@@ -193,6 +193,7 @@ dependencies = [
  "anyhow",
  "clap",
  "jlens-core",
+ "serde",
  "serde_json",
 ]
 
@@ -202,6 +203,7 @@ version = "0.1.0"
 dependencies = [
  "indexmap",
  "libtest-mimic",
+ "serde",
  "serde_json",
  "thiserror",
 ]
@@ -472,6 +474,7 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "jlens-core",
 ]
 
 [[package]]

@@ -26,6 +26,7 @@
 # Architecture
 
 - [Overview](architecture/overview.md)
+- [Parsing](architecture/parser.md)
 - [Roadmap](architecture/roadmap.md)
 - [Conformance testing](architecture/conformance.md)
 - [Decision records](adr/README.md)

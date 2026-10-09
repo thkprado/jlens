@@ -3,30 +3,106 @@
 //! The JSONata language engine behind jlens: lexer, parser, evaluator, function library and
 //! the evaluation audit subsystem.
 //!
-//! The crate is being built in phases (see `docs/src/architecture/roadmap.md`). The public
-//! API below is the stable entry point; until the parser and evaluator land, compiling an
-//! expression returns an [`Error`] with code [`Error::UNIMPLEMENTED`].
+//! The crate is being built in phases (see `docs/src/architecture/roadmap.md`). Parsing is
+//! complete; evaluating an expression still returns an [`Error`] with code
+//! [`Error::UNIMPLEMENTED`].
 //!
 //! ```
-//! use jlens_core::{Bindings, Expression};
+//! use jlens_core::Expression;
 //!
-//! match Expression::compile("Account.Order.Product.Price") {
-//!     Ok(expr) => {
-//!         let input = serde_json::json!({"Account": {"Order": []}});
-//!         let _ = expr.evaluate(Some(&input), &Bindings::new());
-//!     }
-//!     Err(err) => assert_eq!(err.code(), "X0000"),
-//! }
+//! let expr = Expression::compile("Account.Order[0].Product.Price").unwrap();
+//! assert_eq!(expr.ast().root.type_name(), "path");
+//!
+//! let err = Expression::compile("Account.Order[").unwrap_err();
+//! assert_eq!(err.code(), "S0203");
 //! ```
+//!
+//! For editors, [`parse_recover`] keeps going after syntax errors and returns a partial tree
+//! together with [`Diagnostic`]s:
+//!
+//! ```
+//! let ast = jlens_core::parse_recover("Account.");
+//! assert!(ast.has_errors());
+//! assert_eq!(ast.diagnostics[0].code, "S0207");
+//! ```
+//!
+//! Parts of this crate are ported from [jsonata-js](https://github.com/jsonata-js/jsonata)
+//! (© IBM Corp. and JSONata contributors, MIT license); the ported modules say so in their
+//! documentation.
 
-mod error;
+pub mod annotation;
+pub mod ast;
+pub mod debug;
+pub mod error;
+mod lexer;
+mod parser;
+mod process;
+pub mod signature;
 
-pub use error::{Error, Result};
+pub use annotation::Annotation;
+pub use ast::{Ast, Node, NodeKind, Span};
+pub use error::{Diagnostic, Error, Result, Severity};
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use indexmap::IndexMap;
 use serde_json::Value as JsonValue;
+
+/// Parses an expression, failing on the first syntax error.
+///
+/// Warnings (such as misplaced annotations) are returned in [`Ast::diagnostics`].
+pub fn parse(source: &str) -> Result<Ast> {
+    let (raw, errors, warnings) = parser::parse(source, false);
+    debug_assert!(errors.is_empty());
+    let mut processor = process::Processor::new(source, false);
+    let root = processor.process_root(raw?)?;
+    Ok(Ast {
+        root,
+        slots: processor.slots,
+        diagnostics: warnings,
+        source: source.to_owned(),
+    })
+}
+
+/// Parses an expression, recovering from syntax errors.
+///
+/// The returned tree contains [`NodeKind::Error`] nodes where the input could not be parsed,
+/// and [`Ast::diagnostics`] lists every error and warning, ordered by position. This is the
+/// entry point for editors and language tooling.
+pub fn parse_recover(source: &str) -> Ast {
+    let (raw, parse_errors, warnings) = parser::parse(source, true);
+    let mut processor = process::Processor::new(source, true);
+    let root = raw
+        .and_then(|raw| processor.process_root(raw))
+        .unwrap_or_else(|err| {
+            let span = err.span().unwrap_or_default();
+            processor.errors.push(err.clone());
+            Node {
+                id: 0,
+                kind: NodeKind::Error {
+                    error: Box::new(err),
+                },
+                span,
+                pos: span.end,
+                attrs: Default::default(),
+                annotation: None,
+            }
+        });
+    let mut diagnostics: Vec<Diagnostic> = parse_errors
+        .iter()
+        .chain(&processor.errors)
+        .map(Diagnostic::from)
+        .collect();
+    diagnostics.extend(warnings);
+    diagnostics.sort_by_key(|d| d.span.start);
+    Ast {
+        root,
+        slots: processor.slots,
+        diagnostics,
+        source: source.to_owned(),
+    }
+}
 
 /// A compiled JSONata expression.
 ///
@@ -34,19 +110,25 @@ use serde_json::Value as JsonValue;
 /// immutable and can be shared between threads.
 #[derive(Debug, Clone)]
 pub struct Expression {
-    source: String,
+    ast: Arc<Ast>,
 }
 
 impl Expression {
     /// Parses and compiles a JSONata expression.
     pub fn compile(source: &str) -> Result<Self> {
-        let _ = source;
-        Err(Error::unimplemented("the JSONata parser"))
+        Ok(Expression {
+            ast: Arc::new(parse(source)?),
+        })
     }
 
     /// Returns the source text this expression was compiled from.
     pub fn source(&self) -> &str {
-        &self.source
+        &self.ast.source
+    }
+
+    /// The syntax tree of the expression.
+    pub fn ast(&self) -> &Ast {
+        &self.ast
     }
 
     /// Evaluates the expression against `input` with default [`Options`].

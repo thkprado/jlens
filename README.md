@@ -7,8 +7,9 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 - **`jlens`**: the command-line tool;
 - **`jlens-wasm`**: an ES module for the browser.
 
-> **Status: early development (phase 0 of 8).** The workspace, CI and conformance harness are in
-> place; the parser and evaluator are next. See the
+> **Status: early development (phase 1 of 8 done).** The parser is complete: every expression
+> of the official suite parses or fails with the expected error code. `jlens check` and
+> `jlens ast` work; the evaluator is next. See the
 > [roadmap](docs/src/architecture/roadmap.md) and the current
 > [conformance report](tests/conformance/REPORT.md).
 

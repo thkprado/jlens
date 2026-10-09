@@ -6,7 +6,7 @@ default-members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 authors = ["jlens contributors"]
 description = "A JSONata implementation in Rust with auditing and schema-driven autocomplete"

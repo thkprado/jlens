@@ -5,7 +5,7 @@ jlens is built in phases. A phase is complete only when its documentation is wri
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
 | 0 | Workspace, CI, documentation skeleton, conformance harness | CI green; conformance report | **done** |
-| 1 | Lexer, Pratt parser, AST post-processing, spans, recover mode, annotations; `jlens ast` / `jlens check` | Syntax groups of the suite and the parser-recovery cases pass | planned |
+| 1 | Lexer, Pratt parser, AST post-processing, spans, recover mode, annotations; `jlens ast` / `jlens check` | Syntax groups of the suite and the parser-recovery cases pass | **done** |
 | 2 | Value model and evaluator (paths, sequences, predicates, operators, lambdas, closures, tail calls, sort, group-by, parent operator, transform, limits) | Suite groups that don't depend on functions pass | planned |
 | 3 | Function library, signatures, regex, date/time and number formatting | 100% of the suite minus documented overrides | planned |
 | 4 | Evaluation logging and auditing (tracer, audit tree, levels, annotations, explanations) | Snapshot tests; under 3% overhead with the tracer off | planned |
