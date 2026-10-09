@@ -3,15 +3,19 @@
 //! The JSONata language engine behind jlens: lexer, parser, evaluator, function library and
 //! the evaluation audit subsystem.
 //!
-//! The crate is being built in phases (see `docs/src/architecture/roadmap.md`). Parsing is
-//! complete; evaluating an expression still returns an [`Error`] with code
-//! [`Error::UNIMPLEMENTED`].
+//! Compile an expression once, then evaluate it against any number of JSON documents:
 //!
 //! ```
-//! use jlens_core::Expression;
+//! use jlens_core::{Bindings, Expression};
+//! use serde_json::json;
 //!
-//! let expr = Expression::compile("Account.Order[0].Product.Price").unwrap();
-//! assert_eq!(expr.ast().root.type_name(), "path");
+//! let expr = Expression::compile("$sum(items[type = $kind].(price * qty))").unwrap();
+//! let input = json!({"items": [
+//!     {"type": "a", "price": 2.5, "qty": 4},
+//!     {"type": "b", "price": 1.0, "qty": 1},
+//! ]});
+//! let bindings = Bindings::new().var("kind", "a");
+//! assert_eq!(expr.evaluate(Some(&input), &bindings).unwrap(), Some(json!(10)));
 //!
 //! let err = Expression::compile("Account.Order[").unwrap_err();
 //! assert_eq!(err.code(), "S0203");
@@ -32,10 +36,11 @@
 
 pub mod annotation;
 pub mod ast;
+mod datetime;
 pub mod debug;
 pub mod error;
 mod eval;
-mod functions;
+pub mod functions;
 mod lexer;
 mod parser;
 mod process;
@@ -46,6 +51,7 @@ mod value;
 pub use annotation::Annotation;
 pub use ast::{Ast, Node, NodeKind, Span};
 pub use error::{Diagnostic, Error, Result, Severity};
+pub use functions::{Category, FunctionInfo, catalog as function_catalog};
 
 use std::sync::Arc;
 use std::time::Duration;

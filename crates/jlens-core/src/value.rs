@@ -91,8 +91,13 @@ pub(crate) enum Function {
         position: usize,
     },
     /// A regular expression literal, which is callable as a matcher.
-    #[allow(dead_code)] // matched by the regex functions (phase 3)
     Regex(Rc<Regex>),
+    /// The `next()` function of a regex match object.
+    RegexNext {
+        re: Rc<Regex>,
+        text: Rc<str>,
+        last: usize,
+    },
 }
 
 pub(crate) struct Lambda {
@@ -107,14 +112,14 @@ pub(crate) struct Lambda {
 
 impl Function {
     /// Number of parameters, used by higher-order functions to decide which arguments to pass.
-    #[allow(dead_code)] // used by the higher-order functions (phase 3)
     pub fn arity(&self) -> usize {
         match self {
             Function::Lambda(l) => l.params().len(),
-            Function::Native(n) => n.params.len(),
+            Function::Native(n) => n.arity,
             Function::PartialNative { args, .. } => args.iter().filter(|a| a.is_none()).count(),
             Function::Transform { .. } => 1,
-            Function::Regex(_) => 1,
+            Function::Regex(_) => 2,
+            Function::RegexNext { .. } => 0,
         }
     }
 
@@ -237,7 +242,6 @@ impl Value {
     }
 
     /// jsonata-js `isArrayOfStrings`.
-    #[allow(dead_code)] // used by the function library (phase 3)
     pub fn is_array_of_strings(&self) -> bool {
         match self {
             Value::Array(a) => a.items.iter().all(|i| matches!(i, Value::String(_))),

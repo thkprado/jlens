@@ -44,6 +44,11 @@ extensions live in comments or in the host API, not in the language syntax.
 | Invalid regular expression | JavaScript `SyntaxError` without a code | `S0302` with the engine message in `message` |
 | A function as the final result | The function object | `None`, like `JSON.stringify` |
 | Very large integers in results | Printed in full up to 1e21 | `serde_json` numbers. Integers above 2^53 become floats (same value, possibly in exponent notation) |
+| `$toMillis` of a date-time without an offset | Local time (per `Date.parse`) | UTC, so results never depend on the machine's time zone |
+| `$split(s, "")` | Splits into UTF-16 code units | Splits into characters (astral characters stay whole) |
+| `$base64encode` | Takes the low byte of each UTF-16 code unit | The same; text outside Latin-1 does not round-trip, as in jsonata-js |
+| `$random`, `$shuffle` | `Math.random` | A per-evaluation xorshift generator seeded from the clock |
+| Regular expressions | JavaScript `RegExp` | `regress` (ECMAScript syntax and semantics). Match positions are UTF-16 offsets |
 
 The suite runner's own guard raises `U1001` for its `timelimit`/`depth` cases; jlens enforces
 the same limits through `Options` and reports `D1011`/`D1012`, which the conformance harness

@@ -65,7 +65,7 @@ When post-processing marked a call as being in tail position, the body evaluates
 *thunk* instead of making the call. `Evaluator::apply` runs thunks in a loop, so tail-recursive
 functions run in constant stack depth. `$loop(100000, 0)` in the test suite exercises this.
 
-Built-in functions are `Native` entries in `functions.rs`, each with its signature and declared
+Built-in functions are `Native` entries in `functions/mod.rs`, each with its signature and declared
 parameters. Partial application (`$f(?, 2)`) works for both lambdas and built-ins.
 
 ## Signature validation

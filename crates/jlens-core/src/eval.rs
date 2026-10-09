@@ -77,6 +77,10 @@ pub(crate) struct Evaluator {
     /// it). Their bindings are cleared when the evaluation ends so the memory is reclaimed.
     cyclic: Vec<Weak<Frame>>,
     regexes: HashMap<(String, String), Rc<Regex>>,
+    /// Milliseconds since the epoch, fixed for the whole evaluation (`$now`, `$millis`).
+    timestamp: f64,
+    /// State of the xorshift generator behind `$random` and `$shuffle`.
+    rng: u64,
 }
 
 impl Drop for Evaluator {
@@ -160,7 +164,14 @@ pub(crate) fn evaluate(
         started: Instant::now(),
         cyclic: Vec::new(),
         regexes: HashMap::new(),
+        timestamp: 0.0,
+        rng: 0,
     };
+    let since_epoch = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
+        .unwrap_or_default();
+    ev.timestamp = since_epoch.as_millis() as f64;
+    ev.rng = (since_epoch.as_nanos() as u64) | 1;
     let env = Frame::new(None);
     for (name, value) in bindings.iter() {
         ev.bind(&env, name, Value::from_json(value));
@@ -178,6 +189,22 @@ pub(crate) fn evaluate(
 }
 
 impl Evaluator {
+    /// The evaluation timestamp in milliseconds since the epoch.
+    pub(crate) fn timestamp(&self) -> f64 {
+        self.timestamp
+    }
+
+    /// A pseudo-random number in [0, 1).
+    pub(crate) fn random(&mut self) -> f64 {
+        // xorshift64*
+        let mut x = self.rng;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.rng = x;
+        (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64
+    }
+
     pub(crate) fn bind(&mut self, env: &Env, name: &str, value: Value) {
         if matches!(
             value,
@@ -1009,7 +1036,20 @@ impl Evaluator {
                 )
                 .map_err(|e| e.at_if_missing(*span, *position))
             }
-            Function::Regex(_) => Err(Error::unimplemented("calling a regular expression")),
+            Function::Regex(re) => {
+                let mut args = args.into_iter();
+                let Some(Value::String(text)) = args.next() else {
+                    return Ok(Value::Undefined);
+                };
+                let from = match args.next() {
+                    Some(Value::Number(n)) if n > 0.0 => {
+                        crate::regex::byte_offset(&text, n as usize)
+                    }
+                    _ => 0,
+                };
+                Ok(crate::regex::exec(re, &text, from))
+            }
+            Function::RegexNext { re, text, last } => crate::regex::next(re, text, *last),
         }
     }
 

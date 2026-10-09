@@ -52,9 +52,6 @@ impl Serialize for Error {
 }
 
 impl Error {
-    /// Code reported for features that are not implemented yet.
-    pub const UNIMPLEMENTED: &'static str = "X0000";
-
     /// Creates an error with the given code and no details.
     pub fn new(code: impl Into<String>) -> Self {
         Error(Box::new(ErrorInner {
@@ -63,10 +60,6 @@ impl Error {
             span: None,
             details: Map::new(),
         }))
-    }
-
-    pub(crate) fn unimplemented(what: &str) -> Self {
-        Error::new(Self::UNIMPLEMENTED).with("message", format!("{what} is not implemented yet"))
     }
 
     /// Adds a detail used by the message template (for example `token` or `value`).
@@ -265,8 +258,6 @@ pub enum Category {
     Guardrail,
     /// `W` — jlens warnings; they never stop evaluation.
     Warning,
-    /// `X` — jlens internal codes.
-    Internal,
 }
 
 /// One entry of the error catalog.
@@ -286,8 +277,7 @@ impl CatalogEntry {
             b'T' => Category::Type,
             b'D' => Category::Dynamic,
             b'U' => Category::Guardrail,
-            b'W' => Category::Warning,
-            _ => Category::Internal,
+            _ => Category::Warning,
         }
     }
 }
@@ -413,7 +403,6 @@ catalog! {
     "W0101" => "This annotation is not attached to an expression and will be ignored",
     "W0102" => "Unknown annotation tag @{{{tag}}}; expected @label, @message or @id",
     "W0103" => "The value of annotation tag @{{{tag}}} should be a JSON string literal",
-    "X0000" => "{{{message}}}",
 }
 
 #[cfg(test)]
