@@ -1,0 +1,23 @@
+[package]
+name = "jlens-cli"
+description = "Command-line interface for jlens: evaluate, check and explain JSONata expressions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "jlens"
+path = "src/main.rs"
+
+[dependencies]
+jlens-core.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true

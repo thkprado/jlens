@@ -1,0 +1,25 @@
+[package]
+name = "jlens-core"
+description = "JSONata language engine: parser, evaluator, function library and auditing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["parser-implementations", "encoding"]
+
+[dependencies]
+serde_json.workspace = true
+indexmap.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+libtest-mimic.workspace = true
+
+[[test]]
+name = "conformance"
+harness = false
+
+[lints]
+workspace = true

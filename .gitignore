@@ -1,0 +1,5 @@
+/target
+/docs/book
+/crates/jlens-wasm/pkg
+node_modules/
+*.swp

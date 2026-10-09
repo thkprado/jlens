@@ -1,0 +1,33 @@
+{
+  "number": "SO-12345",
+  "customer": {
+    "login": "alice.walker99",
+    "name": "Acme Stores"
+  },
+  "items": [
+    {
+      "code": "1",
+      "color": "blue",
+      "type": "apparel",
+      "unitPrice": 10000.0,
+      "quantity": 2,
+      "tax": 1500.0
+    },
+    {
+      "code": "2",
+      "color": "black",
+      "type": "electronic",
+      "unitPrice": 25000.0,
+      "quantity": 1,
+      "tax": 4000.0
+    },
+    {
+      "code": "3",
+      "color": "white",
+      "type": "electronic",
+      "unitPrice": 12000.0,
+      "quantity": 1,
+      "tax": 3000.0
+    }
+  ]
+}

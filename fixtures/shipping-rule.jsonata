@@ -1,0 +1,35 @@
+/*
+ * Store order shipping rule — the running example of the jlens docs and tests, in JSONata.
+ * Expected decision for fixtures/online-store-order.json: approved
+ * (total 57000, electronics 37000, blue-item tax 1500 < average tax 2833.33).
+ */
+(
+  $total       := $sum(items.(unitPrice * quantity));
+  $electronics := $sum(items[type = 'electronic'].(unitPrice * quantity));
+  $blueTax     := $sum(items[color = 'blue'].tax);
+  $averageTax  := $average(items.tax);
+
+  $approved := (
+    /** @label "Authorized customer" @message "The customer login must be on the approved partners list." */
+    customer.login in ["alice.walker99", "bob.harrison42"]
+    and
+    /** @label "Customer not blocked" @message "The customer must not be on the spam block list." */
+    $not(customer.login in ["mallory.cheat1", "eve.spammer007"])
+    and
+    /** @label "Minimum order grand total" @message "The order grand total must exceed 50,000.00." */
+    $total > 50000
+    and
+    /** @label "Order category check" */
+    (
+      /** @label "Electronics group" */
+      (items.type = 'electronic' and $electronics > $total * 0.30 + 1000)
+      or
+      /** @label "Blue items group" */
+      (items.color = 'blue' and $blueTax < $averageTax)
+    )
+  );
+
+  $approved
+    ? { "action": "FREE_SHIPPING", "code": "OK_200" }
+    : { "action": "REGULAR_FEE", "code": "SHIP_FEE_402", "delivery": "SLOW" }
+)

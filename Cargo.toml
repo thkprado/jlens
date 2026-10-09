@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+default-members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["jlens contributors"]
+description = "A JSONata implementation in Rust with auditing and schema-driven autocomplete"
+keywords = ["jsonata", "json", "query", "transform", "rules"]
+categories = ["parser-implementations", "encoding", "command-line-utilities", "wasm"]
+
+[workspace.dependencies]
+jlens-core = { path = "crates/jlens-core", version = "0.1.0" }
+jlens-schema = { path = "crates/jlens-schema", version = "0.1.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+indexmap = "2"
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+libtest-mimic = "0.8"
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"

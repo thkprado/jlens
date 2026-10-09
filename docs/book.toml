@@ -1,0 +1,10 @@
+[book]
+title = "jlens"
+description = "A JSONata engine in Rust with auditing and schema-driven autocomplete"
+authors = ["jlens contributors"]
+language = "en"
+src = "src"
+
+[output.html.fold]
+enable = true
+level = 1

@@ -1,0 +1,11 @@
+{
+  "$comment": "Intentional deviations from the official suite. Keys are case ids (<group>/<file>[#index]). Each entry needs a \"reason\" and may set \"skip\": true, \"alternateResult\" or \"alternateCode\". Keys starting with '$' are ignored.",
+  "function-encodeUrl/case002": {
+    "reason": "The case file contains a lone UTF-16 surrogate (U+D800). Rust strings are UTF-8 and cannot represent it, so neither the test data nor a jlens input can carry this value.",
+    "skip": true
+  },
+  "function-encodeUrlComponent/case002": {
+    "reason": "The case file contains a lone UTF-16 surrogate (U+D800). Rust strings are UTF-8 and cannot represent it, so neither the test data nor a jlens input can carry this value.",
+    "skip": true
+  }
+}

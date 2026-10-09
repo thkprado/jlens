@@ -1,0 +1,24 @@
+[package]
+name = "jlens-wasm"
+description = "WebAssembly (browser ESM) bindings for jlens"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["wasm", "encoding"]
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jlens-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+wasm-bindgen.workspace = true
+serde-wasm-bindgen.workspace = true
+
+[lints]
+workspace = true
