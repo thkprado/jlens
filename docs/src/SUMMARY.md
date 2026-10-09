@@ -27,6 +27,7 @@
 
 - [Overview](architecture/overview.md)
 - [Parsing](architecture/parser.md)
+- [Evaluation](architecture/evaluator.md)
 - [Roadmap](architecture/roadmap.md)
 - [Conformance testing](architecture/conformance.md)
 - [Decision records](adr/README.md)

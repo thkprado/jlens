@@ -65,9 +65,9 @@ To label a whole `and`/`or` chain, wrap it in parentheses, as the rule in
 ```jsonata
 /** @label "Order category check" */
 (
-  /** @label "Electronics group" */ (items.type = 'electronic' and $electronics > $total * 0.3)
+  /** @label "Electronics group" */ ('electronic' in items.type and $electronics > $total * 0.3)
   or
-  /** @label "Blue items group" */ (items.color = 'blue' and $blueTax < $averageTax)
+  /** @label "Blue items group" */ ('blue' in items.color and $blueTax < $averageTax)
 )
 ```
 

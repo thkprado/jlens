@@ -12,11 +12,12 @@
 //!
 //! In recover mode errors become [`NodeKind::Error`] nodes and diagnostics instead of aborting.
 
-use crate::ast::{BinaryOp, Slot};
+use crate::ast::{BinaryOp, LambdaDef, Slot, TransformDef};
 use crate::ast::{Group, Node, NodeKind, SlotId, SortTerm, Span, Stage};
 use crate::error::{Error, Result};
 use crate::lexer::Lit;
 use crate::parser::{Raw, RawKind};
+use std::sync::Arc;
 
 pub(crate) struct Processor<'a> {
     src: &'a str,
@@ -45,10 +46,18 @@ impl<'a> Processor<'a> {
                 .with("token", root.type_name());
             self.report(err)?;
         }
+        // Final pass: ids, labels of ancestor slots, and UTF-16 positions.
+        let utf16 = utf16_table(self.src);
+        let slots = &self.slots;
         let mut next_id = 0;
         root.walk_mut(&mut |node| {
             node.id = next_id;
             next_id += 1;
+            node.position = utf16[node.pos.min(utf16.len() - 1)];
+            if let NodeKind::Parent { slot, label } = &mut node.kind {
+                *label = slots[*slot].label.clone();
+            }
+            node.attrs.ancestor_label = node.attrs.ancestor.map(|s| slots[s].label.clone());
         });
         Ok(root)
     }
@@ -248,12 +257,12 @@ impl<'a> Processor<'a> {
                     .collect();
                 let body = self.process(*body)?;
                 Node::new(
-                    NodeKind::Lambda {
+                    NodeKind::Lambda(Arc::new(LambdaDef {
                         params,
                         signature,
-                        body: Box::new(tail_call_optimize(body)),
+                        body: tail_call_optimize(body),
                         thunk: false,
-                    },
+                    })),
                     span,
                     pos,
                 )
@@ -292,18 +301,18 @@ impl<'a> Processor<'a> {
                 update,
                 delete,
             } => {
-                let pattern = self.process_boxed(*pattern)?;
-                let update = self.process_boxed(*update)?;
+                let pattern = self.process(*pattern)?;
+                let update = self.process(*update)?;
                 let delete = match delete {
-                    Some(d) => Some(self.process_boxed(*d)?),
+                    Some(d) => Some(self.process(*d)?),
                     None => None,
                 };
                 Node::new(
-                    NodeKind::Transform {
+                    NodeKind::Transform(Arc::new(TransformDef {
                         pattern,
                         update,
                         delete,
-                    },
+                    })),
                     span,
                     pos,
                 )
@@ -351,7 +360,14 @@ impl<'a> Processor<'a> {
                     label: format!("!{slot}"),
                     level: 1,
                 });
-                Node::new(NodeKind::Parent { slot }, span, pos)
+                Node::new(
+                    NodeKind::Parent {
+                        slot,
+                        label: String::new(),
+                    },
+                    span,
+                    pos,
+                )
             }
             RawKind::Variable { value } => Node::new(NodeKind::Variable { name: value }, span, pos),
             RawKind::String { value } => Node::new(NodeKind::String { value }, span, pos),
@@ -409,7 +425,7 @@ impl<'a> Processor<'a> {
     fn path(&mut self, lhs: Raw, rhs: Raw, span: Span) -> Result<Node> {
         let lstep = self.process(lhs)?;
         let parent_slot = match lstep.kind {
-            NodeKind::Parent { slot } => Some(slot),
+            NodeKind::Parent { slot, .. } => Some(slot),
             _ => None,
         };
         let mut result = if matches!(lstep.kind, NodeKind::Path { .. }) {
@@ -627,7 +643,7 @@ impl<'a> Processor<'a> {
             return Ok(());
         };
         let mut slots = last.attrs.seeking_parent.clone();
-        if let NodeKind::Parent { slot } = last.kind {
+        if let NodeKind::Parent { slot, .. } = last.kind {
             slots.push(slot);
         }
         for slot in slots {
@@ -657,7 +673,7 @@ impl<'a> Processor<'a> {
 /// The ancestor slots that `value` passes up to its parent node (`pushAncestry`).
 fn ancestry(value: &Node) -> Vec<SlotId> {
     let mut slots = value.attrs.seeking_parent.clone();
-    if let NodeKind::Parent { slot } = value.kind {
+    if let NodeKind::Parent { slot, .. } = value.kind {
         slots.push(slot);
     }
     slots
@@ -687,12 +703,12 @@ fn tail_call_optimize(mut expr: Node) -> Node {
         NodeKind::Function { .. } if expr.attrs.predicate.is_empty() => {
             let (span, pos) = (expr.span, expr.pos);
             Node::new(
-                NodeKind::Lambda {
+                NodeKind::Lambda(Arc::new(LambdaDef {
                     params: Vec::new(),
                     signature: None,
-                    body: Box::new(expr),
+                    body: expr,
                     thunk: true,
-                },
+                })),
                 span,
                 pos,
             )
@@ -720,4 +736,18 @@ fn tail_call_optimize(mut expr: Node) -> Node {
 
 fn placeholder() -> Node {
     Node::new(NodeKind::Null, Span::default(), 0)
+}
+
+/// Maps every byte offset of `src` (and one past the end) to its UTF-16 offset.
+fn utf16_table(src: &str) -> Vec<usize> {
+    let mut table = Vec::with_capacity(src.len() + 1);
+    let mut units = 0;
+    for ch in src.chars() {
+        for _ in 0..ch.len_utf8() {
+            table.push(units);
+        }
+        units += ch.len_utf16();
+    }
+    table.push(units);
+    table
 }

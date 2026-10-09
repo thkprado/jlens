@@ -254,6 +254,9 @@ fn json_equal(a: &Value, b: &Value) -> bool {
 fn check_error(err: &Error, expected: &Map<String, Value>) -> Result<(), Failed> {
     for (field, want) in expected {
         let got = match field.as_str() {
+            // The suite runner raises U1001 from its own timeout/depth guard; jlens enforces the
+            // same limits through `Options`, which report D1011 (depth) or D1012 (timeout).
+            "code" if want == "U1001" && matches!(err.code(), "D1011" | "D1012") => continue,
             "code" => Some(Value::String(err.code().to_owned())),
             "token" => err.token().map(|t| Value::String(t.to_owned())),
             "position" => err.position().map(Value::from),

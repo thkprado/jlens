@@ -5,6 +5,8 @@
 //! [`Stage`]s, and so on. Unlike the reference implementation, every node is typed, carries a
 //! byte [`Span`] covering its whole source text, and has a stable [`NodeId`].
 
+use std::sync::Arc;
+
 use serde::Serialize;
 
 use crate::annotation::Annotation;
@@ -96,6 +98,9 @@ pub struct Node {
     /// node report this point, matching jsonata-js positions.
     #[serde(skip)]
     pub pos: usize,
+    /// The same point as `pos`, as a UTF-16 offset: the `position` reported by errors.
+    #[serde(skip)]
+    pub position: usize,
     /// Step and sequence attributes set by `processAST`.
     #[serde(flatten)]
     pub attrs: Attrs,
@@ -182,6 +187,8 @@ pub enum NodeKind {
     Parent {
         /// The ancestor slot this operator reads.
         slot: SlotId,
+        /// The variable under which the ancestor is bound (the slot's final label).
+        label: String,
     },
     /// `cond ? then : else`, also produced by `?:` and `??`.
     Condition {
@@ -229,28 +236,12 @@ pub enum NodeKind {
     /// The `?` placeholder in a partial application.
     Placeholder,
     /// A function definition, or a thunk created for tail-call optimisation.
-    Lambda {
-        /// Parameter names, without the leading `$`.
-        params: Vec<String>,
-        /// The optional signature (`<n-n:n>`).
-        #[serde(skip_serializing_if = "Option::is_none")]
-        signature: Option<Signature>,
-        /// The body.
-        body: Box<Node>,
-        /// Whether this lambda is a tail-call thunk rather than a user-written function.
-        #[serde(skip_serializing_if = "is_false")]
-        thunk: bool,
-    },
-    /// `| pattern | update [, delete] |`.
-    Transform {
-        /// Selects the objects to modify.
-        pattern: Box<Node>,
-        /// The object merged into each match.
-        update: Box<Node>,
-        /// Field names to remove.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        delete: Option<Box<Node>>,
-    },
+    ///
+    /// The definition is shared (`Arc`) so that function values created at run time can keep
+    /// their body alive independently of the tree.
+    Lambda(Arc<LambdaDef>),
+    /// `| pattern | update [, delete] |`, shared like [`NodeKind::Lambda`].
+    Transform(Arc<TransformDef>),
     /// An order-by step (`^(...)`), only found inside a path.
     Sort {
         /// The sort keys.
@@ -261,6 +252,33 @@ pub enum NodeKind {
         /// The error.
         error: Box<Error>,
     },
+}
+
+/// A function definition.
+#[derive(Debug, Clone, Serialize)]
+pub struct LambdaDef {
+    /// Parameter names, without the leading `$`.
+    pub params: Vec<String>,
+    /// The optional signature (`<n-n:n>`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<Signature>,
+    /// The body.
+    pub body: Node,
+    /// Whether this lambda is a tail-call thunk rather than a user-written function.
+    #[serde(skip_serializing_if = "is_false")]
+    pub thunk: bool,
+}
+
+/// A transform expression (`| pattern | update [, delete] |`).
+#[derive(Debug, Clone, Serialize)]
+pub struct TransformDef {
+    /// Selects the objects to modify.
+    pub pattern: Node,
+    /// The object merged into each match.
+    pub update: Node,
+    /// Field names to remove.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delete: Option<Node>,
 }
 
 /// Binary operators.
@@ -393,6 +411,9 @@ pub struct Attrs {
     /// Ancestor slot this step binds for a `%` further along.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ancestor: Option<SlotId>,
+    /// The label under which this step binds its input for a `%` further along.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ancestor_label: Option<String>,
     /// Ancestor slots that still need to be resolved by an enclosing path.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub seeking_parent: Vec<SlotId>,
@@ -447,6 +468,7 @@ impl Node {
             kind,
             span,
             pos,
+            position: 0,
             attrs: Attrs::default(),
             annotation: None,
         }
@@ -547,15 +569,11 @@ impl Node {
                 f(procedure);
                 args.iter().for_each(&mut f);
             }
-            NodeKind::Lambda { body, .. } => f(body),
-            NodeKind::Transform {
-                pattern,
-                update,
-                delete,
-            } => {
-                f(pattern);
-                f(update);
-                if let Some(d) = delete {
+            NodeKind::Lambda(def) => f(&def.body),
+            NodeKind::Transform(def) => {
+                f(&def.pattern);
+                f(&def.update);
+                if let Some(d) = &def.delete {
                     f(d);
                 }
             }
@@ -606,16 +624,19 @@ impl Node {
                 f(procedure);
                 args.iter_mut().for_each(&mut *f);
             }
-            NodeKind::Lambda { body, .. } => f(body),
-            NodeKind::Transform {
-                pattern,
-                update,
-                delete,
-            } => {
-                f(pattern);
-                f(update);
-                if let Some(d) = delete {
-                    f(d);
+            // Definitions are only mutated while the tree is being built, when they are unique.
+            NodeKind::Lambda(def) => {
+                if let Some(def) = Arc::get_mut(def) {
+                    f(&mut def.body);
+                }
+            }
+            NodeKind::Transform(def) => {
+                if let Some(def) = Arc::get_mut(def) {
+                    f(&mut def.pattern);
+                    f(&mut def.update);
+                    if let Some(d) = &mut def.delete {
+                        f(d);
+                    }
                 }
             }
             NodeKind::Sort { terms } => terms.iter_mut().for_each(|t| f(&mut t.expr)),

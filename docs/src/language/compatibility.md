@@ -34,4 +34,17 @@ extensions live in comments or in the host API, not in the language syntax.
 - Audit annotations and the warnings `W0101`–`W0103`.
 - `Ast` node ids and spans, and `parse_recover` diagnostics with severities.
 
-Evaluation differences will be listed here as the evaluator is completed.
+## Evaluation
+
+| Topic | jsonata-js | jlens |
+|---|---|---|
+| Object key order | JavaScript order: integer-like keys first, ascending, then insertion order | Insertion order, always |
+| Recursion limit | The JavaScript stack (`RangeError`) | `D1011` after `Options::max_depth` evaluation levels (50,000 by default; 3,000 in Wasm) |
+| Error `position` and `token` inside function calls | Overwritten with the call site | Filled in only when the inner error has none, so it points at the real cause |
+| Invalid regular expression | JavaScript `SyntaxError` without a code | `S0302` with the engine message in `message` |
+| A function as the final result | The function object | `None`, like `JSON.stringify` |
+| Very large integers in results | Printed in full up to 1e21 | `serde_json` numbers. Integers above 2^53 become floats (same value, possibly in exponent notation) |
+
+The suite runner's own guard raises `U1001` for its `timelimit`/`depth` cases; jlens enforces
+the same limits through `Options` and reports `D1011`/`D1012`, which the conformance harness
+accepts in place of `U1001`.

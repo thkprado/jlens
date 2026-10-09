@@ -40,7 +40,7 @@ fn outline(n: &Node) -> String {
         NodeKind::Regex { pattern, flags } => format!("/{pattern}/{flags}"),
         NodeKind::Wildcard => "*".into(),
         NodeKind::Descendant => "**".into(),
-        NodeKind::Parent { slot } => format!("%{slot}"),
+        NodeKind::Parent { slot, .. } => format!("%{slot}"),
         NodeKind::Condition {
             condition,
             then,
@@ -64,13 +64,9 @@ fn outline(n: &Node) -> String {
             format!("partial {}({})", outline(procedure), join(args, ", "))
         }
         NodeKind::Placeholder => "?".into(),
-        NodeKind::Lambda {
-            params,
-            body,
-            thunk,
-            signature,
-        } => {
-            if *thunk {
+        NodeKind::Lambda(def) => {
+            let (params, body, signature) = (&def.params, &def.body, &def.signature);
+            if def.thunk {
                 format!("thunk{{{}}}", outline(body))
             } else {
                 let sig = signature
@@ -80,15 +76,11 @@ fn outline(n: &Node) -> String {
                 format!("λ({}){sig}{{{}}}", params.join(", "), outline(body))
             }
         }
-        NodeKind::Transform {
-            pattern,
-            update,
-            delete,
-        } => format!(
+        NodeKind::Transform(def) => format!(
             "|{}|{}{}|",
-            outline(pattern),
-            outline(update),
-            delete
+            outline(&def.pattern),
+            outline(&def.update),
+            def.delete
                 .as_ref()
                 .map_or(String::new(), |d| format!(", {}", outline(d)))
         ),
@@ -487,15 +479,15 @@ fn fixture_annotations_cover_their_conditions() {
             ("Minimum order grand total", "$total > 50000"),
             (
                 "Order category check",
-                r#"( /** @label "Electronics group" */ (items.type = 'electronic' and $electronics > $total * 0.30 + 1000) or /** @label "Blue items group" */ (items.color = 'blue' and $blueTax < $averageTax) )"#
+                r#"( /** @label "Electronics group" */ ('electronic' in items.type and $electronics > $total * 0.30 + 1000) or /** @label "Blue items group" */ ('blue' in items.color and $blueTax < $averageTax) )"#
             ),
             (
                 "Electronics group",
-                "(items.type = 'electronic' and $electronics > $total * 0.30 + 1000)"
+                "('electronic' in items.type and $electronics > $total * 0.30 + 1000)"
             ),
             (
                 "Blue items group",
-                "(items.color = 'blue' and $blueTax < $averageTax)"
+                "('blue' in items.color and $blueTax < $averageTax)"
             ),
         ]
     );

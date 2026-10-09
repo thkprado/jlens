@@ -83,6 +83,29 @@ impl Error {
         self
     }
 
+    /// Sets the location from a node: its byte span and UTF-16 position.
+    pub(crate) fn at(mut self, span: Span, position: usize) -> Self {
+        self.0.position = Some(position);
+        self.0.span = Some(span);
+        self
+    }
+
+    pub(crate) fn at_if_missing(self, span: Span, position: usize) -> Self {
+        if self.0.position.is_none() {
+            self.at(span, position)
+        } else {
+            self
+        }
+    }
+
+    pub(crate) fn with_token_if_missing(self, token: &str) -> Self {
+        if self.0.details.contains_key("token") {
+            self
+        } else {
+            self.with("token", token)
+        }
+    }
+
     /// The JSONata error code, such as `S0201`.
     pub fn code(&self) -> &str {
         &self.0.code

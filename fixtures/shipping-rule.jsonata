@@ -22,10 +22,10 @@
     /** @label "Order category check" */
     (
       /** @label "Electronics group" */
-      (items.type = 'electronic' and $electronics > $total * 0.30 + 1000)
+      ('electronic' in items.type and $electronics > $total * 0.30 + 1000)
       or
       /** @label "Blue items group" */
-      (items.color = 'blue' and $blueTax < $averageTax)
+      ('blue' in items.color and $blueTax < $averageTax)
     )
   );
 

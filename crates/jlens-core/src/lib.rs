@@ -34,10 +34,14 @@ pub mod annotation;
 pub mod ast;
 pub mod debug;
 pub mod error;
+mod eval;
+mod functions;
 mod lexer;
 mod parser;
 mod process;
+mod regex;
 pub mod signature;
+mod value;
 
 pub use annotation::Annotation;
 pub use ast::{Ast, Node, NodeKind, Span};
@@ -78,16 +82,13 @@ pub fn parse_recover(source: &str) -> Ast {
         .unwrap_or_else(|err| {
             let span = err.span().unwrap_or_default();
             processor.errors.push(err.clone());
-            Node {
-                id: 0,
-                kind: NodeKind::Error {
+            Node::new(
+                NodeKind::Error {
                     error: Box::new(err),
                 },
                 span,
-                pos: span.end,
-                attrs: Default::default(),
-                annotation: None,
-            }
+                span.end,
+            )
         });
     let mut diagnostics: Vec<Diagnostic> = parse_errors
         .iter()
@@ -146,11 +147,15 @@ impl Expression {
     /// Evaluates the expression with explicit [`Options`] (limits and guardrails).
     pub fn evaluate_with(
         &self,
-        _input: Option<&JsonValue>,
-        _bindings: &Bindings,
-        _options: &Options,
+        input: Option<&JsonValue>,
+        bindings: &Bindings,
+        options: &Options,
     ) -> Result<Option<JsonValue>> {
-        Err(Error::unimplemented("the JSONata evaluator"))
+        let limits = eval::Limits {
+            max_depth: options.max_depth.unwrap_or(eval::DEFAULT_MAX_DEPTH),
+            timeout: options.timeout,
+        };
+        eval::evaluate(&self.ast, input, bindings, limits)
     }
 }
 

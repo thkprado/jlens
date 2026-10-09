@@ -12,9 +12,9 @@ Every command takes the expression either as an argument or from a file with `-f
 for anything longer than a one-liner, especially on Windows, where quoting `$` and `"` in
 `cmd.exe` and PowerShell is awkward.
 
-> `jlens eval` is wired up, but evaluation itself arrives in phase 2 of the
-> [roadmap](../architecture/roadmap.md). Until then it reports syntax errors and otherwise
-> returns `X0000`.
+> `jlens eval` evaluates expressions. Only a core set of built-in functions (`$sum`, `$count`,
+> `$string`, `$exists`, ...) is available until phase 3 of the [roadmap](../architecture/roadmap.md)
+> completes the library.
 
 ## Exit codes
 

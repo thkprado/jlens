@@ -19,6 +19,7 @@
 use serde::Serialize;
 
 use crate::error::{Error, Result};
+use crate::value::Value;
 
 /// A parsed function signature.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -129,6 +130,162 @@ impl Signature {
             definition: definition.to_owned(),
             params,
         })
+    }
+}
+
+/// One parameter pattern as a set of accepted symbols and a repetition range.
+struct Piece<'a> {
+    set: &'a str,
+    min: usize,
+    max: usize,
+}
+
+fn piece(pattern: &str) -> Piece<'_> {
+    let (set, quantifier) = match pattern.strip_prefix('[') {
+        Some(rest) => {
+            let close = rest.find(']').unwrap_or(rest.len());
+            (&rest[..close], &rest[(close + 1).min(rest.len())..])
+        }
+        None => pattern.split_at(pattern.len().min(1)),
+    };
+    let (min, max) = if quantifier.contains('+') {
+        (1, usize::MAX)
+    } else if quantifier.contains('?') {
+        (0, 1)
+    } else {
+        (1, 1)
+    };
+    Piece { set, min, max }
+}
+
+/// Greedy backtracking match of `pieces` against `symbols` from `pos`, recording the range
+/// each piece consumed. Equivalent to the regular expression jsonata-js builds.
+fn match_pieces(
+    pieces: &[Piece],
+    symbols: &[char],
+    pos: usize,
+    spans: &mut [(usize, usize)],
+    anchored: bool,
+) -> bool {
+    let Some((p, rest)) = pieces.split_first() else {
+        return !anchored || pos == symbols.len();
+    };
+    let mut n = 0;
+    while n < p.max && pos + n < symbols.len() && p.set.contains(symbols[pos + n]) {
+        n += 1;
+    }
+    loop {
+        if n < p.min {
+            return false;
+        }
+        spans[0] = (pos, pos + n);
+        if match_pieces(rest, symbols, pos + n, &mut spans[1..], anchored) {
+            return true;
+        }
+        if n == 0 {
+            return false;
+        }
+        n -= 1;
+    }
+}
+
+fn array_type_name(subtype: &str) -> &'static str {
+    match subtype {
+        "a" => "arrays",
+        "b" => "booleans",
+        "f" => "functions",
+        "n" => "numbers",
+        "o" => "objects",
+        "s" => "strings",
+        _ => "values",
+    }
+}
+
+impl Signature {
+    /// Checks `args` against the signature and returns them adjusted: missing context
+    /// arguments are filled in and single values are wrapped where an array is expected.
+    pub(crate) fn validate(&self, args: Vec<Value>, context: &Value) -> Result<Vec<Value>> {
+        let symbols: Vec<char> = args.iter().map(Value::signature_symbol).collect();
+        let pieces: Vec<Piece> = self.params.iter().map(|p| piece(&p.pattern)).collect();
+        let mut spans = vec![(0, 0); pieces.len()];
+        if !match_pieces(&pieces, &symbols, 0, &mut spans, true) {
+            // Find the first parameter that does not match.
+            let mut good_to = 0;
+            for index in 0..pieces.len() {
+                let mut partial = vec![(0, 0); index + 1];
+                if !match_pieces(&pieces[..=index], &symbols, 0, &mut partial, false) {
+                    break;
+                }
+                good_to = partial[index].1;
+            }
+            let mut err = Error::new("T0410").with("index", good_to + 1);
+            if let Some(v) = args.get(good_to).and_then(Value::to_json) {
+                err = err.with("value", v);
+            }
+            return Err(err);
+        }
+
+        let mut validated = Vec::with_capacity(args.len());
+        let mut arg_index = 0;
+        for (param, &(start, end)) in self.params.iter().zip(&spans) {
+            let matched = &symbols[start..end];
+            if matched.is_empty() {
+                if let (true, Some(pattern)) = (param.context, &param.context_pattern) {
+                    if piece(pattern).set.contains(context.signature_symbol()) {
+                        validated.push(context.clone());
+                    } else {
+                        let mut err = Error::new("T0411").with("index", arg_index + 1);
+                        if let Some(v) = context.to_json() {
+                            err = err.with("value", v);
+                        }
+                        return Err(err);
+                    }
+                } else {
+                    validated.push(args.get(arg_index).cloned().unwrap_or_default());
+                    arg_index += 1;
+                }
+                continue;
+            }
+            let matched_str: String = matched.iter().collect();
+            for &single in matched {
+                let mut arg = args.get(arg_index).cloned().unwrap_or_default();
+                if param.ty == "a" {
+                    if single == 'm' {
+                        arg = Value::Undefined;
+                    } else {
+                        let mut array_ok = true;
+                        if let Some(subtype) = &param.subtype {
+                            if single != 'a' && matched_str != *subtype {
+                                array_ok = false;
+                            } else if let (Value::Array(a), Some(want)) =
+                                (&arg, subtype.chars().next())
+                                && let Some(first) = a.items.first()
+                            {
+                                let item_type = first.signature_symbol();
+                                array_ok = item_type == want
+                                    && a.items.iter().all(|v| v.signature_symbol() == item_type);
+                            }
+                        }
+                        if !array_ok {
+                            let mut err = Error::new("T0412").with("index", arg_index + 1).with(
+                                "type",
+                                array_type_name(param.subtype.as_deref().unwrap_or("")),
+                            );
+                            if let Some(v) = arg.to_json() {
+                                err = err.with("value", v);
+                            }
+                            return Err(err);
+                        }
+                        if single != 'a' {
+                            arg = Value::array(vec![arg], 0);
+                        }
+                    }
+                }
+                validated.push(arg);
+                arg_index += 1;
+            }
+        }
+        Ok(validated)
     }
 }
 
