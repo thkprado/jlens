@@ -14,6 +14,7 @@ use indexmap::IndexMap;
 use web_time::{Duration, Instant};
 
 use crate::ast::{Ast, BinaryOp, Node, NodeKind, SortTerm, Stage, TransformDef};
+use crate::audit::{Branch, EvalInfo, Outcome, Tracer, ValueRef};
 use crate::error::{Error, Result};
 use crate::functions::{self, Call, boolean};
 use crate::regex::Regex;
@@ -69,7 +70,7 @@ pub(crate) const DEFAULT_MAX_DEPTH: usize = 50_000;
 pub(crate) const DEFAULT_MAX_DEPTH: usize = 3_000;
 
 /// The state of one evaluation.
-pub(crate) struct Evaluator {
+pub(crate) struct Evaluator<'t> {
     depth: usize,
     limits: Limits,
     started: Instant,
@@ -81,9 +82,11 @@ pub(crate) struct Evaluator {
     timestamp: f64,
     /// State of the xorshift generator behind `$random` and `$shuffle`.
     rng: u64,
+    /// Receives evaluation events (auditing, logging). `None` costs one check per hook.
+    tracer: Option<&'t mut dyn Tracer>,
 }
 
-impl Drop for Evaluator {
+impl Drop for Evaluator<'_> {
     fn drop(&mut self) {
         for frame in self.cyclic.drain(..) {
             if let Some(frame) = frame.upgrade() {
@@ -154,6 +157,7 @@ pub(crate) fn evaluate(
     input: Option<&serde_json::Value>,
     bindings: &crate::Bindings,
     limits: Limits,
+    tracer: Option<&mut dyn Tracer>,
 ) -> Result<Option<serde_json::Value>> {
     if ast.has_errors() {
         return Err(Error::new("S0500").at(Default::default(), 0));
@@ -166,6 +170,7 @@ pub(crate) fn evaluate(
         regexes: HashMap::new(),
         timestamp: 0.0,
         rng: 0,
+        tracer,
     };
     let since_epoch = web_time::SystemTime::now()
         .duration_since(web_time::UNIX_EPOCH)
@@ -184,11 +189,23 @@ pub(crate) fn evaluate(
         // An input array is wrapped so that it counts as a single context value.
         input = Value::array(vec![input.clone()], SEQUENCE | OUTER_WRAPPER);
     }
-    let result = ev.eval(&ast.root, &input, &env)?;
-    Ok(result.to_json())
+    if let Some(t) = ev.tracer.as_deref_mut() {
+        t.begin(&EvalInfo {
+            source: &ast.source,
+            timestamp: ev.timestamp,
+        });
+    }
+    let result = ev.eval(&ast.root, &input, &env);
+    if let Some(t) = ev.tracer.as_deref_mut() {
+        match &result {
+            Ok(v) => t.end(Outcome::Value(ValueRef(v))),
+            Err(e) => t.end(Outcome::Error(e)),
+        }
+    }
+    Ok(result?.to_json())
 }
 
-impl Evaluator {
+impl Evaluator<'_> {
     /// The evaluation timestamp in milliseconds since the epoch.
     pub(crate) fn timestamp(&self) -> f64 {
         self.timestamp
@@ -243,7 +260,17 @@ impl Evaluator {
     }
 
     /// Evaluates `expr` against `input` (jsonata-js `evaluate`).
+    #[inline]
     pub(crate) fn eval(&mut self, expr: &Node, input: &Value, env: &Env) -> Result<Value> {
+        if self.tracer.is_some() {
+            return self.eval_traced(expr, input, env);
+        }
+        self.eval_grow(expr, input, env)
+    }
+
+    /// Evaluates with stack growth on native targets.
+    #[inline]
+    fn eval_grow(&mut self, expr: &Node, input: &Value, env: &Env) -> Result<Value> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             stacker::maybe_grow(128 * 1024, 4 * 1024 * 1024, || {
@@ -254,6 +281,23 @@ impl Evaluator {
         {
             self.eval_inner(expr, input, env)
         }
+    }
+
+    /// [`Self::eval`] with `enter`/`exit` events, kept out of the untraced hot path.
+    #[cold]
+    #[inline(never)]
+    fn eval_traced(&mut self, expr: &Node, input: &Value, env: &Env) -> Result<Value> {
+        if let Some(t) = self.tracer.as_deref_mut() {
+            t.enter(expr, ValueRef(input));
+        }
+        let result = self.eval_grow(expr, input, env);
+        if let Some(t) = self.tracer.as_deref_mut() {
+            match &result {
+                Ok(v) => t.exit(expr, Outcome::Value(ValueRef(v))),
+                Err(e) => t.exit(expr, Outcome::Error(e)),
+            }
+        }
+        result
     }
 
     fn eval_inner(&mut self, expr: &Node, input: &Value, env: &Env) -> Result<Value> {
@@ -295,7 +339,16 @@ impl Evaluator {
                 otherwise,
             } => {
                 let c = self.eval(condition, input, env)?;
-                if boolean(&c).map_err(|e| e.at(expr.span, expr.position))? == Some(true) {
+                let holds = boolean(&c).map_err(|e| e.at(expr.span, expr.position))? == Some(true);
+                if let Some(t) = self.tracer.as_deref_mut() {
+                    let taken = match (holds, otherwise.is_some()) {
+                        (true, _) => Branch::Then,
+                        (false, true) => Branch::Else,
+                        (false, false) => Branch::None,
+                    };
+                    t.branch(expr, taken);
+                }
+                if holds {
                     self.eval(then, input, env)?
                 } else if let Some(e) = otherwise {
                     self.eval(e, input, env)?
@@ -314,6 +367,9 @@ impl Evaluator {
             NodeKind::Bind { lhs, rhs } => {
                 let value = self.eval(rhs, input, env)?;
                 if let NodeKind::Variable { name } = &lhs.kind {
+                    if let Some(t) = self.tracer.as_deref_mut() {
+                        t.bind(expr, name, ValueRef(&value));
+                    }
                     self.bind(env, name, value.clone());
                 }
                 value
@@ -657,7 +713,29 @@ impl Evaluator {
             return Ok(Value::array(results, flags));
         }
 
+        if let Some(t) = self.tracer.as_deref_mut() {
+            t.filter_begin(predicate);
+        }
+        let tested = self.filter_items(predicate, &items, is_tuple, env, &mut results);
+        if let Some(t) = self.tracer.as_deref_mut() {
+            t.filter_end(predicate);
+        }
+        tested?;
+        Ok(Value::array(results, flags))
+    }
+
+    /// Tests each item against a predicate, collecting those that pass.
+    fn filter_items(
+        &mut self,
+        predicate: &Node,
+        items: &[Value],
+        is_tuple: bool,
+        env: &Env,
+        results: &mut Vec<Value>,
+    ) -> Result<()> {
+        let len = items.len() as f64;
         for (index, item) in items.iter().enumerate() {
+            let before = results.len();
             let (context, frame) = if is_tuple {
                 (tuple_get(item, "@"), self.frame_from_tuple(env, item))
             } else {
@@ -680,8 +758,11 @@ impl Evaluator {
             } else if boolean(&res)? == Some(true) {
                 results.push(item.clone());
             }
+            if let Some(t) = self.tracer.as_deref_mut() {
+                t.filter_item(predicate, index, ValueRef(item), results.len() > before);
+            }
         }
-        Ok(Value::array(results, flags))
+        Ok(())
     }
 
     // -----------------------------------------------------------------------------------------
@@ -704,10 +785,19 @@ impl Evaluator {
 
         if matches!(op, BinaryOp::And | BinaryOp::Or) {
             let l = boolean(&lhs).map_err(locate)?.unwrap_or(false);
-            let result = match op {
-                BinaryOp::And if !l => false,
-                BinaryOp::Or if l => true,
-                _ => {
+            let decided = match op {
+                BinaryOp::And if !l => Some(false),
+                BinaryOp::Or if l => Some(true),
+                _ => None,
+            };
+            if decided.is_some()
+                && let Some(t) = self.tracer.as_deref_mut()
+            {
+                t.short_circuit(expr);
+            }
+            let result = match decided {
+                Some(value) => value,
+                None => {
                     let rhs = self.eval(rhs_node, input, env).map_err(locate)?;
                     boolean(&rhs).map_err(locate)?.unwrap_or(false)
                 }
@@ -716,6 +806,20 @@ impl Evaluator {
         }
 
         let rhs = self.eval(rhs_node, input, env)?;
+        if let Some(t) = self.tracer.as_deref_mut()
+            && matches!(
+                op,
+                BinaryOp::Eq
+                    | BinaryOp::Ne
+                    | BinaryOp::Lt
+                    | BinaryOp::Le
+                    | BinaryOp::Gt
+                    | BinaryOp::Ge
+                    | BinaryOp::In
+            )
+        {
+            t.operands(expr, ValueRef(&lhs), ValueRef(&rhs));
+        }
         let result = match op {
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                 numeric(&lhs, &rhs, op)

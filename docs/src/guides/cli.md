@@ -4,6 +4,7 @@ The `jlens` binary evaluates, checks and inspects JSONata expressions.
 
 ```text
 jlens eval   <EXPR> | -f FILE  [-i input.json | --no-input] [-b bindings.json] [--compact]
+             [--explain | --audit json|text] [--audit-level decisions|full] [--trace-log FILE]
 jlens check  <EXPR> | -f FILE  [--json]
 jlens ast    <EXPR> | -f FILE  [--tokens | --raw] [--recover]
 ```
@@ -19,6 +20,25 @@ for anything longer than a one-liner, especially on Windows, where quoting `$` a
 | `0` | Success. `check` may still have printed warnings |
 | `1` | The expression has errors: a syntax error, or an evaluation error |
 | `2` | Usage or I/O problem: unreadable file, invalid JSON input, bad arguments |
+
+## `jlens eval`
+
+Evaluates the expression against the input document (a file with `-i`, otherwise stdin) and
+prints the result as JSON. An undefined result prints nothing.
+
+| Option | Effect |
+|---|---|
+| `-b, --bindings FILE` | A JSON object whose fields are bound as variables (`$name`) |
+| `--compact` | Prints the result on one line |
+| `--explain` | Prints an [explanation](audit.md) of how the result was reached, instead of the result |
+| `--audit json` | Prints the full audit tree as JSON, instead of the result |
+| `--audit-level full` | Records every evaluated node, not only decisions |
+| `--trace-log FILE` | Writes every evaluation event to `FILE` as JSON Lines. Combines with the options above |
+
+```text
+$ jlens eval -f fixtures/shipping-rule.jsonata -i fixtures/online-store-order.json --compact
+{"action":"FREE_SHIPPING","code":"OK_200"}
+```
 
 ## `jlens check`
 

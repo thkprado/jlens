@@ -1,0 +1,21 @@
+---
+source: crates/jlens-core/tests/audit.rs
+expression: explain(&tree).to_string()
+---
+result: {"action":"FREE_SHIPPING","code":"OK_200"}
+• $total := $sum(items.(unitPrice * quantity)) = 57000
+• $electronics := $sum(items[type = 'electronic'].(unitPrice * quantity)) = 37000
+  • [type = 'electronic']: 2 of 3 items passed; rejected: {"code":"1","color":"blue","type":"apparel","unitPrice":10000,"quantity":2,"tax":1500}
+• $blueTax := $sum(items[color = 'blue'].tax) = 1500
+  • [color = 'blue']: 1 of 3 items passed; rejected: {"code":"2","color":"black","type":"electronic","unitPrice":25000,"quantity":1,"tax":4000}, {"code":"3","color":"white","type":"electronic","unitPrice":12000,"quantity":1,"tax":3000}
+• $averageTax := $average(items.tax) = 2833.3333333333335
+✔ $approved := ( customer.login in ["alice.walker99", "bob.harrison42"] and $not(customer.login in ["mallory.cheat1", "eve.spammer007"]) and $total > 50000 and ( ('electronic' in items.type and $electro… = true
+  ✔ Authorized customer — customer.login in ["alice.walker99", "bob.harrison42"] → true ("alice.walker99" in ["alice.walker99","bob.harrison42"])
+  ✔ Customer not blocked — $not(customer.login in ["mallory.cheat1", "eve.spammer007"]) → true
+    ✘ customer.login in ["mallory.cheat1", "eve.spammer007"] → false ("alice.walker99" in ["mallory.cheat1","eve.spammer007"])
+  ✔ Minimum order grand total — $total > 50000 → true (57000 > 50000)
+  ✔ Order category check — ( ('electronic' in items.type and $electronics > $total * 0.30 + 1000) or ('blue' in items.color and $blueTax < $averageTax) ) → true
+    ✔ Electronics group — ('electronic' in items.type and $electronics > $total * 0.30 + 1000) → true
+      ✔ 'electronic' in items.type → true ("electronic" in ["apparel","electronic","electronic"])
+      ✔ $electronics > $total * 0.30 + 1000 → true (37000 > 18100)
+• $approved ? { "action": "FREE_SHIPPING", "code": "OK_200" } : { "action": "REGULAR_FEE", "code": "SHIP_FEE_402", "delivery": "SLOW" } → {"action":"FREE_SHIPPING","code":"OK_200"} [then]

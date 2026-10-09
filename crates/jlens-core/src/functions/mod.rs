@@ -29,7 +29,7 @@ pub(crate) struct Call<'a> {
     pub env: &'a Env,
 }
 
-pub(crate) type NativeImpl = fn(&mut Evaluator, Vec<Value>, &Call) -> Result<Value>;
+pub(crate) type NativeImpl = fn(&mut Evaluator<'_>, Vec<Value>, &Call) -> Result<Value>;
 
 /// Groups of built-in functions, as in the JSONata documentation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

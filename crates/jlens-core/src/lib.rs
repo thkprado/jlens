@@ -36,6 +36,7 @@
 
 pub mod annotation;
 pub mod ast;
+pub mod audit;
 mod datetime;
 pub mod debug;
 pub mod error;
@@ -157,11 +158,55 @@ impl Expression {
         bindings: &Bindings,
         options: &Options,
     ) -> Result<Option<JsonValue>> {
-        let limits = eval::Limits {
-            max_depth: options.max_depth.unwrap_or(eval::DEFAULT_MAX_DEPTH),
-            timeout: options.timeout,
-        };
-        eval::evaluate(&self.ast, input, bindings, limits)
+        eval::evaluate(&self.ast, input, bindings, limits(options), None)
+    }
+
+    /// Evaluates the expression, reporting every evaluation event to `tracer`.
+    ///
+    /// See the [`audit`] module for the events and the tracers jlens provides.
+    pub fn evaluate_traced(
+        &self,
+        input: Option<&JsonValue>,
+        bindings: &Bindings,
+        options: &Options,
+        tracer: &mut dyn audit::Tracer,
+    ) -> Result<Option<JsonValue>> {
+        eval::evaluate(&self.ast, input, bindings, limits(options), Some(tracer))
+    }
+
+    /// Evaluates the expression and records an [`audit::AuditTree`] of how the result was
+    /// reached. The audit is returned even when the evaluation fails.
+    ///
+    /// ```
+    /// use jlens_core::{Bindings, Expression, Options};
+    /// use jlens_core::audit::{AuditOptions, OutcomeKind};
+    ///
+    /// let expr = Expression::compile("$x > 10").unwrap();
+    /// let bindings = Bindings::new().var("x", 3);
+    /// let (result, audit) =
+    ///     expr.evaluate_audited(None, &bindings, &Options::default(), &AuditOptions::decisions());
+    /// assert_eq!(result.unwrap(), Some(serde_json::json!(false)));
+    /// let root = audit.root.unwrap();
+    /// assert_eq!(root.outcome, OutcomeKind::False);
+    /// assert_eq!(root.operands, Some([Some(3.into()), Some(10.into())]));
+    /// ```
+    pub fn evaluate_audited(
+        &self,
+        input: Option<&JsonValue>,
+        bindings: &Bindings,
+        options: &Options,
+        audit: &audit::AuditOptions,
+    ) -> (Result<Option<JsonValue>>, audit::AuditTree) {
+        let mut collector = audit::AuditCollector::new(*audit, input);
+        let result = self.evaluate_traced(input, bindings, options, &mut collector);
+        (result, collector.finish())
+    }
+}
+
+fn limits(options: &Options) -> eval::Limits {
+    eval::Limits {
+        max_depth: options.max_depth.unwrap_or(eval::DEFAULT_MAX_DEPTH),
+        timeout: options.timeout,
     }
 }
 

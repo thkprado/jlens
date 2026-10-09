@@ -35,6 +35,14 @@ An `Explanation` is derived from the tree: which operands made an `and` fail, wh
 filter rejected, and so on. It renders as text for the CLI or as JSON for user interfaces.
 Optional `tracing` integration and JSONL event export cover operational logging.
 
+## Measurement
+
+The untraced hot path stays the same as before: when no tracer is attached, `Evaluator::eval`
+checks for one and calls the original code, while the traced variant is a separate, cold
+function. Interleaved A/B runs of `examples/bench_eval.rs` against the evaluator before
+tracing measured between −5.7% and +2.7% across five workloads, which is within the machine's
+noise and inside the 3% budget.
+
 ## Consequences
 
 - Auditing reuses the real evaluation, so what the audit shows is exactly what happened.

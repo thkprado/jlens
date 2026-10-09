@@ -12,6 +12,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+use jlens_core::audit::{self, Tracer};
 use jlens_core::{Bindings, Diagnostic, Expression, Severity};
 use serde_json::Value;
 
@@ -73,6 +74,34 @@ struct EvalArgs {
     /// Print the result on a single line.
     #[arg(long)]
     compact: bool,
+    /// Print an explanation of how the result was reached instead of the result.
+    #[arg(long, conflicts_with = "audit")]
+    explain: bool,
+    /// Print the audit tree as JSON instead of the result.
+    #[arg(long, value_enum)]
+    audit: Option<AuditFormat>,
+    /// What the audit records (with --explain or --audit).
+    #[arg(long, value_enum, default_value = "decisions")]
+    audit_level: Level,
+    /// Write every evaluation event to this file as JSON Lines.
+    #[arg(long, value_name = "FILE")]
+    trace_log: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum AuditFormat {
+    /// The audit tree as JSON.
+    Json,
+    /// The explanation as text (same as --explain).
+    Text,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum Level {
+    /// Comparisons, and/or, conditionals, bindings, filters and annotated nodes.
+    Decisions,
+    /// Every evaluated node, with its input.
+    Full,
 }
 
 #[derive(Args)]
@@ -155,6 +184,11 @@ fn eval(args: EvalArgs) -> Result<ExitCode> {
         },
         None => Bindings::new(),
     };
+
+    let auditing = args.explain || args.audit.is_some();
+    if auditing || args.trace_log.is_some() {
+        return eval_traced(&args, &expr, input.as_ref(), &bindings, auditing);
+    }
 
     match expr.evaluate(input.as_ref(), &bindings) {
         Ok(Some(value)) => {
@@ -247,4 +281,137 @@ fn ast(args: AstArgs) -> Result<ExitCode> {
     } else {
         ExitCode::SUCCESS
     })
+}
+
+/// Forwards every event to two tracers (the audit collector and the event log).
+struct Tee<'a>(&'a mut dyn Tracer, &'a mut dyn Tracer);
+
+impl Tracer for Tee<'_> {
+    fn begin(&mut self, info: &audit::EvalInfo) {
+        self.0.begin(info);
+        self.1.begin(info);
+    }
+    fn enter(&mut self, node: &jlens_core::Node, input: audit::ValueRef<'_>) {
+        self.0.enter(node, input);
+        self.1.enter(node, input);
+    }
+    fn exit(&mut self, node: &jlens_core::Node, outcome: audit::Outcome<'_>) {
+        self.0.exit(node, outcome);
+        self.1.exit(node, outcome);
+    }
+    fn operands(
+        &mut self,
+        node: &jlens_core::Node,
+        lhs: audit::ValueRef<'_>,
+        rhs: audit::ValueRef<'_>,
+    ) {
+        self.0.operands(node, lhs, rhs);
+        self.1.operands(node, lhs, rhs);
+    }
+    fn short_circuit(&mut self, node: &jlens_core::Node) {
+        self.0.short_circuit(node);
+        self.1.short_circuit(node);
+    }
+    fn branch(&mut self, node: &jlens_core::Node, taken: audit::Branch) {
+        self.0.branch(node, taken);
+        self.1.branch(node, taken);
+    }
+    fn bind(&mut self, node: &jlens_core::Node, name: &str, value: audit::ValueRef<'_>) {
+        self.0.bind(node, name, value);
+        self.1.bind(node, name, value);
+    }
+    fn filter_begin(&mut self, predicate: &jlens_core::Node) {
+        self.0.filter_begin(predicate);
+        self.1.filter_begin(predicate);
+    }
+    fn filter_item(
+        &mut self,
+        predicate: &jlens_core::Node,
+        index: usize,
+        item: audit::ValueRef<'_>,
+        passed: bool,
+    ) {
+        self.0.filter_item(predicate, index, item, passed);
+        self.1.filter_item(predicate, index, item, passed);
+    }
+    fn filter_end(&mut self, predicate: &jlens_core::Node) {
+        self.0.filter_end(predicate);
+        self.1.filter_end(predicate);
+    }
+    fn end(&mut self, outcome: audit::Outcome<'_>) {
+        self.0.end(outcome);
+        self.1.end(outcome);
+    }
+}
+
+/// `jlens eval` with --explain, --audit and/or --trace-log.
+fn eval_traced(
+    args: &EvalArgs,
+    expr: &Expression,
+    input: Option<&Value>,
+    bindings: &Bindings,
+    auditing: bool,
+) -> Result<ExitCode> {
+    let options = audit::AuditOptions {
+        level: match args.audit_level {
+            Level::Decisions => audit::AuditLevel::Decisions,
+            Level::Full => audit::AuditLevel::Full,
+        },
+        ..Default::default()
+    };
+    let mut collector = audit::AuditCollector::new(options, input);
+    let mut log = match &args.trace_log {
+        Some(path) => Some(audit::JsonlTracer::new(
+            std::io::BufWriter::new(
+                fs::File::create(path).with_context(|| format!("creating {}", path.display()))?,
+            ),
+            options.limits,
+        )),
+        None => None,
+    };
+    let opts = jlens_core::Options::default();
+    let result = match (&mut log, auditing) {
+        (Some(log), true) => {
+            expr.evaluate_traced(input, bindings, &opts, &mut Tee(&mut collector, log))
+        }
+        (Some(log), false) => expr.evaluate_traced(input, bindings, &opts, log),
+        (None, _) => expr.evaluate_traced(input, bindings, &opts, &mut collector),
+    };
+    if let Some(log) = log {
+        if let Some(e) = log.error() {
+            anyhow::bail!("writing the trace log: {e}");
+        }
+        use std::io::Write as _;
+        log.into_inner().flush().context("writing the trace log")?;
+    }
+
+    if auditing {
+        let tree = collector.finish();
+        if matches!(args.audit, Some(AuditFormat::Json)) {
+            print_json(&tree)?;
+        } else {
+            print!("{}", audit::explain(&tree));
+        }
+        return Ok(if result.is_ok() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        });
+    }
+    match result {
+        Ok(Some(value)) => {
+            let text = if args.compact {
+                serde_json::to_string(&value)?
+            } else {
+                serde_json::to_string_pretty(&value)?
+            };
+            println!("{text}");
+            Ok(ExitCode::SUCCESS)
+        }
+        Ok(None) => Ok(ExitCode::SUCCESS),
+        Err(err) => {
+            eprintln!("{err}");
+            Ok(ExitCode::from(1))
+        }
+    }
 }

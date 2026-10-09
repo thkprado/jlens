@@ -14,7 +14,7 @@ use crate::error::{Diagnostic, Error, Severity};
 use crate::signature::Signature;
 
 /// A byte range in the expression source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, serde::Deserialize)]
 pub struct Span {
     /// Offset of the first byte.
     pub start: usize,

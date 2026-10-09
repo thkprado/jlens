@@ -97,3 +97,21 @@ jsonata-js has no depth limit of its own; it stops when the JavaScript stack ove
 needs a limit so that it fails with an error instead of crashing the process. On native
 targets, the evaluator grows its stack on demand (with the `stacker` crate), so the default
 limit is generous.
+
+## Tracing hooks
+
+The evaluator reports its work to an optional `Tracer`; [ADR 0004](../adr/0004-audit-tracer.md)
+records why. The hooks sit at these points:
+
+| Hook | Where |
+|---|---|
+| `enter` / `exit` | `Evaluator::eval`, around every node, including errors |
+| `operands` | `binary`, before a comparison or `in` |
+| `short_circuit` | `binary`, when `and`/`or` skips its right side |
+| `branch` | the conditional, after the condition |
+| `bind` | `:=`, before binding |
+| `filter_begin` / `filter_item` / `filter_end` | `filter`, around expression predicates (numeric indexes are not reported) |
+
+When no tracer is attached, `eval` calls the untraced code directly. The traced variant is a
+separate function marked cold, so the hot path does not change. The
+[audit guide](../guides/audit.md) describes the tracers built on these hooks.

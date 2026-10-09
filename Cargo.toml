@@ -23,12 +23,14 @@ thiserror = "2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 libtest-mimic = "0.8"
+insta = { version = "1", features = ["json", "redactions"] }
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"
 ryu-js = "1"
 regress = "0.10"
 web-time = "1"
 stacker = "0.1"
+tracing = "0.1"
 
 [workspace.lints.rust]
 missing_docs = "warn"

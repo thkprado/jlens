@@ -1,0 +1,427 @@
+---
+source: crates/jlens-core/tests/audit.rs
+expression: tree
+---
+{
+  "header": {
+    "engine": "jlens-core 0.1.0",
+    "expressionHash": "a4d2fb3dd6ef0f78",
+    "inputHash": "9e4a19be212bfd56",
+    "timestamp": "[timestamp]",
+    "durationMs": "[duration]",
+    "level": "decisions",
+    "result": {
+      "action": "FREE_SHIPPING",
+      "code": "OK_200"
+    }
+  },
+  "root": {
+    "node": 0,
+    "kind": "block",
+    "span": {
+      "start": 248,
+      "end": 1390
+    },
+    "source": "( $total := $sum(items.(unitPrice * quantity)); $electronics := $sum(items[type = 'electronic'].(unitPrice * quantity)); $blueTax := $sum(items[color = 'blue'].tax); $averageTax := $average(items.tax)…",
+    "output": {
+      "action": "FREE_SHIPPING",
+      "code": "OK_200"
+    },
+    "outcome": "value",
+    "children": [
+      {
+        "node": 1,
+        "kind": "bind",
+        "op": "$total",
+        "span": {
+          "start": 252,
+          "end": 302
+        },
+        "source": "$total := $sum(items.(unitPrice * quantity))",
+        "output": 57000,
+        "outcome": "value",
+        "binding": "$total"
+      },
+      {
+        "node": 13,
+        "kind": "bind",
+        "op": "$electronics",
+        "span": {
+          "start": 306,
+          "end": 377
+        },
+        "source": "$electronics := $sum(items[type = 'electronic'].(unitPrice * quantity))",
+        "output": 37000,
+        "outcome": "value",
+        "binding": "$electronics",
+        "children": [
+          {
+            "node": 17,
+            "kind": "path",
+            "span": {
+              "start": 327,
+              "end": 376
+            },
+            "source": "items[type = 'electronic'].(unitPrice * quantity)",
+            "output": [
+              25000,
+              12000
+            ],
+            "outcome": "value",
+            "filters": [
+              {
+                "node": 19,
+                "source": "type = 'electronic'",
+                "tested": 3,
+                "passed": 2,
+                "rejected": [
+                  {
+                    "code": "1",
+                    "color": "blue",
+                    "type": "apparel",
+                    "unitPrice": 10000,
+                    "quantity": 2,
+                    "tax": 1500
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "node": 29,
+        "kind": "bind",
+        "op": "$blueTax",
+        "span": {
+          "start": 381,
+          "end": 428
+        },
+        "source": "$blueTax := $sum(items[color = 'blue'].tax)",
+        "output": 1500,
+        "outcome": "value",
+        "binding": "$blueTax",
+        "children": [
+          {
+            "node": 33,
+            "kind": "path",
+            "span": {
+              "start": 402,
+              "end": 427
+            },
+            "source": "items[color = 'blue'].tax",
+            "output": 1500,
+            "outcome": "value",
+            "filters": [
+              {
+                "node": 35,
+                "source": "color = 'blue'",
+                "tested": 3,
+                "passed": 1,
+                "rejected": [
+                  {
+                    "code": "2",
+                    "color": "black",
+                    "type": "electronic",
+                    "unitPrice": 25000,
+                    "quantity": 1,
+                    "tax": 4000
+                  },
+                  {
+                    "code": "3",
+                    "color": "white",
+                    "type": "electronic",
+                    "unitPrice": 12000,
+                    "quantity": 1,
+                    "tax": 3000
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "node": 40,
+        "kind": "bind",
+        "op": "$averageTax",
+        "span": {
+          "start": 432,
+          "end": 467
+        },
+        "source": "$averageTax := $average(items.tax)",
+        "output": 2833.3333333333335,
+        "outcome": "value",
+        "binding": "$averageTax"
+      },
+      {
+        "node": 47,
+        "kind": "bind",
+        "op": "$approved",
+        "span": {
+          "start": 472,
+          "end": 1242
+        },
+        "source": "$approved := ( customer.login in [\"alice.walker99\", \"bob.harrison42\"] and $not(customer.login in [\"mallory.cheat1\", \"eve.spammer007\"]) and $total > 50000 and ( ('electronic' in items.type and $electro…",
+        "output": true,
+        "outcome": "true",
+        "binding": "$approved",
+        "children": [
+          {
+            "node": 49,
+            "kind": "block",
+            "span": {
+              "start": 485,
+              "end": 1242
+            },
+            "source": "( customer.login in [\"alice.walker99\", \"bob.harrison42\"] and $not(customer.login in [\"mallory.cheat1\", \"eve.spammer007\"]) and $total > 50000 and ( ('electronic' in items.type and $electronics > $total…",
+            "output": true,
+            "outcome": "true",
+            "children": [
+              {
+                "node": 50,
+                "kind": "binary",
+                "op": "and",
+                "span": {
+                  "start": 600,
+                  "end": 1238
+                },
+                "source": "customer.login in [\"alice.walker99\", \"bob.harrison42\"] and $not(customer.login in [\"mallory.cheat1\", \"eve.spammer007\"]) and $total > 50000 and ( ('electronic' in items.type and $electronics > $total *…",
+                "output": true,
+                "outcome": "true",
+                "children": [
+                  {
+                    "node": 51,
+                    "kind": "binary",
+                    "op": "and",
+                    "span": {
+                      "start": 600,
+                      "end": 957
+                    },
+                    "source": "customer.login in [\"alice.walker99\", \"bob.harrison42\"] and $not(customer.login in [\"mallory.cheat1\", \"eve.spammer007\"]) and $total > 50000",
+                    "output": true,
+                    "outcome": "true",
+                    "children": [
+                      {
+                        "node": 52,
+                        "kind": "binary",
+                        "op": "and",
+                        "span": {
+                          "start": 600,
+                          "end": 828
+                        },
+                        "source": "customer.login in [\"alice.walker99\", \"bob.harrison42\"] and $not(customer.login in [\"mallory.cheat1\", \"eve.spammer007\"])",
+                        "output": true,
+                        "outcome": "true",
+                        "children": [
+                          {
+                            "node": 53,
+                            "kind": "binary",
+                            "op": "in",
+                            "span": {
+                              "start": 600,
+                              "end": 654
+                            },
+                            "source": "customer.login in [\"alice.walker99\", \"bob.harrison42\"]",
+                            "label": "Authorized customer",
+                            "message": "The customer login must be on the approved partners list.",
+                            "output": true,
+                            "outcome": "true",
+                            "operands": [
+                              "alice.walker99",
+                              [
+                                "alice.walker99",
+                                "bob.harrison42"
+                              ]
+                            ]
+                          },
+                          {
+                            "node": 60,
+                            "kind": "function",
+                            "op": "$not",
+                            "span": {
+                              "start": 768,
+                              "end": 828
+                            },
+                            "source": "$not(customer.login in [\"mallory.cheat1\", \"eve.spammer007\"])",
+                            "label": "Customer not blocked",
+                            "message": "The customer must not be on the spam block list.",
+                            "output": true,
+                            "outcome": "true",
+                            "children": [
+                              {
+                                "node": 62,
+                                "kind": "binary",
+                                "op": "in",
+                                "span": {
+                                  "start": 773,
+                                  "end": 827
+                                },
+                                "source": "customer.login in [\"mallory.cheat1\", \"eve.spammer007\"]",
+                                "output": false,
+                                "outcome": "false",
+                                "operands": [
+                                  "alice.walker99",
+                                  [
+                                    "mallory.cheat1",
+                                    "eve.spammer007"
+                                  ]
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "node": 69,
+                        "kind": "binary",
+                        "op": ">",
+                        "span": {
+                          "start": 943,
+                          "end": 957
+                        },
+                        "source": "$total > 50000",
+                        "label": "Minimum order grand total",
+                        "message": "The order grand total must exceed 50,000.00.",
+                        "output": true,
+                        "outcome": "true",
+                        "operands": [
+                          57000,
+                          50000
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "node": 72,
+                    "kind": "block",
+                    "span": {
+                      "start": 1011,
+                      "end": 1238
+                    },
+                    "source": "( ('electronic' in items.type and $electronics > $total * 0.30 + 1000) or ('blue' in items.color and $blueTax < $averageTax) )",
+                    "label": "Order category check",
+                    "output": true,
+                    "outcome": "true",
+                    "children": [
+                      {
+                        "node": 73,
+                        "kind": "binary",
+                        "op": "or",
+                        "span": {
+                          "start": 1059,
+                          "end": 1232
+                        },
+                        "source": "('electronic' in items.type and $electronics > $total * 0.30 + 1000) or ('blue' in items.color and $blueTax < $averageTax)",
+                        "output": true,
+                        "outcome": "true",
+                        "shortCircuited": true,
+                        "children": [
+                          {
+                            "node": 74,
+                            "kind": "block",
+                            "span": {
+                              "start": 1059,
+                              "end": 1127
+                            },
+                            "source": "('electronic' in items.type and $electronics > $total * 0.30 + 1000)",
+                            "label": "Electronics group",
+                            "output": true,
+                            "outcome": "true",
+                            "children": [
+                              {
+                                "node": 75,
+                                "kind": "binary",
+                                "op": "and",
+                                "span": {
+                                  "start": 1060,
+                                  "end": 1126
+                                },
+                                "source": "'electronic' in items.type and $electronics > $total * 0.30 + 1000",
+                                "output": true,
+                                "outcome": "true",
+                                "children": [
+                                  {
+                                    "node": 76,
+                                    "kind": "binary",
+                                    "op": "in",
+                                    "span": {
+                                      "start": 1060,
+                                      "end": 1086
+                                    },
+                                    "source": "'electronic' in items.type",
+                                    "output": true,
+                                    "outcome": "true",
+                                    "operands": [
+                                      "electronic",
+                                      [
+                                        "apparel",
+                                        "electronic",
+                                        "electronic"
+                                      ]
+                                    ]
+                                  },
+                                  {
+                                    "node": 81,
+                                    "kind": "binary",
+                                    "op": ">",
+                                    "span": {
+                                      "start": 1091,
+                                      "end": 1126
+                                    },
+                                    "source": "$electronics > $total * 0.30 + 1000",
+                                    "output": true,
+                                    "outcome": "true",
+                                    "operands": [
+                                      37000,
+                                      18100
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "node": 98,
+        "kind": "condition",
+        "span": {
+          "start": 1247,
+          "end": 1388
+        },
+        "source": "$approved ? { \"action\": \"FREE_SHIPPING\", \"code\": \"OK_200\" } : { \"action\": \"REGULAR_FEE\", \"code\": \"SHIP_FEE_402\", \"delivery\": \"SLOW\" }",
+        "output": {
+          "action": "FREE_SHIPPING",
+          "code": "OK_200"
+        },
+        "outcome": "value",
+        "branch": "then",
+        "children": [
+          {
+            "node": 99,
+            "kind": "variable",
+            "op": "$approved",
+            "span": {
+              "start": 1247,
+              "end": 1256
+            },
+            "source": "$approved",
+            "output": true,
+            "outcome": "true"
+          }
+        ]
+      }
+    ]
+  },
+  "nodeCount": 24,
+  "truncated": false
+}

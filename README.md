@@ -7,9 +7,10 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 - **`jlens`**: the command-line tool;
 - **`jlens-wasm`**: an ES module for the browser.
 
-> **Status: the JSONata engine is complete (phase 3 of 8 done).** jlens passes 1,688 of the
+> **Status: the JSONata engine is complete (phase 4 of 8 done).** jlens passes 1,688 of the
 > 1,690 cases of the official JSONata 2.2.2 test suite; the other two are documented
-> overrides. Auditing (phase 4) and schema-driven autocomplete (phase 5) are next. See the
+> overrides, and evaluations can be audited and explained. Schema-driven autocomplete (phase 5) is
+> next. See the
 > [roadmap](docs/src/architecture/roadmap.md) and the current
 > [conformance report](tests/conformance/REPORT.md).
 
@@ -17,8 +18,8 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 
 - Full JSONata 2.2 semantics, including every built-in function, checked against the official
   test suite.
-- (Planned) Audit trees and explanations of evaluations. Business labels go in ordinary comments, so
-  expressions stay portable:
+- Audit trees and explanations of evaluations (`jlens eval --explain`). Business labels go in
+  ordinary comments, so expressions stay portable:
 
   ```jsonata
   /** @label "Minimum order grand total" */

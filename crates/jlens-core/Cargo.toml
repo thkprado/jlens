@@ -12,6 +12,7 @@ categories = ["parser-implementations", "encoding"]
 [dependencies]
 serde = { workspace = true, features = ["rc"] }
 serde_json.workspace = true
+tracing = { workspace = true, optional = true }
 indexmap.workspace = true
 thiserror.workspace = true
 ryu-js.workspace = true
@@ -23,6 +24,7 @@ stacker.workspace = true
 
 [dev-dependencies]
 libtest-mimic.workspace = true
+insta.workspace = true
 
 [[test]]
 name = "conformance"
