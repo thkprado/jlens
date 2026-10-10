@@ -59,10 +59,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+          components: clippy
       - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: actions/setup-node@v4
         with:
-          tool: wasm-pack
-      - run: wasm-pack build crates/jlens-wasm --target web --release
+          node-version: 22
+      - name: Install wasm-bindgen-cli (the version in Cargo.lock)
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          cargo install wasm-bindgen-cli --locked --version "$version"
+      - run: cargo clippy -p jlens-wasm --target wasm32-unknown-unknown
+      - name: Build and test the package (Node.js, headless Chrome, web editor example)
+        run: cargo xtask wasm-test --require-browser --example
+      - name: TypeScript declarations
+        run: >-
+          npx -y -p typescript@5.9.2 tsc --noEmit --strict --target es2022 --module es2022
+          --moduleResolution bundler --lib es2022,dom,esnext.disposable
+          crates/jlens-wasm/tests/types.ts
       - name: Report package size
         run: ls -l crates/jlens-wasm/pkg/*.wasm

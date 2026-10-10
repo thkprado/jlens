@@ -48,6 +48,7 @@ mod parser;
 mod process;
 mod regex;
 pub mod signature;
+pub mod stack;
 mod value;
 
 pub use annotation::Annotation;
@@ -252,8 +253,9 @@ impl FromIterator<(String, JsonValue)> for Bindings {
 /// Evaluation guardrails.
 #[derive(Debug, Clone, Default)]
 pub struct Options {
-    /// Maximum wall-clock time for one evaluation. Exceeding it raises `U1001`.
+    /// Maximum wall-clock time for one evaluation. Exceeding it raises `D1012`.
     pub timeout: Option<Duration>,
-    /// Maximum evaluation depth. Exceeding it raises `U1001`.
+    /// Maximum evaluation depth (default 50,000; 1,000 on WebAssembly). Exceeding it raises
+    /// `D1011`.
     pub max_depth: Option<usize>,
 }

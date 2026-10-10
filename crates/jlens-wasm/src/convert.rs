@@ -1,0 +1,226 @@
+//! Conversions at the JavaScript boundary: values, offsets and errors.
+
+use jlens_core::{Bindings, Options, format_json};
+use serde::Serialize;
+use serde_json::Value;
+use wasm_bindgen::prelude::*;
+
+/// Converts between UTF-8 byte offsets (used by the Rust crates) and UTF-16 code unit offsets
+/// (used by JavaScript strings).
+pub struct Offsets {
+    /// For non-ASCII text: the UTF-16 offset of every byte offset (`len + 1` entries). Bytes
+    /// inside a character map to the offset of the character.
+    table: Option<Vec<u32>>,
+    len: usize,
+}
+
+impl Offsets {
+    pub fn new(text: &str) -> Self {
+        let table = (!text.is_ascii()).then(|| {
+            let mut table = Vec::with_capacity(text.len() + 1);
+            let mut units = 0u32;
+            for c in text.chars() {
+                table.extend(std::iter::repeat_n(units, c.len_utf8()));
+                units += c.len_utf16() as u32;
+            }
+            table.push(units);
+            table
+        });
+        Offsets {
+            table,
+            len: text.len(),
+        }
+    }
+
+    /// The UTF-16 offset of a byte offset.
+    pub fn to_utf16(&self, byte: usize) -> usize {
+        let byte = byte.min(self.len);
+        match &self.table {
+            Some(table) => table[byte] as usize,
+            None => byte,
+        }
+    }
+
+    /// The byte offset of a UTF-16 offset. An offset inside a surrogate pair maps to the start
+    /// of the character.
+    pub fn to_byte(&self, unit: usize) -> usize {
+        match &self.table {
+            Some(table) => {
+                // The first byte whose UTF-16 offset reaches `unit`.
+                let mut byte = table
+                    .partition_point(|&u| (u as usize) < unit)
+                    .min(self.len);
+                if table[byte] as usize > unit {
+                    // `unit` falls inside a surrogate pair: go back to the character's start.
+                    byte -= 1;
+                    while byte > 0 && table[byte - 1] == table[byte] {
+                        byte -= 1;
+                    }
+                }
+                byte
+            }
+            None => unit.min(self.len),
+        }
+    }
+
+    /// Rewrites, recursively, every `span` and `range` object (`{start, end}`) from byte
+    /// offsets to UTF-16 offsets.
+    pub fn convert_spans(&self, value: &mut Value) {
+        if self.table.is_none() {
+            return;
+        }
+        match value {
+            Value::Array(items) => items.iter_mut().for_each(|v| self.convert_spans(v)),
+            Value::Object(map) => {
+                for (key, v) in map.iter_mut() {
+                    if (key == "span" || key == "range")
+                        && let Value::Object(span) = v
+                        && span.len() == 2
+                    {
+                        for bound in ["start", "end"] {
+                            if let Some(n) = span.get(bound).and_then(Value::as_u64) {
+                                span.insert(bound.into(), self.to_utf16(n as usize).into());
+                            }
+                        }
+                    } else {
+                        self.convert_spans(v);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Converts a JS value to JSON, through `JSON.stringify`. `undefined` (and values that
+/// stringify to nothing, such as functions) become `None`.
+pub fn from_js(value: &JsValue, what: &str) -> Result<Option<Value>, JsValue> {
+    if value.is_undefined() {
+        return Ok(None);
+    }
+    let text = js_sys::JSON::stringify(value)
+        .map_err(|e| type_error(&format!("{what} cannot be converted to JSON: {e:?}")))?;
+    match text.as_string() {
+        Some(text) => parse_json(&text, what).map(Some),
+        None => Ok(None),
+    }
+}
+
+pub fn parse_json(text: &str, what: &str) -> Result<Value, JsValue> {
+    serde_json::from_str(text).map_err(|e| type_error(&format!("{what} is not valid JSON: {e}")))
+}
+
+/// Converts JSON to a JS value, through `JSON.parse`. Numbers are formatted the way
+/// JavaScript formats them, so they round-trip exactly.
+pub fn to_js(value: &Value) -> JsValue {
+    js_sys::JSON::parse(&format_json(value, false)).expect("format_json produces valid JSON")
+}
+
+/// Serializes a Rust value to a JS value through JSON.
+pub fn ser_to_js<T: Serialize>(value: &T) -> JsValue {
+    to_js(&serde_json::to_value(value).expect("serializable"))
+}
+
+/// Reads the `bindings` argument: `undefined`, `null` or an object.
+pub fn bindings(value: &JsValue) -> Result<Bindings, JsValue> {
+    if value.is_null() {
+        return Ok(Bindings::new());
+    }
+    match from_js(value, "bindings")? {
+        None => Ok(Bindings::new()),
+        Some(Value::Object(map)) => Ok(map.into_iter().collect()),
+        Some(_) => Err(type_error("bindings must be an object")),
+    }
+}
+
+/// Reads `timeout` (milliseconds) and `maxDepth` from an options object.
+pub fn options(options: Option<&Value>) -> Result<Options, JsValue> {
+    let mut out = Options::default();
+    let Some(options) = options else {
+        return Ok(out);
+    };
+    let Value::Object(map) = options else {
+        return Err(type_error("options must be an object"));
+    };
+    if let Some(v) = map.get("timeout").filter(|v| !v.is_null()) {
+        let ms = v
+            .as_f64()
+            .filter(|ms| *ms >= 0.0)
+            .ok_or_else(|| type_error("options.timeout must be a number of milliseconds"))?;
+        out.timeout = Some(std::time::Duration::from_secs_f64(ms / 1000.0));
+    }
+    if let Some(v) = map.get("maxDepth").filter(|v| !v.is_null()) {
+        out.max_depth = Some(
+            v.as_u64()
+                .ok_or_else(|| type_error("options.maxDepth must be a positive integer"))?
+                as usize,
+        );
+    }
+    Ok(out)
+}
+
+/// The fields of a jlens error, as JSON, with offsets in UTF-16 code units.
+pub fn error_json(err: &jlens_core::Error, offsets: &Offsets) -> Value {
+    let mut map = serde_json::Map::new();
+    map.insert("code".into(), err.code().into());
+    map.insert("message".into(), err.message().into());
+    if let Some(position) = err.position() {
+        map.insert("position".into(), position.into());
+    }
+    if let Some(span) = err.span() {
+        map.insert("start".into(), offsets.to_utf16(span.start).into());
+        map.insert("end".into(), offsets.to_utf16(span.end).into());
+    }
+    if let Some(token) = err.token() {
+        map.insert("token".into(), token.into());
+    }
+    if let Some(value) = err.value() {
+        map.insert("value".into(), value.clone());
+    }
+    Value::Object(map)
+}
+
+/// A JS `Error` named `JlensError`, carrying the fields of [`error_json`].
+pub fn js_error(err: &jlens_core::Error, offsets: &Offsets) -> JsValue {
+    let fields = error_json(err, offsets);
+    let error = js_sys::Error::new(&err.message());
+    error.set_name("JlensError");
+    if let Value::Object(map) = &fields {
+        for (key, value) in map {
+            if key != "message" {
+                let _ = js_sys::Reflect::set(&error, &JsValue::from_str(key), &to_js(value));
+            }
+        }
+    }
+    error.into()
+}
+
+/// Reports Rust panics on the browser console (debug builds only).
+pub fn install_hooks() {
+    #[cfg(debug_assertions)]
+    console_error_panic_hook::set_once();
+}
+
+/// A JS `TypeError` for invalid arguments.
+pub fn type_error(message: &str) -> JsValue {
+    js_sys::TypeError::new(message).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Offsets;
+
+    #[test]
+    fn offsets_round_trip() {
+        let text = "aé𝄞b";
+        let o = Offsets::new(text);
+        // bytes: a=0, é=1..3, 𝄞=3..7, b=7, end=8; UTF-16: a=0, é=1, 𝄞=2..4, b=4, end=5.
+        assert_eq!([0, 1, 3, 7, 8].map(|b| o.to_utf16(b)), [0, 1, 2, 4, 5]);
+        assert_eq!([0, 1, 2, 4, 5].map(|u| o.to_byte(u)), [0, 1, 3, 7, 8]);
+        // Inside the surrogate pair: the start of the character.
+        assert_eq!(o.to_byte(3), 3);
+        assert_eq!(o.to_byte(99), 8);
+        let ascii = Offsets::new("abc");
+        assert_eq!((ascii.to_utf16(2), ascii.to_byte(9)), (2, 3));
+    }
+}

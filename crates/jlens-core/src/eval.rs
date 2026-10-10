@@ -67,7 +67,7 @@ pub(crate) struct Limits {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) const DEFAULT_MAX_DEPTH: usize = 50_000;
 #[cfg(target_arch = "wasm32")]
-pub(crate) const DEFAULT_MAX_DEPTH: usize = 3_000;
+pub(crate) const DEFAULT_MAX_DEPTH: usize = 1_000;
 
 /// The state of one evaluation.
 pub(crate) struct Evaluator<'t> {
@@ -268,19 +268,13 @@ impl Evaluator<'_> {
         self.eval_grow(expr, input, env)
     }
 
-    /// Evaluates with stack growth on native targets.
+    /// Evaluates with stack growth on native targets, and a stack check on WebAssembly.
     #[inline]
     fn eval_grow(&mut self, expr: &Node, input: &Value, env: &Env) -> Result<Value> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            stacker::maybe_grow(128 * 1024, 4 * 1024 * 1024, || {
-                self.eval_inner(expr, input, env)
-            })
+        if crate::stack::exhausted() {
+            return Err(Error::new("D1011").with("value", self.depth));
         }
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.eval_inner(expr, input, env)
-        }
+        crate::stack::grow(|| self.eval_inner(expr, input, env))
     }
 
     /// [`Self::eval`] with `enter`/`exit` events, kept out of the untraced hot path.

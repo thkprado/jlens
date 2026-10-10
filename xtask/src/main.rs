@@ -6,13 +6,19 @@ use std::{env, fs};
 
 use anyhow::{Context, Result, bail};
 
+mod wasm;
+
 const USAGE: &str = "\
 usage: cargo xtask <command>
 
 commands:
   conformance [--update-baseline]   run the whole JSONata suite and write tests/conformance/REPORT.md
   update-suite <jsonata-js checkout> replace tests/jsonata-suite with <checkout>/test/test-suite
-  gen-docs [--check]                regenerate docs/src/language/errors.md from the error catalog
+  gen-docs [--check]                regenerate the generated pages of the book (errors, functions)
+  wasm [--dev]                      build the browser package in crates/jlens-wasm/pkg
+  wasm-test [--require-browser] [--example]
+                                    build the package and test it in Node.js and a headless browser
+  serve                             serve the repository over HTTP (for examples/web-editor)
 ";
 
 fn main() -> Result<()> {
@@ -20,6 +26,12 @@ fn main() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("conformance") => conformance(args.iter().any(|a| a == "--update-baseline")),
         Some("gen-docs") => gen_docs(args.iter().any(|a| a == "--check")),
+        Some("wasm") => wasm::build(args.iter().any(|a| a == "--dev")),
+        Some("wasm-test") => wasm::test(
+            args.iter().any(|a| a == "--require-browser"),
+            args.iter().any(|a| a == "--example"),
+        ),
+        Some("serve") => wasm::serve_forever(),
         Some("update-suite") => match args.get(1) {
             Some(path) => update_suite(Path::new(path)),
             None => bail!("update-suite needs the path of a jsonata-js checkout\n\n{USAGE}"),

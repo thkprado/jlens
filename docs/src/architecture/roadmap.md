@@ -11,7 +11,7 @@ jlens is built in phases. A phase is complete only when its documentation is wri
 | 4 | Evaluation logging and auditing (tracer, audit tree, levels, annotations, explanations) | Snapshot tests; under 3% overhead with the tracer off | **done** |
 | 5 | `jlens-schema`: inference, overrides, JSON Schema, static typing, completion/diagnostics/hover | Table-driven language-service tests | **done** |
 | 6 | Full CLI | CLI snapshot tests | **done** |
-| 7 | WebAssembly package (browser ESM), TypeScript types, web editor example | Headless browser tests; working demo | planned |
+| 7 | WebAssembly package (browser ESM), TypeScript types, web editor example | Headless browser tests; working demo | **done** |
 | 8 | Documentation consolidation, benchmarks, publishing | Doc examples verified; link check green | planned |
 
 Phases 4 and 5 can run in parallel once phase 3 is done. Phase 5 only needs the parser from

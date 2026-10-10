@@ -6,4 +6,5 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
+flate2 = "1"
 jlens-core.workspace = true

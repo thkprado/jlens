@@ -90,13 +90,27 @@ clears those frames when the evaluation ends.
 
 | Limit | Option | Error | Default |
 |---|---|---|---|
-| Evaluation depth | `Options::max_depth` | `D1011` | 50,000 native, 3,000 in Wasm |
+| Evaluation depth | `Options::max_depth` | `D1011` | 50,000 native, 1,000 in Wasm |
 | Wall-clock time | `Options::timeout` | `D1012` | none |
+| Expression nesting | (fixed) | `U1001` | 1,000 levels, checked by the parser |
 
 jsonata-js has no depth limit of its own; it stops when the JavaScript stack overflows. jlens
-needs a limit so that it fails with an error instead of crashing the process. On native
-targets, the evaluator grows its stack on demand (with the `stacker` crate), so the default
-limit is generous.
+needs limits so that it fails with an error instead of crashing the process.
+
+- **Native targets.** The parser, the post-processing pass, the evaluator and the schema typing
+  walker grow their stack on demand (with the `stacker` crate), so the default depth limit is
+  generous. The CLI also runs on a thread with a 64 MiB stack, which covers the other recursive
+  walks of the tree (printing it as JSON, for example).
+- **WebAssembly.** The stack cannot grow, and an overflow traps, which leaves the module
+  instance unusable. jlens links the module with a 4 MiB stack and checks the space left before
+  each recursive step (`jlens_core::stack`), failing with `D1011` (evaluation) or `U1001`
+  (parsing) instead. WebAssembly frames also use the JavaScript engine's own stack, which is about
+  1 MiB in V8 and cannot be measured from inside the module; the lower default depth limit
+  (1,000) keeps evaluations well inside it. A larger `maxDepth` can raise a JavaScript
+  `RangeError` and break the instance.
+
+The nesting limit bounds every recursive walk of the syntax tree: 1,000 levels is far more
+than any hand-written expression uses.
 
 ## Tracing hooks
 

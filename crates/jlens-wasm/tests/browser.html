@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>jlens browser tests</title>
+</head>
+<body data-status="running">
+  <pre id="log"></pre>
+  <script type="module">
+    // Runs suite.mjs in the browser; `cargo xtask wasm-test` reads the result from the DOM.
+    import init, * as jlens from "../pkg/jlens.js";
+    import { cases } from "./suite.mjs";
+
+    const log = document.getElementById("log");
+    let failed = 0;
+    try {
+      await init();
+      for (const [name, run] of cases) {
+        try {
+          await run(jlens);
+          log.textContent += `ok   ${name}\n`;
+        } catch (err) {
+          failed++;
+          log.textContent += `FAIL ${name}: ${err.message}\n`;
+        }
+      }
+    } catch (err) {
+      failed++;
+      log.textContent += `FAIL loading the module: ${err}\n`;
+    }
+    log.textContent += `${cases.length - failed} passed, ${failed} failed\n`;
+    document.body.dataset.status = failed ? "fail" : "pass";
+  </script>
+</body>
+</html>

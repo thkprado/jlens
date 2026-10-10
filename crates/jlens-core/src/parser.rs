@@ -218,12 +218,18 @@ fn is_unknown_operator(op: &str) -> bool {
 
 type PResult<T> = Result<T>;
 
+/// Maximum nesting of subexpressions. Deeper expressions fail with `U1001` instead of exhausting
+/// the stack in the passes that walk the tree.
+pub(crate) const MAX_NESTING: usize = 1000;
+
 pub(crate) struct Parser<'a> {
     src: &'a str,
     lexer: Lexer<'a>,
     node: Sym,
     prev_end: usize,
     recover: bool,
+    /// Nesting of `expression` calls, bounded by [`MAX_NESTING`].
+    depth: usize,
     pub errors: Vec<Error>,
     pub warnings: Vec<Diagnostic>,
 }
@@ -240,6 +246,7 @@ pub(crate) fn parse(src: &str, recover: bool) -> (PResult<Raw>, Vec<Error>, Vec<
         },
         prev_end: 0,
         recover,
+        depth: 0,
         errors: Vec::new(),
         warnings: Vec::new(),
     };
@@ -373,6 +380,23 @@ impl<'a> Parser<'a> {
 
     /// Pratt's algorithm.
     fn expression(&mut self, rbp: u8) -> PResult<Raw> {
+        if self.depth >= MAX_NESTING || crate::stack::exhausted() {
+            return Err(Error::new("U1001")
+                .with(
+                    "message",
+                    format!(
+                        "The expression is nested too deeply (the limit is {MAX_NESTING} levels)"
+                    ),
+                )
+                .located(self.src, self.node.span, self.node.span.end));
+        }
+        self.depth += 1;
+        let result = crate::stack::grow(|| self.expression_inner(rbp));
+        self.depth -= 1;
+        result
+    }
+
+    fn expression_inner(&mut self, rbp: u8) -> PResult<Raw> {
         let docs = std::mem::take(&mut self.node.docs);
         let t = self.node.clone();
         self.advance(None, true)?;

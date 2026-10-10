@@ -492,3 +492,23 @@ fn fixture_annotations_cover_their_conditions() {
         ]
     );
 }
+
+#[test]
+fn deep_nesting_is_an_error_not_a_crash() {
+    let nested = |n: usize| format!("{}1{}", "(".repeat(n), ")".repeat(n));
+    // The limit is generous for real expressions.
+    let ok = jlens_core::Expression::compile(&nested(999)).unwrap();
+    assert_eq!(
+        ok.evaluate(None, &jlens_core::Bindings::new()).unwrap(),
+        Some(1.into())
+    );
+    let err = jlens_core::Expression::compile(&nested(5000)).unwrap_err();
+    assert_eq!(err.code(), "U1001");
+    assert!(
+        err.message().contains("nested too deeply"),
+        "{}",
+        err.message()
+    );
+    let ast = jlens_core::parse_recover(&format!("{}a", "[".repeat(5000)));
+    assert_eq!(ast.diagnostics[0].code, "U1001");
+}

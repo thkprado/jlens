@@ -196,6 +196,14 @@ impl<'s> Walker<'s, '_> {
 
     /// Walks `node` evaluated against context `ctx`, returning the type of its result.
     pub fn walk(&mut self, node: &Node, ctx: &Ty<'s>, scope: &mut Scope<'s>) -> Ty<'s> {
+        // Very deep expressions are typed only down to where the stack allows.
+        if jlens_core::stack::exhausted() {
+            return Ty::unknown();
+        }
+        jlens_core::stack::grow(|| self.walk_inner(node, ctx, scope))
+    }
+
+    fn walk_inner(&mut self, node: &Node, ctx: &Ty<'s>, scope: &mut Scope<'s>) -> Ty<'s> {
         let ty = match &node.kind {
             NodeKind::Path { steps, .. } => {
                 let mark = scope.len();

@@ -1,0 +1,58 @@
+// Type-checks the declarations of the package (`tsc --noEmit --strict`); it is not run.
+
+import init, {
+  type AuditResult,
+  type Completions,
+  type Diagnostic,
+  type FunctionInfo,
+  type JlensError,
+  type JsonSchema,
+  Expression,
+  LanguageService,
+  functions,
+  inferSchema,
+  parseRecover,
+  version,
+} from "../pkg/jlens.js";
+
+export async function check(): Promise<void> {
+  await init();
+  const v: string = version();
+
+  const expr = new Expression("$sum(items.price)");
+  const source: string = expr.source;
+  const r1: unknown = expr.evaluate();
+  const r2: unknown = expr.evaluate({ items: [] }, { limit: 1 }, { timeout: 100, maxDepth: 50 });
+  const r3: string | undefined = expr.evaluateJson('{"items": []}');
+  const audit: AuditResult = expr.evaluateWithAudit({}, null, {
+    level: "full",
+    limits: { maxNodes: 100 },
+  });
+  const text: string = audit.explanationText;
+  const failed = audit.explanation.lines.filter((l) => l.passed === false).map((l) => l.text);
+  const root = audit.audit.root;
+  const start: number | undefined = root?.span.start;
+  const type: string = expr.ast().type;
+  expr.free();
+
+  try {
+    new Expression("(");
+  } catch (e) {
+    const err = e as JlensError;
+    const code: string = err.code;
+    const position: number | undefined = err.position;
+    console.log(code, position);
+  }
+
+  const { ast, diagnostics } = parseRecover("a +");
+  const d: Diagnostic | undefined = diagnostics[0];
+  const schema: JsonSchema = inferSchema([{ a: 1 }], { a: { description: "A", enum: [1, 2] } });
+  const service = new LanguageService(schema, { limit: { type: "number" }, other: null });
+  const plain = new LanguageService();
+  const completions: Completions = service.complete("a", 1);
+  const kinds = completions.items.map((i) => i.kind);
+  const hover = service.hover("a", 0)?.contents;
+  const help = plain.signatureHelp("$sum(", 5)?.activeParam;
+  const catalog: FunctionInfo[] = functions();
+  console.log(v, source, r1, r2, r3, text, failed, start, type, ast.id, d, kinds, hover, help, catalog);
+}

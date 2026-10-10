@@ -95,6 +95,15 @@ impl<'a> Processor<'a> {
     }
 
     fn process(&mut self, raw: Raw) -> Result<Node> {
+        if crate::stack::exhausted() {
+            return Err(Error::new("U1001")
+                .with("message", "The expression is nested too deeply")
+                .located(self.src, raw.span, raw.pos));
+        }
+        crate::stack::grow(|| self.process_inner(raw))
+    }
+
+    fn process_inner(&mut self, raw: Raw) -> Result<Node> {
         let Raw {
             kind,
             span,

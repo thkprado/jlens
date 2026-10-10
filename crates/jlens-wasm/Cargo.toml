@@ -15,10 +15,12 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 jlens-core.workspace = true
+jlens-schema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true
-serde-wasm-bindgen.workspace = true
+js-sys.workspace = true
+console_error_panic_hook.workspace = true
 
 [lints]
 workspace = true

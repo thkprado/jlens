@@ -98,8 +98,21 @@ struct AstArgs {
     recover: bool,
 }
 
+/// Stack size of the thread doing the work. The main thread's stack is small on some platforms
+/// (1 MiB on Windows), and walking a deeply nested syntax tree (to print it, for example) is
+/// recursive.
+const STACK_SIZE: usize = 64 * 1024 * 1024;
+
 fn main() -> ExitCode {
-    match run(Cli::parse()) {
+    let cli = Cli::parse();
+    let worker = std::thread::Builder::new()
+        .stack_size(STACK_SIZE)
+        .spawn(move || run(cli))
+        .expect("spawning the worker thread");
+    let result = worker
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    match result {
         Ok(code) => code,
         Err(err) if output::is_broken_pipe(&err) => ExitCode::SUCCESS,
         Err(err) => {

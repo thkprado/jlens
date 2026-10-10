@@ -39,7 +39,8 @@ extensions live in comments or in the host API, not in the language syntax.
 | Topic | jsonata-js | jlens |
 |---|---|---|
 | Object key order | JavaScript order: integer-like keys first, ascending, then insertion order | Insertion order, always |
-| Recursion limit | The JavaScript stack (`RangeError`) | `D1011` after `Options::max_depth` evaluation levels (50,000 by default; 3,000 in Wasm) |
+| Recursion limit | The JavaScript stack (`RangeError`) | `D1011` after `Options::max_depth` evaluation levels (50,000 by default; 1,000 in Wasm) |
+| Nesting limit | The JavaScript stack | `U1001` beyond 1,000 levels of nested subexpressions |
 | Error `position` and `token` inside function calls | Overwritten with the call site | Filled in only when the inner error has none, so it points at the real cause |
 | Invalid regular expression | JavaScript `SyntaxError` without a code | `S0302` with the engine message in `message` |
 | A function as the final result | The function object | `None`, like `JSON.stringify` |

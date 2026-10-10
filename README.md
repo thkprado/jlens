@@ -7,10 +7,11 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 - **`jlens`**: the command-line tool;
 - **`jlens-wasm`**: an ES module for the browser.
 
-> **Status: the JSONata engine is complete (phase 6 of 8 done).** jlens passes 1,688 of the
-> 1,690 cases of the official JSONata 2.2.2 test suite; the other two are documented
-> overrides. Evaluations can be audited and explained, and schemas inferred from samples drive
-> completion and diagnostics. The browser WebAssembly package (phase 7) is next. See the
+> **Status: phase 7 of 8 done.** jlens passes 1,688 of the 1,690 cases of the official
+> JSONata 2.2.2 test suite; the other two are documented overrides. Evaluations can be audited
+> and explained, schemas inferred from samples drive completion and diagnostics, and everything
+> is available in the browser as a WebAssembly ES module. Benchmarks, documentation
+> consolidation and publishing (phase 8) are next. See the
 > [roadmap](docs/src/architecture/roadmap.md) and the current
 > [conformance report](tests/conformance/REPORT.md).
 
@@ -28,6 +29,8 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 
 - Structural metadata inferred from sample documents (JSON Schema 2020-12), which drives
   completion, diagnostics and hover (`jlens schema infer`, `jlens check --schema`).
+- A browser ES module with TypeScript types. The `examples/web-editor` demo is a JSONata editor
+  with completion, live results, explanations and an audit tree viewer.
 
 ## Quick start
 
@@ -47,10 +50,11 @@ jlens check --schema schema.json -f fixtures/shipping-rule.jsonata
 | `crates/jlens-core` | Language engine and audit subsystem |
 | `crates/jlens-schema` | Metadata inference and language service |
 | `crates/jlens-cli` | `jlens` binary |
-| `crates/jlens-wasm` | Browser bindings (`wasm-pack build --target web`) |
+| `crates/jlens-wasm` | Browser bindings (`cargo xtask wasm`) |
 | `tests/jsonata-suite` | Vendored official test suite (jsonata-js 2.2.2, MIT) |
 | `tests/conformance` | Baseline, overrides and conformance report |
 | `fixtures` | Sample documents and expressions used in tests and guides |
+| `examples/web-editor` | Browser demo: JSONata editor with autocomplete, explanations and audit trees |
 | `docs` | The jlens book (mdBook) and decision records |
 | `xtask` | Repository automation (`cargo xtask`) |
 
@@ -61,7 +65,9 @@ cargo test --workspace                 # unit tests + conformance baseline (regr
 cargo xtask conformance                # full suite run, writes tests/conformance/REPORT.md
 cargo clippy --workspace --all-targets
 mdbook build docs                      # requires mdbook
-wasm-pack build crates/jlens-wasm --target web
+cargo xtask wasm                       # browser package in crates/jlens-wasm/pkg (needs wasm-bindgen-cli)
+cargo xtask wasm-test                  # its tests, in Node.js and a headless browser
+cargo xtask serve                      # serve the repository; open /examples/web-editor/
 ```
 
 ## License
