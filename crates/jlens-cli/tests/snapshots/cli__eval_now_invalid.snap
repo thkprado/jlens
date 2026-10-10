@@ -1,0 +1,10 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--no-input\", \"--now\", \"yesterday\", \"$now()\"], None)"
+---
+exit: 2
+--- stdout
+--- stderr
+error: invalid value 'yesterday' for '--now <TIME>': expected milliseconds or an ISO 8601 timestamp
+
+For more information, try '--help'.

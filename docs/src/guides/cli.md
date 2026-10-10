@@ -5,6 +5,7 @@ The `jlens` binary evaluates, checks, explains and inspects JSONata expressions.
 ```text
 jlens eval      <EXPR> | -f FILE  [-i INPUT | --no-input] [--ndjson] [--filter]
                 [-b BINDINGS] [-c | -r | --json] [--timeout MS] [--max-depth N]
+                [--now TIME] [--seed N]
                 [--explain | --audit json|text] [--audit-level decisions|full] [--trace-log FILE]
 jlens check     <EXPR> | -f FILE  [--json] [--schema SCHEMA]
 jlens functions [NAME] [--json]
@@ -24,7 +25,7 @@ shells (`cmd.exe`, PowerShell) in particular make quoting expressions awkward. G
 |---|---|
 | `0` | Success. `check` may still have printed warnings |
 | `1` | The expression has errors: a syntax error, an evaluation error, or (with `--ndjson`) at least one line that failed |
-| `2` | Usage or I/O problem: unreadable file, invalid JSON input, bad arguments |
+| `2` | Usage or I/O problem: unreadable file, invalid JSON input, bad arguments, a terminal on standard input |
 
 Writing to a closed pipe, as in `jlens functions | head`, ends quietly with code 0.
 
@@ -42,20 +43,20 @@ Writing to a closed pipe, as in `jlens functions | head`, ends quietly with code
 - **The format never depends on the terminal.** A command prints the same thing when an agent
   runs it and when a person copies it into a shell. Ask for machine output with a flag.
 - **Pass the expression with `-f FILE`** and the input with `-i FILE` or `--no-input`. This
-  avoids shell quoting, and an `eval` that would read standard input never waits on a terminal
-  by accident.
+  avoids shell quoting. An `eval` that would read its input from a terminal fails with code 2
+  instead of waiting.
 - **Use `eval --json`** to get every outcome, errors included, as one line of JSON on standard
   output (see [below](#machine-output---json)), and `check --json` for diagnostics as JSON.
-
-Version 0.3 completes the contract, as the ADR describes: `--json` combines with `--ndjson`,
-each envelope carrying its input line number; `--now` and `--seed` make results that depend on
-the clock or on chance reproducible; and `eval` fails with code 2 instead of waiting when
-standard input is a terminal.
+- **Fix the clock and the seed** with `--now` and `--seed` when a result depends on `$now()`,
+  `$millis()`, `$random()` or `$shuffle()`, so that the same command prints the same bytes when
+  it is run again.
 
 ## `jlens eval`
 
 Evaluates the expression against a JSON document and prints the result. The document comes from
-`-i FILE`, or from standard input. An undefined result prints nothing.
+`-i FILE`, or from standard input. An undefined result prints nothing. When standard input is a
+terminal and neither `-i` nor `--no-input` is given, `eval` fails with exit code 2 instead of
+waiting for a document.
 
 ```text
 $ jlens eval -f fixtures/shipping-rule.jsonata -i fixtures/online-store-order.json
@@ -75,6 +76,8 @@ $ jlens eval -f fixtures/shipping-rule.jsonata -i fixtures/online-store-order.js
 | `--json` | Print a JSON envelope instead of the bare result (see below) |
 | `--timeout MS` | Stop an evaluation that runs longer (error `D1012`) |
 | `--max-depth N` | Stop an evaluation that nests deeper (error `D1011`); the default is 50,000 |
+| `--now TIME` | The time seen by `$now()` and `$millis()`: milliseconds since the epoch, or an ISO 8601 timestamp such as `2026-01-01T00:00:00Z` |
+| `--seed N` | Seed `$random()` and `$shuffle()`: the same seed gives the same results |
 
 Results are printed the way JavaScript prints JSON, so they match jsonata-js output: `2^64` prints
 as `18446744073709552000` and `1e21` as `1e+21`.
@@ -104,8 +107,10 @@ $ jlens eval --json -i fixtures/online-store-order.json 'customer.name + 1'
   code 2 as without `--json`.
 - With `--filter`, a matching document is the `result`, and a document that does not match
   prints nothing.
-- `--json` cannot be combined with `-r`, `--explain` or `--audit`. In this version it cannot be
-  combined with `--ndjson` either.
+- With `--ndjson`, every envelope also carries `line`, the number of its input line, so that
+  results and errors can be paired with their input. A line that is not valid JSON gives a
+  `U2001` envelope, and processing continues.
+- `--json` cannot be combined with `-r`, `--explain` or `--audit`.
 - Fields are only ever added to the envelope: ignore the ones you do not know.
 
 ### Many documents: `--ndjson`
@@ -116,6 +121,8 @@ stream through in constant memory.
 - Blank lines are skipped.
 - Lines that are not valid JSON, and evaluations that fail, are reported on standard error with
   their line number. Processing continues, and the exit code becomes 1.
+- With `--json`, each result and each error is an envelope that carries its line number, and
+  nothing is written to standard error.
 
 ```text
 $ jlens eval --ndjson -i fixtures/orders.ndjson '$sum(items.(unitPrice * quantity))'
@@ -123,6 +130,15 @@ $ jlens eval --ndjson -i fixtures/orders.ndjson '$sum(items.(unitPrice * quantit
 300
 60000
 line 5: invalid JSON: expected ident at line 1 column 2
+```
+
+```text
+$ jlens eval --ndjson --json -i fixtures/orders.ndjson '$sum(items.(unitPrice * quantity))'
+{"ok":true,"line":1,"result":50000}
+{"ok":true,"line":2,"result":300}
+{"ok":true,"line":4,"result":60000}
+{"ok":false,"line":5,"error":{"code":"U2001","message":"The input is not valid JSON: expected ident at line 1 column 2"}}
+{"ok":true,"line":6,"undefined":true}
 ```
 
 ### Selecting documents: `--filter`

@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--no-input\", \"-c\", \"--now\", \"2026-01-01T00:00:00Z\", \"--seed\",\n\"42\",\n\"{'now': $now(), 'millis': $millis(), 'random': $random(), 'shuffle': $shuffle([1, 2, 3, 4, 5])}\"],\nNone)"
+---
+exit: 0
+--- stdout
+{"now":"2026-01-01T00:00:00.000Z","millis":1767225600000,"random":0.1941059175341826,"shuffle":[3,1,5,4,2]}
+--- stderr

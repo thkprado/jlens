@@ -156,6 +156,41 @@ fn eval_ndjson() {
     snapshot!("ndjson_results", &[&args[..], &[total]].concat());
     let rule = "customer.login in ['alice.walker99', 'bob.harrison42'] and $sum(items.(unitPrice * quantity)) > 50000";
     snapshot!("ndjson_filter", &[&args[..], &["--filter", rule]].concat());
+    snapshot!("ndjson_json", &[&args[..], &["--json", total]].concat());
+    snapshot!(
+        "ndjson_json_filter",
+        &[&args[..], &["--json", "--filter", rule]].concat()
+    );
+    snapshot!(
+        "ndjson_json_error",
+        &["eval", "--ndjson", "--json", "a + 1"],
+        "{\"a\":1}\n{\"a\":\"x\"}\n"
+    );
+}
+
+#[test]
+fn eval_reproducible() {
+    snapshot!(
+        "eval_now_seed",
+        &[
+            "eval",
+            "--no-input",
+            "-c",
+            "--now",
+            "2026-01-01T00:00:00Z",
+            "--seed",
+            "42",
+            "{'now': $now(), 'millis': $millis(), 'random': $random(), 'shuffle': $shuffle([1, 2, 3, 4, 5])}"
+        ]
+    );
+    snapshot!(
+        "eval_now_millis",
+        &["eval", "--no-input", "--now", "1000", "$now()"]
+    );
+    snapshot!(
+        "eval_now_invalid",
+        &["eval", "--no-input", "--now", "yesterday", "$now()"]
+    );
 }
 
 #[test]

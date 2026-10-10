@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--no-input\", \"--now\", \"1000\", \"$now()\"], None)"
+---
+exit: 0
+--- stdout
+"1970-01-01T00:00:01.000Z"
+--- stderr

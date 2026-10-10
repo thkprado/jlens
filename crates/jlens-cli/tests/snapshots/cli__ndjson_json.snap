@@ -1,0 +1,12 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[&args[..], &[\"--json\", total]].concat(), None)"
+---
+exit: 1
+--- stdout
+{"ok":true,"line":1,"result":50000}
+{"ok":true,"line":2,"result":300}
+{"ok":true,"line":4,"result":60000}
+{"ok":false,"line":5,"error":{"code":"U2001","message":"The input is not valid JSON: expected ident at line 1 column 2"}}
+{"ok":true,"line":6,"undefined":true}
+--- stderr

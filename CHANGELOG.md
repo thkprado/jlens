@@ -16,13 +16,18 @@ All notable changes are recorded here. The format follows
 - `jlens eval --json` prints one JSON envelope per evaluation on standard output:
   `{"ok":true,"result":…}`, `{"ok":true,"undefined":true}` or `{"ok":false,"error":{…}}`,
   with the error's code, message, position, line and column. An input document that is not
-  valid JSON is reported with the new code `U2001`. See ADR 0008.
+  valid JSON is reported with the new code `U2001`. With `--ndjson`, each envelope also
+  carries `line`, the number of its input line. See ADR 0008.
+- `jlens eval --now TIME` and `--seed N` fix the clock and the random generator, so that a
+  command can be replayed with the same output.
 
 ### Changed
 
 - `Options` (`jlens-core`) is `#[non_exhaustive]`, so new options can be added without a
   breaking change. Build it with `Options::new().timeout(..).max_depth(..)` instead of a struct
   literal; its fields stay public.
+- `jlens eval` fails with exit code 2, instead of waiting, when it would read its input from a
+  terminal.
 
 ## [0.2.0]
 

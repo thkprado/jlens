@@ -42,24 +42,28 @@ impl Format {
     }
 }
 
-/// The `--json` envelope of a successful evaluation (ADR 0008).
-pub fn ok_envelope(value: Option<&Value>) -> String {
+/// The `--json` envelope of a successful evaluation (ADR 0008). `line` is the input line, with
+/// `--ndjson`.
+pub fn ok_envelope(value: Option<&Value>, line: Option<usize>) -> String {
+    let line = line.map_or_else(String::new, |n| format!(r#","line":{n}"#));
     match value {
         // `format_json` prints numbers as jsonata-js does, which `serde_json` would not.
         Some(value) => format!(
-            r#"{{"ok":true,"result":{}}}"#,
+            r#"{{"ok":true{line},"result":{}}}"#,
             jlens_core::format_json(value, false)
         ),
-        None => r#"{"ok":true,"undefined":true}"#.to_owned(),
+        None => format!(r#"{{"ok":true{line},"undefined":true}}"#),
     }
 }
 
 /// The `--json` envelope of a failed evaluation (ADR 0008). `source` is the expression, in
-/// which the error's line and column are computed.
-pub fn error_envelope(err: &jlens_core::Error, source: &str) -> String {
+/// which the error's line and column are computed; `line` is the input line, with `--ndjson`.
+pub fn error_envelope(err: &jlens_core::Error, source: &str, line: Option<usize>) -> String {
     #[derive(Serialize)]
     struct Envelope<'a> {
         ok: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        line: Option<usize>,
         error: ErrorInfo<'a>,
     }
     #[derive(Serialize)]
@@ -76,6 +80,7 @@ pub fn error_envelope(err: &jlens_core::Error, source: &str) -> String {
     let location = err.span().map(|span| report::location(source, span.start));
     let envelope = Envelope {
         ok: false,
+        line,
         error: ErrorInfo {
             code: err.code(),
             message: err.message(),
@@ -120,23 +125,35 @@ mod tests {
     #[test]
     fn envelopes() {
         assert_eq!(
-            ok_envelope(Some(&json!([1e21, null]))),
+            ok_envelope(Some(&json!([1e21, null])), None),
             r#"{"ok":true,"result":[1e+21,null]}"#
         );
-        assert_eq!(ok_envelope(None), r#"{"ok":true,"undefined":true}"#);
+        assert_eq!(ok_envelope(None, None), r#"{"ok":true,"undefined":true}"#);
+        assert_eq!(
+            ok_envelope(Some(&json!(1)), Some(3)),
+            r#"{"ok":true,"line":3,"result":1}"#
+        );
+        assert_eq!(
+            ok_envelope(None, Some(4)),
+            r#"{"ok":true,"line":4,"undefined":true}"#
+        );
         let source = "(\n  \"é\" + 1\n)";
         let err = jlens_core::Expression::compile(source)
             .unwrap()
             .evaluate(None, &jlens_core::Bindings::new())
             .unwrap_err();
-        let envelope: Value = serde_json::from_str(&error_envelope(&err, source)).unwrap();
+        let envelope: Value = serde_json::from_str(&error_envelope(&err, source, None)).unwrap();
         assert_eq!(envelope["error"]["code"], "T2001");
         assert_eq!(envelope["error"]["line"], 2);
         assert_eq!(envelope["error"]["column"], 3);
         let input = jlens_core::Error::new("U2001").with("message", "oops");
         assert_eq!(
-            error_envelope(&input, ""),
+            error_envelope(&input, "", None),
             r#"{"ok":false,"error":{"code":"U2001","message":"The input is not valid JSON: oops"}}"#
+        );
+        assert_eq!(
+            error_envelope(&input, "", Some(5)),
+            r#"{"ok":false,"line":5,"error":{"code":"U2001","message":"The input is not valid JSON: oops"}}"#
         );
     }
 }

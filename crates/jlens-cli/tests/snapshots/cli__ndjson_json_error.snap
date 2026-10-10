@@ -1,0 +1,9 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--ndjson\", \"--json\", \"a + 1\"],\nSome(\"{\\\"a\\\":1}\\n{\\\"a\\\":\\\"x\\\"}\\n\"))"
+---
+exit: 1
+--- stdout
+{"ok":true,"line":1,"result":2}
+{"ok":false,"line":2,"error":{"code":"T2001","message":"The left side of the \"+\" operator must evaluate to a number","position":3,"line":1,"column":1}}
+--- stderr

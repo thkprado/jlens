@@ -1,7 +1,7 @@
 //! `jlens eval`.
 
 use std::fs;
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -19,7 +19,7 @@ use crate::{ExprSource, print_json, read_json, report};
 pub struct EvalArgs {
     #[command(flatten)]
     source: ExprSource,
-    /// Input JSON document (defaults to stdin).
+    /// Input JSON document (defaults to stdin, which must not be a terminal).
     #[arg(short, long, value_name = "FILE")]
     input: Option<PathBuf>,
     /// Evaluate with no input document.
@@ -43,8 +43,8 @@ pub struct EvalArgs {
     raw_output: bool,
     /// Print one JSON envelope per evaluation on stdout, errors included:
     /// {"ok":true,"result":…}, {"ok":true,"undefined":true} or {"ok":false,"error":{…}}.
-    // Combining with --ndjson comes next (roadmap 0.3).
-    #[arg(long, conflicts_with_all = ["raw_output", "explain", "audit", "ndjson"])]
+    /// With --ndjson, each envelope also carries the input "line".
+    #[arg(long, conflicts_with_all = ["raw_output", "explain", "audit"])]
     json: bool,
     /// Stop an evaluation after this many milliseconds (error D1012).
     #[arg(long, value_name = "MS")]
@@ -52,6 +52,13 @@ pub struct EvalArgs {
     /// Stop an evaluation nested deeper than this (error D1011).
     #[arg(long, value_name = "N")]
     max_depth: Option<usize>,
+    /// The time seen by $now() and $millis(): milliseconds since the epoch, or an ISO 8601
+    /// timestamp such as 2026-01-01T00:00:00Z.
+    #[arg(long, value_name = "TIME", value_parser = parse_now)]
+    now: Option<i64>,
+    /// Seed for $random() and $shuffle(): the same seed gives the same results.
+    #[arg(long, value_name = "N")]
+    seed: Option<u64>,
     /// Print an explanation of how the result was reached instead of the result.
     #[arg(long, conflicts_with_all = ["audit", "ndjson", "filter"])]
     explain: bool,
@@ -83,12 +90,16 @@ pub enum Level {
 }
 
 pub fn run(args: EvalArgs) -> Result<ExitCode> {
+    guard_terminal(
+        args.input.is_none() && !args.no_input,
+        std::io::stdin().is_terminal(),
+    )?;
     let (source, name) = args.source.read()?;
     let expr = match Expression::compile(&source) {
         Ok(expr) => expr,
         Err(err) => {
             if args.json {
-                output::line(&output::error_envelope(&err, &source))?;
+                output::line(&output::error_envelope(&err, &source, None))?;
             } else {
                 eprint!(
                     "{}",
@@ -108,6 +119,8 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
     let mut options = Options::new();
     options.timeout = args.timeout.map(Duration::from_millis);
     options.max_depth = args.max_depth;
+    options.now = args.now;
+    options.seed = args.seed;
     let format = Format {
         compact: args.compact || args.ndjson,
         raw: args.raw_output,
@@ -117,7 +130,7 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
         if args.no_input {
             bail!("--ndjson needs input documents");
         }
-        return ndjson(&args, &expr, &bindings, &options, format);
+        return ndjson(&args, &source, &expr, &bindings, &options, format);
     }
 
     let input = if args.no_input {
@@ -141,8 +154,7 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
             Err(e) => {
                 // Still exit code 2, but the envelope reports it too (ADR 0008).
                 if args.json {
-                    let err = jlens_core::Error::new("U2001").with("message", e.to_string());
-                    output::line(&output::error_envelope(&err, &source))?;
+                    output::line(&output::error_envelope(&invalid_input(&e), &source, None))?;
                 }
                 return Err(anyhow::Error::new(e).context(format!("parsing {name}")));
             }
@@ -165,13 +177,13 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
                     && let Some(doc) = &input
                 {
                     output::line(&if args.json {
-                        output::ok_envelope(Some(doc))
+                        output::ok_envelope(Some(doc), None)
                     } else {
                         format.render(doc)
                     })?;
                 }
             } else if args.json {
-                output::line(&output::ok_envelope(value.as_ref()))?;
+                output::line(&output::ok_envelope(value.as_ref(), None))?;
             } else if let Some(value) = value {
                 output::line(&format.render(&value))?;
             }
@@ -179,7 +191,7 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
         }
         Err(err) => {
             if args.json {
-                output::line(&output::error_envelope(&err, &source))?;
+                output::line(&output::error_envelope(&err, &source, None))?;
             } else {
                 eprintln!("{err}");
             }
@@ -191,6 +203,7 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
 /// Evaluates the expression for each line of the input.
 fn ndjson(
     args: &EvalArgs,
+    source: &str,
     expr: &Expression,
     bindings: &Bindings,
     options: &Options,
@@ -214,22 +227,46 @@ fn ndjson(
         let doc: Value = match serde_json::from_str(text) {
             Ok(doc) => doc,
             Err(e) => {
-                eprintln!("line {number}: invalid JSON: {e}");
                 failures += 1;
+                if args.json {
+                    let err = invalid_input(&e);
+                    writeln!(
+                        out,
+                        "{}",
+                        output::error_envelope(&err, source, Some(number))
+                    )?;
+                } else {
+                    eprintln!("line {number}: invalid JSON: {e}");
+                }
                 continue;
             }
         };
         match expr.evaluate_with(Some(&doc), bindings, options) {
             Ok(value) if args.filter => {
                 if truthy(value.as_ref()) {
-                    writeln!(out, "{}", format.render(&doc))?;
+                    if args.json {
+                        writeln!(out, "{}", output::ok_envelope(Some(&doc), Some(number)))?;
+                    } else {
+                        writeln!(out, "{}", format.render(&doc))?;
+                    }
                 }
+            }
+            Ok(value) if args.json => {
+                writeln!(out, "{}", output::ok_envelope(value.as_ref(), Some(number)))?;
             }
             Ok(Some(value)) => writeln!(out, "{}", format.render(&value))?,
             Ok(None) => {}
             Err(err) => {
-                eprintln!("line {number}: {err}");
                 failures += 1;
+                if args.json {
+                    writeln!(
+                        out,
+                        "{}",
+                        output::error_envelope(&err, source, Some(number))
+                    )?;
+                } else {
+                    eprintln!("line {number}: {err}");
+                }
             }
         }
     }
@@ -239,6 +276,32 @@ fn ndjson(
     } else {
         ExitCode::SUCCESS
     })
+}
+
+/// Fails instead of waiting when the input would be read from a terminal (ADR 0008).
+fn guard_terminal(reads_stdin: bool, stdin_is_terminal: bool) -> Result<()> {
+    if reads_stdin && stdin_is_terminal {
+        bail!("standard input is a terminal: pass the input with -i FILE, or use --no-input");
+    }
+    Ok(())
+}
+
+/// The error (`U2001`) of an input document that is not valid JSON.
+fn invalid_input(err: &serde_json::Error) -> jlens_core::Error {
+    jlens_core::Error::new("U2001").with("message", err.to_string())
+}
+
+/// Parses `--now`: milliseconds since the epoch, or an ISO 8601 timestamp.
+fn parse_now(text: &str) -> std::result::Result<i64, String> {
+    if let Ok(millis) = text.parse() {
+        return Ok(millis);
+    }
+    let expected = || "expected milliseconds or an ISO 8601 timestamp".to_owned();
+    let expr = Expression::compile("$toMillis($t)").expect("a valid expression");
+    match expr.evaluate(None, &Bindings::new().var("t", text)) {
+        Ok(Some(Value::Number(n))) => n.as_f64().map(|f| f as i64).ok_or_else(expected),
+        _ => Err(expected()),
+    }
 }
 
 enum Traced {
@@ -362,5 +425,27 @@ impl Tracer for Tee<'_> {
     fn end(&mut self, outcome: audit::Outcome<'_>) {
         self.0.end(outcome);
         self.1.end(outcome);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn never_waits_on_a_terminal() {
+        assert!(guard_terminal(true, true).is_err());
+        assert!(guard_terminal(true, false).is_ok());
+        assert!(guard_terminal(false, true).is_ok());
+    }
+
+    #[test]
+    fn now_takes_millis_or_a_timestamp() {
+        assert_eq!(parse_now("1700000000000"), Ok(1_700_000_000_000));
+        assert_eq!(parse_now("-1"), Ok(-1));
+        assert_eq!(parse_now("1970-01-01T00:00:01Z"), Ok(1000));
+        assert_eq!(parse_now("2026-01-01T00:00:00.000Z"), Ok(1_767_225_600_000));
+        assert!(parse_now("yesterday").is_err());
+        assert!(parse_now("").is_err());
     }
 }
