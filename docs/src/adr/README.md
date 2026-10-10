@@ -11,3 +11,4 @@ earlier one instead.
 | [0003](0003-value-model.md) | An explicit value model with `Undefined` and sequence flags | Accepted |
 | [0004](0004-audit-tracer.md) | Audit evaluations through a tracer interface in the evaluator | Accepted |
 | [0005](0005-comment-annotations.md) | Carry audit labels in JSONata doc-comments | Accepted |
+| [0006](0006-host-functions.md) | Host functions with a JSON boundary | Accepted |

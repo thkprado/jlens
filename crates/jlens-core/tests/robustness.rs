@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use jlens_core::{Bindings, Document, Expression, Options};
+use jlens_core::{Bindings, Document, Error, Expression, HostFunction, Options};
 use proptest::prelude::*;
 use serde_json::json;
 
@@ -15,7 +15,7 @@ const TOKENS: &[&str] = &[
     "=", "!=", "<", "<=", ">", "and", "or", "in", "?", "??", "?:", ":=", "~>", "&", "..", "**",
     "^(", ">price", "@$v", "#$j", "|", "function($v){", "λ($w){", "$sum(", "$map(", "$string(",
     "$substring(", "$match(", "$replace(", "$split(", "$formatNumber(", "$fromMillis(", "$keys(",
-    "$merge(", "$sort(", "$reduce(", "$each(", "$eval(", "/a+/", "/[/", "`a b`", "/* c */",
+    "$merge(", "$sort(", "$reduce(", "$each(", "$eval(", "$echo(", "$checked(", "$fail(", "$echo(?, ", "/a+/", "/[/", "`a b`", "/* c */",
     "/** @label \"x\" */", "<s:s>", "%", "\\", "é", "𝄞", " ",
 ];
 
@@ -92,6 +92,9 @@ fn valid() -> impl Strategy<Value = String> {
                 "$zip",
                 "$single",
                 "$shuffle",
+                "$echo",
+                "$checked",
+                "$fail",
             ][..],
         );
         prop_oneof![
@@ -128,6 +131,27 @@ fn expression() -> impl Strategy<Value = String> {
     ]
 }
 
+/// Host functions: one that returns its arguments, one with a signature, one that fails.
+fn bindings() -> Bindings {
+    Bindings::new()
+        .var("x", json!([1, "two", null]))
+        .function(
+            "echo",
+            HostFunction::new(2, |args, call| {
+                Ok(Some(json!({"args": args, "input": call.input()})))
+            }),
+        )
+        .function(
+            "checked",
+            HostFunction::with_signature("<n-a<s>?f?:a>", |args, _| Ok(Some(json!(args))))
+                .expect("valid signature"),
+        )
+        .function(
+            "fail",
+            HostFunction::new(0, |_, _| Err(Error::new("X0001").with("message", "fails"))),
+        )
+}
+
 fn input() -> serde_json::Value {
     json!({
         "a": {"b": [1, 2, {"b": "x"}]},
@@ -156,7 +180,7 @@ proptest! {
                 timeout: Some(Duration::from_millis(50)),
                 max_depth: Some(300),
             };
-            let bindings = Bindings::new().var("x", json!([1, "two", null]));
+            let bindings = bindings();
             let input = input();
             let _ = expr.evaluate_with(Some(&input), &bindings, &options);
             let _ = expr.evaluate_with(None, &bindings, &options);

@@ -8,6 +8,10 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Host functions (`jlens-core`): the application provides its own functions through
+  `Bindings::function`, with an optional signature that is checked like a built-in function's.
+  They work with higher-order functions, partial application and `~>`, and take precedence over
+  built-in functions of the same name. See ADR 0006.
 - Web editor: an example selector, with the samples of try.jsonata.org (Invoice, Address, Schema,
   Library and an adapted Bindings) next to the store order rule. The chosen example is kept in
   the address (`#invoice`).

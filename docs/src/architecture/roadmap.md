@@ -21,7 +21,8 @@ phase 1 to start.
 
 Ideas that came up during development, not commitments:
 
-- Custom functions registered from Rust (and from JavaScript in the Wasm package).
+- Custom functions registered from JavaScript in the Wasm package. Rust applications already
+  have [host functions](../guides/crate.md#host-functions) ([ADR 0006](../adr/0006-host-functions.md)).
 - Lazy conversion of input documents, so that evaluations which read a small part of a large
   document do not pay for converting all of it.
 - Asynchronous functions (jsonata-js allows functions that return promises).

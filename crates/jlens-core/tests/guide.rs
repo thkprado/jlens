@@ -87,6 +87,45 @@ fn errors() {
 }
 
 #[test]
+fn host_functions() -> Result<()> {
+    use jlens_core::{Bindings, Expression};
+    use serde_json::json;
+    // ANCHOR: host_functions
+    use jlens_core::{Error, HostFunction};
+
+    // `$shipping(weight, region?)`: the region defaults to the context value's `region`.
+    let shipping = HostFunction::with_signature("<ns?:n>", |args, call| {
+        let weight = args[0].as_ref().and_then(|w| w.as_f64()).unwrap_or(0.0);
+        let region = match &args[1] {
+            Some(region) => region.clone(),
+            None => call
+                .input()
+                .map_or(json!(null), |order| order["region"].clone()),
+        };
+        let rate = match region.as_str() {
+            Some("north") => 1.5,
+            Some("south") => 2.0,
+            _ => return Err(Error::new("SHIP01").with("message", format!("No rate for {region}"))),
+        };
+        Ok(Some(json!(weight * rate)))
+    })?;
+    let bindings = Bindings::new().function("shipping", shipping);
+
+    let expr = Expression::compile("$shipping($sum(items.weight))")?;
+    let order = json!({"region": "south", "items": [{"weight": 2}, {"weight": 1.5}]});
+    assert_eq!(expr.evaluate(Some(&order), &bindings)?, Some(json!(7)));
+
+    let err = Expression::compile("$shipping(3, 'west')")?
+        .evaluate(None, &bindings)
+        .unwrap_err();
+    assert_eq!(err.code(), "SHIP01");
+    assert_eq!(err.message(), r#"No rate for "west""#);
+    assert_eq!(err.position(), Some(10)); // the call, as for built-in functions
+    // ANCHOR_END: host_functions
+    Ok(())
+}
+
+#[test]
 fn documents() -> Result<()> {
     use jlens_core::{Bindings, Expression, Options};
     use serde_json::json;

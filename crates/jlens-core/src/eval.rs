@@ -181,6 +181,13 @@ pub(crate) fn evaluate(
     for (name, value) in bindings.iter() {
         ev.bind(&env, name, Value::from_json(value));
     }
+    for (name, function) in bindings.functions() {
+        ev.bind(
+            &env,
+            name,
+            Value::function(Function::Host(function.clone())),
+        );
+    }
     let mut input = input;
     ev.bind(&env, "$", input.clone());
     if let Value::Array(a) = &input
@@ -1098,8 +1105,15 @@ impl Evaluator<'_> {
                 };
                 (native.imp)(self, args, &Call { input, env })
             }
-            Function::PartialNative {
-                native,
+            Function::Host(host) => {
+                let args = match host.signature() {
+                    Some(sig) => sig.validate(args, input)?,
+                    None => args,
+                };
+                host.call(&args, input)
+            }
+            Function::Partial {
+                target,
                 args: bound,
             } => {
                 let mut supplied = args.into_iter();
@@ -1110,14 +1124,20 @@ impl Evaluator<'_> {
                         None => supplied.next().unwrap_or_default(),
                     })
                     .collect();
-                (native.imp)(
-                    self,
-                    full,
-                    &Call {
-                        input: &Value::Undefined,
-                        env,
-                    },
-                )
+                // Like jsonata-js, which wraps the function in a lambda: no signature check and
+                // no context value.
+                match &**target {
+                    Function::Native(native) => (native.imp)(
+                        self,
+                        full,
+                        &Call {
+                            input: &Value::Undefined,
+                            env,
+                        },
+                    ),
+                    Function::Host(host) => host.call(&full, &Value::Undefined),
+                    _ => Err(Error::new("T1006")),
+                }
             }
             Function::Transform {
                 def,
@@ -1216,23 +1236,29 @@ impl Evaluator<'_> {
                     env: frame,
                 }))
             }
-            Function::Native(native) => Value::function(Function::PartialNative {
-                native,
-                args: (0..native.params.len())
-                    .map(|i| match evaluated.get(i) {
-                        Some(None) => None,
-                        Some(Some(v)) => Some(v.clone()),
-                        None => Some(Value::Undefined),
-                    })
-                    .collect(),
-            }),
-            Function::PartialNative {
-                native,
+            Function::Native(_) | Function::Host(_) => {
+                let params = match &**f {
+                    Function::Native(native) => native.params.len(),
+                    _ => f.arity(),
+                };
+                Value::function(Function::Partial {
+                    target: f.clone(),
+                    args: (0..params)
+                        .map(|i| match evaluated.get(i) {
+                            Some(None) => None,
+                            Some(Some(v)) => Some(v.clone()),
+                            None => Some(Value::Undefined),
+                        })
+                        .collect(),
+                })
+            }
+            Function::Partial {
+                target,
                 args: bound,
             } => {
                 let mut supplied = evaluated.into_iter();
-                Value::function(Function::PartialNative {
-                    native,
+                Value::function(Function::Partial {
+                    target: target.clone(),
                     args: bound
                         .iter()
                         .map(|b| match b {

@@ -55,3 +55,4 @@
   - [0003 Value and sequence model](adr/0003-value-model.md)
   - [0004 Auditing through a tracer](adr/0004-audit-tracer.md)
   - [0005 Audit annotations in comments](adr/0005-comment-annotations.md)
+  - [0006 Host functions](adr/0006-host-functions.md)

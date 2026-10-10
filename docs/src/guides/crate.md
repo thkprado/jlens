@@ -66,6 +66,36 @@ message:
 is a byte range, for slicing the source in Rust. Errors serialize to JSON with their code,
 message and details.
 
+## Host functions
+
+The application can provide its own functions, called from expressions like built-in ones. Bind
+a [`HostFunction`](https://docs.rs/jlens-core/latest/jlens_core/struct.HostFunction.html) with
+`Bindings::function`:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:host_functions}}
+```
+
+- **Arguments and results are JSON.** `None` stands for *undefined*. A function passed as an
+  argument (such as a lambda) arrives as `None`.
+- **Signatures** use the [notation of the built-in functions](../language/programming.md#signatures).
+  `HostFunction::with_signature` checks the arguments before each call, with the same errors
+  (`T0410`, `T0412`). A parameter with `-` takes the context value when the argument is missing.
+  `HostFunction::new(arity, ...)` skips the check and passes the arguments as given.
+- **The arity** tells higher-order functions how many arguments to pass: `$map` passes the index
+  only to functions with two parameters or more. Partial application (`$shipping(?, 'north')`)
+  uses it too.
+- **The context value** is available through `HostCall::input`, which converts it to JSON only
+  when called.
+- **Errors** returned by the function stop the evaluation. Give them a code of your own and a
+  `message` detail. Like other errors, they get the position and token of the call.
+- **Bindings take precedence** over built-in functions of the same name, as in jsonata-js. A
+  name holds a value or a function: binding one replaces the other.
+
+Host functions are `Send + Sync`, so bindings that hold them can be shared between threads. A
+host function runs to completion: a [timeout](#guardrails) is checked again only once it
+returns.
+
 ## Many expressions, one document
 
 Each `evaluate` call converts its input document into jlens's internal representation. For a

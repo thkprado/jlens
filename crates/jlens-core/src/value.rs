@@ -19,6 +19,7 @@ use crate::ast::{LambdaDef, Span, TransformDef};
 use crate::error::{Error, Result};
 use crate::eval::Env;
 use crate::functions::Native;
+use crate::host::HostFunction;
 use crate::regex::Regex;
 
 /// The fields of an object, in insertion order.
@@ -78,9 +79,12 @@ pub(crate) enum Function {
     Lambda(Lambda),
     /// A built-in function.
     Native(&'static Native),
-    /// A built-in function with some arguments supplied (`$f(?, 2)`); `None` marks a `?`.
-    PartialNative {
-        native: &'static Native,
+    /// A function of the host application.
+    Host(HostFunction),
+    /// A built-in or host function with some arguments supplied (`$f(?, 2)`); `None` marks a
+    /// `?`.
+    Partial {
+        target: Rc<Function>,
         args: Vec<Option<Value>>,
     },
     /// The function produced by a transform expression.
@@ -116,7 +120,8 @@ impl Function {
         match self {
             Function::Lambda(l) => l.params().len(),
             Function::Native(n) => n.arity,
-            Function::PartialNative { args, .. } => args.iter().filter(|a| a.is_none()).count(),
+            Function::Host(h) => h.arity(),
+            Function::Partial { args, .. } => args.iter().filter(|a| a.is_none()).count(),
             Function::Transform { .. } => 1,
             Function::Regex(_) => 2,
             Function::RegexNext { .. } => 0,

@@ -25,7 +25,7 @@ See [ADR 0003](../adr/0003-value-model.md) for the reasoning. The short version:
 | `Null`, `Bool`, `Number(f64)`, `String(Rc<str>)` | Numbers are IEEE doubles, as in JavaScript |
 | `Array(Rc<Array>)` | Items plus flags: `SEQUENCE`, `KEEP_SINGLETON`, `OUTER_WRAPPER`, `CONS`, `TUPLE_STREAM` |
 | `Object(Rc<RefCell<Map>>)` | Insertion-ordered. Shared and mutable because transforms update matches in place |
-| `Function(Rc<Function>)` | A lambda closure, a built-in, a partial application, a transformer, or a regex |
+| `Function(Rc<Function>)` | A lambda closure, a built-in, a host function, a partial application, a transformer, or a regex |
 
 ### Sequences
 
@@ -66,7 +66,10 @@ When post-processing marked a call as being in tail position, the body evaluates
 functions run in constant stack depth. `$loop(100000, 0)` in the test suite exercises this.
 
 Built-in functions are `Native` entries in `functions/mod.rs`, each with its signature and declared
-parameters. Partial application (`$f(?, 2)`) works for both lambdas and built-ins.
+parameters. Host functions (`HostFunction`, from the bindings) have an optional signature and an
+arity; their arguments and results are converted to and from JSON
+([ADR 0006](../adr/0006-host-functions.md)). Partial application (`$f(?, 2)`) works for lambdas,
+built-ins and host functions.
 
 ## Signature validation
 

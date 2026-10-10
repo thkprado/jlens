@@ -57,3 +57,13 @@ extensions live in comments or in the host API, not in the language syntax.
 The suite runner's own guard raises `U1001` for its `timelimit`/`depth` cases; jlens enforces
 the same limits through `Options` and reports `D1011`/`D1012`, which the conformance harness
 accepts in place of `U1001`.
+
+### Host functions
+
+Functions provided by the application through the bindings (`Bindings::function` in Rust):
+
+| Topic | jsonata-js | jlens |
+|---|---|---|
+| Arguments and result | The JavaScript values themselves, which the function may modify | JSON copies: the function cannot change the values of the evaluation |
+| A function as an argument (`$f($g)`) | The function, which the host can call | `None` (undefined) |
+| The context value | `this`: the context value for a function in the bindings, `{environment, input}` for one registered with `registerFunction`. An input array arrives in its wrapper | `HostCall::input`, the context value itself, an input array included |

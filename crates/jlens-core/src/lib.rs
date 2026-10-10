@@ -43,6 +43,7 @@ mod document;
 pub mod error;
 mod eval;
 pub mod functions;
+mod host;
 mod json;
 mod lexer;
 mod parser;
@@ -57,6 +58,7 @@ pub use ast::{Ast, Node, NodeKind, Span};
 pub use document::Document;
 pub use error::{Diagnostic, Error, Result, Severity};
 pub use functions::{Category, FunctionInfo, catalog as function_catalog};
+pub use host::{HostCall, HostFunction};
 pub use json::format_json;
 
 use std::sync::Arc;
@@ -249,10 +251,14 @@ fn limits(options: &Options) -> eval::Limits {
     }
 }
 
-/// Variable bindings made available to an expression as `$name`.
+/// Variables and host functions made available to an expression as `$name`.
+///
+/// A name holds either a value or a [`HostFunction`]: binding one replaces the other. Bindings
+/// take precedence over the built-in functions of the same name, as in jsonata-js.
 #[derive(Debug, Clone, Default)]
 pub struct Bindings {
     vars: IndexMap<String, JsonValue>,
+    functions: IndexMap<String, HostFunction>,
 }
 
 impl Bindings {
@@ -263,7 +269,18 @@ impl Bindings {
 
     /// Adds (or replaces) a variable binding. The name is given without the leading `$`.
     pub fn var(mut self, name: impl Into<String>, value: impl Into<JsonValue>) -> Self {
-        self.vars.insert(name.into(), value.into());
+        let name = name.into();
+        self.functions.shift_remove(&name);
+        self.vars.insert(name, value.into());
+        self
+    }
+
+    /// Adds (or replaces) a host function, called as `$name(...)`. The name is given without
+    /// the leading `$`.
+    pub fn function(mut self, name: impl Into<String>, function: HostFunction) -> Self {
+        let name = name.into();
+        self.vars.shift_remove(&name);
+        self.functions.insert(name, function);
         self
     }
 
@@ -272,9 +289,19 @@ impl Bindings {
         self.vars.get(name)
     }
 
-    /// Iterates over all bindings in insertion order.
+    /// Looks up a host function by name (without the leading `$`).
+    pub fn get_function(&self, name: &str) -> Option<&HostFunction> {
+        self.functions.get(name)
+    }
+
+    /// Iterates over the variable bindings in insertion order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &JsonValue)> {
         self.vars.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// Iterates over the host functions in insertion order.
+    pub fn functions(&self) -> impl Iterator<Item = (&str, &HostFunction)> {
+        self.functions.iter().map(|(k, f)| (k.as_str(), f))
     }
 }
 
@@ -282,6 +309,7 @@ impl FromIterator<(String, JsonValue)> for Bindings {
     fn from_iter<T: IntoIterator<Item = (String, JsonValue)>>(iter: T) -> Self {
         Bindings {
             vars: iter.into_iter().collect(),
+            functions: IndexMap::new(),
         }
     }
 }
