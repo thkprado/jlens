@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Web editor: an example selector, with the samples of try.jsonata.org (Invoice, Address, Schema,
+  Library and an adapted Bindings) next to the store order rule. The chosen example is kept in
+  the address (`#invoice`).
+
 ## [0.1.1]
 
 No change to the language or the APIs.

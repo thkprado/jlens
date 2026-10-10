@@ -19,45 +19,17 @@ import init, {
 } from "../../crates/jlens-wasm/pkg/jlens.js";
 import { renderAudit, renderExplanation, spansOf } from "./audit-view.js";
 import { jlensExtensions } from "./jlens-codemirror.js";
-
-const SAMPLE_INPUT = {
-  number: "SO-12345",
-  customer: { login: "alice.walker99", name: "Acme Stores" },
-  items: [
-    { code: "1", color: "blue", type: "apparel", unitPrice: 10000.0, quantity: 2, tax: 1500.0 },
-    { code: "2", color: "black", type: "electronic", unitPrice: 25000.0, quantity: 1, tax: 4000.0 },
-    { code: "3", color: "white", type: "electronic", unitPrice: 12000.0, quantity: 1, tax: 3000.0 },
-  ],
-};
-
-const SAMPLE_BINDINGS = { approvedCustomers: ["alice.walker99", "bob.harrison42"] };
-
-const SAMPLE_EXPRESSION = `(
-  $total       := $sum(items.(unitPrice * quantity));
-  $electronics := $sum(items[type = 'electronic'].(unitPrice * quantity));
-
-  $approved :=
-    /** @label "Authorized customer" @message "The customer must be an approved partner." */
-    customer.login in $approvedCustomers
-    and
-    /** @label "Minimum order grand total" @message "The total must exceed 50,000.00." */
-    $total > 50000
-    and
-    /** @label "Electronics share" */
-    $electronics > $total * 0.30 + 1000;
-
-  $approved
-    ? { "action": "FREE_SHIPPING", "code": "OK_200" }
-    : { "action": "REGULAR_FEE", "code": "SHIP_FEE_402" }
-)`;
+import { samples } from "./samples.js";
 
 const $ = (id) => document.getElementById(id);
 
 await init();
 $("status").textContent = `jlens ${version()} (WebAssembly)`;
 
-let input = SAMPLE_INPUT;
-let bindings = SAMPLE_BINDINGS;
+// The example named in the address (`#invoice`), or the first one.
+const initial = samples.find((s) => `#${s.id}` === location.hash) ?? samples[0];
+let input = initial.input;
+let bindings = initial.bindings;
 let service = new LanguageService();
 let schema = null;
 
@@ -151,7 +123,7 @@ const colorScheme = new Compartment();
 const schemeFlag = (dark) => EditorView.theme({}, { dark });
 
 const editor = new EditorView({
-  doc: SAMPLE_EXPRESSION,
+  doc: initial.expression,
   parent: $("expression"),
   extensions: [
     lineNumbers(),
@@ -198,8 +170,27 @@ function readInputs() {
   schedule();
 }
 
-$("input").value = JSON.stringify(SAMPLE_INPUT, null, 2);
-$("bindings").value = JSON.stringify(SAMPLE_BINDINGS, null, 2);
+/** Replaces the expression, the input document and the bindings with an example's. */
+function loadSample(sample) {
+  input = sample.input;
+  bindings = sample.bindings;
+  $("input").value = JSON.stringify(sample.input, null, 2);
+  $("bindings").value = JSON.stringify(sample.bindings, null, 2);
+  $("input-error").textContent = "";
+  updateService();
+  editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: sample.expression } });
+}
+
+for (const sample of samples) $("sample").append(new Option(sample.label, sample.id));
+$("sample").value = initial.id;
+$("sample").addEventListener("change", () => {
+  const sample = samples.find((s) => s.id === $("sample").value);
+  window.history.replaceState(null, "", `#${sample.id}`); // `history` is CodeMirror's here
+  loadSample(sample);
+});
+
+$("input").value = JSON.stringify(initial.input, null, 2);
+$("bindings").value = JSON.stringify(initial.bindings, null, 2);
 $("input").addEventListener("input", () => {
   clearTimeout(timer);
   timer = setTimeout(readInputs, 300);

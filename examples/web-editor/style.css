@@ -55,9 +55,9 @@ body {
 
 header {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 8px 24px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
@@ -66,7 +66,9 @@ h1 { margin: 0; font-size: 18px; }
 h1 span { color: var(--muted); font-weight: 400; }
 h2, h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 h3 { margin-top: 12px; }
-#status { margin: 0; color: var(--muted); font-size: 12px; }
+#status { margin: 0 0 0 auto; color: var(--muted); font-size: 12px; }
+.sample { color: var(--muted); font-size: 13px; display: flex; gap: 8px; align-items: baseline; }
+.sample select { padding: 2px 4px; max-width: 70vw; }
 
 main {
   display: grid;

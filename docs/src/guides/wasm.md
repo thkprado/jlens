@@ -307,7 +307,8 @@ complete page with no build step:
   by a schema inferred from the input document;
 - live evaluation;
 - the explanation and an audit tree viewer; clicking a node selects its source;
-- the inferred schema.
+- the inferred schema;
+- ready-made examples, including the samples of [try.jsonata.org](https://try.jsonata.org).
 
 ```sh
 cargo xtask wasm
