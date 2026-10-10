@@ -176,10 +176,9 @@ proptest! {
     #[test]
     fn evaluation_never_panics(source in expression()) {
         if let Ok(expr) = Expression::compile(&source) {
-            let options = Options {
-                timeout: Some(Duration::from_millis(50)),
-                max_depth: Some(300),
-            };
+            let options = Options::new()
+                .timeout(Duration::from_millis(50))
+                .max_depth(300);
             let bindings = bindings();
             let input = input();
             let _ = expr.evaluate_with(Some(&input), &bindings, &options);

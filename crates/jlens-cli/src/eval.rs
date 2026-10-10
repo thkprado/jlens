@@ -96,10 +96,9 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
         },
         None => Bindings::new(),
     };
-    let options = Options {
-        timeout: args.timeout.map(Duration::from_millis),
-        max_depth: args.max_depth,
-    };
+    let mut options = Options::new();
+    options.timeout = args.timeout.map(Duration::from_millis);
+    options.max_depth = args.max_depth;
     let format = Format {
         compact: args.compact || args.ndjson,
         raw: args.raw_output,

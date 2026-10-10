@@ -315,11 +315,44 @@ impl FromIterator<(String, JsonValue)> for Bindings {
 }
 
 /// Evaluation guardrails.
+///
+/// The struct is `#[non_exhaustive]`, so new options can be added without breaking callers:
+/// start from [`Options::new`] (or `Options::default()`) and chain the builder methods.
+///
+/// ```
+/// use jlens_core::Options;
+/// use std::time::Duration;
+///
+/// let options = Options::new()
+///     .timeout(Duration::from_millis(100))
+///     .max_depth(500);
+/// assert_eq!(options.max_depth, Some(500));
+/// ```
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct Options {
     /// Maximum wall-clock time for one evaluation. Exceeding it raises `D1012`.
     pub timeout: Option<Duration>,
     /// Maximum evaluation depth (default 50,000; 1,000 on WebAssembly). Exceeding it raises
     /// `D1011`.
     pub max_depth: Option<usize>,
+}
+
+impl Options {
+    /// Creates options with no timeout and the default depth limit.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the maximum wall-clock time for one evaluation (`D1012` when exceeded).
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Sets the maximum evaluation depth (`D1011` when exceeded).
+    pub fn max_depth(mut self, max_depth: usize) -> Self {
+        self.max_depth = Some(max_depth);
+        self
+    }
 }

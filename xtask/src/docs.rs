@@ -197,10 +197,7 @@ fn run_example(example: &Example) -> Result<(), String> {
             _ => return Err("bindings must be a JSON object".into()),
         },
     };
-    let options = Options {
-        timeout: Some(Duration::from_secs(5)),
-        max_depth: None,
-    };
+    let options = Options::new().timeout(Duration::from_secs(5));
     let result = Expression::compile(&example.expression)
         .and_then(|expr| expr.evaluate_with(input.as_ref(), &bindings, &options));
     let expected = example.expected.as_str();

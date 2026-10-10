@@ -48,7 +48,7 @@ tests them and explains their results before they ship.
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
 | 1 | ADR 0008, the CLI's machine contract: a JSON envelope for results and errors, exit codes, the roles of stdout and stderr, never reading a terminal | ADR accepted; the CLI guide has a "For scripts and agents" section | **done** |
-| 2 | `Options` becomes `#[non_exhaustive]`, with builder methods. A fixed clock (`$now`, `$millis`) and a random seed (`$random`, `$shuffle`) | The same expression, input and options give byte-identical results; crate guide snippets updated | planned |
+| 2 | `Options` becomes `#[non_exhaustive]`, with builder methods. A fixed clock (`$now`, `$millis`) and a random seed (`$random`, `$shuffle`) | The same expression, input and options give byte-identical results; crate guide snippets updated | in progress (builder done) |
 | 3 | `jlens eval --json`: one compact envelope per evaluation, `{"ok":true,"result":…}`, `{"ok":true,"undefined":true}` or `{"ok":false,"error":{code, message, position, line, column}}`. With `--ndjson`, one envelope per line, carrying the line number | Snapshot tests for a result, undefined, a syntax error, an evaluation error and invalid input | planned |
 | 4 | `jlens eval --now` and `--seed` | CLI tests with `$now()` and `$random()` | planned |
 | 5 | `eval` fails with code 2 instead of waiting when standard input is a terminal and neither `-i` nor `--no-input` is given | CLI test | planned |

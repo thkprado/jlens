@@ -46,10 +46,9 @@ fn options() -> Result<()> {
     use jlens_core::Options;
     use std::time::Duration;
 
-    let options = Options {
-        timeout: Some(Duration::from_millis(100)), // D1012 when exceeded
-        max_depth: Some(500),                      // D1011 when exceeded
-    };
+    let options = Options::new()
+        .timeout(Duration::from_millis(100)) // D1012 when exceeded
+        .max_depth(500); // D1011 when exceeded
     let runaway = Expression::compile("($f := function($n) { $f($n + 1) }; $f(0))")?;
     let err = runaway
         .evaluate_with(None, &Bindings::new(), &options)

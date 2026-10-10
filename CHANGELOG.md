@@ -12,6 +12,12 @@ All notable changes are recorded here. The format follows
   signature help to editors. A `jlens.json` per workspace folder maps file patterns to a
   schema, variables and host functions. See the editors guide and ADR 0007.
 
+### Changed
+
+- `Options` (`jlens-core`) is `#[non_exhaustive]`, so new options can be added without a
+  breaking change. Build it with `Options::new().timeout(..).max_depth(..)` instead of a struct
+  literal; its fields stay public.
+
 ## [0.2.0]
 
 ### Added

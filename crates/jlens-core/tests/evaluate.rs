@@ -113,20 +113,14 @@ fn errors_carry_code_position_and_token() {
 #[test]
 fn guardrails_stop_runaway_evaluations() {
     let deep = Expression::compile("($f := function($n){ 1 + $f($n + 1) }; $f(0))").unwrap();
-    let options = Options {
-        max_depth: Some(500),
-        ..Options::default()
-    };
+    let options = Options::new().max_depth(500);
     let err = deep
         .evaluate_with(None, &Bindings::new(), &options)
         .unwrap_err();
     assert_eq!(err.code(), "D1011");
 
     let forever = Expression::compile("($f := function($n){ $f($n + 1) }; $f(0))").unwrap();
-    let options = Options {
-        timeout: Some(Duration::from_millis(50)),
-        ..Options::default()
-    };
+    let options = Options::new().timeout(Duration::from_millis(50));
     let err = forever
         .evaluate_with(None, &Bindings::new(), &options)
         .unwrap_err();
