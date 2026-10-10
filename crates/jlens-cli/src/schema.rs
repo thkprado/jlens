@@ -10,7 +10,7 @@ use clap::{Args, Subcommand};
 use jlens_schema::{LanguageService, Override, Schema};
 use serde_json::Value;
 
-use crate::{ExprSource, print_json, read_json};
+use crate::{ExprSource, output, print_json, read_json};
 
 #[derive(Subcommand)]
 pub enum SchemaCommand {
@@ -110,7 +110,7 @@ fn infer(args: InferArgs) -> Result<ExitCode> {
                 path.display()
             );
         }
-        None => println!("{text}"),
+        None => output::line(&text)?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -133,8 +133,8 @@ fn complete(args: CompleteArgs) -> Result<ExitCode> {
             let kind = serde_json::to_value(item.kind)?;
             let kind = kind.as_str().unwrap_or_default();
             match &item.detail {
-                Some(detail) => println!("{:<24} {kind:<9} {detail}", item.label),
-                None => println!("{:<24} {kind}", item.label),
+                Some(detail) => output::line(&format!("{:<24} {kind:<9} {detail}", item.label))?,
+                None => output::line(&format!("{:<24} {kind}", item.label))?,
             }
         }
     }

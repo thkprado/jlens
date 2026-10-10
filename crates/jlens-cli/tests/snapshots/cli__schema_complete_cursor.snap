@@ -1,0 +1,9 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"schema\", \"complete\", \"--schema\",\n\"fixtures/cli/order.schema.json\", \"--cursor\", \"9\", \"customer.n + 1\"],\nNone)"
+---
+exit: 0
+--- stdout
+login                    field     string
+name                     field     string
+--- stderr

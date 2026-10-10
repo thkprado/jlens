@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: stable
+---
+exit: 1
+--- stdout
+--- stderr
+D1012: Evaluation timeout after 20 milliseconds. Check for infinite loop

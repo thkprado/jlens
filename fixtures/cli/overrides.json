@@ -1,0 +1,4 @@
+{
+  "items[].type": { "description": "Product category", "enum": ["apparel", "electronic", "toy"] },
+  "number": { "hidden": true }
+}

@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "number": {
+      "type": "string",
+      "examples": [
+        "SO-12345"
+      ],
+      "x-jlens-hidden": true
+    },
+    "customer": {
+      "type": "object",
+      "properties": {
+        "login": {
+          "type": "string",
+          "examples": [
+            "alice.walker99"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "examples": [
+            "Acme Stores"
+          ]
+        }
+      },
+      "required": [
+        "login",
+        "name"
+      ]
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "examples": [
+              "1",
+              "2",
+              "3"
+            ]
+          },
+          "color": {
+            "type": "string",
+            "examples": [
+              "blue",
+              "black",
+              "white"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "description": "Product category",
+            "enum": [
+              "apparel",
+              "electronic",
+              "toy"
+            ],
+            "examples": [
+              "apparel",
+              "electronic"
+            ]
+          },
+          "unitPrice": {
+            "type": "number",
+            "minimum": 10000,
+            "maximum": 25000,
+            "examples": [
+              10000.0,
+              25000.0,
+              12000.0
+            ]
+          },
+          "quantity": {
+            "type": "integer",
+            "enum": [
+              2,
+              1
+            ],
+            "minimum": 1,
+            "maximum": 2,
+            "examples": [
+              2,
+              1
+            ]
+          },
+          "tax": {
+            "type": "number",
+            "minimum": 1500,
+            "maximum": 4000,
+            "examples": [
+              1500.0,
+              4000.0,
+              3000.0
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "color",
+          "type",
+          "unitPrice",
+          "quantity",
+          "tax"
+        ]
+      }
+    }
+  },
+  "required": [
+    "number",
+    "customer",
+    "items"
+  ],
+  "x-jlens-samples": 1
+}

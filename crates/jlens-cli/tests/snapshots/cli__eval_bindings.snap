@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--no-input\", \"-b\", \"fixtures/cli/bindings.json\",\n\"$limit * 2\"], None)"
+---
+exit: 0
+--- stdout
+42
+--- stderr

@@ -1,0 +1,9 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--no-input\", \"--explain\",\n\"/** @label \\\"Positive\\\" */ 3 > 0 and /** @label \\\"Small\\\" */ 3 < 2\"], None)"
+---
+exit: 0
+--- stdout
+result: false
+✘ Small — 3 < 2 → false (3 < 2)
+--- stderr

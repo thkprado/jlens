@@ -7,10 +7,10 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 - **`jlens`**: the command-line tool;
 - **`jlens-wasm`**: an ES module for the browser.
 
-> **Status: the JSONata engine is complete (phase 5 of 8 done).** jlens passes 1,688 of the
+> **Status: the JSONata engine is complete (phase 6 of 8 done).** jlens passes 1,688 of the
 > 1,690 cases of the official JSONata 2.2.2 test suite; the other two are documented
 > overrides. Evaluations can be audited and explained, and schemas inferred from samples drive
-> completion and diagnostics. The full CLI (phase 6) is next. See the
+> completion and diagnostics. The browser WebAssembly package (phase 7) is next. See the
 > [roadmap](docs/src/architecture/roadmap.md) and the current
 > [conformance report](tests/conformance/REPORT.md).
 
@@ -28,6 +28,17 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 
 - Structural metadata inferred from sample documents (JSON Schema 2020-12), which drives
   completion, diagnostics and hover (`jlens schema infer`, `jlens check --schema`).
+
+## Quick start
+
+```sh
+cargo install --path crates/jlens-cli
+
+jlens eval -f fixtures/shipping-rule.jsonata -i fixtures/online-store-order.json --explain
+jlens eval --ndjson --filter -i fixtures/orders.ndjson '$sum(items.(unitPrice * quantity)) > 50000'
+jlens schema infer fixtures/online-store-order.json -o schema.json
+jlens check --schema schema.json -f fixtures/shipping-rule.jsonata
+```
 
 ## Repository layout
 

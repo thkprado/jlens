@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"schema\", \"complete\", \"--schema\",\n\"fixtures/cli/order.schema.json\", \"items[type = 'x'].u\"], None)"
+---
+exit: 0
+--- stdout
+unitPrice                field     number
+--- stderr

@@ -1,0 +1,12 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"items[type = 'x'\", \"-i\", ORDER], None)"
+---
+exit: 1
+--- stdout
+--- stderr
+error[S0203]: Expected "]" before end of expression
+ --> <expr>:1:17
+  |
+1 | items[type = 'x'
+  |                 ^

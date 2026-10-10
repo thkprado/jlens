@@ -358,7 +358,7 @@ pub(crate) fn js_string_cmp(a: &str, b: &str) -> Ordering {
 }
 
 /// Writes `s` as a JSON string literal with `JSON.stringify` escaping.
-fn write_json_string(out: &mut String, s: &str) {
+pub(crate) fn write_json_string(out: &mut String, s: &str) {
     out.push('"');
     for c in s.chars() {
         match c {

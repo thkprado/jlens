@@ -1,0 +1,5 @@
+[
+  {"id": 1, "status": "open", "tags": ["a"]},
+  {"id": 2, "status": "closed"},
+  {"id": 3, "status": "open", "owner": {"name": "Ann"}}
+]

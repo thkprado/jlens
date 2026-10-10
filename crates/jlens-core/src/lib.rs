@@ -42,6 +42,7 @@ pub mod debug;
 pub mod error;
 mod eval;
 pub mod functions;
+mod json;
 mod lexer;
 mod parser;
 mod process;
@@ -53,6 +54,7 @@ pub use annotation::Annotation;
 pub use ast::{Ast, Node, NodeKind, Span};
 pub use error::{Diagnostic, Error, Result, Severity};
 pub use functions::{Category, FunctionInfo, catalog as function_catalog};
+pub use json::format_json;
 
 use std::sync::Arc;
 use std::time::Duration;

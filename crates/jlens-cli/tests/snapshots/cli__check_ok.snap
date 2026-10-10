@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"check\", \"-f\", RULE], None)"
+---
+exit: 0
+--- stdout
+--- stderr
+fixtures/shipping-rule.jsonata: ok

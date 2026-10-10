@@ -1,0 +1,91 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"functions\"], None)"
+---
+exit: 0
+--- stdout
+Aggregation:
+  $sum($array)                                    Sum of an array of numbers
+  $count($array)                                  Number of items in an array
+  $max($array)                                    Largest number in an array
+  $min($array)                                    Smallest number in an array
+  $average($array)                                Mean of an array of numbers
+
+String:
+  $string($arg, $prettify)                        Casts a value to a string; objects and arrays become JSON
+  $substring($str, $start, $length)               Characters from a start position, optionally limited to a length
+  $substringBefore($str, $chars)                  The part of a string before the first occurrence of a substring
+  $substringAfter($str, $chars)                   The part of a string after the first occurrence of a substring
+  $lowercase($str)                                Converts a string to lower case
+  $uppercase($str)                                Converts a string to upper case
+  $length($str)                                   Number of characters in a string
+  $trim($str)                                     Normalizes and trims whitespace
+  $pad($str, $width, $char)                       Pads a string to a width; positive pads on the right, negative on the left
+  $match($str, $regex, $limit)                    Matches a regular expression, returning the matches with their positions and groups
+  $contains($str, $token)                         Whether a string contains a substring or matches a regular expression
+  $replace($str, $pattern, $replacement, $limit)  Replaces occurrences of a substring or regular expression
+  $split($str, $separator, $limit)                Splits a string by a separator or regular expression
+  $join($strs, $separator)                        Joins an array of strings with an optional separator
+  $formatNumber($value, $picture, $options)       Formats a number with an XPath picture string
+  $formatBase($value, $radix)                     Formats a number in another base (2 to 36)
+  $formatInteger($value, $picture)                Formats an integer with an XPath picture string (words, roman, letters, digits)
+  $parseInteger($value, $picture)                 Parses an integer written according to an XPath picture string
+
+Numeric:
+  $number($arg)                                   Casts a value to a number
+  $floor($arg)                                    Rounds down
+  $ceil($arg)                                     Rounds up
+  $round($arg, $precision)                        Rounds half to even, optionally to a number of decimal places
+  $abs($arg)                                      Absolute value
+  $sqrt($arg)                                     Square root
+  $power($arg, $exp)                              Raises a number to a power
+  $random()                                       A pseudo-random number between 0 (inclusive) and 1 (exclusive)
+
+Boolean:
+  $boolean($arg)                                  The effective boolean value of a value
+  $not($arg)                                      Logical negation of the effective boolean value
+  $exists($arg)                                   Whether a value is defined
+
+Higher-order:
+  $map($arr, $func)                               Applies a function to each item of an array
+  $filter($arr, $func)                            The items of an array for which a predicate holds
+  $single($arr, $func)                            The only item of an array matching a predicate; an error otherwise
+  $reduce($sequence, $func, $init)                Folds an array into a single value with a function
+  $sift($arg, $func)                              The key/value pairs of an object for which a predicate holds
+
+Array:
+  $zip()                                          Combines arrays item by item into an array of arrays
+  $append($arg1, $arg2)                           Concatenates two values into an array
+  $reverse($arr)                                  Reverses an array
+  $sort($arr, $comparator)                        Sorts an array, optionally with a comparator function
+  $shuffle($arr)                                  Shuffles an array into a random order
+  $distinct($arr)                                 Removes duplicate values from an array
+
+Object:
+  $keys($arg)                                     The keys of an object, or the union of keys of an array of objects
+  $lookup($input, $key)                           The value of a key in an object, or in each object of an array
+  $spread($arg)                                   Splits an object into an array of single-key objects
+  $merge($arg)                                    Merges an array of objects into one; later keys win
+  $each($obj, $func)                              Applies a function to each key/value pair of an object
+
+Other:
+  $error($message)                                Raises an error (D3137) with a message
+  $assert($condition, $message)                   Raises an error (D3141) when a condition is false
+  $type($value)                                   The type of a value: null, number, string, boolean, array, object or function
+  $eval($expr, $focus)                            Parses and evaluates a JSONata expression given as a string
+  $clone($arg)                                    A deep copy of a value
+
+Encoding:
+  $base64encode($str)                             Encodes a string as Base64 (each character taken as a byte)
+  $base64decode($str)                             Decodes a Base64 string (each byte becomes a character)
+  $encodeUrlComponent($str)                       Percent-encodes a URL component
+  $encodeUrl($str)                                Percent-encodes a URL, leaving reserved characters
+  $decodeUrlComponent($str)                       Decodes a percent-encoded URL component
+  $decodeUrl($str)                                Decodes a percent-encoded URL, leaving reserved characters encoded
+
+Date/time:
+  $now($picture, $timezone)                       The evaluation's timestamp as an ISO 8601 string, or formatted with a picture
+  $millis()                                       The evaluation's timestamp in milliseconds since the epoch
+  $fromMillis($millis, $picture, $timezone)       Formats milliseconds since the epoch as a timestamp string
+  $toMillis($timestamp, $picture)                 Parses a timestamp string into milliseconds since the epoch
+--- stderr

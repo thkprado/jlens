@@ -1,0 +1,13 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"check\", \"/** @label \\\"x\\\" @owner \\\"me\\\" */ a > 1\"], None)"
+---
+exit: 0
+--- stdout
+--- stderr
+warning[W0102]: Unknown annotation tag @owner; expected @label, @message or @id
+ --> <expr>:1:16
+  |
+1 | /** @label "x" @owner "me" */ a > 1
+  |                ^^^^^^
+<expr>: 0 error(s), 1 warning(s)

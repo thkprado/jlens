@@ -1,0 +1,11 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[&args[..], &[total]].concat(), None)"
+---
+exit: 1
+--- stdout
+50000
+300
+60000
+--- stderr
+line 5: invalid JSON: expected ident at line 1 column 2

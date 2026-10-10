@@ -1,0 +1,64 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"schema\", \"infer\", \"--each\", \"fixtures/cli/samples.json\"], None)"
+---
+exit: 0
+--- stdout
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3,
+      "examples": [
+        1,
+        2,
+        3
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "closed"
+      ],
+      "examples": [
+        "open",
+        "closed"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "examples": [
+          "a"
+        ]
+      },
+      "x-jlens-presence": 0.3333333333333333
+    },
+    "owner": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "examples": [
+            "Ann"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "x-jlens-presence": 0.3333333333333333
+    }
+  },
+  "required": [
+    "id",
+    "status"
+  ],
+  "x-jlens-samples": 3
+}
+--- stderr

@@ -1,0 +1,18 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"check\", \"--schema\", \"fixtures/cli/order.schema.json\",\n\"items[type = 'x'].unitprice + customer.nick\"], None)"
+---
+exit: 0
+--- stdout
+--- stderr
+warning[W0201]: Field "unitprice" is not in the schema; did you mean `unitPrice`?
+ --> <expr>:1:19
+  |
+1 | items[type = 'x'].unitprice + customer.nick
+  |                   ^^^^^^^^^
+warning[W0201]: Field "nick" is not in the schema
+ --> <expr>:1:40
+  |
+1 | items[type = 'x'].unitprice + customer.nick
+  |                                        ^^^^
+<expr>: 0 error(s), 2 warning(s)

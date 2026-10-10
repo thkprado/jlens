@@ -1,0 +1,6 @@
+{"number":"SO-1","customer":{"login":"alice.walker99"},"items":[{"type":"electronic","unitPrice":25000,"quantity":2}]}
+{"number":"SO-2","customer":{"login":"mallory.cheat1"},"items":[{"type":"apparel","unitPrice":100,"quantity":3}]}
+
+{"number":"SO-3","customer":{"login":"bob.harrison42"},"items":[{"type":"toy","unitPrice":60000,"quantity":1}]}
+not json
+{"number":"SO-5","customer":{"login":"alice.walker99"},"items":"oops"}

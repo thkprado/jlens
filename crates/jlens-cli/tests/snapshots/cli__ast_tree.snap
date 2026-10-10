@@ -1,0 +1,75 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"ast\", \"a[b > 1]\"], None)"
+---
+exit: 0
+--- stdout
+{
+  "root": {
+    "id": 0,
+    "type": "path",
+    "steps": [
+      {
+        "id": 1,
+        "type": "name",
+        "name": "a",
+        "span": {
+          "start": 0,
+          "end": 8
+        },
+        "stages": [
+          {
+            "type": "filter",
+            "expr": {
+              "id": 2,
+              "type": "binary",
+              "op": ">",
+              "lhs": {
+                "id": 3,
+                "type": "path",
+                "steps": [
+                  {
+                    "id": 4,
+                    "type": "name",
+                    "name": "b",
+                    "span": {
+                      "start": 2,
+                      "end": 3
+                    }
+                  }
+                ],
+                "span": {
+                  "start": 2,
+                  "end": 3
+                }
+              },
+              "rhs": {
+                "id": 5,
+                "type": "number",
+                "value": 1.0,
+                "span": {
+                  "start": 6,
+                  "end": 7
+                }
+              },
+              "span": {
+                "start": 2,
+                "end": 7
+              }
+            },
+            "span": {
+              "start": 1,
+              "end": 8
+            }
+          }
+        ]
+      }
+    ],
+    "span": {
+      "start": 0,
+      "end": 8
+    }
+  },
+  "slots": []
+}
+--- stderr

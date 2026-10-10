@@ -1,0 +1,7 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"missing\", \"-i\", ORDER], None)"
+---
+exit: 0
+--- stdout
+--- stderr

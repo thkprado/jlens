@@ -1,0 +1,9 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[&args[..], &[\"--filter\", rule]].concat(), None)"
+---
+exit: 1
+--- stdout
+{"number":"SO-3","customer":{"login":"bob.harrison42"},"items":[{"type":"toy","unitPrice":60000,"quantity":1}]}
+--- stderr
+line 5: invalid JSON: expected ident at line 1 column 2

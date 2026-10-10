@@ -1,0 +1,18 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"-f\", RULE, \"--explain\"], Some(&input))"
+---
+exit: 0
+--- stdout
+result: {"action":"REGULAR_FEE","code":"SHIP_FEE_402","delivery":"SLOW"}
+• $total := $sum(items.(unitPrice * quantity)) = 37000
+• $electronics := $sum(items[type = 'electronic'].(unitPrice * quantity)) = 17000
+  • [type = 'electronic']: 2 of 3 items passed; rejected: {"code":"1","color":"blue","type":"apparel","unitPrice":10000,"quantity":2,"tax":1500}
+• $blueTax := $sum(items[color = 'blue'].tax) = 1500
+  • [color = 'blue']: 1 of 3 items passed; rejected: {"code":"2","color":"black","type":"electronic","unitPrice":5000,"quantity":1,"tax":4000}, {"code":"3","color":"white","type":"electronic","unitPrice":12000,"quantity":1,"tax":3000}
+• $averageTax := $average(items.tax) = 2833.3333333333335
+✘ $approved := ( customer.login in ["alice.walker99", "bob.harrison42"] and $not(customer.login in ["mallory.cheat1", "eve.spammer007"]) and $total > 50000 and ( ('electronic' in items.type and $electro… = false
+  ✘ Minimum order grand total — $total > 50000 → false (37000 > 50000)
+      The order grand total must exceed 50,000.00.
+• $approved ? { "action": "FREE_SHIPPING", "code": "OK_200" } : { "action": "REGULAR_FEE", "code": "SHIP_FEE_402", "delivery": "SLOW" } → {"action":"REGULAR_FEE","code":"SHIP_FEE_402","delivery":"SLOW"} [else]
+--- stderr

@@ -1,0 +1,11 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"functions\", \"formatNumber\"], None)"
+---
+exit: 0
+--- stdout
+$formatNumber($value, $picture, $options)
+  signature: <n-so?:s>
+  category:  String
+  Formats a number with an XPath picture string
+--- stderr

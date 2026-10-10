@@ -1,0 +1,11 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"-f\", RULE, \"-i\", ORDER], None)"
+---
+exit: 0
+--- stdout
+{
+  "action": "FREE_SHIPPING",
+  "code": "OK_200"
+}
+--- stderr

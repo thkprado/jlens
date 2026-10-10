@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"functions\", \"$nope\"], None)"
+---
+exit: 2
+--- stdout
+--- stderr
+error: there is no built-in function $nope; run `jlens functions` for the list
