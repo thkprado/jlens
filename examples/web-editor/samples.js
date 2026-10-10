@@ -1,10 +1,11 @@
 // The examples offered by the web editor. Each has an input document, bindings (a JSON object of
 // variables) and an expression.
 //
-// The examples marked "try.jsonata.org" are the samples of the JSONata Exerciser
-// (https://try.jsonata.org, https://github.com/jsonata-js/jsonata-exerciser, src/sample.js),
-// © IBM Corp. 2016, 2020, MIT license. The Bindings example is adapted: the Exerciser binds a
-// JavaScript function, and jlens bindings are JSON values.
+// The Invoice, Address, Schema, Library and Bindings examples are the samples of the JSONata
+// Exerciser (https://try.jsonata.org, https://github.com/jsonata-js/jsonata-exerciser,
+// src/sample.js), © IBM Corp. 2016, 2020, MIT license. The Bindings example is adapted: the
+// Exerciser binds a JavaScript function (Math.cos), and jlens bindings are JSON values, so $cosine
+// is written in JSONata.
 
 export const samples = [
   {
@@ -41,7 +42,7 @@ export const samples = [
   },
   {
     id: "invoice",
-    label: "Invoice (try.jsonata.org)",
+    label: "Invoice",
     input: {
       "Account": {
         "Account Name": "Firefly",
@@ -120,7 +121,7 @@ export const samples = [
   },
   {
     id: "address",
-    label: "Address (try.jsonata.org)",
+    label: "Address",
     input: {
       "FirstName": "Fred",
       "Surname": "Smith",
@@ -182,7 +183,7 @@ export const samples = [
   },
   {
     id: "schema",
-    label: "Schema (try.jsonata.org)",
+    label: "Schema",
     input: {
       "$schema": "http://json-schema.org/draft-04/schema#",
       "required": [
@@ -316,7 +317,7 @@ export const samples = [
   },
   {
     id: "library",
-    label: "Library (try.jsonata.org)",
+    label: "Library",
     input: {
       "library": {
         "books": [
@@ -420,16 +421,12 @@ export const samples = [
   },
   {
     id: "bindings",
-    label: "Bindings (try.jsonata.org, adapted)",
+    label: "Bindings",
     input: {
       "angle": 60
     },
     bindings: {"pi":3.1415926535898},
-    expression: `/*
-On try.jsonata.org this example binds a JavaScript function, Math.cos, to $cosine.
-jlens takes bindings as JSON values (see the Bindings panel: $pi), so here $cosine
-is written in JSONata, as a Taylor series.
-*/
+    expression: `/* $pi comes from the Bindings panel; $cosine is a Taylor series. */
 (
   $factorial := function($n) { $reduce([1..$n], function($a, $b) { $a * $b }, 1) };
   $cosine := function($x) {
