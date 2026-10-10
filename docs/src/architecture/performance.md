@@ -71,9 +71,9 @@ that its asynchronous `evaluate` requires.
 
 jsonata-js works on the JavaScript objects it is given, so it never pays for converting the
 input. jlens-wasm `evaluate` has to convert it: `JSON.stringify` on the JavaScript side, then a
-parse into jlens's representation. For this document that costs about 430 µs. Against a
+parse into jlens's representation. For this document that costs about 400 µs. Against a
 `Document` converted once, jlens-wasm is faster than jsonata-js on eight of the ten cases, by up
-to 6.6× on recursion.
+to 6.7× on recursion.
 
 It is slower on two cases:
 - `path`, which does almost no work, so the overhead of calling into WebAssembly dominates;

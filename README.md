@@ -7,12 +7,12 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 - **`jlens`**: the command-line tool;
 - **`jlens-wasm`**: an ES module for the browser (npm package `jlens-wasm`).
 
-> **Status: phase 7 of 8 done.** jlens passes 1,688 of the 1,690 cases of the official
-> JSONata 2.2.2 test suite; the other two are documented overrides. Evaluations can be audited
-> and explained, schemas inferred from samples drive completion and diagnostics, and everything
-> is available in the browser as a WebAssembly ES module. Benchmarks, documentation
-> consolidation and publishing (phase 8) are next. See the
-> [roadmap](docs/src/architecture/roadmap.md) and the current
+> **Status: 0.1.0, ready for its first release.** jlens passes 1,688 of the 1,690 cases of the
+> official JSONata 2.2.2 test suite; the other two are documented overrides. Evaluations can be
+> audited and explained, schemas inferred from samples drive completion and diagnostics, and
+> everything is available in the browser as a WebAssembly ES module. See the
+> [changelog](CHANGELOG.md), the [roadmap](docs/src/architecture/roadmap.md), the
+> [performance measurements](docs/src/architecture/performance.md) and the current
 > [conformance report](tests/conformance/REPORT.md).
 
 ## Highlights
@@ -35,7 +35,7 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 ## Quick start
 
 ```sh
-cargo install --path crates/jlens-cli
+cargo install jlens-cli                 # or: cargo install --path crates/jlens-cli
 
 jlens eval -f fixtures/shipping-rule.jsonata -i fixtures/online-store-order.json --explain
 jlens eval --ndjson --filter -i fixtures/orders.ndjson '$sum(items.(unitPrice * quantity)) > 50000'
@@ -55,6 +55,7 @@ jlens check --schema schema.json -f fixtures/shipping-rule.jsonata
 | `tests/conformance` | Baseline, overrides and conformance report |
 | `fixtures` | Sample documents and expressions used in tests and guides |
 | `examples/web-editor` | Browser demo: JSONata editor with autocomplete, explanations and audit trees |
+| `benches` | Benchmark workload, and comparisons with jsonata-js (`benches/compare`) |
 | `docs` | The jlens book (mdBook) and decision records |
 | `xtask` | Repository automation (`cargo xtask`) |
 
@@ -68,7 +69,11 @@ mdbook build docs                      # requires mdbook
 cargo xtask wasm                       # browser package in crates/jlens-wasm/pkg (needs wasm-bindgen-cli)
 cargo xtask wasm-test                  # its tests, in Node.js and a headless browser
 cargo xtask serve                      # serve the repository; open /examples/web-editor/
+cargo xtask doc-check                  # run the book's examples, check its links
+cargo bench -p jlens-core              # benchmarks
 ```
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the full list of checks and the release process.
 
 ## License
 

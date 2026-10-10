@@ -47,9 +47,17 @@ jobs:
         with:
           tool: mdbook
       - run: mdbook build docs
+      - name: Examples and links of the book
+        run: cargo xtask doc-check
       - run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The examples of the book agree with jsonata-js
+        working-directory: benches/compare
+        run: npm ci && node doc-examples.mjs
 
   wasm:
     name: Wasm (browser ESM)
