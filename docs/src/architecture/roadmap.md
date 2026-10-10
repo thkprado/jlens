@@ -19,11 +19,13 @@ phase 1 to start.
 
 ## After 0.1
 
+Done since: host functions ([ADR 0006](../adr/0006-host-functions.md)) and the language server
+`jlens lsp` ([ADR 0007](../adr/0007-language-server.md)).
+
 Ideas that came up during development, not commitments:
 
-- Host functions that call back the JSONata functions they receive as arguments. Host
-  functions themselves are described in [ADR 0006](../adr/0006-host-functions.md).
+- Host functions that call back the JSONata functions they receive as arguments.
+- A VS Code extension that starts `jlens lsp`, and syntax highlighting for JSONata files.
 - Lazy conversion of input documents, so that evaluations which read a small part of a large
   document do not pay for converting all of it.
 - Asynchronous functions (jsonata-js allows functions that return promises).
-- A language server (LSP) built on `jlens-schema`, for editors other than the browser.

@@ -20,6 +20,7 @@ path = "src/main.rs"
 [dependencies]
 jlens-core.workspace = true
 jlens-schema.workspace = true
+jlens-lsp.workspace = true
 glob.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

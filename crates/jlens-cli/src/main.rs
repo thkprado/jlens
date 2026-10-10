@@ -44,6 +44,9 @@ enum Command {
     Schema(schema::SchemaCommand),
     /// Print the tokens or syntax tree of an expression (for debugging expressions and jlens).
     Ast(AstArgs),
+    /// Run the language server (LSP) over standard input and output, for editors. It is
+    /// configured by the `jlens.json` of each workspace folder.
+    Lsp,
 }
 
 /// Where the expression comes from.
@@ -129,6 +132,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Command::Functions(args) => functions::run(args),
         Command::Schema(cmd) => schema::run(cmd),
         Command::Ast(args) => ast(args),
+        Command::Lsp => {
+            jlens_lsp::run_stdio().map_err(|e| anyhow::anyhow!("language server: {e}"))?;
+            Ok(ExitCode::SUCCESS)
+        }
     }
 }
 

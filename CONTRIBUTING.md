@@ -49,8 +49,8 @@ cargo xtask serve                              # serve the repository, for examp
 
 ## Releasing
 
-1. Update the version in `[workspace.package]` and in the `jlens-core` and `jlens-schema`
-   entries of `[workspace.dependencies]` (`Cargo.toml`).
+1. Update the version in `[workspace.package]` and in the `jlens-core`, `jlens-schema` and
+   `jlens-lsp` entries of `[workspace.dependencies]` (`Cargo.toml`).
 2. Move the `Unreleased` entries of `CHANGELOG.md` under the new version.
 3. Check that everything passes, including the packages:
 
@@ -61,11 +61,11 @@ cargo xtask serve                              # serve the repository, for examp
    ```
 
 4. Commit, tag `vX.Y.Z`, and push the tag. The `Release` workflow publishes `jlens-core`,
-   `jlens-schema` and `jlens-cli` to crates.io, in that order, and `jlens-wasm` to npm. It needs
+   `jlens-schema`, `jlens-lsp` and `jlens-cli` to crates.io, in that order, and `jlens-wasm` to npm. It needs
    the repository secrets `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`.
 
    To publish by hand instead: `cargo publish -p jlens-core`, then `-p jlens-schema`, then
-   `-p jlens-cli`; then `npm publish --access public` in `crates/jlens-wasm/pkg` after
+   `-p jlens-lsp`, then `-p jlens-cli`; then `npm publish --access public` in `crates/jlens-wasm/pkg` after
    `cargo xtask wasm`.
 
 ## License

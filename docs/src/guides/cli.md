@@ -162,6 +162,11 @@ The [function reference](../language/functions.md) is generated from the same ca
 
 Both are described in the [schema guide](schema.md).
 
+## `jlens lsp`
+
+Runs the language server on standard input and output. Editors start it; it is configured by
+the `jlens.json` of each workspace folder. See the [editors guide](editors.md).
+
 ## `jlens ast`
 
 Prints the processed syntax tree as JSON. This is the tree the evaluator walks, with node ids,

@@ -4,7 +4,8 @@ Guidance for coding agents working in this repository. Humans: see [CONTRIBUTING
 
 jlens is a JSONata 2.2 engine in Rust, ported from jsonata-js 2.2.2. It has evaluation audits
 and schema-driven editor support, and ships as crates (`jlens-core`, `jlens-schema`,
-`jlens-cli`) and as the npm package `jlens-wasm`. The documentation is an mdBook in `docs/`.
+`jlens-lsp`, `jlens-cli`) and as the npm package `jlens-wasm`. The documentation is an mdBook
+in `docs/`.
 
 ## Map
 
@@ -12,7 +13,8 @@ and schema-driven editor support, and ships as crates (`jlens-core`, `jlens-sche
 |---|---|
 | `crates/jlens-core/src` | `lexer.rs`, `parser.rs` (Pratt, recover mode), `process.rs` (raw tree → `Ast`), `eval.rs` (interpreter), `value.rs` (value and sequence model), `functions/` (library and catalog), `datetime.rs`, `regex.rs`, `signature.rs`, `error.rs` (codes and messages), `audit/` (tracer, collector, explain), `document.rs`, `stack.rs` |
 | `crates/jlens-schema/src` | `shape.rs` (Schema, inference, overrides), `jsonschema.rs`, `typing.rs` (typing walker), `service.rs` (LanguageService) |
-| `crates/jlens-cli/src` | the `jlens` binary (clap) |
+| `crates/jlens-lsp/src` | the language server: `server.rs` (message loop, requests), `config.rs` (`jlens.json`), `text.rs` (positions, incremental sync) |
+| `crates/jlens-cli/src` | the `jlens` binary (clap); `jlens lsp` runs `jlens-lsp` |
 | `crates/jlens-wasm` | wasm-bindgen bindings; `src/types.d.ts` holds the hand-written TypeScript declarations; `tests/` holds the JS suite (`suite.mjs`), shared by Node and the browser |
 | `tests/jsonata-suite` | the vendored official suite (do not edit; `cargo xtask update-suite` replaces it) |
 | `tests/conformance` | `baseline.txt`, `overrides.json`, `REPORT.md` |

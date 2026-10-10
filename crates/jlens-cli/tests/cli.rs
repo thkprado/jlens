@@ -222,3 +222,38 @@ fn ast() {
     snapshot!("ast_tokens", &["ast", "--tokens", "a.b[0]"]);
     snapshot!("ast_tree", &["ast", "a[b > 1]"]);
 }
+
+/// `jlens lsp` speaks the protocol on standard input and output, and exits when asked to.
+#[test]
+fn lsp_runs_a_language_server_session() {
+    let frame = |message: &str| format!("Content-Length: {}\r\n\r\n{message}", message.len());
+    let session = [
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"untitled:a","languageId":"jsonata","version":1,"text":"$sum(1"}}}"#,
+        r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#,
+        r#"{"jsonrpc":"2.0","method":"exit"}"#,
+    ]
+    .map(frame)
+    .concat();
+    let out = Command::cargo_bin("jlens")
+        .unwrap()
+        .arg("lsp")
+        .write_stdin(session)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains(r#""positionEncoding":"utf-16""#),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(r#""code":"S0203""#),
+        "diagnostics: {stdout}"
+    );
+}

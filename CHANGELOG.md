@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Language server: `jlens lsp` (crate `jlens-lsp`) offers completion, diagnostics, hover and
+  signature help to editors. A `jlens.json` per workspace folder maps file patterns to a
+  schema, variables and host functions. See the editors guide and ADR 0007.
+
 ## [0.2.0]
 
 ### Added

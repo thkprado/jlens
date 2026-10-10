@@ -1,0 +1,31 @@
+[package]
+name = "jlens-lsp"
+description = "A language server (LSP) for JSONata: completion, diagnostics, hover and signature help over JSON Schemas"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/jlens-lsp"
+authors.workspace = true
+keywords.workspace = true
+categories = ["development-tools", "text-editors"]
+include = ["src/**/*", "README.md", "LICENSE"]
+
+[dependencies]
+jlens-core.workspace = true
+jlens-schema.workspace = true
+lsp-server.workspace = true
+lsp-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+glob.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

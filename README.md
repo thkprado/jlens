@@ -4,7 +4,8 @@ A [JSONata](https://jsonata.org/) engine written in Rust. It filters, queries an
 JSON documents, and it can **explain** how a result was reached. It ships as:
 
 - **`jlens-core`**: the Rust crate (with `jlens-schema` for metadata and autocomplete);
-- **`jlens`**: the command-line tool;
+- **`jlens`**: the command-line tool, which includes a language server for editors
+  (`jlens lsp`);
 - **`jlens-wasm`**: an ES module for the browser (npm package `jlens-wasm`).
 
 > **Status: version 0.2.0.** jlens passes 1,688 of the 1,690 cases of the
@@ -49,6 +50,7 @@ jlens check --schema schema.json -f fixtures/shipping-rule.jsonata
 |---|---|
 | `crates/jlens-core` | Language engine and audit subsystem |
 | `crates/jlens-schema` | Metadata inference and language service |
+| `crates/jlens-lsp` | Language server (`jlens lsp`) |
 | `crates/jlens-cli` | `jlens` binary |
 | `crates/jlens-wasm` | Browser bindings (`cargo xtask wasm`) |
 | `tests/jsonata-suite` | Vendored official test suite (jsonata-js 2.2.2, MIT) |
