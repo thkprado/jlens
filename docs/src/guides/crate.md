@@ -6,7 +6,7 @@ is on [docs.rs](https://docs.rs/jlens-core).
 
 ```toml
 [dependencies]
-jlens-core = "0.1"
+jlens-core = "0.2"
 serde_json = "1"
 ```
 

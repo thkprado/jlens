@@ -14,7 +14,7 @@ cargo install --path crates/jlens-cli            # from a checkout
 
 ```text
 $ jlens --version
-jlens 0.1.1
+jlens 0.2.0
 ```
 
 The [CLI guide](../guides/cli.md) describes every command.
@@ -23,8 +23,8 @@ The [CLI guide](../guides/cli.md) describes every command.
 
 ```toml
 [dependencies]
-jlens-core = "0.1"     # the language: parsing, evaluation, functions, auditing
-jlens-schema = "0.1"   # optional: schema inference and the language service
+jlens-core = "0.2"     # the language: parsing, evaluation, functions, auditing
+jlens-schema = "0.2"   # optional: schema inference and the language service
 serde_json = "1"
 ```
 

@@ -6,6 +6,8 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0]
+
 ### Added
 
 - Host functions (`jlens-core`): the application provides its own functions through
@@ -18,15 +20,15 @@ All notable changes are recorded here. The format follows
   called as host functions. Their exceptions are rethrown as is; a function that returns a
   promise fails with the new code `U1002`. `LanguageService` takes host function declarations
   as a third argument.
+- Web editor: an example selector, with the samples of try.jsonata.org (Invoice, Address, Schema,
+  Library and an adapted Bindings) next to the store order rule. The chosen example is kept in
+  the address (`#invoice`).
 
 ### Changed
 
 - Language service: a call to a declared variable or host function that has the name of a
   built-in function is no longer typed as the built-in's result.
 - WebAssembly: bindings that are a function, rather than an object, are a `TypeError`.
-- Web editor: an example selector, with the samples of try.jsonata.org (Invoice, Address, Schema,
-  Library and an adapted Bindings) next to the store order rule. The chosen example is kept in
-  the address (`#invoice`).
 
 ## [0.1.1]
 
@@ -87,6 +89,7 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/thkprado/jlens/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/thkprado/jlens/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/thkprado/jlens/releases/tag/v0.1.0
