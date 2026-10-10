@@ -86,7 +86,8 @@ expr.free();                                 // release it (or let the garbage c
 - **`input`** can be any JSON-compatible value. `undefined`, or no argument, means there is no
   input document, so `$` is undefined. Values pass through `JSON.stringify`. As a result, `Date`
   objects become strings, and functions and `undefined` fields are dropped.
-- **`bindings`** is an object of variables: `{limit: 10}` makes `$limit` available.
+- **`bindings`** is an object of variables and functions: `{limit: 10}` makes `$limit`
+  available, and a function becomes a [host function](#host-functions).
 - **`options`** takes `timeout` (milliseconds; error `D1012`) and `maxDepth` (error `D1011`).
 - **The result** is a plain value, or `undefined` when the expression evaluates to undefined.
   Numbers and object key order are the same as in jsonata-js.
@@ -114,6 +115,37 @@ measurements.
 
 With explicit resource management, `using expr = new Expression(...)` frees the expression at
 the end of the block.
+
+### Host functions
+
+JavaScript functions, in the bindings or registered on an expression, are called from the
+expression like built-in functions:
+
+```js
+const expr = new Expression("$shipping($sum(items.weight), region)");
+expr.evaluate(order, { shipping: (weight, region) => weight * rates[region] });
+
+// As in jsonata-js: available to every evaluation, with an optional signature.
+expr.registerFunction("shipping", (weight, region) => weight * rates[region], "<ns:n>");
+```
+
+- **Arguments and the result** pass through JSON, like the input. `undefined` stands for
+  undefined, and a function argument arrives as `undefined`.
+- **A signature** (`registerFunction`'s third argument) checks the arguments before each call,
+  with the errors of the built-in functions (`T0410`, `T0412`). A parameter with `-` receives the
+  context value when the argument is missing: `<n-:n>` makes `price.$double()` work.
+- **`this` is `undefined`.** Use a signature with `-` to receive the context value.
+- **The function's `length`** tells higher-order functions how many arguments to pass: `$map`
+  passes the index only to functions with two parameters or more.
+- **An exception** thrown by the function is rethrown by `evaluate` as is. Its `position` and
+  `token` are set to the call when it has none. `evaluateWithAudit` reports it with its `code`,
+  or its `name`, and its `message`.
+- **Asynchronous functions are not supported.** A function that returns a promise fails with
+  `U1002`. Fetch what the expression needs before evaluating it.
+- **Precedence:** a function in the bindings replaces a registered function of the same name,
+  and both replace a built-in function.
+
+The [Rust crate guide](crate.md#host-functions) describes the same model.
 
 ## Errors
 
@@ -216,7 +248,17 @@ service.signatureHelp("$substring(name, ", 17);
 `schema` is optional: without one, functions and variables are still completed. The second
 argument declares the variables the expressions are evaluated with. Its keys are variable
 names, with or without `$`, and its values are schemas, or `null` when the shape is unknown.
-Create a new service when the schema or the variables change. Construction is cheap.
+The third argument declares host functions, as `{name, signature, params, summary}` objects.
+They are completed first, and hover and signature help show them:
+
+```js
+new LanguageService(schema, null, [
+  { name: "shipping", signature: "<ns:n>", params: ["weight", "region"], summary: "Shipping cost" },
+]);
+```
+
+Create a new service when the schema, the variables or the functions change. Construction is
+cheap.
 
 Completion items are ranked best first, and `insertText` replaces `range`. Field names that are
 not plain identifiers come quoted with backquotes. `documentation` and hover `contents` are

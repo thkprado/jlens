@@ -4,7 +4,8 @@
 //! JavaScript API mirrors the Rust crates:
 //!
 //! * [`Expression`] compiles an expression once; `evaluate`, `evaluateJson` and
-//!   `evaluateWithAudit` run it against any number of documents.
+//!   `evaluateWithAudit` run it against any number of documents. JavaScript functions in the
+//!   bindings, or registered with `registerFunction`, are called as host functions.
 //! * [`parse_recover`] parses with error recovery, for tooling.
 //! * [`LanguageService`] offers completion, diagnostics, hover and signature help over a
 //!   JSON Schema, and [`infer_schema`] infers one from sample documents.
@@ -17,6 +18,7 @@
 //! The TypeScript declarations of the values exchanged are in `src/types.d.ts`.
 
 mod convert;
+mod host;
 mod service;
 
 pub use service::{LanguageService, functions, infer_schema};
@@ -26,7 +28,8 @@ use jlens_core::{Bindings, Options};
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
-use convert::{Offsets, error_json, from_js, js_error, to_js, type_error};
+use convert::{Offsets, Registered, error_json, from_js, js_error, to_js, type_error};
+use host::Scope;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPES: &str = include_str!("types.d.ts");
@@ -46,6 +49,7 @@ pub fn version() -> String {
 pub struct Expression {
     inner: jlens_core::Expression,
     offsets: Offsets,
+    registered: Vec<Registered>,
 }
 
 #[wasm_bindgen]
@@ -56,7 +60,35 @@ impl Expression {
         convert::install_hooks();
         let offsets = Offsets::new(source);
         let inner = jlens_core::Expression::compile(source).map_err(|e| js_error(&e, &offsets))?;
-        Ok(Expression { inner, offsets })
+        Ok(Expression {
+            inner,
+            offsets,
+            registered: Vec::new(),
+        })
+    }
+
+    /// Makes `implementation` available to the expression as `$name`, in every evaluation. With
+    /// a `signature` (such as `<n-n?:n>`), arguments are checked before each call, as for
+    /// built-in functions. Throws a `JlensError` when the signature is invalid.
+    #[wasm_bindgen(js_name = registerFunction, skip_typescript)]
+    pub fn register_function(
+        &mut self,
+        name: &str,
+        implementation: js_sys::Function,
+        signature: Option<String>,
+    ) -> Result<(), JsValue> {
+        if let Some(signature) = &signature {
+            jlens_core::signature::Signature::parse(signature)
+                .map_err(|e| js_error(&e, &Offsets::new(signature)))?;
+        }
+        let name = name.trim_start_matches('$').to_owned();
+        self.registered.retain(|r| r.name != name);
+        self.registered.push(Registered {
+            name,
+            function: implementation,
+            signature,
+        });
+        Ok(())
     }
 
     /// The source text of the expression.
@@ -66,7 +98,8 @@ impl Expression {
     }
 
     /// Evaluates the expression against `input`, a JSON-compatible value (`undefined` means no
-    /// input document). `bindings` provides variables: `{limit: 10}` defines `$limit`.
+    /// input document). `bindings` provides variables and functions: `{limit: 10}` defines
+    /// `$limit`, and `{rate: (region) => ...}` defines `$rate(region)`.
     /// Returns `undefined` when the result is undefined; throws a `JlensError` when the
     /// evaluation fails.
     #[wasm_bindgen(skip_typescript)]
@@ -80,9 +113,10 @@ impl Expression {
             Some(input) => convert::document(input, "input")?,
             None => None,
         };
-        let (bindings, options) = arguments(bindings, options)?;
+        let scope = Scope::enter();
+        let (bindings, options) = self.arguments(&scope, bindings, options)?;
         let options = convert::options(options.as_ref())?;
-        let result = self.run(document.as_ref(), &bindings, &options)?;
+        let result = self.run(&scope, document.as_ref(), &bindings, &options)?;
         Ok(result.map_or(JsValue::UNDEFINED, |v| to_js(&v)))
     }
 
@@ -102,9 +136,10 @@ impl Expression {
             ),
             None => None,
         };
-        let (bindings, options) = arguments(bindings, options)?;
+        let scope = Scope::enter();
+        let (bindings, options) = self.arguments(&scope, bindings, options)?;
         let options = convert::options(options.as_ref())?;
-        let result = self.run(document.as_ref(), &bindings, &options)?;
+        let result = self.run(&scope, document.as_ref(), &bindings, &options)?;
         Ok(result.map(|v| jlens_core::format_json(&v, false)))
     }
 
@@ -117,9 +152,10 @@ impl Expression {
         bindings: Option<JsValue>,
         options: Option<JsValue>,
     ) -> Result<JsValue, JsValue> {
-        let (bindings, options) = arguments(bindings, options)?;
+        let scope = Scope::enter();
+        let (bindings, options) = self.arguments(&scope, bindings, options)?;
         let options = convert::options(options.as_ref())?;
-        let result = self.run(Some(&document.inner), &bindings, &options)?;
+        let result = self.run(&scope, Some(&document.inner), &bindings, &options)?;
         Ok(result.map_or(JsValue::UNDEFINED, |v| to_js(&v)))
     }
 
@@ -136,7 +172,8 @@ impl Expression {
             Some(input) => from_js(input, "input")?,
             None => None,
         };
-        let (bindings, options) = arguments(bindings, options)?;
+        let scope = Scope::enter();
+        let (bindings, options) = self.arguments(&scope, bindings, options)?;
         let eval_options = convert::options(options.as_ref())?;
         let audit_options = audit_options(options.as_ref())?;
         let (result, tree) =
@@ -174,8 +211,10 @@ impl Expression {
 }
 
 impl Expression {
+    /// Evaluates, throwing a `JlensError`, or the exception a JavaScript function threw.
     fn run(
         &self,
+        scope: &Scope,
         document: Option<&jlens_core::Document>,
         bindings: &Bindings,
         options: &Options,
@@ -184,22 +223,52 @@ impl Expression {
             Some(document) => self.inner.evaluate_document(document, bindings, options),
             None => self.inner.evaluate_with(None, bindings, options),
         }
-        .map_err(|e| js_error(&e, &self.offsets))
+        .map_err(|e| match scope.exception(&e) {
+            Some(exception) => locate(exception, &e),
+            None => js_error(&e, &self.offsets),
+        })
+    }
+
+    /// Reads the `bindings` and `options` arguments of the evaluation methods. The functions of
+    /// the bindings, and those registered on the expression, belong to `scope`. The options are
+    /// returned as JSON, for `convert::options` and `audit_options`.
+    fn arguments(
+        &self,
+        scope: &Scope,
+        bindings: Option<JsValue>,
+        options: Option<JsValue>,
+    ) -> Result<(Bindings, Option<Value>), JsValue> {
+        let bindings = convert::bindings(
+            &bindings.unwrap_or(JsValue::UNDEFINED),
+            scope,
+            &self.registered,
+        )?;
+        let options = match &options {
+            Some(options) => from_js(options, "options")?,
+            None => None,
+        };
+        Ok((bindings, options))
     }
 }
 
-/// Reads the `bindings` and `options` arguments of the evaluation methods. The options are
-/// returned as JSON, for `convert::options` and `audit_options`.
-fn arguments(
-    bindings: Option<JsValue>,
-    options: Option<JsValue>,
-) -> Result<(Bindings, Option<Value>), JsValue> {
-    let bindings = convert::bindings(&bindings.unwrap_or(JsValue::UNDEFINED))?;
-    let options = match &options {
-        Some(options) => from_js(options, "options")?,
-        None => None,
-    };
-    Ok((bindings, options))
+/// Adds the call's `position` and `token` to an exception thrown by a JavaScript function, when
+/// it is an object that has none, as for other errors.
+fn locate(exception: JsValue, err: &jlens_core::Error) -> JsValue {
+    if exception.is_object() {
+        let fields = [
+            ("position", err.position().map(|p| JsValue::from(p as u32))),
+            ("token", err.token().map(|t| JsValue::from_str(&t))),
+        ];
+        for (key, value) in fields {
+            let key = JsValue::from_str(key);
+            if let Some(value) = value
+                && !js_sys::Reflect::has(&exception, &key).unwrap_or(true)
+            {
+                let _ = js_sys::Reflect::set(&exception, &key, &value);
+            }
+        }
+    }
+    exception
 }
 
 /// A JSON document converted once into jlens's internal representation, for evaluating

@@ -49,6 +49,11 @@ Options considered for the values that cross the boundary:
 
 - `Bindings` and `HostFunction` are `Send + Sync`. In WebAssembly, JavaScript functions are not
   `Send`, so the bindings refer to them indirectly, through a registry local to the evaluation.
+- In WebAssembly, `this` is `undefined`, where jsonata-js passes the context value. Passing it
+  would convert the context value to JavaScript at every call, which is the whole document for
+  a call at the top of the expression. A signature with `-` passes it as an argument instead.
+  An exception thrown by a JavaScript function is kept, and the evaluation rethrows it as is. A
+  promise is refused (`U1002`), since evaluation is synchronous.
 - Each call copies its arguments and its result. For the functions that rule engines call, which
   take a few scalars, the cost is small. It is large only for a function that receives a large
   array or object.

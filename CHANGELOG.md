@@ -14,11 +14,16 @@ All notable changes are recorded here. The format follows
   built-in functions of the same name. See ADR 0006.
 - Language service (`jlens-schema`): `LanguageService::with_function` declares host functions
   (`FunctionDecl`), which completion, hover and signature help show like built-in functions.
+- WebAssembly: JavaScript functions in the bindings, and `Expression.registerFunction`, are
+  called as host functions. Their exceptions are rethrown as is; a function that returns a
+  promise fails with the new code `U1002`. `LanguageService` takes host function declarations
+  as a third argument.
 
 ### Changed
 
 - Language service: a call to a declared variable or host function that has the name of a
   built-in function is no longer typed as the built-in's result.
+- WebAssembly: bindings that are a function, rather than an object, are a `TypeError`.
 - Web editor: an example selector, with the samples of try.jsonata.org (Invoice, Address, Schema,
   Library and an adapted Bindings) next to the store order rule. The chosen example is kept in
   the address (`#invoice`).

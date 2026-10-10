@@ -3,7 +3,10 @@
 use jlens_core::{Bindings, Options, format_json};
 use serde::Serialize;
 use serde_json::Value;
+use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
+
+use crate::host::Scope;
 
 /// Converts between UTF-8 byte offsets (used by the Rust crates) and UTF-16 code unit offsets
 /// (used by JavaScript strings).
@@ -137,16 +140,50 @@ pub fn ser_to_js<T: Serialize>(value: &T) -> JsValue {
     to_js(&serde_json::to_value(value).expect("serializable"))
 }
 
-/// Reads the `bindings` argument: `undefined`, `null` or an object.
-pub fn bindings(value: &JsValue) -> Result<Bindings, JsValue> {
-    if value.is_null() {
-        return Ok(Bindings::new());
+/// A function registered on an expression with `registerFunction`.
+pub struct Registered {
+    pub name: String,
+    pub function: js_sys::Function,
+    pub signature: Option<String>,
+}
+
+/// Reads the `bindings` argument (`undefined`, `null` or an object), after the functions
+/// registered on the expression. A function in the bindings becomes a host function of `scope`,
+/// and replaces a registered function of the same name.
+pub fn bindings(
+    value: &JsValue,
+    scope: &Scope,
+    registered: &[Registered],
+) -> Result<Bindings, JsValue> {
+    let mut out = Bindings::new();
+    for r in registered {
+        let function = scope
+            .function(&r.name, &r.function, r.signature.as_deref())
+            .map_err(|e| type_error(&e.to_string()))?;
+        out = out.function(r.name.clone(), function);
     }
-    match from_js(value, "bindings")? {
-        None => Ok(Bindings::new()),
-        Some(Value::Object(map)) => Ok(map.into_iter().collect()),
-        Some(_) => Err(type_error("bindings must be an object")),
+    if value.is_undefined() || value.is_null() {
+        return Ok(out);
     }
+    if !value.is_object() || js_sys::Array::is_array(value) || value.is_function() {
+        return Err(type_error("bindings must be an object"));
+    }
+    for entry in js_sys::Object::entries(value.unchecked_ref()).iter() {
+        let entry: js_sys::Array = entry.unchecked_into();
+        let Some(name) = entry.get(0).as_string() else {
+            continue;
+        };
+        let value = entry.get(1);
+        if let Some(function) = value.dyn_ref::<js_sys::Function>() {
+            let function = scope
+                .function(&name, function, None)
+                .map_err(|e| type_error(&e.to_string()))?;
+            out = out.function(name, function);
+        } else if let Some(json) = from_js(&value, &format!("binding {name}"))? {
+            out = out.var(name, json);
+        }
+    }
+    Ok(out)
 }
 
 /// Reads `timeout` (milliseconds) and `maxDepth` from an options object.

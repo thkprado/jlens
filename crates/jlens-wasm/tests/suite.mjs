@@ -128,9 +128,98 @@ export const cases = [
     equal(new j.Expression("1 + 1").evaluate(), 2, "still usable");
   }],
 
+  ["host functions in the bindings", (j) => {
+    const bindings = {
+      add: (a, b) => a + b,
+      args: function (a) { return [...arguments].map((x) => (x === undefined ? null : x)); },
+      two: (v, i) => [v, i],
+      pair: () => [{ a: 1 }, { a: 2 }],
+      nothing: () => undefined,
+      self: function () { return this === undefined; },
+      rate: 0.5,
+    };
+    const ev = (src, input) => new j.Expression(src).evaluate(input, bindings);
+    equal(ev("$add(1, 2)"), 3);
+    equal(ev("$add(price, $rate)", { price: 2 }), 2.5, "with a variable");
+    equal(ev("$args(1, 'a', missing, {'k': [1]})", {}), [1, "a", null, { k: [1] }], "arguments as JSON");
+    equal(ev("$args($add, function($x) { $x })"), [null, null], "function arguments");
+    equal(ev("$pair().a"), [1, 2], "results are values");
+    equal(ev("$nothing()"), undefined, "undefined result");
+    equal(ev("$self()"), true, "this");
+    // `length` is the arity that higher-order functions use.
+    equal(ev("$map([5, 6], $args)"), [[5], [6]], "map, one parameter");
+    equal(ev("$map([5, 6], $two)"), [[5, 0], [6, 1]], "map, two parameters");
+    equal(ev("$add(?, 1)(41)"), 42, "partial application");
+    equal(ev("$type($add)"), "function", "type");
+    equal(ev("$sum([1])", {}), 1, "built-ins still work");
+    equal(new j.Expression("$sum([1])").evaluate(null, { sum: () => "mine" }), "mine", "shadowing");
+    equal(new j.Expression("$f()").evaluateJson("{}", { f: () => ({ a: 1 }) }), '{"a":1}', "evaluateJson");
+    equal(new j.Expression("$f(a)").evaluateDocument(new j.Document({ a: 2 }), { f: (x) => x * 2 }), 4, "documents");
+  }],
+
+  ["registerFunction", (j) => {
+    const expr = new j.Expression("$tax(100) + price.$tax()");
+    expr.registerFunction("tax", (amount, rate) => amount * (rate ?? 0.25), "<n-n?:n>");
+    equal(expr.evaluate({ price: 8 }), 27, "with a signature");
+    throws(() => new j.Expression("$tax('x')").evaluate(), (e) => equal(e.code, "T1006"));
+    const typed = new j.Expression("$tax('x')");
+    typed.registerFunction("$tax", (a) => a, "<n:n>");
+    throws(() => typed.evaluate(), (e) => {
+      equal([e.name, e.code, e.position, e.token], ["JlensError", "T0410", 5, "tax"]);
+    });
+    // The bindings take precedence; registering again replaces the function.
+    equal(expr.evaluate({ price: 8 }, { tax: () => 1 }), 2, "bindings first");
+    expr.registerFunction("tax", () => 3);
+    equal(expr.evaluate({ price: 8 }), 6, "replaced");
+    throws(() => expr.registerFunction("f", () => 1, "<n<s>:n>"), (e) => {
+      equal(e.name, "JlensError");
+      ok(e.code.startsWith("S04"), e.code);
+    });
+  }],
+
+  ["exceptions of host functions are rethrown", (j) => {
+    class RateError extends Error {}
+    const failing = new RateError("The rate service is down");
+    failing.code = "ACME01";
+    const expr = new j.Expression("1 + $rate()");
+    throws(() => expr.evaluate(null, { rate: () => { throw failing; } }), (e) => {
+      ok(e === failing, "the same exception");
+      equal([e.position, e.token], [10, "rate"], "position and token");
+    });
+    throws(() => expr.evaluate(null, { rate: () => { throw "plain"; } }), (e) => equal(e, "plain"));
+    // An exception wrapped by $eval is the error of $eval.
+    throws(() => new j.Expression("$eval('$rate()')").evaluate(null, { rate: () => { throw failing; } }), (e) => {
+      equal([e.name, e.code], ["JlensError", "D3121"]);
+    });
+    const audited = expr.evaluateWithAudit(null, { rate: () => { throw failing; } });
+    equal([audited.error.code, audited.error.message], ["ACME01", "The rate service is down"], "audit");
+    const typeError = expr.evaluateWithAudit(null, { rate: () => null.x });
+    equal(typeError.error.code, "TypeError", "the name as the code");
+    // A result that cannot be converted fails like an exception.
+    const cyclic = {};
+    cyclic.self = cyclic;
+    throws(() => expr.evaluate(null, { rate: () => cyclic }), (e) => ok(e instanceof TypeError, "TypeError"));
+    // Expressions evaluated by a host function have their own functions and exceptions.
+    const inner = new j.Expression("$g()");
+    const nested = { f: () => inner.evaluate(null, { g: () => 20 }) + 1 };
+    equal(new j.Expression("$f() * 2").evaluate(null, nested), 42, "nested evaluations");
+    throws(() => new j.Expression("$f()").evaluate(null, { f: () => inner.evaluate(null, { g: () => { throw failing; } }) }), (e) => {
+      ok(e === failing, "rethrown through both evaluations");
+    });
+    equal(new j.Expression("$add(1, 2)").evaluate(null, { add: (a, b) => a + b }), 3, "still usable");
+  }],
+
+  ["asynchronous host functions fail with U1002", (j) => {
+    throws(() => new j.Expression("$fetch()").evaluate(null, { fetch: async () => 1 }), (e) => {
+      equal([e.name, e.code, e.token], ["JlensError", "U1002", "fetch"]);
+      ok(e.message.includes("$fetch"), e.message);
+    });
+  }],
+
   ["invalid arguments are TypeErrors", (j) => {
     const expr = new j.Expression("$x");
     throws(() => expr.evaluate(null, [1]), (e) => ok(e instanceof TypeError, "bindings array"));
+    throws(() => expr.evaluate(null, () => 1), (e) => ok(e instanceof TypeError, "bindings function"));
     throws(() => expr.evaluate(null, null, { timeout: "soon" }), (e) => ok(e instanceof TypeError, "timeout"));
     throws(
       () => expr.evaluateWithAudit(null, null, { level: "everything" }),
@@ -226,6 +315,19 @@ export const cases = [
     const help = service.signatureHelp("$substring('abc', ", 18);
     equal([help.name, help.activeParam], ["$substring", 1]);
     equal(new j.LanguageService().diagnostics("a +").map((d) => d.code), ["S0207"]);
+  }],
+
+  ["declared host functions in the language service", (j) => {
+    const service = new j.LanguageService(null, null, [
+      { name: "$shipping", signature: "<ns?:n>", params: ["weight", "region"], summary: "Shipping cost" },
+      { name: "sum" },
+    ]);
+    const items = service.complete("$s", 2).items.filter((i) => i.kind === "function");
+    equal(items.slice(0, 2).map((i) => [i.label, i.detail ?? null]), [["$shipping", "<ns?:n>"], ["$sum", null]]);
+    const help = service.signatureHelp("$shipping(3, ", 13);
+    equal([help.params, help.activeParam, help.summary], [["$weight", "$region"], 1, "Shipping cost"]);
+    throws(() => new j.LanguageService(null, null, [{ name: "x", sig: "<n>" }]), (e) => ok(e instanceof TypeError, "unknown field"));
+    throws(() => new j.LanguageService(null, null, {}), (e) => ok(e instanceof TypeError, "not an array"));
   }],
 
   ["function catalog", (j) => {

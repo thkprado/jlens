@@ -1,5 +1,19 @@
-/** Variables an expression is evaluated with: `{limit: 10}` defines `$limit`. */
+/**
+ * Variables and functions an expression is evaluated with: `{limit: 10}` defines `$limit`, and
+ * `{rate: (region) => 0.2}` defines `$rate(region)`. Values are converted to JSON; functions are
+ * called as host functions (see `HostFunction`).
+ */
 export type Bindings = Record<string, unknown>;
+
+/**
+ * A JavaScript function called from an expression. Arguments and the result are converted
+ * through JSON: `undefined` stands for undefined, and a function argument arrives as
+ * `undefined`. `this` is `undefined`; use a signature with `-` to receive the context value.
+ * Without a signature, `length` tells higher-order functions how many arguments to pass. An
+ * exception it throws is rethrown by the evaluation, with the `position` and `token` of the call
+ * when it has none. Returning a promise fails with `U1002`.
+ */
+export type HostFunction = (...args: any[]) => unknown;
 
 /** Evaluation guardrails. */
 export interface EvaluateOptions {
@@ -277,6 +291,17 @@ export type FunctionCategory =
   | "encoding"
   | "misc";
 
+/** A host function declared to the language service, completed like a built-in function. */
+export interface FunctionDeclaration {
+  /** The name, with or without `$`. */
+  name: string;
+  /** The signature, such as `<n-n?:n>`. */
+  signature?: string;
+  /** Parameter names, without `$`, shown by signature help. */
+  params?: string[];
+  summary?: string;
+}
+
 export interface FunctionInfo {
   /** The name, without `$`. */
   name: string;
@@ -314,15 +339,23 @@ export class Expression {
     options?: EvaluateOptions,
   ): string | undefined;
   /**
-   * Evaluates the expression and records how the result was reached. Evaluation errors are
-   * reported in the returned `error`, not thrown.
-   */
-  /**
    * Evaluates the expression against a `Document` converted beforehand, which avoids converting
    * the input on every call. Use it to evaluate several expressions against one document.
    */
   evaluateDocument(document: Document, bindings?: Bindings | null, options?: EvaluateOptions): unknown;
+  /**
+   * Evaluates the expression and records how the result was reached. Evaluation errors are
+   * reported in the returned `error`, not thrown; an exception of a host function is reported
+   * with its `code` (or its `name`) and its `message`.
+   */
   evaluateWithAudit(input?: unknown, bindings?: Bindings | null, options?: AuditOptions): AuditResult;
+  /**
+   * Makes `implementation` available as `$name` in every evaluation, as jsonata-js does. With a
+   * `signature` (such as `<n-n?:n>`), arguments are checked before each call, as for built-in
+   * functions. A function of the same name in the bindings takes precedence. Throws a
+   * `JlensError` when the signature is invalid.
+   */
+  registerFunction(name: string, implementation: HostFunction, signature?: string): void;
   /** The processed syntax tree, as plain objects. */
   ast(): AstNode;
   /** Releases the compiled expression. */
@@ -351,9 +384,14 @@ export class LanguageService {
   /**
    * `schema` describes the input documents; without it, functions and variables are still
    * completed. `variables` declares the bindings the expressions are evaluated with (names with
-   * or without `$`), optionally with a schema for their values.
+   * or without `$`), optionally with a schema for their values. `functions` declares the host
+   * functions they are evaluated with.
    */
-  constructor(schema?: JsonSchema | null, variables?: Record<string, JsonSchema | null>);
+  constructor(
+    schema?: JsonSchema | null,
+    variables?: Record<string, JsonSchema | null> | null,
+    functions?: FunctionDeclaration[] | null,
+  );
   /** Suggestions for the word at `offset`, and the range they replace. */
   complete(text: string, offset: number): Completions;
   /** Syntax errors, and references to fields the schema does not have. */

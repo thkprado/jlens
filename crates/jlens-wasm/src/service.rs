@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use jlens_schema::{Override, Schema};
+use jlens_schema::{FunctionDecl, Override, Schema};
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
@@ -59,12 +59,13 @@ pub struct LanguageService {
 impl LanguageService {
     /// Creates a service. `schema` describes the input documents (without it, functions and
     /// variables are still completed); `variables` declares the bindings the expressions are
-    /// evaluated with, optionally with a schema for their values.
+    /// evaluated with, optionally with a schema for their values; `functions` declares the host
+    /// functions they are evaluated with.
     #[wasm_bindgen(constructor, skip_typescript)]
     pub fn new(
         schema: Option<JsValue>,
-
         variables: Option<JsValue>,
+        functions: Option<JsValue>,
     ) -> Result<LanguageService, JsValue> {
         crate::convert::install_hooks();
         let schema = match &schema {
@@ -89,6 +90,20 @@ impl LanguageService {
                     }
                 }
                 Some(_) => return Err(type_error("variables must be an object")),
+            }
+        }
+        if let Some(functions) = &functions {
+            match from_js(functions, "functions")? {
+                None | Some(Value::Null) => {}
+                Some(list @ Value::Array(_)) => {
+                    let list: Vec<FunctionDecl> = serde_json::from_value(list)
+                        .map_err(|e| type_error(&format!("invalid function declaration: {e}")))?;
+                    for mut decl in list {
+                        decl.name = decl.name.trim_start_matches('$').to_owned();
+                        inner = inner.with_function(decl);
+                    }
+                }
+                Some(_) => return Err(type_error("functions must be an array")),
             }
         }
         Ok(LanguageService { inner })

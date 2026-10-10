@@ -139,11 +139,12 @@ Raised while evaluating, for other run-time problems.
 
 ## Guardrail errors (U)
 
-Raised when an evaluation exceeds its configured limits.
+Raised when an evaluation exceeds its configured limits, or needs what jlens does not support.
 
 | Code | Message |
 |---|---|
 | `U1001` | `{{{message}}}` |
+| `U1002` | `The function ${{{token}}} returned a promise: asynchronous functions are not supported` |
 
 ## Warnings (W)
 

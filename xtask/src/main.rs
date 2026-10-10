@@ -171,7 +171,7 @@ fn errors_page() -> String {
         (
             Category::Guardrail,
             "Guardrail errors (U)",
-            "Raised when an evaluation exceeds its configured limits.",
+            "Raised when an evaluation exceeds its configured limits, or needs what jlens does not support.",
         ),
         (
             Category::Warning,

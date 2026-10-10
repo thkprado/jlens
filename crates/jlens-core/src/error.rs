@@ -408,6 +408,7 @@ catalog! {
     "D3140" => "Malformed URL passed to ${{{functionName}}}(): {{value}}",
     "D3141" => "{{{message}}}",
     "U1001" => "{{{message}}}",
+    "U1002" => "The function ${{{token}}} returned a promise: asynchronous functions are not supported",
     "W0101" => "This annotation is not attached to an expression and will be ignored",
     "W0102" => "Unknown annotation tag @{{{tag}}}; expected @label, @message or @id",
     "W0103" => "The value of annotation tag @{{{tag}}} should be a JSON string literal",

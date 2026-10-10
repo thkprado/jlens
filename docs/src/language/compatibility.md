@@ -60,10 +60,13 @@ accepts in place of `U1001`.
 
 ### Host functions
 
-Functions provided by the application through the bindings (`Bindings::function` in Rust):
+Functions provided by the application through the bindings (`Bindings::function` in Rust,
+functions in the bindings object or `registerFunction` in the WebAssembly package):
 
 | Topic | jsonata-js | jlens |
 |---|---|---|
 | Arguments and result | The JavaScript values themselves, which the function may modify | JSON copies: the function cannot change the values of the evaluation |
 | A function as an argument (`$f($g)`) | The function, which the host can call | `None` (undefined) |
-| The context value | `this`: the context value for a function in the bindings, `{environment, input}` for one registered with `registerFunction`. An input array arrives in its wrapper | `HostCall::input`, the context value itself, an input array included |
+| The context value | `this`: the context value for a function in the bindings, `{environment, input}` for one registered with `registerFunction`. An input array arrives in its wrapper | `HostCall::input`, the context value itself, an input array included. In WebAssembly, `this` is `undefined`: a signature with `-` passes the context value as an argument |
+| A function that returns a promise | The evaluation awaits it | `U1002` |
+| An exception thrown by the function | Rethrown, with the `position` and `token` of the call | Rethrown as is in WebAssembly; `position` and `token` are added when missing |
