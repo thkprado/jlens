@@ -106,6 +106,22 @@ pub fn from_js(value: &JsValue, what: &str) -> Result<Option<Value>, JsValue> {
     }
 }
 
+/// Converts a JS value to a jlens document, through `JSON.stringify` and a parse straight into
+/// the internal representation. `undefined` (and values that stringify to nothing) become `None`.
+pub fn document(value: &JsValue, what: &str) -> Result<Option<jlens_core::Document>, JsValue> {
+    if value.is_undefined() {
+        return Ok(None);
+    }
+    let text = js_sys::JSON::stringify(value)
+        .map_err(|e| type_error(&format!("{what} cannot be converted to JSON: {e:?}")))?;
+    match text.as_string() {
+        Some(text) => jlens_core::Document::parse(&text)
+            .map(Some)
+            .map_err(|e| type_error(&format!("{what} is not valid JSON: {e}"))),
+        None => Ok(None),
+    }
+}
+
 pub fn parse_json(text: &str, what: &str) -> Result<Value, JsValue> {
     serde_json::from_str(text).map_err(|e| type_error(&format!("{what} is not valid JSON: {e}")))
 }

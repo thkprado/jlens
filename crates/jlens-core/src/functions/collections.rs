@@ -129,7 +129,7 @@ pub(super) fn reduce(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
 pub(super) fn sift(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
     let obj = arg(&a, 0);
     let func = arg(&a, 1);
-    let mut out = Map::new();
+    let mut out = Map::default();
     for (key, value) in entries(&obj) {
         let args = hof_args(
             &func,
@@ -208,7 +208,7 @@ fn spread_value(v: &Value) -> Value {
             o.borrow()
                 .iter()
                 .map(|(k, v)| {
-                    let mut m = Map::new();
+                    let mut m = Map::default();
                     m.insert(k.clone(), v.clone());
                     Value::object(m)
                 })
@@ -223,7 +223,7 @@ pub(super) fn merge(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     if arr.is_undefined() {
         return Ok(Value::Undefined);
     }
-    let mut out = Map::new();
+    let mut out = Map::default();
     for item in arr.items_or_self() {
         for (k, v) in entries(&item) {
             out.insert(k, v);

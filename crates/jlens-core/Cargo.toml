@@ -14,6 +14,7 @@ serde = { workspace = true, features = ["rc"] }
 serde_json.workspace = true
 tracing = { workspace = true, optional = true }
 indexmap.workspace = true
+foldhash.workspace = true
 thiserror.workspace = true
 ryu-js.workspace = true
 regress.workspace = true
@@ -25,9 +26,15 @@ stacker.workspace = true
 [dev-dependencies]
 libtest-mimic.workspace = true
 insta.workspace = true
+criterion.workspace = true
+proptest.workspace = true
 
 [[test]]
 name = "conformance"
+harness = false
+
+[[bench]]
+name = "evaluate"
 harness = false
 
 [lints]

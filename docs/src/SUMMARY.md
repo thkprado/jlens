@@ -31,6 +31,7 @@
 - [Schema and language service](architecture/language-service.md)
 - [Roadmap](architecture/roadmap.md)
 - [Conformance testing](architecture/conformance.md)
+- [Performance](architecture/performance.md)
 - [Decision records](adr/README.md)
   - [0001 Own JSONata implementation](adr/0001-own-implementation.md)
   - [0002 ECMAScript regex via regress](adr/0002-regress.md)

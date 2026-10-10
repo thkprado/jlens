@@ -22,7 +22,7 @@ use crate::functions::Native;
 use crate::regex::Regex;
 
 /// The fields of an object, in insertion order.
-pub(crate) type Map = IndexMap<String, Value>;
+pub(crate) type Map = IndexMap<String, Value, foldhash::fast::RandomState>;
 
 /// A JSONata value.
 #[derive(Clone, Default)]

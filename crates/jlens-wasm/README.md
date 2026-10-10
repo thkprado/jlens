@@ -1,4 +1,4 @@
-# jlens (WebAssembly)
+# jlens-wasm
 
 [JSONata](https://jsonata.org/) for the browser, compiled from Rust to WebAssembly. It
 evaluates expressions, **explains** how a result was reached, and gives editors completion,
@@ -8,7 +8,7 @@ This is an ES module for browsers (`--target web`). It also runs in Node.js 20+ 
 pass the `.wasm` bytes to `init`.
 
 ```js
-import init, { Expression } from "jlens";
+import init, { Expression } from "jlens-wasm";
 
 await init(); // fetches jlens_bg.wasm next to jlens.js
 
@@ -24,6 +24,7 @@ expr.evaluate({ items: [{ type: "a", price: 2.5, qty: 4 }] }, { kind: "a" }); //
 | `new Expression(source)` | Compiles an expression; throws a `JlensError` on syntax errors |
 | `expr.evaluate(input?, bindings?, options?)` | Evaluates against a JSON-compatible value; `undefined` when the result is undefined |
 | `expr.evaluateJson(json?, bindings?, options?)` | The same with JSON text in and out (faster for large documents) |
+| `new Document(input)`, `Document.fromJson(text)` | A document converted once, for `expr.evaluateDocument(doc, bindings?, options?)` |
 | `expr.evaluateWithAudit(input?, bindings?, options?)` | Result, audit tree and explanation; errors are reported, not thrown |
 | `expr.ast()` | The processed syntax tree |
 | `parseRecover(source)` | Partial syntax tree and every diagnostic, without throwing |

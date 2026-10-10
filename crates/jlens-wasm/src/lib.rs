@@ -22,10 +22,11 @@ mod service;
 pub use service::{LanguageService, functions, infer_schema};
 
 use jlens_core::audit::{self, AuditOptions, CaptureLimits};
+use jlens_core::{Bindings, Options};
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
-use convert::{Offsets, error_json, from_js, js_error, parse_json, to_js, type_error};
+use convert::{Offsets, error_json, from_js, js_error, to_js, type_error};
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPES: &str = include_str!("types.d.ts");
@@ -75,13 +76,14 @@ impl Expression {
         bindings: Option<JsValue>,
         options: Option<JsValue>,
     ) -> Result<JsValue, JsValue> {
-        let input = match &input {
-            Some(input) => from_js(input, "input")?,
+        let document = match &input {
+            Some(input) => convert::document(input, "input")?,
             None => None,
         };
-        Ok(self
-            .run(input.as_ref(), bindings, options)?
-            .map_or(JsValue::UNDEFINED, |v| to_js(&v)))
+        let (bindings, options) = arguments(bindings, options)?;
+        let options = convert::options(options.as_ref())?;
+        let result = self.run(document.as_ref(), &bindings, &options)?;
+        Ok(result.map_or(JsValue::UNDEFINED, |v| to_js(&v)))
     }
 
     /// Like `evaluate`, with the input document and the result as JSON text. This avoids
@@ -93,13 +95,32 @@ impl Expression {
         bindings: Option<JsValue>,
         options: Option<JsValue>,
     ) -> Result<Option<String>, JsValue> {
-        let input = match &input {
-            Some(text) => Some(parse_json(text, "input")?),
+        let document = match &input {
+            Some(text) => Some(
+                jlens_core::Document::parse(text)
+                    .map_err(|e| type_error(&format!("input is not valid JSON: {e}")))?,
+            ),
             None => None,
         };
-        Ok(self
-            .run(input.as_ref(), bindings, options)?
-            .map(|v| jlens_core::format_json(&v, false)))
+        let (bindings, options) = arguments(bindings, options)?;
+        let options = convert::options(options.as_ref())?;
+        let result = self.run(document.as_ref(), &bindings, &options)?;
+        Ok(result.map(|v| jlens_core::format_json(&v, false)))
+    }
+
+    /// Evaluates the expression against a `Document` converted beforehand, which avoids
+    /// converting the input on every call.
+    #[wasm_bindgen(js_name = evaluateDocument, skip_typescript)]
+    pub fn evaluate_document(
+        &self,
+        document: &Document,
+        bindings: Option<JsValue>,
+        options: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let (bindings, options) = arguments(bindings, options)?;
+        let options = convert::options(options.as_ref())?;
+        let result = self.run(Some(&document.inner), &bindings, &options)?;
+        Ok(result.map_or(JsValue::UNDEFINED, |v| to_js(&v)))
     }
 
     /// Evaluates the expression and records how the result was reached. Never throws for
@@ -115,11 +136,7 @@ impl Expression {
             Some(input) => from_js(input, "input")?,
             None => None,
         };
-        let bindings = convert::bindings(&bindings.unwrap_or(JsValue::UNDEFINED))?;
-        let options = match &options {
-            Some(options) => from_js(options, "options")?,
-            None => None,
-        };
+        let (bindings, options) = arguments(bindings, options)?;
         let eval_options = convert::options(options.as_ref())?;
         let audit_options = audit_options(options.as_ref())?;
         let (result, tree) =
@@ -159,19 +176,58 @@ impl Expression {
 impl Expression {
     fn run(
         &self,
-        input: Option<&Value>,
-        bindings: Option<JsValue>,
-        options: Option<JsValue>,
+        document: Option<&jlens_core::Document>,
+        bindings: &Bindings,
+        options: &Options,
     ) -> Result<Option<Value>, JsValue> {
-        let bindings = convert::bindings(&bindings.unwrap_or(JsValue::UNDEFINED))?;
-        let options = match &options {
-            Some(options) => from_js(options, "options")?,
-            None => None,
-        };
-        let options = convert::options(options.as_ref())?;
-        self.inner
-            .evaluate_with(input, &bindings, &options)
-            .map_err(|e| js_error(&e, &self.offsets))
+        match document {
+            Some(document) => self.inner.evaluate_document(document, bindings, options),
+            None => self.inner.evaluate_with(None, bindings, options),
+        }
+        .map_err(|e| js_error(&e, &self.offsets))
+    }
+}
+
+/// Reads the `bindings` and `options` arguments of the evaluation methods. The options are
+/// returned as JSON, for `convert::options` and `audit_options`.
+fn arguments(
+    bindings: Option<JsValue>,
+    options: Option<JsValue>,
+) -> Result<(Bindings, Option<Value>), JsValue> {
+    let bindings = convert::bindings(&bindings.unwrap_or(JsValue::UNDEFINED))?;
+    let options = match &options {
+        Some(options) => from_js(options, "options")?,
+        None => None,
+    };
+    Ok((bindings, options))
+}
+
+/// A JSON document converted once into jlens's internal representation, for evaluating
+/// several expressions (or one several times) against it.
+#[wasm_bindgen(skip_typescript)]
+pub struct Document {
+    inner: jlens_core::Document,
+}
+
+#[wasm_bindgen]
+impl Document {
+    /// Converts a JSON-compatible value.
+    #[wasm_bindgen(constructor, skip_typescript)]
+    pub fn new(input: JsValue) -> Result<Document, JsValue> {
+        convert::install_hooks();
+        match convert::document(&input, "the document")? {
+            Some(inner) => Ok(Document { inner }),
+            None => Err(type_error("the document cannot be converted to JSON")),
+        }
+    }
+
+    /// Parses JSON text.
+    #[wasm_bindgen(js_name = fromJson, skip_typescript)]
+    pub fn from_json(text: &str) -> Result<Document, JsValue> {
+        convert::install_hooks();
+        let inner = jlens_core::Document::parse(text)
+            .map_err(|e| type_error(&format!("the document is not valid JSON: {e}")))?;
+        Ok(Document { inner })
     }
 }
 

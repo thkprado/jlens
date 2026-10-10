@@ -149,7 +149,7 @@ fn workspace_version() -> Result<String> {
 fn write_package(out: &Path) -> Result<()> {
     let package = format!(
         r#"{{
-  "name": "jlens",
+  "name": "jlens-wasm",
   "version": "{version}",
   "description": "JSONata in WebAssembly, with evaluation audits and schema-driven autocomplete",
   "license": "MIT",

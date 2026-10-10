@@ -219,7 +219,7 @@ pub(super) fn match_(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
         let mut matches = evaluate_matcher(ev, &arg(&a, 1), Value::String(s), call)?;
         let mut count = 0.0;
         while !matches.is_undefined() && limit.is_none_or(|l| count < l) {
-            let mut m = Map::new();
+            let mut m = Map::default();
             m.insert("match".into(), field(&matches, "match"));
             m.insert("index".into(), field(&matches, "start"));
             m.insert("groups".into(), field(&matches, "groups"));

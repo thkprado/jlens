@@ -317,10 +317,28 @@ export class Expression {
    * Evaluates the expression and records how the result was reached. Evaluation errors are
    * reported in the returned `error`, not thrown.
    */
+  /**
+   * Evaluates the expression against a `Document` converted beforehand, which avoids converting
+   * the input on every call. Use it to evaluate several expressions against one document.
+   */
+  evaluateDocument(document: Document, bindings?: Bindings | null, options?: EvaluateOptions): unknown;
   evaluateWithAudit(input?: unknown, bindings?: Bindings | null, options?: AuditOptions): AuditResult;
   /** The processed syntax tree, as plain objects. */
   ast(): AstNode;
   /** Releases the compiled expression. */
+  free(): void;
+  [Symbol.dispose](): void;
+}
+
+/**
+ * A JSON document converted once into jlens's internal representation. Evaluating against a
+ * `Document` (`expr.evaluateDocument(doc)`) skips converting the input on every call.
+ */
+export class Document {
+  /** Converts a JSON-compatible value. */
+  constructor(input: unknown);
+  /** Parses JSON text. Throws a `TypeError` when it is not valid JSON. */
+  static fromJson(text: string): Document;
   free(): void;
   [Symbol.dispose](): void;
 }

@@ -1,0 +1,12 @@
+{
+  "name": "jlens-benchmark-comparison",
+  "private": true,
+  "type": "module",
+  "description": "Compares jlens (WebAssembly, in Node.js) with jsonata-js on benches/cases.json",
+  "scripts": {
+    "compare": "node compare.mjs"
+  },
+  "dependencies": {
+    "jsonata": "2.2.2"
+  }
+}

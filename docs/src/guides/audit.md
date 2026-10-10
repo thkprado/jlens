@@ -136,10 +136,12 @@ You can implement your own tracer, for example to collect metrics, and pass it t
 ## Performance
 
 When no tracer is attached, auditing costs one check per evaluated node. Compared with the
-evaluator before tracing existed, interleaved benchmark runs
-(`cargo run --release -p jlens-core --example bench_eval`) measured between −5.7% and +2.7%
+evaluator before tracing existed, interleaved benchmark runs measured between −5.7% and +2.7%
 across five workloads, within the noise of the machine. With a tracer attached, evaluation does
-more work in proportion to what is recorded. Level `decisions` is the cheapest useful level.
+more work in proportion to what is recorded. Level `decisions` is the cheapest useful level:
+for the shipping rule on a 200-item document, it takes about three times as long as an
+evaluation without a tracer, and `full` about fifteen times. `cargo bench -p jlens-core -- audit`
+measures this; see [Performance](../architecture/performance.md).
 
 ## Limitations
 

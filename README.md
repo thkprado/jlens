@@ -5,7 +5,7 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 
 - **`jlens-core`**: the Rust crate (with `jlens-schema` for metadata and autocomplete);
 - **`jlens`**: the command-line tool;
-- **`jlens-wasm`**: an ES module for the browser.
+- **`jlens-wasm`**: an ES module for the browser (npm package `jlens-wasm`).
 
 > **Status: phase 7 of 8 done.** jlens passes 1,688 of the 1,690 cases of the official
 > JSONata 2.2.2 test suite; the other two are documented overrides. Evaluations can be audited

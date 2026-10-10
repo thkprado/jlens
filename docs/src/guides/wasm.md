@@ -10,7 +10,7 @@ Rust crates do:
 It also runs in Node.js 20+ and Deno, provided `init` is given the `.wasm` bytes.
 
 ```js
-import init, { Expression } from "jlens";
+import init, { Expression } from "jlens-wasm";
 
 await init();
 
@@ -62,7 +62,7 @@ or its bytes:
 
 ```js
 // Vite: get the URL of the asset.
-import wasmUrl from "jlens/jlens_bg.wasm?url";
+import wasmUrl from "jlens-wasm/jlens_bg.wasm?url";
 await init({ module_or_path: wasmUrl });
 
 // Node.js or Deno: pass the bytes.
@@ -93,6 +93,23 @@ expr.free();                                 // release it (or let the garbage c
 `evaluateJson` takes the input as JSON text and returns the result as JSON text. For large
 documents that you already have as text, such as a `fetch` response body, it avoids converting
 the document to JavaScript objects and back.
+
+### Reusing a document
+
+Each `evaluate` call converts its input. For a document of a few dozen kilobytes that costs
+hundreds of microseconds, often more than the evaluation itself. To evaluate several
+expressions against one document (a set of rules, say), convert it once:
+
+```js
+import { Document } from "jlens-wasm";
+
+const doc = new Document(input);              // or Document.fromJson(text)
+const results = rules.map((rule) => rule.evaluateDocument(doc, bindings));
+doc.free();
+```
+
+Evaluations never modify a document. [Performance](../architecture/performance.md) has
+measurements.
 
 With explicit resource management, `using expr = new Expression(...)` frees the expression at
 the end of the block.
@@ -270,7 +287,7 @@ measured what your target engines allow. The jlens errors themselves (`JlensErro
 `TypeError`) never affect the instance. The
 [evaluator chapter](../architecture/evaluator.md#guardrails) has the details.
 
-`Expression` and `LanguageService` objects live in WebAssembly memory. The garbage collector
+`Expression`, `Document` and `LanguageService` objects live in WebAssembly memory. The garbage collector
 frees them through `FinalizationRegistry`. Call `free()`, or use `using`, to release them
 promptly in loops.
 

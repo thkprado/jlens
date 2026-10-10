@@ -62,6 +62,19 @@ export const cases = [
     equal(result.a, [2e21, 0.1 + 0.2, 1 / 3, 2 ** 64], "numbers");
   }],
 
+  ["documents", (j) => {
+    const doc = new j.Document(order);
+    const rules = ["$sum(items.(unitPrice * quantity))", "customer.login", "items[type = $t].code"];
+    equal(rules.map((r) => new j.Expression(r).evaluateDocument(doc, { t: "electronic" })), [57000, "alice.walker99", ["2", "3"]]);
+    const transform = new j.Expression("$ ~> |items|{'n': 1}, ['tax']|");
+    transform.evaluateDocument(doc);
+    equal(new j.Expression("items[0]").evaluateDocument(doc), order.items[0], "unchanged");
+    equal(new j.Expression("a").evaluateDocument(j.Document.fromJson('{"a": [1, {"b": null}]}')), [1, { b: null }]);
+    throws(() => j.Document.fromJson("{oops"), (e) => ok(e instanceof TypeError, "TypeError"));
+    throws(() => new j.Document(undefined), (e) => ok(e instanceof TypeError, "undefined"));
+    doc.free();
+  }],
+
   ["evaluateJson", (j) => {
     const expr = new j.Expression("items[0].{'code': code, 'total': unitPrice * quantity}");
     equal(expr.evaluateJson(JSON.stringify(order)), '{"code":"1","total":20000}');

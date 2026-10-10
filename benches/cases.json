@@ -1,0 +1,15 @@
+{
+  "input": "orders-200.json",
+  "cases": [
+    { "name": "path", "expr": "customer.name" },
+    { "name": "filter + aggregate", "expr": "$sum(items[type = 'electronic' and quantity > 1].(unitPrice * quantity))" },
+    { "name": "group-by", "expr": "items{type: {'total': $sum($.(unitPrice * quantity)), 'n': $count($)}}" },
+    { "name": "sort + map", "expr": "$map(items^(>tax, code), function($i){ $i.code & ':' & $string($i.tax) })" },
+    { "name": "strings", "expr": "$join(items[type = 'electronic'].$uppercase(color & '-' & code), ',')" },
+    { "name": "regex", "expr": "$count(items[$contains(code, /^1[0-9]$/)])" },
+    { "name": "number formatting", "expr": "items[[0..19]].$formatNumber(unitPrice * quantity, '#,##0.00')" },
+    { "name": "transform", "expr": "$ ~> |items|{'total': unitPrice * quantity}, ['tax']|" },
+    { "name": "recursion", "expr": "($f := function($n){ $n <= 1 ? $n : $f($n - 1) + $f($n - 2) }; $f(15))" },
+    { "name": "shipping rule", "file": "../fixtures/shipping-rule.jsonata" }
+  ]
+}

@@ -7,6 +7,7 @@ import init, {
   type FunctionInfo,
   type JlensError,
   type JsonSchema,
+  Document,
   Expression,
   LanguageService,
   functions,
@@ -32,6 +33,10 @@ export async function check(): Promise<void> {
   const failed = audit.explanation.lines.filter((l) => l.passed === false).map((l) => l.text);
   const root = audit.audit.root;
   const start: number | undefined = root?.span.start;
+  const doc = Document.fromJson("{}");
+  const r4: unknown = expr.evaluateDocument(new Document({ items: [] }), { limit: 1 });
+  const r5: unknown = expr.evaluateDocument(doc);
+  doc.free();
   const type: string = expr.ast().type;
   expr.free();
 
@@ -54,5 +59,5 @@ export async function check(): Promise<void> {
   const hover = service.hover("a", 0)?.contents;
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();
-  console.log(v, source, r1, r2, r3, text, failed, start, type, ast.id, d, kinds, hover, help, catalog);
+  console.log(v, source, r1, r2, r3, r4, r5, text, failed, start, type, ast.id, d, kinds, hover, help, catalog);
 }

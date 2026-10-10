@@ -25,7 +25,7 @@ use crate::value::{
 
 /// A scope of variable bindings.
 pub(crate) struct Frame {
-    vars: RefCell<HashMap<String, Value>>,
+    vars: RefCell<HashMap<String, Value, foldhash::fast::RandomState>>,
     parent: Option<Env>,
 }
 
@@ -35,7 +35,7 @@ pub(crate) type Env = Rc<Frame>;
 impl Frame {
     fn new(parent: Option<&Env>) -> Env {
         Rc::new(Frame {
-            vars: RefCell::new(HashMap::new()),
+            vars: RefCell::new(HashMap::default()),
             parent: parent.cloned(),
         })
     }
@@ -134,7 +134,7 @@ fn tuple_get(tuple: &Value, key: &str) -> Value {
 fn tuple_map(tuple: &Value) -> Map {
     match tuple {
         Value::Object(o) => o.borrow().clone(),
-        _ => IndexMap::new(),
+        _ => Map::default(),
     }
 }
 
@@ -154,7 +154,7 @@ fn transform_signature() -> &'static Signature {
 /// Evaluates a parsed expression. This is the entry point used by `Expression::evaluate_with`.
 pub(crate) fn evaluate(
     ast: &Ast,
-    input: Option<&serde_json::Value>,
+    input: Value,
     bindings: &crate::Bindings,
     limits: Limits,
     tracer: Option<&mut dyn Tracer>,
@@ -181,7 +181,7 @@ pub(crate) fn evaluate(
     for (name, value) in bindings.iter() {
         ev.bind(&env, name, Value::from_json(value));
     }
-    let mut input = input.map_or(Value::Undefined, Value::from_json);
+    let mut input = input;
     ev.bind(&env, "$", input.clone());
     if let Value::Array(a) = &input
         && !a.is_sequence()
@@ -609,7 +609,7 @@ impl Evaluator<'_> {
                         .into_iter()
                         .enumerate()
                         .map(|(ss, item)| {
-                            let mut tuple = Map::new();
+                            let mut tuple = Map::default();
                             tuple.insert("@".into(), item);
                             if let Some(index) = &step.attrs.index {
                                 tuple.insert(index.clone(), Value::Number(ss as f64));
@@ -631,7 +631,7 @@ impl Evaluator<'_> {
                     a.items
                         .iter()
                         .map(|item| {
-                            let mut t = Map::new();
+                            let mut t = Map::default();
                             t.insert("@".into(), item.clone());
                             Value::object(t)
                         })
@@ -917,7 +917,7 @@ impl Evaluator<'_> {
             }
         }
 
-        let mut result = Map::new();
+        let mut result = Map::default();
         for (key, (data, pair_index)) in groups {
             let (context, frame) = if reduce {
                 let mut tuple = reduce_tuple_stream(&data);

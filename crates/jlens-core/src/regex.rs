@@ -66,7 +66,7 @@ pub(crate) fn exec(re: &Rc<Regex>, text: &Rc<str>, from: usize) -> Value {
             None => Value::Undefined,
         })
         .collect();
-    let mut obj = Map::new();
+    let mut obj = Map::default();
     obj.insert("match".into(), Value::string(&text[range.clone()]));
     obj.insert(
         "start".into(),

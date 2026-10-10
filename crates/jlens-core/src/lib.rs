@@ -39,6 +39,7 @@ pub mod ast;
 pub mod audit;
 mod datetime;
 pub mod debug;
+mod document;
 pub mod error;
 mod eval;
 pub mod functions;
@@ -53,6 +54,7 @@ mod value;
 
 pub use annotation::Annotation;
 pub use ast::{Ast, Node, NodeKind, Span};
+pub use document::Document;
 pub use error::{Diagnostic, Error, Result, Severity};
 pub use functions::{Category, FunctionInfo, catalog as function_catalog};
 pub use json::format_json;
@@ -161,7 +163,31 @@ impl Expression {
         bindings: &Bindings,
         options: &Options,
     ) -> Result<Option<JsonValue>> {
-        eval::evaluate(&self.ast, input, bindings, limits(options), None)
+        eval::evaluate(
+            &self.ast,
+            json_input(input),
+            bindings,
+            limits(options),
+            None,
+        )
+    }
+
+    /// Evaluates the expression against a [`Document`] converted beforehand. Use it to
+    /// evaluate several expressions, or the same one several times, against one large document
+    /// without converting it each time.
+    pub fn evaluate_document(
+        &self,
+        document: &Document,
+        bindings: &Bindings,
+        options: &Options,
+    ) -> Result<Option<JsonValue>> {
+        eval::evaluate(
+            &self.ast,
+            document.value().clone(),
+            bindings,
+            limits(options),
+            None,
+        )
     }
 
     /// Evaluates the expression, reporting every evaluation event to `tracer`.
@@ -174,7 +200,13 @@ impl Expression {
         options: &Options,
         tracer: &mut dyn audit::Tracer,
     ) -> Result<Option<JsonValue>> {
-        eval::evaluate(&self.ast, input, bindings, limits(options), Some(tracer))
+        eval::evaluate(
+            &self.ast,
+            json_input(input),
+            bindings,
+            limits(options),
+            Some(tracer),
+        )
     }
 
     /// Evaluates the expression and records an [`audit::AuditTree`] of how the result was
@@ -204,6 +236,10 @@ impl Expression {
         let result = self.evaluate_traced(input, bindings, options, &mut collector);
         (result, collector.finish())
     }
+}
+
+fn json_input(input: Option<&JsonValue>) -> value::Value {
+    input.map_or(value::Value::Undefined, value::Value::from_json)
 }
 
 fn limits(options: &Options) -> eval::Limits {
