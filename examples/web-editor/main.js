@@ -8,6 +8,7 @@ import { closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirro
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { bracketMatching } from "@codemirror/language";
 import { lintKeymap } from "@codemirror/lint";
+import { Compartment } from "@codemirror/state";
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from "@codemirror/view";
 
 import init, {
@@ -116,6 +117,39 @@ function schedule() {
   timer = setTimeout(evaluate, 150);
 }
 
+// The editor's colors come from the page's CSS variables, so they follow its light and dark
+// modes. A CodeMirror theme takes precedence over CodeMirror's base theme, which a plain
+// stylesheet does not: the base theme would otherwise draw a black cursor on the dark background.
+const editorTheme = EditorView.theme({
+  "&": { minHeight: "320px", maxHeight: "60vh", backgroundColor: "var(--panel)", color: "var(--text)" },
+  ".cm-scroller": {
+    fontFamily: 'ui-monospace, "Cascadia Code", Menlo, Consolas, monospace',
+    fontSize: "13px",
+    lineHeight: "1.5",
+  },
+  ".cm-content": { caretColor: "var(--caret)" },
+  ".cm-cursor, .cm-dropCursor": { borderLeft: "2px solid var(--caret)" },
+  ".cm-gutters": {
+    backgroundColor: "var(--code-bg)",
+    color: "var(--muted)",
+    borderRight: "1px solid var(--border)",
+  },
+  ".cm-activeLine": { backgroundColor: "color-mix(in srgb, var(--accent) 8%, transparent)" },
+  ".cm-activeLineGutter": {
+    backgroundColor: "color-mix(in srgb, var(--accent) 16%, transparent)",
+    color: "var(--text)",
+  },
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+    backgroundColor: "color-mix(in srgb, var(--accent) 30%, transparent)",
+  },
+  "&.cm-focused": { outline: "none" },
+});
+
+// Tells CodeMirror whether the page is dark, so that its own defaults (tooltips, panels) match.
+const darkScheme = window.matchMedia("(prefers-color-scheme: dark)");
+const colorScheme = new Compartment();
+const schemeFlag = (dark) => EditorView.theme({}, { dark });
+
 const editor = new EditorView({
   doc: SAMPLE_EXPRESSION,
   parent: $("expression"),
@@ -132,12 +166,18 @@ const editor = new EditorView({
       ...completionKeymap,
       ...lintKeymap,
     ]),
+    editorTheme,
+    colorScheme.of(schemeFlag(darkScheme.matches)),
     EditorView.lineWrapping,
     jlensExtensions(() => service, $("signature")),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) schedule();
     }),
   ],
+});
+
+darkScheme.addEventListener("change", (event) => {
+  editor.dispatch({ effects: colorScheme.reconfigure(schemeFlag(event.matches)) });
 });
 
 /** Reads the input document and the bindings from their text areas. */

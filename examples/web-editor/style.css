@@ -9,6 +9,7 @@
   --fail: #c62f2f;
   --warn: #b26a00;
   --code-bg: #f0f0ee;
+  --caret: #1d4ed8;
   --syntax-comment: #7a7f87;
   --syntax-string: #a1441b;
   --syntax-number: #0b7a75;
@@ -31,6 +32,7 @@
     --fail: #ff6b6b;
     --warn: #f0a640;
     --code-bg: #2a2a2e;
+  --caret: #ffcc4d;
     --syntax-comment: #8b919a;
     --syntax-string: #f0a07a;
     --syntax-number: #5fd3cc;
@@ -91,13 +93,8 @@ main {
 }
 
 .editor { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-.editor .cm-editor { min-height: 320px; max-height: 60vh; background: var(--panel); color: var(--text); }
-.editor .cm-scroller { font: 13px/1.5 ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; }
-.editor .cm-gutters { background: var(--code-bg); color: var(--muted); border-right: 1px solid var(--border); }
-.editor .cm-activeLine { background: color-mix(in srgb, var(--accent) 6%, transparent); }
-.editor .cm-activeLineGutter { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.editor .cm-cursor { border-left-color: var(--text); }
-.editor .cm-selectionBackground, .editor .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 28%, transparent) !important; }
+/* The editor's own colors are a CodeMirror theme (editorTheme in main.js). */
+.editor:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
 .cm-tooltip { background: var(--panel) !important; color: var(--text); border: 1px solid var(--border) !important; border-radius: 6px; max-width: 420px; }
 .cm-tooltip .md { padding: 6px 10px; }
 .cm-tooltip-autocomplete ul li[aria-selected] { background: var(--accent) !important; color: #fff !important; }
@@ -106,6 +103,7 @@ code, .md code { font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, mo
 
 textarea {
   width: 100%;
+  caret-color: var(--caret);
   min-height: 260px;
   resize: vertical;
   font: 12px/1.45 ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
