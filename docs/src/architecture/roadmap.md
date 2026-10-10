@@ -55,7 +55,7 @@ tests them and explains their results before they ship.
 | 6 | `jlens check` takes several files and glob patterns, adds `file`, `line` and `column` to its JSON, prints it compact, and has `--deny-warnings` | Snapshot tests; the CI loop in the CLI guide becomes one command | **done** |
 | 7 | `jlens errors [CODE] [--json]`, from the error catalog | Snapshot tests | **done** |
 | 8 | Cancellation from another thread, and caps on the size of built strings and arrays (`U1001`) | Property tests; an expression that builds a huge value stops with `U1001` | **done** |
-| 9 | The public API is reviewed before it grows further: what `jlens-core` exposes, and `Send`/`Sync` of `Expression` and `Document`, asserted in tests. `cargo-semver-checks` runs in CI | CI job green | planned |
+| 9 | The public API is reviewed before it grows further: what `jlens-core` exposes, and `Send`/`Sync` of `Expression` and `Document`, asserted in tests. `cargo-semver-checks` runs in CI | CI job green | **done** |
 
 ## 0.4: catching mistakes before they run
 

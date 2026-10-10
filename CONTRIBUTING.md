@@ -22,7 +22,13 @@ cargo test --workspace                         # includes the conformance baseli
 cargo xtask gen-docs --check                   # generated pages are up to date
 cargo xtask doc-check                          # the book's examples run, its links resolve
 cargo xtask wasm-test                          # the browser package, in Node.js and a browser
+cargo semver-checks -p jlens-core -p jlens-schema  # the API against the last release on crates.io
 ```
+
+The last check fails on a breaking change while `Cargo.toml` still carries the version of the
+last release. A breaking change is fine before 1.0, but it is deliberate: the change that
+introduces the first one after a release also raises the minor version in `Cargo.toml` (step 1
+of [Releasing](#releasing)), and records the break in the `Changed` section of `CHANGELOG.md`.
 
 Other useful tasks:
 
