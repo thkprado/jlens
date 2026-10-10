@@ -76,11 +76,18 @@ impl ExprSource {
 
 #[derive(Args)]
 struct CheckArgs {
-    #[command(flatten)]
-    source: ExprSource,
-    /// Print diagnostics as JSON.
+    /// The JSONata expression (omit when using --file).
+    #[arg(required_unless_present = "files")]
+    expr: Option<String>,
+    /// Read expressions from files: several, or glob patterns such as `rules/*.jsonata`.
+    #[arg(short, long = "file", value_name = "FILE", num_args = 1.., conflicts_with = "expr")]
+    files: Vec<String>,
+    /// Print the diagnostics of all expressions as one compact JSON array.
     #[arg(long)]
     json: bool,
+    /// Fail with exit code 1 on warnings too.
+    #[arg(long)]
+    deny_warnings: bool,
     /// Also report fields that this schema (JSON Schema, e.g. from `jlens schema infer`) lacks.
     #[arg(long, value_name = "FILE")]
     schema: Option<PathBuf>,
@@ -151,31 +158,76 @@ pub fn print_json(value: &impl serde::Serialize) -> Result<()> {
 }
 
 fn check(args: CheckArgs) -> Result<ExitCode> {
-    let (source, name) = args.source.read()?;
+    // Read every expression first, so that an unreadable file prints nothing on stdout.
+    let sources = match &args.expr {
+        Some(expr) => vec![(expr.clone(), None)],
+        None => schema::expand(&args.files)?
+            .into_iter()
+            .map(|file| {
+                let source = fs::read_to_string(&file)
+                    .with_context(|| format!("reading {}", file.display()))?;
+                Ok((source, Some(file.display().to_string())))
+            })
+            .collect::<Result<Vec<_>>>()?,
+    };
     let schema = args.schema.as_ref().map(schema::load).transpose()?;
-    let diagnostics = jlens_schema::LanguageService::new(schema).diagnostics(&source);
-    let errors = diagnostics
-        .iter()
-        .filter(|d| d.severity == Severity::Error)
-        .count();
-    if args.json {
-        print_json(&diagnostics)?;
-    } else {
-        for diagnostic in &diagnostics {
-            eprint!("{}", report::render(&source, &name, diagnostic));
+    let service = jlens_schema::LanguageService::new(schema);
+    let (mut errors, mut warnings) = (0, 0);
+    let mut json = Vec::new();
+    for (source, file) in &sources {
+        let diagnostics = service.diagnostics(source);
+        let file_errors = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .count();
+        let file_warnings = diagnostics.len() - file_errors;
+        errors += file_errors;
+        warnings += file_warnings;
+        let name = file.as_deref().unwrap_or("<expr>");
+        if args.json {
+            for diagnostic in &diagnostics {
+                json.push(diagnostic_json(source, file.as_deref(), diagnostic)?);
+            }
+            continue;
         }
-        let warnings = diagnostics.len() - errors;
+        for diagnostic in &diagnostics {
+            eprint!("{}", report::render(source, name, diagnostic));
+        }
         if diagnostics.is_empty() {
             eprintln!("{name}: ok");
         } else {
-            eprintln!("{name}: {errors} error(s), {warnings} warning(s)");
+            eprintln!("{name}: {file_errors} error(s), {file_warnings} warning(s)");
         }
     }
-    Ok(if errors > 0 {
+    if args.json {
+        output::line(&serde_json::to_string(&json)?)?;
+    } else if sources.len() > 1 {
+        eprintln!(
+            "{} file(s): {errors} error(s), {warnings} warning(s)",
+            sources.len()
+        );
+    }
+    Ok(if errors > 0 || (args.deny_warnings && warnings > 0) {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
     })
+}
+
+/// A diagnostic as `check --json` prints it: `file` (absent for an inline expression), `line`
+/// and `column` (1-based, the column in characters), then the diagnostic's own fields.
+fn diagnostic_json(source: &str, file: Option<&str>, diagnostic: &Diagnostic) -> Result<Value> {
+    let mut object = serde_json::Map::new();
+    if let Some(file) = file {
+        object.insert("file".into(), file.into());
+    }
+    let (line, column) = report::location(source, diagnostic.span.start);
+    object.insert("line".into(), line.into());
+    object.insert("column".into(), column.into());
+    if let Value::Object(fields) = serde_json::to_value(diagnostic)? {
+        object.extend(fields);
+    }
+    Ok(Value::Object(object))
 }
 
 fn ast(args: AstArgs) -> Result<ExitCode> {

@@ -25,6 +25,9 @@ fn jlens(args: &[&str], stdin: Option<&str>) -> String {
             .replace("No such file or directory", "<file not found>")
             // Usage lines name the binary.
             .replace("jlens.exe", "jlens")
+            // Glob matches use the platform's separator (escaped in JSON).
+            .replace(r"fixtures\\cli\\check\\", "fixtures/cli/check/")
+            .replace(r"fixtures\cli\check\", "fixtures/cli/check/")
     };
     format!(
         "exit: {}\n--- stdout\n{}--- stderr\n{}",
@@ -239,6 +242,60 @@ fn check() {
     snapshot!(
         "check_annotation_warning",
         &["check", "/** @label \"x\" @owner \"me\" */ a > 1"]
+    );
+}
+
+const CHECK_SCHEMA: &str = "fixtures/cli/order.schema.json";
+
+#[test]
+fn check_files() {
+    snapshot!(
+        "check_files_glob",
+        &[
+            "check",
+            "--schema",
+            CHECK_SCHEMA,
+            "-f",
+            "fixtures/cli/check/*.jsonata"
+        ]
+    );
+    snapshot!(
+        "check_files_json",
+        &[
+            "check",
+            "--json",
+            "--schema",
+            CHECK_SCHEMA,
+            "-f",
+            "fixtures/cli/check/*.jsonata"
+        ]
+    );
+    let warning_only = [
+        "check",
+        "--schema",
+        CHECK_SCHEMA,
+        "-f",
+        "fixtures/cli/check/ok.jsonata",
+        "fixtures/cli/check/unknown-field.jsonata",
+    ];
+    snapshot!("check_files_warnings", &warning_only);
+    snapshot!(
+        "check_files_deny_warnings",
+        &[&warning_only[..], &["--deny-warnings"]].concat()
+    );
+    snapshot!(
+        "check_files_no_match",
+        &["check", "-f", "fixtures/cli/check/*.nope"]
+    );
+    snapshot!(
+        "check_files_missing",
+        &[
+            "check",
+            "--json",
+            "-f",
+            "fixtures/cli/check/ok.jsonata",
+            "missing.jsonata"
+        ]
     );
 }
 

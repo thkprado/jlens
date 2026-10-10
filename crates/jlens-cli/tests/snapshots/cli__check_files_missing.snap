@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"check\", \"--json\", \"-f\", \"fixtures/cli/check/ok.jsonata\",\n\"missing.jsonata\"], None)"
+---
+exit: 2
+--- stdout
+--- stderr
+error: reading missing.jsonata: <file not found> (os error 2)

@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"check\", \"-f\", \"fixtures/cli/check/*.nope\"], None)"
+---
+exit: 2
+--- stdout
+--- stderr
+error: no files match fixtures/cli/check/*.nope

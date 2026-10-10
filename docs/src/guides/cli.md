@@ -7,7 +7,7 @@ jlens eval      <EXPR> | -f FILE  [-i INPUT | --no-input] [--ndjson] [--filter]
                 [-b BINDINGS] [-c | -r | --json] [--timeout MS] [--max-depth N]
                 [--now TIME] [--seed N]
                 [--explain | --audit json|text] [--audit-level decisions|full] [--trace-log FILE]
-jlens check     <EXPR> | -f FILE  [--json] [--schema SCHEMA]
+jlens check     <EXPR> | -f FILE...  [--json] [--deny-warnings] [--schema SCHEMA]
 jlens functions [NAME] [--json]
 jlens schema infer    SAMPLES...  [--each] [--overrides FILE] [-o SCHEMA]
 jlens schema complete <EXPR> | -f FILE  [--schema SCHEMA] [--cursor N] [--json]
@@ -17,13 +17,14 @@ jlens ast       <EXPR> | -f FILE  [--tokens | --raw] [--recover]
 Every command takes the expression either as an argument or from a file with `-f`. Prefer `-f`
 for anything longer than a one-liner. Shells interpret `$`, `"` and `*` differently, and Windows
 shells (`cmd.exe`, PowerShell) in particular make quoting expressions awkward. Glob patterns in
-`jlens schema infer` are expanded by `jlens` itself, so they work in every shell.
+`jlens check -f` and `jlens schema infer` are expanded by `jlens` itself, so they work in every
+shell.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
-| `0` | Success. `check` may still have printed warnings |
+| `0` | Success. `check` may still have printed warnings (unless `--deny-warnings`) |
 | `1` | The expression has errors: a syntax error, an evaluation error, or (with `--ndjson`) at least one line that failed |
 | `2` | Usage or I/O problem: unreadable file, invalid JSON input, bad arguments, a terminal on standard input |
 
@@ -46,7 +47,8 @@ Writing to a closed pipe, as in `jlens functions | head`, ends quietly with code
   avoids shell quoting. An `eval` that would read its input from a terminal fails with code 2
   instead of waiting.
 - **Use `eval --json`** to get every outcome, errors included, as one line of JSON on standard
-  output (see [below](#machine-output---json)), and `check --json` for diagnostics as JSON.
+  output (see [below](#machine-output---json)), and `check --json` for the diagnostics of
+  every file as one JSON array.
 - **Fix the clock and the seed** with `--now` and `--seed` when a result depends on `$now()`,
   `$millis()`, `$random()` or `$shuffle()`, so that the same command prints the same bytes when
   it is run again.
@@ -188,24 +190,25 @@ error[S0202]: Expected "]", got ";"
 <expr>: 1 error(s), 0 warning(s)
 ```
 
-Errors make the exit code 1; warnings alone do not. With `--json`, the diagnostics are printed as
-an array, which suits editors and CI scripts. Spans are byte offsets into the expression:
+`-f` takes several files, and glob patterns such as `rules/*.jsonata`. Each file is reported in
+turn, followed by a total. Errors make the exit code 1; warnings alone do not, unless
+`--deny-warnings` is given. An unreadable file, or a pattern that matches nothing, ends with exit
+code 2 before anything is checked.
 
-```json
-[
-  {
-    "severity": "error",
-    "code": "S0207",
-    "message": "Unexpected end of expression",
-    "span": { "start": 3, "end": 3 }
-  }
-]
+With `--json`, the diagnostics of all the files are printed as one compact JSON array on
+standard output, which suits editors, CI scripts and agents. Each diagnostic has `file` (absent
+for an expression given as an argument), the 1-based `line` and `column` (counted in
+characters), then the severity, code, message and `span`, in byte offsets into the file:
+
+```text
+$ jlens check --json 'a +'
+[{"line":1,"column":4,"severity":"error","code":"S0207","message":"Unexpected end of expression","span":{"start":3,"end":3}}]
 ```
 
-To validate a directory of rules in CI:
+To validate a directory of rules in CI, warnings included:
 
 ```sh
-for f in rules/*.jsonata; do jlens check --schema order.schema.json -f "$f" || exit 1; done
+jlens check --deny-warnings --schema order.schema.json -f 'rules/*.jsonata'
 ```
 
 ## `jlens functions`

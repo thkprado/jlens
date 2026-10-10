@@ -1,0 +1,26 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"check\", \"--schema\", CHECK_SCHEMA, \"-f\",\n\"fixtures/cli/check/*.jsonata\"], None)"
+---
+exit: 1
+--- stdout
+--- stderr
+fixtures/cli/check/ok.jsonata: ok
+error[S0202]: Expected ")", got ";"
+ --> fixtures/cli/check/syntax-error.jsonata:2:33
+  |
+2 |   $total := $sum(items.unitPrice;
+  |                                 ^
+error[S0203]: Expected ")" before end of expression
+ --> fixtures/cli/check/syntax-error.jsonata:5:1
+  |
+5 | 
+  | ^
+fixtures/cli/check/syntax-error.jsonata: 2 error(s), 0 warning(s)
+warning[W0201]: Field "unitprice" is not in the schema; did you mean `unitPrice`?
+ --> fixtures/cli/check/unknown-field.jsonata:2:19
+  |
+2 | items.(quantity * unitprice)
+  |                   ^^^^^^^^^
+fixtures/cli/check/unknown-field.jsonata: 0 error(s), 1 warning(s)
+3 file(s): 2 error(s), 1 warning(s)

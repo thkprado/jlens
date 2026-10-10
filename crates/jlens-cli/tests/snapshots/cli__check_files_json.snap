@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"check\", \"--json\", \"--schema\", CHECK_SCHEMA, \"-f\",\n\"fixtures/cli/check/*.jsonata\"], None)"
+---
+exit: 1
+--- stdout
+[{"file":"fixtures/cli/check/syntax-error.jsonata","line":2,"column":33,"severity":"error","code":"S0202","message":"Expected \")\", got \";\"","span":{"start":34,"end":35}},{"file":"fixtures/cli/check/syntax-error.jsonata","line":5,"column":1,"severity":"error","code":"S0203","message":"Expected \")\" before end of expression","span":{"start":47,"end":47}},{"file":"fixtures/cli/check/unknown-field.jsonata","line":2,"column":19,"severity":"warning","code":"W0201","message":"Field \"unitprice\" is not in the schema; did you mean `unitPrice`?","span":{"start":59,"end":68}}]
+--- stderr

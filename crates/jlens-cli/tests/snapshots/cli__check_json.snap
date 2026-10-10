@@ -4,15 +4,5 @@ expression: "jlens(&[\"check\", \"--json\", \"a +\"], None)"
 ---
 exit: 1
 --- stdout
-[
-  {
-    "severity": "error",
-    "code": "S0207",
-    "message": "Unexpected end of expression",
-    "span": {
-      "start": 3,
-      "end": 3
-    }
-  }
-]
+[{"line":1,"column":4,"severity":"error","code":"S0207","message":"Unexpected end of expression","span":{"start":3,"end":3}}]
 --- stderr

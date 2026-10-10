@@ -65,7 +65,7 @@ pub fn load(path: &PathBuf) -> Result<Schema> {
 }
 
 /// Expands glob patterns (Windows shells do not do it).
-fn expand(patterns: &[String]) -> Result<Vec<PathBuf>> {
+pub fn expand(patterns: &[String]) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for pattern in patterns {
         if pattern.contains(['*', '?', '[']) {

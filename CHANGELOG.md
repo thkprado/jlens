@@ -20,12 +20,16 @@ All notable changes are recorded here. The format follows
   carries `line`, the number of its input line. See ADR 0008.
 - `jlens eval --now TIME` and `--seed N` fix the clock and the random generator, so that a
   command can be replayed with the same output.
+- `jlens check -f` takes several files and glob patterns (expanded by `jlens`), and
+  `--deny-warnings` makes warnings fail with exit code 1.
 
 ### Changed
 
 - `Options` (`jlens-core`) is `#[non_exhaustive]`, so new options can be added without a
   breaking change. Build it with `Options::new().timeout(..).max_depth(..)` instead of a struct
   literal; its fields stay public.
+- `jlens check --json` prints one compact array for all the files, and each diagnostic
+  carries `file`, `line` and `column`.
 - `jlens eval` fails with exit code 2, instead of waiting, when it would read its input from a
   terminal.
 
