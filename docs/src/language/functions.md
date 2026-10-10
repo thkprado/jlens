@@ -23,115 +23,135 @@ value has the wrong type) or `T0412` (an array item has the wrong type).
 
 ## String functions
 
+Details and examples: [String functions](functions/string.md).
+
 | Function | Signature | Description |
 |---|---|---|
-| `$string($arg, $prettify)` | `<x-b?:s>` | Casts a value to a string; objects and arrays become JSON |
-| `$substring($str, $start, $length)` | `<s-nn?:s>` | Characters from a start position, optionally limited to a length |
-| `$substringBefore($str, $chars)` | `<s-s:s>` | The part of a string before the first occurrence of a substring |
-| `$substringAfter($str, $chars)` | `<s-s:s>` | The part of a string after the first occurrence of a substring |
-| `$lowercase($str)` | `<s-:s>` | Converts a string to lower case |
-| `$uppercase($str)` | `<s-:s>` | Converts a string to upper case |
-| `$length($str)` | `<s-:n>` | Number of characters in a string |
-| `$trim($str)` | `<s-:s>` | Normalizes and trims whitespace |
-| `$pad($str, $width, $char)` | `<s-ns?:s>` | Pads a string to a width; positive pads on the right, negative on the left |
-| `$match($str, $regex, $limit)` | `<s-f<s:o>n?:a<o>>` | Matches a regular expression, returning the matches with their positions and groups |
-| `$contains($str, $token)` | `<s-(sf):b>` | Whether a string contains a substring or matches a regular expression |
-| `$replace($str, $pattern, $replacement, $limit)` | `<s-(sf)(sf)n?:s>` | Replaces occurrences of a substring or regular expression |
-| `$split($str, $separator, $limit)` | `<s-(sf)n?:a<s>>` | Splits a string by a separator or regular expression |
-| `$join($strs, $separator)` | `<a<s>s?:s>` | Joins an array of strings with an optional separator |
-| `$formatNumber($value, $picture, $options)` | `<n-so?:s>` | Formats a number with an XPath picture string |
-| `$formatBase($value, $radix)` | `<n-n?:s>` | Formats a number in another base (2 to 36) |
-| `$formatInteger($value, $picture)` | `<n-s:s>` | Formats an integer with an XPath picture string (words, roman, letters, digits) |
-| `$parseInteger($value, $picture)` | `<s-s:n>` | Parses an integer written according to an XPath picture string |
+| [`$string($arg, $prettify)`](functions/string.md#string) | `<x-b?:s>` | Casts a value to a string; objects and arrays become JSON |
+| [`$substring($str, $start, $length)`](functions/string.md#substring) | `<s-nn?:s>` | Characters from a start position, optionally limited to a length |
+| [`$substringBefore($str, $chars)`](functions/string.md#substringbefore) | `<s-s:s>` | The part of a string before the first occurrence of a substring |
+| [`$substringAfter($str, $chars)`](functions/string.md#substringafter) | `<s-s:s>` | The part of a string after the first occurrence of a substring |
+| [`$lowercase($str)`](functions/string.md#lowercase) | `<s-:s>` | Converts a string to lower case |
+| [`$uppercase($str)`](functions/string.md#uppercase) | `<s-:s>` | Converts a string to upper case |
+| [`$length($str)`](functions/string.md#length) | `<s-:n>` | Number of characters in a string |
+| [`$trim($str)`](functions/string.md#trim) | `<s-:s>` | Normalizes and trims whitespace |
+| [`$pad($str, $width, $char)`](functions/string.md#pad) | `<s-ns?:s>` | Pads a string to a width; positive pads on the right, negative on the left |
+| [`$match($str, $regex, $limit)`](functions/string.md#match) | `<s-f<s:o>n?:a<o>>` | Matches a regular expression, returning the matches with their positions and groups |
+| [`$contains($str, $token)`](functions/string.md#contains) | `<s-(sf):b>` | Whether a string contains a substring or matches a regular expression |
+| [`$replace($str, $pattern, $replacement, $limit)`](functions/string.md#replace) | `<s-(sf)(sf)n?:s>` | Replaces occurrences of a substring or regular expression |
+| [`$split($str, $separator, $limit)`](functions/string.md#split) | `<s-(sf)n?:a<s>>` | Splits a string by a separator or regular expression |
+| [`$join($strs, $separator)`](functions/string.md#join) | `<a<s>s?:s>` | Joins an array of strings with an optional separator |
 
 ## Numeric functions
 
+Details and examples: [Numeric functions](functions/numeric.md).
+
 | Function | Signature | Description |
 |---|---|---|
-| `$number($arg)` | `<(nsb)-:n>` | Casts a value to a number |
-| `$floor($arg)` | `<n-:n>` | Rounds down |
-| `$ceil($arg)` | `<n-:n>` | Rounds up |
-| `$round($arg, $precision)` | `<n-n?:n>` | Rounds half to even, optionally to a number of decimal places |
-| `$abs($arg)` | `<n-:n>` | Absolute value |
-| `$sqrt($arg)` | `<n-:n>` | Square root |
-| `$power($arg, $exp)` | `<n-n:n>` | Raises a number to a power |
-| `$random()` | `<:n>` | A pseudo-random number between 0 (inclusive) and 1 (exclusive) |
+| [`$formatNumber($value, $picture, $options)`](functions/numeric.md#formatnumber) | `<n-so?:s>` | Formats a number with an XPath picture string |
+| [`$formatBase($value, $radix)`](functions/numeric.md#formatbase) | `<n-n?:s>` | Formats a number in another base (2 to 36) |
+| [`$formatInteger($value, $picture)`](functions/numeric.md#formatinteger) | `<n-s:s>` | Formats an integer with an XPath picture string (words, roman, letters, digits) |
+| [`$parseInteger($value, $picture)`](functions/numeric.md#parseinteger) | `<s-s:n>` | Parses an integer written according to an XPath picture string |
+| [`$number($arg)`](functions/numeric.md#number) | `<(nsb)-:n>` | Casts a value to a number |
+| [`$floor($arg)`](functions/numeric.md#floor) | `<n-:n>` | Rounds down |
+| [`$ceil($arg)`](functions/numeric.md#ceil) | `<n-:n>` | Rounds up |
+| [`$round($arg, $precision)`](functions/numeric.md#round) | `<n-n?:n>` | Rounds half to even, optionally to a number of decimal places |
+| [`$abs($arg)`](functions/numeric.md#abs) | `<n-:n>` | Absolute value |
+| [`$sqrt($arg)`](functions/numeric.md#sqrt) | `<n-:n>` | Square root |
+| [`$power($arg, $exp)`](functions/numeric.md#power) | `<n-n:n>` | Raises a number to a power |
+| [`$random()`](functions/numeric.md#random) | `<:n>` | A pseudo-random number between 0 (inclusive) and 1 (exclusive) |
 
 ## Aggregation functions
 
+Details and examples: [Aggregation functions](functions/aggregation.md).
+
 | Function | Signature | Description |
 |---|---|---|
-| `$sum($array)` | `<a<n>:n>` | Sum of an array of numbers |
-| `$count($array)` | `<a:n>` | Number of items in an array |
-| `$max($array)` | `<a<n>:n>` | Largest number in an array |
-| `$min($array)` | `<a<n>:n>` | Smallest number in an array |
-| `$average($array)` | `<a<n>:n>` | Mean of an array of numbers |
+| [`$sum($array)`](functions/aggregation.md#sum) | `<a<n>:n>` | Sum of an array of numbers |
+| [`$count($array)`](functions/aggregation.md#count) | `<a:n>` | Number of items in an array |
+| [`$max($array)`](functions/aggregation.md#max) | `<a<n>:n>` | Largest number in an array |
+| [`$min($array)`](functions/aggregation.md#min) | `<a<n>:n>` | Smallest number in an array |
+| [`$average($array)`](functions/aggregation.md#average) | `<a<n>:n>` | Mean of an array of numbers |
 
 ## Boolean functions
 
+Details and examples: [Boolean functions](functions/boolean.md).
+
 | Function | Signature | Description |
 |---|---|---|
-| `$boolean($arg)` | `<x-:b>` | The effective boolean value of a value |
-| `$not($arg)` | `<x-:b>` | Logical negation of the effective boolean value |
-| `$exists($arg)` | `<x:b>` | Whether a value is defined |
+| [`$boolean($arg)`](functions/boolean.md#boolean) | `<x-:b>` | The effective boolean value of a value |
+| [`$not($arg)`](functions/boolean.md#not) | `<x-:b>` | Logical negation of the effective boolean value |
+| [`$exists($arg)`](functions/boolean.md#exists) | `<x:b>` | Whether a value is defined |
 
 ## Array functions
 
+Details and examples: [Array functions](functions/array.md).
+
 | Function | Signature | Description |
 |---|---|---|
-| `$zip()` | `<a+>` | Combines arrays item by item into an array of arrays |
-| `$append($arg1, $arg2)` | `<xx:a>` | Concatenates two values into an array |
-| `$reverse($arr)` | `<a:a>` | Reverses an array |
-| `$sort($arr, $comparator)` | `<af?:a>` | Sorts an array, optionally with a comparator function |
-| `$shuffle($arr)` | `<a:a>` | Shuffles an array into a random order |
-| `$distinct($arr)` | `<x:x>` | Removes duplicate values from an array |
+| [`$zip()`](functions/array.md#zip) | `<a+>` | Combines arrays item by item into an array of arrays |
+| [`$append($arg1, $arg2)`](functions/array.md#append) | `<xx:a>` | Concatenates two values into an array |
+| [`$reverse($arr)`](functions/array.md#reverse) | `<a:a>` | Reverses an array |
+| [`$sort($arr, $comparator)`](functions/array.md#sort) | `<af?:a>` | Sorts an array, optionally with a comparator function |
+| [`$shuffle($arr)`](functions/array.md#shuffle) | `<a:a>` | Shuffles an array into a random order |
+| [`$distinct($arr)`](functions/array.md#distinct) | `<x:x>` | Removes duplicate values from an array |
 
 ## Object functions
 
+Details and examples: [Object functions](functions/object.md).
+
 | Function | Signature | Description |
 |---|---|---|
-| `$keys($arg)` | `<x-:a<s>>` | The keys of an object, or the union of keys of an array of objects |
-| `$lookup($input, $key)` | `<x-s:x>` | The value of a key in an object, or in each object of an array |
-| `$spread($arg)` | `<x-:a<o>>` | Splits an object into an array of single-key objects |
-| `$merge($arg)` | `<a<o>:o>` | Merges an array of objects into one; later keys win |
-| `$each($obj, $func)` | `<o-f:a>` | Applies a function to each key/value pair of an object |
+| [`$keys($arg)`](functions/object.md#keys) | `<x-:a<s>>` | The keys of an object, or the union of keys of an array of objects |
+| [`$lookup($input, $key)`](functions/object.md#lookup) | `<x-s:x>` | The value of a key in an object, or in each object of an array |
+| [`$spread($arg)`](functions/object.md#spread) | `<x-:a<o>>` | Splits an object into an array of single-key objects |
+| [`$merge($arg)`](functions/object.md#merge) | `<a<o>:o>` | Merges an array of objects into one; later keys win |
+| [`$each($obj, $func)`](functions/object.md#each) | `<o-f:a>` | Applies a function to each key/value pair of an object |
 
 ## Higher-order functions
 
+Details and examples: [Higher-order functions](functions/higher-order.md).
+
 | Function | Signature | Description |
 |---|---|---|
-| `$map($arr, $func)` | `<af>` | Applies a function to each item of an array |
-| `$filter($arr, $func)` | `<af>` | The items of an array for which a predicate holds |
-| `$single($arr, $func)` | `<af?>` | The only item of an array matching a predicate; an error otherwise |
-| `$reduce($sequence, $func, $init)` | `<afj?:j>` | Folds an array into a single value with a function |
-| `$sift($arg, $func)` | `<o-f?:o>` | The key/value pairs of an object for which a predicate holds |
+| [`$map($arr, $func)`](functions/higher-order.md#map) | `<af>` | Applies a function to each item of an array |
+| [`$filter($arr, $func)`](functions/higher-order.md#filter) | `<af>` | The items of an array for which a predicate holds |
+| [`$single($arr, $func)`](functions/higher-order.md#single) | `<af?>` | The only item of an array matching a predicate; an error otherwise |
+| [`$reduce($sequence, $func, $init)`](functions/higher-order.md#reduce) | `<afj?:j>` | Folds an array into a single value with a function |
+| [`$sift($arg, $func)`](functions/higher-order.md#sift) | `<o-f?:o>` | The key/value pairs of an object for which a predicate holds |
 
 ## Date and time functions
 
+Details and examples: [Date and time functions](functions/date-time.md).
+
 | Function | Signature | Description |
 |---|---|---|
-| `$now($picture, $timezone)` | `<s?s?:s>` | The evaluation's timestamp as an ISO 8601 string, or formatted with a picture |
-| `$millis()` | `<:n>` | The evaluation's timestamp in milliseconds since the epoch |
-| `$fromMillis($millis, $picture, $timezone)` | `<n-s?s?:s>` | Formats milliseconds since the epoch as a timestamp string |
-| `$toMillis($timestamp, $picture)` | `<s-s?:n>` | Parses a timestamp string into milliseconds since the epoch |
+| [`$now($picture, $timezone)`](functions/date-time.md#now) | `<s?s?:s>` | The evaluation's timestamp as an ISO 8601 string, or formatted with a picture |
+| [`$millis()`](functions/date-time.md#millis) | `<:n>` | The evaluation's timestamp in milliseconds since the epoch |
+| [`$fromMillis($millis, $picture, $timezone)`](functions/date-time.md#frommillis) | `<n-s?s?:s>` | Formats milliseconds since the epoch as a timestamp string |
+| [`$toMillis($timestamp, $picture)`](functions/date-time.md#tomillis) | `<s-s?:n>` | Parses a timestamp string into milliseconds since the epoch |
 
 ## Encoding functions
 
+Details and examples: [Encoding functions](functions/encoding.md).
+
 | Function | Signature | Description |
 |---|---|---|
-| `$base64encode($str)` | `<s-:s>` | Encodes a string as Base64 (each character taken as a byte) |
-| `$base64decode($str)` | `<s-:s>` | Decodes a Base64 string (each byte becomes a character) |
-| `$encodeUrlComponent($str)` | `<s-:s>` | Percent-encodes a URL component |
-| `$encodeUrl($str)` | `<s-:s>` | Percent-encodes a URL, leaving reserved characters |
-| `$decodeUrlComponent($str)` | `<s-:s>` | Decodes a percent-encoded URL component |
-| `$decodeUrl($str)` | `<s-:s>` | Decodes a percent-encoded URL, leaving reserved characters encoded |
+| [`$base64encode($str)`](functions/encoding.md#base64encode) | `<s-:s>` | Encodes a string as Base64 (each character taken as a byte) |
+| [`$base64decode($str)`](functions/encoding.md#base64decode) | `<s-:s>` | Decodes a Base64 string (each byte becomes a character) |
+| [`$encodeUrlComponent($str)`](functions/encoding.md#encodeurlcomponent) | `<s-:s>` | Percent-encodes a URL component |
+| [`$encodeUrl($str)`](functions/encoding.md#encodeurl) | `<s-:s>` | Percent-encodes a URL, leaving reserved characters |
+| [`$decodeUrlComponent($str)`](functions/encoding.md#decodeurlcomponent) | `<s-:s>` | Decodes a percent-encoded URL component |
+| [`$decodeUrl($str)`](functions/encoding.md#decodeurl) | `<s-:s>` | Decodes a percent-encoded URL, leaving reserved characters encoded |
 
 ## Other functions
 
+Details and examples: [Other functions](functions/misc.md).
+
 | Function | Signature | Description |
 |---|---|---|
-| `$error($message)` | `<s?:x>` | Raises an error (D3137) with a message |
-| `$assert($condition, $message)` | `<bs?:x>` | Raises an error (D3141) when a condition is false |
-| `$type($value)` | `<x:s>` | The type of a value: null, number, string, boolean, array, object or function |
-| `$eval($expr, $focus)` | `<sx?:x>` | Parses and evaluates a JSONata expression given as a string |
-| `$clone($arg)` | `<(oa)-:o>` | A deep copy of a value |
+| [`$error($message)`](functions/misc.md#error) | `<s?:x>` | Raises an error (D3137) with a message |
+| [`$assert($condition, $message)`](functions/misc.md#assert) | `<bs?:x>` | Raises an error (D3141) when a condition is false |
+| [`$type($value)`](functions/misc.md#type) | `<x:s>` | The type of a value: null, number, string, boolean, array, object or function |
+| [`$eval($expr, $focus)`](functions/misc.md#eval) | `<sx?:x>` | Parses and evaluates a JSONata expression given as a string |
+| [`$clone($arg)`](functions/misc.md#clone) | `<(oa)-:o>` | A deep copy of a value |

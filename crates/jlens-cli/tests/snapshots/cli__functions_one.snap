@@ -6,6 +6,6 @@ exit: 0
 --- stdout
 $formatNumber($value, $picture, $options)
   signature: <n-so?:s>
-  category:  String
+  category:  Numeric
   Formats a number with an XPath picture string
 --- stderr

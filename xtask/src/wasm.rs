@@ -107,19 +107,31 @@ fn check_wasm_bindgen() -> Result<()> {
     Ok(())
 }
 
-/// Runs `wasm-opt -Oz` in place, when binaryen is installed.
+/// The binaryen release used through npm when `wasm-opt` is not installed.
+const BINARYEN_NPM: &str = "binaryen@132.0.0";
+
+/// Runs `wasm-opt -Oz` in place: the installed binaryen if there is one, otherwise binaryen
+/// from npm (through `npx`), otherwise nothing.
 fn optimize(wasm: &Path) -> Result<()> {
-    let found = Command::new("wasm-opt").arg("--version").output().is_ok();
-    if !found {
+    let npx = if cfg!(windows) { "npx.cmd" } else { "npx" };
+    let mut command = if Command::new("wasm-opt").arg("--version").output().is_ok() {
+        Command::new("wasm-opt")
+    } else if Command::new(npx).arg("--version").output().is_ok() {
+        println!("wasm-opt not found; using {BINARYEN_NPM} from npm");
+        let mut command = Command::new(npx);
+        command.args(["--yes", "-p", BINARYEN_NPM, "wasm-opt"]);
+        command
+    } else {
         println!(
             "wasm-opt not found; skipping optimization (install binaryen for a smaller .wasm)"
         );
         return Ok(());
-    }
-    let status = Command::new("wasm-opt")
+    };
+    let status = command
         .arg(wasm)
         .args([
             "-Oz",
+            // The WebAssembly features rustc enables by default for wasm32-unknown-unknown.
             "--enable-bulk-memory",
             "--enable-nontrapping-float-to-int",
             "--enable-sign-ext",
@@ -153,6 +165,13 @@ fn write_package(out: &Path) -> Result<()> {
   "version": "{version}",
   "description": "JSONata in WebAssembly, with evaluation audits and schema-driven autocomplete",
   "license": "MIT",
+  "repository": {{
+    "type": "git",
+    "url": "git+https://github.com/thkprado/jlens.git",
+    "directory": "crates/jlens-wasm"
+  }},
+  "homepage": "https://github.com/thkprado/jlens",
+  "bugs": "https://github.com/thkprado/jlens/issues",
   "type": "module",
   "main": "./{OUT_NAME}.js",
   "types": "./{OUT_NAME}.d.ts",

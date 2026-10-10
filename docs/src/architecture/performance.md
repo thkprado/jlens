@@ -51,22 +51,23 @@ evaluates against a [`Document`](#reusing-documents) converted beforehand.
 
 ### WebAssembly against jsonata-js (Node.js)
 
-Both run in the same Node.js process, on the same input. The comparison script first checks
+Both run in the same Node.js process, on the same input. The WebAssembly module is the release
+build optimized by `wasm-opt -Oz`. The comparison script first checks
 that both produce the same result for each case. The jsonata-js times include the `await`
 that its asynchronous `evaluate` requires.
 
 | Case | jsonata-js 2.2.2 | jlens-wasm `evaluate` | jlens-wasm `evaluateDocument` |
 |---|---:|---:|---:|
-| path | 2.1 µs | 432 µs | 2.7 µs |
-| filter + aggregate | 633 µs | 629 µs | 193 µs |
-| group-by | 1.01 ms | 1.26 ms | 824 µs |
-| sort + map | 4.94 ms | 2.66 ms | 2.22 ms |
-| strings | 591 µs | 705 µs | 266 µs |
-| regex | 710 µs | 797 µs | 354 µs |
-| number formatting | 575 µs | 766 µs | 402 µs |
-| transform | 1.35 ms | 2.52 ms | 1.80 ms |
-| recursion | 8.12 ms | 1.66 ms | 1.23 ms |
-| shipping rule | 1.67 ms | 965 µs | 525 µs |
+| path | 2.1 µs | 402 µs | 2.5 µs |
+| filter + aggregate | 624 µs | 594 µs | 181 µs |
+| group-by | 1.02 ms | 1.19 ms | 790 µs |
+| sort + map | 4.94 ms | 2.50 ms | 2.09 ms |
+| strings | 582 µs | 672 µs | 253 µs |
+| regex | 623 µs | 758 µs | 342 µs |
+| number formatting | 560 µs | 732 µs | 317 µs |
+| transform | 1.35 ms | 2.11 ms | 1.70 ms |
+| recursion | 7.92 ms | 1.60 ms | 1.18 ms |
+| shipping rule | 1.78 ms | 928 µs | 494 µs |
 
 jsonata-js works on the JavaScript objects it is given, so it never pays for converting the
 input. jlens-wasm `evaluate` has to convert it: `JSON.stringify` on the JavaScript side, then a

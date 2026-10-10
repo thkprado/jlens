@@ -10,7 +10,7 @@ It ships in three forms that share a single engine:
 |---|---|---|
 | Rust crate | `jlens-core` (+ `jlens-schema`) | Embedding the engine in Rust services |
 | Command line | `jlens` binary | Scripts, pipelines, NDJSON filtering, debugging expressions |
-| WebAssembly | `jlens-wasm` (npm, ESM) | Browsers: evaluation, editors with autocomplete, audit viewers |
+| WebAssembly | `jlens-wasm` (npm package, ES module) | Browsers: evaluation, editors with autocomplete, audit viewers |
 
 What sets jlens apart from other JSONata implementations:
 
@@ -25,4 +25,6 @@ What sets jlens apart from other JSONata implementations:
 - **Conformance first.** The engine is checked against the official JSONata test suite (2.2.2)
   on every change; see [Conformance testing](architecture/conformance.md).
 
-> **Status:** early development. See the [roadmap](architecture/roadmap.md) for what works today.
+> **Status:** jlens 0.1 implements all of JSONata 2.2 (1,688 of the 1,690 official test cases,
+> with the other two documented), evaluation audits, schema-driven editor support, the
+> command line and the browser package. See the [roadmap](architecture/roadmap.md).

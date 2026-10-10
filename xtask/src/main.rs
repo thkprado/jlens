@@ -6,6 +6,7 @@ use std::{env, fs};
 
 use anyhow::{Context, Result, bail};
 
+mod docs;
 mod wasm;
 
 const USAGE: &str = "\
@@ -15,6 +16,7 @@ commands:
   conformance [--update-baseline]   run the whole JSONata suite and write tests/conformance/REPORT.md
   update-suite <jsonata-js checkout> replace tests/jsonata-suite with <checkout>/test/test-suite
   gen-docs [--check]                regenerate the generated pages of the book (errors, functions)
+  doc-check                         run the examples of the book and check its links
   wasm [--dev]                      build the browser package in crates/jlens-wasm/pkg
   wasm-test [--require-browser] [--example]
                                     build the package and test it in Node.js and a headless browser
@@ -26,6 +28,7 @@ fn main() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("conformance") => conformance(args.iter().any(|a| a == "--update-baseline")),
         Some("gen-docs") => gen_docs(args.iter().any(|a| a == "--check")),
+        Some("doc-check") => docs::check(),
         Some("wasm") => wasm::build(args.iter().any(|a| a == "--dev")),
         Some("wasm-test") => wasm::test(
             args.iter().any(|a| a == "--require-browser"),
@@ -209,29 +212,42 @@ fn functions_page() -> String {
          Arguments that do not match the signature raise `T0410` (wrong type), `T0411` (the context\n\
          value has the wrong type) or `T0412` (an array item has the wrong type).\n",
     );
+    // (category, title, page with the detailed descriptions)
     let sections = [
-        (Category::String, "String functions"),
-        (Category::Numeric, "Numeric functions"),
-        (Category::Aggregation, "Aggregation functions"),
-        (Category::Boolean, "Boolean functions"),
-        (Category::Array, "Array functions"),
-        (Category::Object, "Object functions"),
-        (Category::HigherOrder, "Higher-order functions"),
-        (Category::DateTime, "Date and time functions"),
-        (Category::Encoding, "Encoding functions"),
-        (Category::Misc, "Other functions"),
+        (Category::String, "String functions", "string"),
+        (Category::Numeric, "Numeric functions", "numeric"),
+        (
+            Category::Aggregation,
+            "Aggregation functions",
+            "aggregation",
+        ),
+        (Category::Boolean, "Boolean functions", "boolean"),
+        (Category::Array, "Array functions", "array"),
+        (Category::Object, "Object functions", "object"),
+        (
+            Category::HigherOrder,
+            "Higher-order functions",
+            "higher-order",
+        ),
+        (Category::DateTime, "Date and time functions", "date-time"),
+        (Category::Encoding, "Encoding functions", "encoding"),
+        (Category::Misc, "Other functions", "misc"),
     ];
     let catalog = jlens_core::function_catalog();
-    for (category, title) in sections {
+    for (category, title, page) in sections {
         out.push_str(&format!(
-            "\n## {title}\n\n| Function | Signature | Description |\n|---|---|---|\n"
+            "\n## {title}\n\nDetails and examples: [{title}](functions/{page}.md).\n\n\
+             | Function | Signature | Description |\n|---|---|---|\n"
         ));
         for f in catalog.iter().filter(|f| f.category == category) {
             let params: Vec<String> = f.params.iter().map(|p| format!("${p}")).collect();
+            // The detailed pages have a `$name` heading per function, whose id is the
+            // lowercased name.
             out.push_str(&format!(
-                "| `${}({})` | `{}` | {} |\n",
+                "| [`${}({})`](functions/{page}.md#{}) | `{}` | {} |\n",
                 f.name,
                 params.join(", "),
+                f.name.to_lowercase(),
                 f.signature,
                 f.summary
             ));

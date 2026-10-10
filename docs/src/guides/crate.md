@@ -1,4 +1,154 @@
 # Rust crate
 
-> This chapter is written during the corresponding phase of the
-> [roadmap](../architecture/roadmap.md).
+`jlens-core` is the JSONata engine. `jlens-schema` adds schema inference and the language
+service; see the [schema guide](schema.md). This chapter covers `jlens-core`. Its API reference
+is on [docs.rs](https://docs.rs/jlens-core).
+
+```toml
+[dependencies]
+jlens-core = "0.1"
+serde_json = "1"
+```
+
+The snippets in this chapter come from `crates/jlens-core/tests/guide.rs`, which runs them as
+tests.
+
+## Compile once, evaluate many times
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:quick_start}}
+```
+
+[`Expression::compile`](https://docs.rs/jlens-core/latest/jlens_core/struct.Expression.html#method.compile)
+parses the expression and prepares it for evaluation. A compiled expression is immutable and
+cheap to clone. Keep it, and evaluate it as often as needed, from any thread (see
+[Threads](#threads)).
+
+Documents and results are `serde_json::Value`s. Object fields keep their order (jlens enables
+`serde_json`'s `preserve_order`). Variables come from
+[`Bindings`](https://docs.rs/jlens-core/latest/jlens_core/struct.Bindings.html): `$kind` above.
+Bindings can also be collected from `(String, Value)` pairs, such as the fields of a JSON object.
+
+### Undefined
+
+JSONata distinguishes *nothing* (an empty sequence) from `null`. In the API, nothing is `None`,
+both for the input and for the result:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:undefined}}
+```
+
+## Guardrails
+
+Expressions can recurse and loop. Bound their cost with
+[`Options`](https://docs.rs/jlens-core/latest/jlens_core/struct.Options.html), especially for
+expressions that users write:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:options}}
+```
+
+The default depth limit is 50,000 levels natively; the stack grows as needed. There is no
+default timeout. Expressions nested more than 1,000 levels deep are rejected when compiled
+(`U1001`). See [Guardrails](../architecture/evaluator.md#guardrails).
+
+## Errors
+
+Every error has a stable [code](../language/errors.md): `S0xxx` for syntax errors, `T` for
+type errors, `D` for dynamic errors, and `U1001` for limits. Match on the code, not on the
+message:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:errors}}
+```
+
+`position` matches jsonata-js: a UTF-16 offset, usually just after the offending token. `span`
+is a byte range, for slicing the source in Rust. Errors serialize to JSON with their code,
+message and details.
+
+## Many expressions, one document
+
+Each `evaluate` call converts its input document into jlens's internal representation. For a
+document of a few dozen kilobytes, that costs more than a typical rule. To evaluate several
+rules against the same document, convert it once into a
+[`Document`](https://docs.rs/jlens-core/latest/jlens_core/struct.Document.html):
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:documents}}
+```
+
+`Document::parse` reads JSON text straight into the internal representation, and
+`Document::new` converts a `serde_json::Value`. A `Document` is not `Send`: use it on the thread
+that created it. [Performance](../architecture/performance.md) has measurements.
+
+## Explaining results
+
+`evaluate_audited` records an audit tree of the evaluation: comparisons and their operands,
+`and`/`or` short circuits, conditionals, bindings, filters, and the labels of
+[annotations](../language/annotations.md). `explain` summarizes it:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:audit}}
+```
+
+The [audit guide](audit.md) describes the tree, the levels and the bounds that keep audits of
+large documents small.
+
+### Custom tracers
+
+Audits are built by a tracer, an implementation of the
+[`Tracer`](https://docs.rs/jlens-core/latest/jlens_core/audit/trait.Tracer.html) trait that
+receives evaluation events. Every method has a default that does nothing, so a tracer
+implements only what it needs:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:tracer}}
+```
+
+jlens provides three tracers:
+- `AuditCollector` builds audit trees;
+- `JsonlTracer` writes every event as a line of JSON;
+- `TracingTracer`, with the `tracing` feature, emits [`tracing`](https://docs.rs/tracing)
+  events.
+
+Without a tracer, the evaluator runs its fast path, so tracing costs nothing when unused.
+
+## Tools for editors
+
+[`parse_recover`](https://docs.rs/jlens-core/latest/jlens_core/fn.parse_recover.html) keeps
+going after syntax errors. The syntax tree is public, with node ids, spans and annotations:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:tooling}}
+```
+
+The function catalog describes every built-in function, for completion lists and
+documentation:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:functions}}
+```
+
+For completion, diagnostics and hover against a schema, use `jlens_schema::LanguageService`;
+see the [schema guide](schema.md#in-rust).
+
+## Threads
+
+`Expression` is `Send + Sync`. Share one compiled expression between threads, for example
+behind an `Arc`:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:threads}}
+```
+
+Each evaluation is independent and single-threaded. Values created during an evaluation never
+leave it, except as the `serde_json::Value` result.
+
+## Features
+
+| Feature | Effect |
+|---|---|
+| `tracing` | Adds `audit::TracingTracer`, which reports evaluations as `tracing` spans and events |
+
+The minimum supported Rust version is 1.88. jlens-core compiles to `wasm32-unknown-unknown`;
+the [WebAssembly guide](wasm.md) covers the browser package built on it.

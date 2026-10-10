@@ -33,6 +33,8 @@ extensions live in comments or in the host API, not in the language syntax.
 
 - Audit annotations and the warnings `W0101`–`W0103`.
 - `Ast` node ids and spans, and `parse_recover` diagnostics with severities.
+- Schema-driven warnings (`W0201`) and the language service.
+- `Document`, for evaluating many expressions against one converted document.
 
 ## Evaluation
 

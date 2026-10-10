@@ -26,12 +26,12 @@ String:
   $replace($str, $pattern, $replacement, $limit)  Replaces occurrences of a substring or regular expression
   $split($str, $separator, $limit)                Splits a string by a separator or regular expression
   $join($strs, $separator)                        Joins an array of strings with an optional separator
+
+Numeric:
   $formatNumber($value, $picture, $options)       Formats a number with an XPath picture string
   $formatBase($value, $radix)                     Formats a number in another base (2 to 36)
   $formatInteger($value, $picture)                Formats an integer with an XPath picture string (words, roman, letters, digits)
   $parseInteger($value, $picture)                 Parses an integer written according to an XPath picture string
-
-Numeric:
   $number($arg)                                   Casts a value to a number
   $floor($arg)                                    Rounds down
   $ceil($arg)                                     Rounds up

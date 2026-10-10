@@ -5,9 +5,14 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/jlens-schema"
 authors.workspace = true
 keywords.workspace = true
 categories = ["development-tools", "encoding"]
+include = ["src/**/*", "README.md", "LICENSE"]
 
 [dependencies]
 jlens-core.workspace = true

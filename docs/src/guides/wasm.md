@@ -30,7 +30,8 @@ cargo xtask wasm --dev      # unoptimized, with Rust panics reported on the cons
 `cargo xtask wasm` does four things:
 1. It compiles the crate with the `wasm-release` profile, which optimizes for size.
 2. It generates the JavaScript glue and the TypeScript declarations with `wasm-bindgen --target web`.
-3. It runs `wasm-opt -Oz` when [binaryen](https://github.com/WebAssembly/binaryen) is installed.
+3. It runs `wasm-opt -Oz` from [binaryen](https://github.com/WebAssembly/binaryen): the installed one, or the
+   npm package through `npx`. Without either, the module is about 60% larger.
 4. It writes `package.json`.
 
 The `wasm-bindgen` CLI must be the exact version in `Cargo.lock`, and the task checks this.
@@ -39,7 +40,7 @@ The `wasm-bindgen` CLI must be the exact version in `Cargo.lock`, and the task c
 |---|---|
 | `jlens.js` | The ES module |
 | `jlens.d.ts` | TypeScript declarations |
-| `jlens_bg.wasm` | The WebAssembly module: about 1.5 MB, 415 KiB gzipped, before `wasm-opt` |
+| `jlens_bg.wasm` | The WebAssembly module: about 950 KiB, 370 KiB gzipped |
 | `package.json` | npm metadata: `"type": "module"`, `exports`, `types` |
 
 A size budget for the gzipped module is enforced in `xtask/src/wasm.rs`.

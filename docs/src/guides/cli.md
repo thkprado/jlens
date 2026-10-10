@@ -147,7 +147,7 @@ Lists the built-in functions by category, with their parameters and a summary. G
 $ jlens functions formatNumber
 $formatNumber($value, $picture, $options)
   signature: <n-so?:s>
-  category:  String
+  category:  Numeric
   Formats a number with an XPath picture string
 ```
 

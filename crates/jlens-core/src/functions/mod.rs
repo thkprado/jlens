@@ -157,13 +157,13 @@ natives! {
     "replace" "<s-(sf)(sf)n?:s>" ["str", "pattern", "replacement", "limit"] 4 String "Replaces occurrences of a substring or regular expression" => s::replace;
     "split" "<s-(sf)n?:a<s>>" ["str", "separator", "limit"] 3 String "Splits a string by a separator or regular expression" => s::split;
     "join" "<a<s>s?:s>" ["strs", "separator"] 2 String "Joins an array of strings with an optional separator" => s::join;
-    "formatNumber" "<n-so?:s>" ["value", "picture", "options"] 3 String "Formats a number with an XPath picture string" => n::format_number;
-    "formatBase" "<n-n?:s>" ["value", "radix"] 2 String "Formats a number in another base (2 to 36)" => n::format_base;
-    "formatInteger" "<n-s:s>" ["value", "picture"] 2 String "Formats an integer with an XPath picture string (words, roman, letters, digits)" => |_, a, _| match num(&a, 0) {
+    "formatNumber" "<n-so?:s>" ["value", "picture", "options"] 3 Numeric "Formats a number with an XPath picture string" => n::format_number;
+    "formatBase" "<n-n?:s>" ["value", "radix"] 2 Numeric "Formats a number in another base (2 to 36)" => n::format_base;
+    "formatInteger" "<n-s:s>" ["value", "picture"] 2 Numeric "Formats an integer with an XPath picture string (words, roman, letters, digits)" => |_, a, _| match num(&a, 0) {
         None => Ok(Value::Undefined),
         Some(v) => crate::datetime::format_integer(v, &text(&a, 1).unwrap_or_default()).map(Value::string),
     };
-    "parseInteger" "<s-s:n>" ["value", "picture"] 2 String "Parses an integer written according to an XPath picture string" => |_, a, _| match text(&a, 0) {
+    "parseInteger" "<s-s:n>" ["value", "picture"] 2 Numeric "Parses an integer written according to an XPath picture string" => |_, a, _| match text(&a, 0) {
         None => Ok(Value::Undefined),
         Some(v) => crate::datetime::parse_integer(&v, &text(&a, 1).unwrap_or_default()).map(Value::Number),
     };

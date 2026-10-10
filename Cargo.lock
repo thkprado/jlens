@@ -1319,6 +1319,7 @@ dependencies = [
  "anyhow",
  "flate2",
  "jlens-core",
+ "serde_json",
 ]
 
 [[package]]
