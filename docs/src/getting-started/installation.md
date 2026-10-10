@@ -14,7 +14,7 @@ cargo install --path crates/jlens-cli            # from a checkout
 
 ```text
 $ jlens --version
-jlens 0.1.0
+jlens 0.1.1
 ```
 
 The [CLI guide](../guides/cli.md) describes every command.

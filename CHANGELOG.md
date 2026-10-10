@@ -6,6 +6,20 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1]
+
+No change to the language or the APIs.
+
+### Changed
+
+- The examples in the API documentation (`jlens-core` annotations, the `jlens-schema` overview),
+  the book, the fixtures and the web editor use an online store order.
+- `cargo xtask wasm-test` prints the browser's console when the browser tests hang.
+
+### Fixed
+
+- Web editor: the text cursor is visible in dark mode.
+
 ## [0.1.0]
 
 The first release.
@@ -51,5 +65,6 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/thkprado/jlens/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/thkprado/jlens/releases/tag/v0.1.0
