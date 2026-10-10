@@ -307,9 +307,9 @@ impl<'a> Parser<'a> {
     }
 
     /// Consumes the remaining tokens (the reference implementation attaches them to errors).
+    /// Lexer errors in the rest of the input are ignored: the input ends here either way.
     fn drain(&mut self) {
-        while let Ok(Some(_)) = self.lexer.next(true) {}
-        let _ = self.lexer.take_trailing_docs();
+        self.lexer.finish();
     }
 
     fn advance(&mut self, expect: Option<&str>, infix: bool) -> PResult<()> {

@@ -512,3 +512,23 @@ fn deep_nesting_is_an_error_not_a_crash() {
     let ast = jlens_core::parse_recover(&format!("{}a", "[".repeat(5000)));
     assert_eq!(ast.diagnostics[0].code, "U1001");
 }
+
+#[test]
+fn recovery_moves_past_lexer_errors() {
+    // Found by the property tests: an out-of-range number made recovery loop forever.
+    for source in [
+        "1e310",
+        "a + 1e310 + b",
+        "$f(1e400, ",
+        "\"unterminated",
+        "/* open",
+        "`open",
+    ] {
+        let ast = jlens_core::parse_recover(source);
+        assert!(ast.has_errors(), "{source}");
+    }
+    assert_eq!(
+        jlens_core::parse_recover("1e310").diagnostics[0].code,
+        "S0102"
+    );
+}

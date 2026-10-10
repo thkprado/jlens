@@ -74,6 +74,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Skips the rest of the input.
+    pub fn finish(&mut self) {
+        self.pos = self.src.len();
+        self.docs.clear();
+    }
+
     /// Doc-comments seen after the last token (they have nothing to attach to).
     pub fn take_trailing_docs(&mut self) -> Vec<DocComment> {
         std::mem::take(&mut self.docs)
@@ -156,6 +162,8 @@ impl<'a> Lexer<'a> {
             let text = &self.src[start..end];
             let value: f64 = text.parse().unwrap_or(f64::INFINITY);
             if !value.is_finite() {
+                // Consume the number, so that a recovering parser moves past it.
+                self.pos = end;
                 return Err(self.error("S0102", start, start).with("token", text));
             }
             self.pos = end;

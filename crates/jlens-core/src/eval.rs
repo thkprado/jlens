@@ -1298,6 +1298,16 @@ impl Evaluator<'_> {
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
                 if let Value::Object(target) = &m {
+                    // jsonata-js would build a circular object here, which cannot be
+                    // converted to JSON; jlens reports it instead.
+                    if entries.iter().any(|(_, v)| reaches(v, target)) {
+                        return Err(Error::new("U1001")
+                            .with(
+                                "message",
+                                "The transform would make an object contain itself",
+                            )
+                            .at(def.update.span, def.update.position));
+                    }
                     let mut target = target.borrow_mut();
                     for (k, v) in entries {
                         target.insert(k, v);
@@ -1522,4 +1532,24 @@ fn reduce_tuple_stream(stream: &Value) -> Map {
         }
     }
     result
+}
+
+/// Whether `object` can be reached from `value` (or is `value`). Shared substructures are
+/// visited once, so this is linear in the size of `value`.
+fn reaches(value: &Value, object: &Rc<RefCell<Map>>) -> bool {
+    let mut seen: std::collections::HashSet<*const ()> = std::collections::HashSet::new();
+    let mut stack = vec![value.clone()];
+    while let Some(v) = stack.pop() {
+        match &v {
+            Value::Object(o) if Rc::ptr_eq(o, object) => return true,
+            Value::Object(o) if seen.insert(Rc::as_ptr(o) as *const ()) => {
+                stack.extend(o.borrow().values().cloned());
+            }
+            Value::Array(a) if seen.insert(Rc::as_ptr(a) as *const ()) => {
+                stack.extend(a.items.iter().cloned());
+            }
+            _ => {}
+        }
+    }
+    false
 }

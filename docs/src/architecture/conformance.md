@@ -43,3 +43,23 @@ cargo xtask conformance --update-baseline  # also rewrites baseline.txt
 | Case | Reason |
 |---|---|
 | `function-encodeUrl/case002`, `function-encodeUrlComponent/case002` | The data contains a lone UTF-16 surrogate (U+D800), which Rust's UTF-8 strings cannot represent. |
+
+## Property tests
+
+The suite checks that jlens gives the right answers. Property tests (`proptest`) check that no
+input makes it crash, whatever the input:
+
+| Test | What it generates | What must hold |
+|---|---|---|
+| `jlens-core/tests/robustness.rs` | Valid expressions from a small grammar, near-valid token soups, and arbitrary strings | Parsing (strict and recovering), evaluation, evaluation against a `Document`, and audited evaluation never panic; diagnostic spans stay inside the source |
+| `jlens-schema/tests/robustness.rs` | Token soups and arbitrary strings | Completion, diagnostics, hover and signature help never panic at any byte offset; ranges stay inside the text |
+
+They run 2,000 and 1,000 cases with `cargo test`. Set `PROPTEST_CASES` for longer runs:
+`PROPTEST_CASES=100000 cargo test -p jlens-core --test robustness`.
+
+The property tests found two bugs:
+- In recovering parsing, an out-of-range number (`1e310`) looped forever.
+- A transform such as `|items|{'p': $}|` built an object containing itself, which then
+  overflowed the stack when converted to JSON. It now fails with `U1001`.
+
+Both have regression tests.

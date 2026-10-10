@@ -190,3 +190,26 @@ fn compiled_expressions_can_be_shared_between_threads() {
         [json!(1), json!(2), json!(3), json!(4)].map(Some).to_vec()
     );
 }
+
+#[test]
+fn transforms_cannot_create_circular_objects() {
+    // Found by the property tests: this used to overflow the stack when converting the result.
+    for source in [
+        "$ ~> |items|{'p': $}|",
+        "$ ~> |$|{'self': $}|",
+        "$ ~> |items|{'wrapped': {'again': [$]}}|",
+    ] {
+        let expr = Expression::compile(source).unwrap();
+        let err = expr
+            .evaluate(Some(&json!({"items": [{"a": 1}]})), &Bindings::new())
+            .unwrap_err();
+        assert_eq!(err.code(), "U1001", "{source}");
+    }
+    // Copying a value that merely looks the same is fine.
+    let expr = Expression::compile("$ ~> |items|{'copy': $clone($)}|").unwrap();
+    assert_eq!(
+        expr.evaluate(Some(&json!({"items": [{"a": 1}]})), &Bindings::new())
+            .unwrap(),
+        Some(json!({"items": [{"a": 1, "copy": {"a": 1}}]}))
+    );
+}
