@@ -25,6 +25,10 @@ All notable changes are recorded here. The format follows
 - `jlens errors [CODE] [--json]` lists the error and warning codes, or describes one.
 - Cancellation (`jlens-core`): a `CancelToken` passed in `Options::cancel_token` stops an
   evaluation from another thread, with the new code `U1003`.
+- Size limits (`jlens-core`): an evaluation that builds a string longer than
+  `Options::max_string_length` (256 MiB by default) or an array longer than
+  `Options::max_array_length` (16,777,216 items) fails with `U1001` instead of running out
+  of memory.
 
 ### Changed
 

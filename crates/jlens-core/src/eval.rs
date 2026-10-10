@@ -60,6 +60,8 @@ impl Frame {
 pub(crate) struct Limits {
     pub max_depth: usize,
     pub timeout: Option<Duration>,
+    pub max_string_length: usize,
+    pub max_array_length: usize,
     pub cancel_token: Option<crate::CancelToken>,
     /// Milliseconds since the epoch to use instead of the system clock.
     pub now: Option<i64>,
@@ -73,6 +75,13 @@ pub(crate) struct Limits {
 pub(crate) const DEFAULT_MAX_DEPTH: usize = 50_000;
 #[cfg(target_arch = "wasm32")]
 pub(crate) const DEFAULT_MAX_DEPTH: usize = 1_000;
+
+/// Default maximum length of a built string, in bytes (256 MiB). jsonata-js is limited by the
+/// JavaScript engine (about 2^29 UTF-16 units in V8); jlens fails cleanly instead of running
+/// out of memory.
+pub(crate) const DEFAULT_MAX_STRING_LENGTH: usize = 1 << 28;
+/// Default maximum number of items of a built array (above the 10^7 of a range, `D2014`).
+pub(crate) const DEFAULT_MAX_ARRAY_LENGTH: usize = 1 << 24;
 
 /// The state of one evaluation.
 pub(crate) struct Evaluator<'t> {
@@ -290,6 +299,40 @@ impl Evaluator<'_> {
             return Err(Error::new("U1003"));
         }
         Ok(())
+    }
+
+    /// Fails with `U1001` when a string of `len` bytes would exceed the size limit.
+    pub(crate) fn check_string(&self, len: usize) -> Result<()> {
+        let limit = self.limits.max_string_length;
+        if len > limit {
+            return Err(Error::new("U1001").with(
+                "message",
+                format!("A string would exceed the size limit of {limit} bytes"),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Fails with `U1001` when an array of `len` items would exceed the size limit.
+    pub(crate) fn check_array(&self, len: usize) -> Result<()> {
+        let limit = self.limits.max_array_length;
+        if len > limit {
+            return Err(Error::new("U1001").with(
+                "message",
+                format!("An array would exceed the size limit of {limit} items"),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Checks the size of a value returned by a built-in or host function.
+    fn check_size(&self, v: Value) -> Result<Value> {
+        match &v {
+            Value::String(s) => self.check_string(s.len())?,
+            Value::Array(a) => self.check_array(a.items.len())?,
+            _ => {}
+        }
+        Ok(v)
     }
 
     /// Evaluates `expr` against `input` (jsonata-js `evaluate`).
@@ -599,8 +642,14 @@ impl Evaluator<'_> {
         let mut out = Vec::with_capacity(results.len());
         for res in results {
             match &res {
-                Value::Array(a) if !a.has(CONS) => out.extend(a.items.iter().cloned()),
-                _ => out.push(res),
+                Value::Array(a) if !a.has(CONS) => {
+                    self.check_array(out.len() + a.items.len())?;
+                    out.extend(a.items.iter().cloned());
+                }
+                _ => {
+                    self.check_array(out.len() + 1)?;
+                    out.push(res);
+                }
             }
         }
         Ok(Value::sequence(out))
@@ -685,6 +734,7 @@ impl Evaluator<'_> {
                 Value::Array(a) => (a.items.clone(), a.is_tuple_stream()),
                 other => (vec![other.clone()], false),
             };
+            self.check_array(out.len() + items.len())?;
             for (bb, item) in items.into_iter().enumerate() {
                 let mut t = tuple_map(tuple);
                 if res_is_tuple {
@@ -860,9 +910,10 @@ impl Evaluator<'_> {
             BinaryOp::Concat => {
                 let l = functions::to_string(&lhs, false)?.unwrap_or_default();
                 let r = functions::to_string(&rhs, false)?.unwrap_or_default();
-                Ok(Value::string(l + &r))
+                self.check_string(l.len() + r.len())
+                    .map(|()| Value::string(l + &r))
             }
-            BinaryOp::Range => range(&lhs, &rhs),
+            BinaryOp::Range => range(&lhs, &rhs).and_then(|v| self.check_size(v)),
             BinaryOp::In => Ok(Value::Bool(
                 !lhs.is_undefined()
                     && !rhs.is_undefined()
@@ -887,11 +938,18 @@ impl Evaluator<'_> {
                 continue;
             }
             if matches!(item.kind, NodeKind::Array { .. }) {
+                self.check_array(out.len() + 1)?;
                 out.push(value);
             } else {
                 match &value {
-                    Value::Array(a) => out.extend(a.items.iter().cloned()),
-                    other => out.push(other.clone()),
+                    Value::Array(a) => {
+                        self.check_array(out.len() + a.items.len())?;
+                        out.extend(a.items.iter().cloned());
+                    }
+                    other => {
+                        self.check_array(out.len() + 1)?;
+                        out.push(other.clone());
+                    }
                 }
             }
         }
@@ -1129,14 +1187,16 @@ impl Evaluator<'_> {
                     Some(sig) => sig.validate(args, input)?,
                     None => args,
                 };
-                (native.imp)(self, args, &Call { input, env })
+                let result = (native.imp)(self, args, &Call { input, env })?;
+                self.check_size(result)
             }
             Function::Host(host) => {
                 let args = match host.signature() {
                     Some(sig) => sig.validate(args, input)?,
                     None => args,
                 };
-                host.call(&args, input)
+                let result = host.call(&args, input)?;
+                self.check_size(result)
             }
             Function::Partial {
                 target,
@@ -1152,7 +1212,7 @@ impl Evaluator<'_> {
                     .collect();
                 // Like jsonata-js, which wraps the function in a lambda: no signature check and
                 // no context value.
-                match &**target {
+                let result = match &**target {
                     Function::Native(native) => (native.imp)(
                         self,
                         full,
@@ -1163,7 +1223,8 @@ impl Evaluator<'_> {
                     ),
                     Function::Host(host) => host.call(&full, &Value::Undefined),
                     _ => Err(Error::new("T1006")),
-                }
+                }?;
+                self.check_size(result)
             }
             Function::Transform {
                 def,

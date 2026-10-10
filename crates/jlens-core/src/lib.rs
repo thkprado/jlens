@@ -248,6 +248,12 @@ fn limits(options: &Options) -> eval::Limits {
     eval::Limits {
         max_depth: options.max_depth.unwrap_or(eval::DEFAULT_MAX_DEPTH),
         timeout: options.timeout,
+        max_string_length: options
+            .max_string_length
+            .unwrap_or(eval::DEFAULT_MAX_STRING_LENGTH),
+        max_array_length: options
+            .max_array_length
+            .unwrap_or(eval::DEFAULT_MAX_ARRAY_LENGTH),
         cancel_token: options.cancel_token.clone(),
         now: options.now,
         seed: options.seed,
@@ -346,11 +352,17 @@ pub struct Options {
     pub seed: Option<u64>,
     /// Stops the evaluation with `U1003` once the token is cancelled, from any thread.
     pub cancel_token: Option<CancelToken>,
+    /// Maximum length, in bytes of UTF-8, of a string that the evaluation builds (default
+    /// 268,435,456: 256 MiB). Exceeding it raises `U1001`.
+    pub max_string_length: Option<usize>,
+    /// Maximum number of items in an array or sequence that the evaluation builds (default
+    /// 16,777,216). Exceeding it raises `U1001`.
+    pub max_array_length: Option<usize>,
 }
 
 impl Options {
-    /// Creates options with no timeout, the default depth limit, the system clock and an
-    /// unseeded generator.
+    /// Creates options with no timeout, the default depth and size limits, the system clock
+    /// and an unseeded generator.
     pub fn new() -> Self {
         Self::default()
     }
@@ -377,6 +389,20 @@ impl Options {
     /// Sets the maximum evaluation depth (`D1011` when exceeded).
     pub fn max_depth(mut self, max_depth: usize) -> Self {
         self.max_depth = Some(max_depth);
+        self
+    }
+
+    /// Sets the maximum length, in bytes, of a string the evaluation builds (`U1001` when
+    /// exceeded).
+    pub fn max_string_length(mut self, bytes: usize) -> Self {
+        self.max_string_length = Some(bytes);
+        self
+    }
+
+    /// Sets the maximum number of items of an array the evaluation builds (`U1001` when
+    /// exceeded).
+    pub fn max_array_length(mut self, items: usize) -> Self {
+        self.max_array_length = Some(items);
         self
     }
 

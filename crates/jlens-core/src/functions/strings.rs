@@ -409,17 +409,21 @@ pub(super) fn split(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
     Ok(Value::array(out, 0))
 }
 
-pub(super) fn join(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn join(ev: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     let strs = arg(&a, 0);
     if strs.is_undefined() {
         return Ok(Value::Undefined);
     }
     let separator = text(&a, 1).unwrap_or_default();
-    let parts: Vec<String> = strs
-        .items_or_self()
+    let items = strs.items_or_self();
+    let parts: Vec<&str> = items
         .iter()
-        .map(|v| v.as_str().unwrap_or_default().to_owned())
+        .map(|v| v.as_str().unwrap_or_default())
         .collect();
+    // Checked before joining: the parts may share one long string many times.
+    let len = parts.iter().map(|p| p.len()).sum::<usize>()
+        + separator.len() * parts.len().saturating_sub(1);
+    ev.check_string(len)?;
     Ok(Value::string(parts.join(&separator)))
 }
 

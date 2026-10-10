@@ -97,6 +97,8 @@ clears those frames when the evaluation ends.
 | Wall-clock time | `Options::timeout` | `D1012` | none |
 | Cancellation from another thread | `Options::cancel_token` | `U1003` | none |
 | Expression nesting | (fixed) | `U1001` | 1,000 levels, checked by the parser |
+| Length of a built string | `Options::max_string_length` | `U1001` | 256 MiB (in bytes of UTF-8) |
+| Items of a built array | `Options::max_array_length` | `U1001` | 16,777,216 |
 
 jsonata-js has no depth limit of its own; it stops when the JavaScript stack overflows. jlens
 needs limits so that it fails with an error instead of crashing the process.
@@ -115,6 +117,14 @@ needs limits so that it fails with an error instead of crashing the process.
 
 The nesting limit bounds every recursive walk of the syntax tree: 1,000 levels is far more
 than any hand-written expression uses.
+
+The size limits stop an expression that doubles a string or an array on each step, or a path
+whose steps multiply the length of a sequence, before it runs out of memory, which would abort
+the process. They are checked by the operators that build strings and arrays (`&`, ranges,
+array constructors, path steps) and on the value that each built-in or host function returns;
+`$join` checks the length before joining. They apply to each string and array, not to the
+total size of a result. The operators check before they build the value; a function's result
+is checked once it has returned.
 
 ## Tracing hooks
 

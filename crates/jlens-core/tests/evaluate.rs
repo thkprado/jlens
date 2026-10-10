@@ -128,6 +128,46 @@ fn guardrails_stop_runaway_evaluations() {
 }
 
 #[test]
+fn size_caps_stop_huge_values() {
+    let code = |source: &str, options: &Options| {
+        Expression::compile(source)
+            .unwrap()
+            .evaluate_with(None, &Bindings::new(), options)
+            .err()
+            .map(|e| e.code().to_owned())
+    };
+    // 30 times a string of 10^7 bytes is over the default 256 MiB.
+    let huge = r#"($s := $pad("", 10000000, "x"); $join([1..30].$s))"#;
+    assert_eq!(code(huge, &Options::new()).as_deref(), Some("U1001"));
+
+    let strings = Options::new().max_string_length(10);
+    assert_eq!(code(r#""abcde" & "fghij""#, &strings), None);
+    assert_eq!(
+        code(r#""abcde" & "fghijk""#, &strings).as_deref(),
+        Some("U1001")
+    );
+    assert_eq!(
+        code(r#"$uppercase("abcdefghijk")"#, &strings).as_deref(),
+        Some("U1001")
+    );
+
+    let arrays = Options::new().max_array_length(3);
+    for ok in ["[1, 2, 3]", "[[1, 2], [3, 4]]", "[1..3]"] {
+        assert_eq!(code(ok, &arrays), None, "{ok}");
+    }
+    for huge in [
+        "[1, 2, 3, 4]",
+        "[[1], [2], [3], [4]]",
+        "[1..4]",
+        "($x := [1, 2]; $x.$x)",
+        "($x := [1, 2]; $x@$a.$x@$b)",
+        "$append([1, 2], [3, 4])",
+    ] {
+        assert_eq!(code(huge, &arrays).as_deref(), Some("U1001"), "{huge}");
+    }
+}
+
+#[test]
 fn documents_are_reusable_and_unchanged_by_evaluation() {
     use jlens_core::Document;
     let text = r#"{"items": [{"code": "a", "n": 1}, {"code": "b", "n": 2}], "k": 1, "k": 2}"#;

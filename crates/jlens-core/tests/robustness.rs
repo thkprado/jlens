@@ -231,4 +231,29 @@ proptest! {
         let run = || format!("{:?}", expr.evaluate_with(None, &Bindings::new(), &options));
         prop_assert_eq!(run(), run());
     }
+
+    #[test]
+    fn size_caps_fail_with_u1001_or_change_nothing(source in expression()) {
+        if let Ok(expr) = Expression::compile(&source) {
+            let options = Options::new()
+                .timeout(Duration::from_millis(50))
+                .max_depth(300)
+                .now(0)
+                .seed(1);
+            let capped = options.clone().max_string_length(8).max_array_length(4);
+            let bindings = bindings();
+            let input = input();
+            let free = expr.evaluate_with(Some(&input), &bindings, &options);
+            let tight = expr.evaluate_with(Some(&input), &bindings, &capped);
+            let timed_out = |r: &Result<Option<serde_json::Value>, Error>| {
+                r.as_ref().is_err_and(|e| e.code() == "D1012")
+            };
+            if !timed_out(&free) && !timed_out(&tight) {
+                match &tight {
+                    Err(e) if e.code() == "U1001" => {}
+                    _ => prop_assert_eq!(format!("{tight:?}"), format!("{free:?}")),
+                }
+            }
+        }
+    }
 }
