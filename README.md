@@ -7,10 +7,10 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 - **`jlens`**: the command-line tool;
 - **`jlens-wasm`**: an ES module for the browser.
 
-> **Status: the JSONata engine is complete (phase 4 of 8 done).** jlens passes 1,688 of the
+> **Status: the JSONata engine is complete (phase 5 of 8 done).** jlens passes 1,688 of the
 > 1,690 cases of the official JSONata 2.2.2 test suite; the other two are documented
-> overrides, and evaluations can be audited and explained. Schema-driven autocomplete (phase 5) is
-> next. See the
+> overrides. Evaluations can be audited and explained, and schemas inferred from samples drive
+> completion and diagnostics. The full CLI (phase 6) is next. See the
 > [roadmap](docs/src/architecture/roadmap.md) and the current
 > [conformance report](tests/conformance/REPORT.md).
 
@@ -26,8 +26,8 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
   $sum(items.(unitPrice * quantity)) > 50000
   ```
 
-- (Planned) Structural metadata inferred from sample documents, which drives completion,
-  diagnostics and hover in editors.
+- Structural metadata inferred from sample documents (JSON Schema 2020-12), which drives
+  completion, diagnostics and hover (`jlens schema infer`, `jlens check --schema`).
 
 ## Repository layout
 

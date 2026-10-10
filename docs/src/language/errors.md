@@ -154,3 +154,4 @@ jlens-specific. Warnings are reported as diagnostics by `jlens check` and `parse
 | `W0101` | `This annotation is not attached to an expression and will be ignored` |
 | `W0102` | `Unknown annotation tag @{{{tag}}}; expected @label, @message or @id` |
 | `W0103` | `The value of annotation tag @{{{tag}}} should be a JSON string literal` |
+| `W0201` | `Field {{token}} is not in the schema{{{hint}}}` |

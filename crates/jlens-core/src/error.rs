@@ -220,6 +220,14 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    /// A diagnostic with a catalog code; `details` fill the code's message template (string
+    /// details are inserted as JSON strings by `{{name}}` and as raw text by `{{{name}}}`).
+    pub fn new(severity: Severity, code: &str, span: Span, details: &[(&str, &str)]) -> Self {
+        let mut d = Diagnostic::warning(code, span, details);
+        d.severity = severity;
+        d
+    }
+
     pub(crate) fn warning(code: &str, span: Span, details: &[(&str, &str)]) -> Self {
         let mut map = Map::new();
         for (k, v) in details {
@@ -403,6 +411,7 @@ catalog! {
     "W0101" => "This annotation is not attached to an expression and will be ignored",
     "W0102" => "Unknown annotation tag @{{{tag}}}; expected @label, @message or @id",
     "W0103" => "The value of annotation tag @{{{tag}}} should be a JSON string literal",
+    "W0201" => "Field {{token}} is not in the schema{{{hint}}}",
 }
 
 #[cfg(test)]

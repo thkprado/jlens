@@ -5,7 +5,9 @@ The `jlens` binary evaluates, checks and inspects JSONata expressions.
 ```text
 jlens eval   <EXPR> | -f FILE  [-i input.json | --no-input] [-b bindings.json] [--compact]
              [--explain | --audit json|text] [--audit-level decisions|full] [--trace-log FILE]
-jlens check  <EXPR> | -f FILE  [--json]
+jlens check  <EXPR> | -f FILE  [--json] [--schema schema.json]
+jlens schema infer    SAMPLES...  [--each] [--overrides FILE] [-o schema.json]
+jlens schema complete <EXPR> | -f FILE  [--schema schema.json] [--cursor N] [--json]
 jlens ast    <EXPR> | -f FILE  [--tokens | --raw] [--recover]
 ```
 
@@ -74,6 +76,12 @@ Use `check` in CI to validate a directory of rule files:
 ```sh
 for f in rules/*.jsonata; do jlens check -f "$f" || exit 1; done
 ```
+
+## `jlens schema`
+
+`jlens schema infer` builds a JSON Schema from sample documents, and `jlens schema complete`
+lists completions at a cursor position. With `--schema`, `jlens check` also reports field
+names that the schema does not have (`W0201`). The [schema guide](schema.md) covers all three.
 
 ## `jlens ast`
 

@@ -13,6 +13,7 @@ categories = ["development-tools", "encoding"]
 jlens-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+indexmap.workspace = true
 
 [lints]
 workspace = true

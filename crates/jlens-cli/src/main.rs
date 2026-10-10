@@ -4,6 +4,7 @@
 //! I/O problems (unreadable files, invalid JSON input).
 
 mod report;
+mod schema;
 
 use std::fs;
 use std::io::Read;
@@ -32,11 +33,14 @@ enum Command {
     Check(CheckArgs),
     /// Print the tokens or syntax tree of an expression (for debugging expressions and jlens).
     Ast(AstArgs),
+    /// Infer schemas from sample documents and query the language service.
+    #[command(subcommand)]
+    Schema(schema::SchemaCommand),
 }
 
 /// Where the expression comes from.
 #[derive(Args)]
-struct ExprSource {
+pub struct ExprSource {
     /// The JSONata expression (omit when using --file).
     #[arg(required_unless_present = "file")]
     expr: Option<String>,
@@ -46,7 +50,8 @@ struct ExprSource {
 }
 
 impl ExprSource {
-    fn read(&self) -> Result<(String, String)> {
+    /// The expression text and a name for messages (`<expr>` or the file path).
+    pub fn read(&self) -> Result<(String, String)> {
         match (&self.expr, &self.file) {
             (Some(expr), _) => Ok((expr.clone(), "<expr>".to_owned())),
             (None, Some(file)) => Ok((
@@ -111,6 +116,9 @@ struct CheckArgs {
     /// Print diagnostics as JSON.
     #[arg(long)]
     json: bool,
+    /// Also report fields that this schema (JSON Schema, e.g. from `jlens schema infer`) lacks.
+    #[arg(long, value_name = "FILE")]
+    schema: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -143,15 +151,18 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Command::Eval(args) => eval(args),
         Command::Check(args) => check(args),
         Command::Ast(args) => ast(args),
+        Command::Schema(cmd) => schema::run(cmd),
     }
 }
 
-fn read_json(path: &PathBuf) -> Result<Value> {
+/// Reads and parses a JSON file.
+pub fn read_json(path: &PathBuf) -> Result<Value> {
     let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
 }
 
-fn print_json(value: &impl serde::Serialize) -> Result<()> {
+/// Prints a value as pretty JSON on stdout.
+pub fn print_json(value: &impl serde::Serialize) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
@@ -210,26 +221,27 @@ fn eval(args: EvalArgs) -> Result<ExitCode> {
 
 fn check(args: CheckArgs) -> Result<ExitCode> {
     let (source, name) = args.source.read()?;
-    let ast = jlens_core::parse_recover(&source);
+    let schema = args.schema.as_ref().map(schema::load).transpose()?;
+    let diagnostics = jlens_schema::LanguageService::new(schema).diagnostics(&source);
+    let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
     if args.json {
-        print_json(&ast.diagnostics)?;
+        print_json(&diagnostics)?;
     } else {
-        for diagnostic in &ast.diagnostics {
+        for diagnostic in &diagnostics {
             eprint!("{}", report::render(&source, &name, diagnostic));
         }
-        let errors = ast
-            .diagnostics
+        let errors = diagnostics
             .iter()
             .filter(|d| d.severity == Severity::Error)
             .count();
-        let warnings = ast.diagnostics.len() - errors;
-        if ast.diagnostics.is_empty() {
+        let warnings = diagnostics.len() - errors;
+        if diagnostics.is_empty() {
             eprintln!("{name}: ok");
         } else {
             eprintln!("{name}: {errors} error(s), {warnings} warning(s)");
         }
     }
-    Ok(if ast.has_errors() {
+    Ok(if has_errors {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
