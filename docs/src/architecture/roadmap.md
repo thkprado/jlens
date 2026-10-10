@@ -1,6 +1,8 @@
 # Roadmap
 
-jlens is built in phases. A phase is complete only when its documentation is written.
+## How 0.1 was built
+
+jlens was built in phases. A phase was complete only when its documentation was written.
 
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
@@ -12,20 +14,31 @@ jlens is built in phases. A phase is complete only when its documentation is wri
 | 5 | `jlens-schema`: inference, overrides, JSON Schema, static typing, completion/diagnostics/hover | Table-driven language-service tests | **done** |
 | 6 | Full CLI | CLI snapshot tests | **done** |
 | 7 | WebAssembly package (browser ESM), TypeScript types, web editor example | Headless browser tests; working demo | **done** |
-| 8 | Documentation consolidation, benchmarks, publishing | Doc examples verified; link check green | **done** (publishing pending) |
+| 8 | Documentation consolidation, benchmarks, publishing | Doc examples verified; link check green; published to crates.io and npm | **done** (0.1.0) |
 
-Phases 4 and 5 can run in parallel once phase 3 is done. Phase 5 only needs the parser from
-phase 1 to start.
+## Releases
 
-## After 0.1
+The [changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md) lists every change.
 
-Done since: host functions ([ADR 0006](../adr/0006-host-functions.md)) and the language server
-`jlens lsp` ([ADR 0007](../adr/0007-language-server.md)).
+| Version | Highlights |
+|---|---|
+| 0.1.0 | The first release: the engine, audits, schemas and the language service, the CLI and the WebAssembly package |
+| 0.1.1 | Examples, fixtures and the web editor use an online store order |
+| 0.2.0 | Host functions in Rust and WebAssembly ([ADR 0006](../adr/0006-host-functions.md)), and their declarations in the language service; the web editor's example selector |
+| Unreleased | The language server `jlens lsp` and `jlens.json` ([ADR 0007](../adr/0007-language-server.md), [editors guide](../guides/editors.md)) |
 
-Ideas that came up during development, not commitments:
+## Ideas
 
-- Host functions that call back the JSONata functions they receive as arguments.
-- A VS Code extension that starts `jlens lsp`, and syntax highlighting for JSONata files.
-- Lazy conversion of input documents, so that evaluations which read a small part of a large
-  document do not pay for converting all of it.
-- Asynchronous functions (jsonata-js allows functions that return promises).
+Not commitments, roughly from the smallest to the largest:
+
+- **A VS Code extension** that starts `jlens lsp` for `.jsonata` files, with a TextMate grammar
+  for syntax highlighting. The other editors with an LSP client need no extension.
+- **Host functions that call back** the JSONata functions they receive as arguments, through a
+  callable handle. This extends the host function API of ADR 0006 without changing the
+  functions already written against it.
+- **Lazy conversion of input documents**, so that evaluations that read a small part of a large
+  document do not pay for converting all of it. This changes the value model
+  ([ADR 0003](../adr/0003-value-model.md)).
+- **Asynchronous functions**, as in jsonata-js, whose functions may return promises. This needs
+  an evaluator that can suspend, and an ADR first. Until then, a host function that returns a
+  promise fails with `U1002`.

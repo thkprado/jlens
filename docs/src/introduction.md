@@ -21,10 +21,10 @@ What sets jlens apart from other JSONata implementations:
   implementation.
 - **Schema-driven assistance.** jlens infers structural metadata from sample documents. It then
   uses that metadata to offer completion, diagnostics and hover information for expressions
-  being written.
+  being written, in the browser and in editors ([language server](guides/editors.md)).
 - **Conformance first.** The engine is checked against the official JSONata test suite (2.2.2)
   on every change; see [Conformance testing](architecture/conformance.md).
 
-> **Status:** jlens 0.1 implements all of JSONata 2.2 (1,688 of the 1,690 official test cases,
-> with the other two documented), evaluation audits, schema-driven editor support, the
-> command line and the browser package. See the [roadmap](architecture/roadmap.md).
+> **Status:** jlens 0.2 implements all of JSONata 2.2 (1,688 of the 1,690 official test cases,
+> with the other two documented), host functions, evaluation audits, schema-driven editor
+> support, the command line and the browser package. See the [roadmap](architecture/roadmap.md).
