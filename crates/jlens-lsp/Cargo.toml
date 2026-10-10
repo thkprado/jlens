@@ -22,10 +22,11 @@ lsp-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 glob.workspace = true
-url.workspace = true
 
 [lints]
 workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+# Builds the URIs of the tests, and checks the paths of `uri.rs` against its own.
+url.workspace = true

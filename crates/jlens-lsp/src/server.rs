@@ -182,8 +182,8 @@ fn supports_watching(params: &InitializeParams) -> bool {
 }
 
 /// The file system path of a `file:` URI.
-pub(crate) fn path_of(uri: &Uri) -> Option<PathBuf> {
-    url::Url::parse(uri.as_str()).ok()?.to_file_path().ok()
+fn path_of(uri: &Uri) -> Option<PathBuf> {
+    crate::uri::path_of(uri.as_str())
 }
 
 impl Server<'_> {

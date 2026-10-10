@@ -13,7 +13,7 @@ in `docs/`.
 |---|---|
 | `crates/jlens-core/src` | `lexer.rs`, `parser.rs` (Pratt, recover mode), `process.rs` (raw tree → `Ast`), `eval.rs` (interpreter), `value.rs` (value and sequence model), `functions/` (library and catalog), `datetime.rs`, `regex.rs`, `signature.rs`, `error.rs` (codes and messages), `audit/` (tracer, collector, explain), `document.rs`, `stack.rs` |
 | `crates/jlens-schema/src` | `shape.rs` (Schema, inference, overrides), `jsonschema.rs`, `typing.rs` (typing walker), `service.rs` (LanguageService) |
-| `crates/jlens-lsp/src` | the language server: `server.rs` (message loop, requests), `config.rs` (`jlens.json`), `text.rs` (positions, incremental sync) |
+| `crates/jlens-lsp/src` | the language server: `server.rs` (message loop, requests), `config.rs` (`jlens.json`), `text.rs` (positions, incremental sync), `uri.rs` (paths of `file:` URIs) |
 | `crates/jlens-cli/src` | the `jlens` binary (clap); `jlens lsp` runs `jlens-lsp` |
 | `crates/jlens-wasm` | wasm-bindgen bindings; `src/types.d.ts` holds the hand-written TypeScript declarations; `tests/` holds the JS suite (`suite.mjs`), shared by Node and the browser |
 | `tests/jsonata-suite` | the vendored official suite (do not edit; `cargo xtask update-suite` replaces it) |

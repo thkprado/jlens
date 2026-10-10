@@ -24,6 +24,7 @@
 mod config;
 mod server;
 mod text;
+mod uri;
 
 pub use server::{Error, run};
 
