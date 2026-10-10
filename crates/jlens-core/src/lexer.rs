@@ -1,5 +1,4 @@
-//! The tokenizer. Ported from the `tokenizer` function in jsonata-js `src/parser.js`
-//! (© IBM Corp., MIT).
+//! The tokenizer. Ported from the `tokenizer` function in jsonata-js `src/parser.js` (MIT).
 //!
 //! Tokens are produced on demand because `/` is ambiguous: in operand position it starts a
 //! regular expression, in operator position it is division. The parser tells the lexer which

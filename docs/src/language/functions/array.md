@@ -94,4 +94,4 @@ $zip([1, 2, 3], [4, 5], [7, 8, 9])
 
 ---
 
-Adapted from the JSONata documentation (© IBM Corp. and JSONata contributors, MIT license).
+Adapted from the JSONata documentation (MIT license).

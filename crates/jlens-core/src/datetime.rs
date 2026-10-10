@@ -1,5 +1,5 @@
 //! Date/time and integer picture strings (XPath F&O 3.1 `format-dateTime`, `format-integer`).
-//! Ported from jsonata-js `src/datetime.js` (© IBM Corp., MIT).
+//! Ported from jsonata-js `src/datetime.js` (MIT).
 //!
 //! Calendar arithmetic uses the proleptic Gregorian calendar in UTC, like JavaScript's `Date`
 //! with its `UTC` methods, so no time-zone database is needed.

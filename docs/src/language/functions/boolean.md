@@ -49,4 +49,4 @@ input: address.json
 
 ---
 
-Adapted from the JSONata documentation (© IBM Corp. and JSONata contributors, MIT license).
+Adapted from the JSONata documentation (MIT license).

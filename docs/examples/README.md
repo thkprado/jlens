@@ -9,5 +9,4 @@ The JSONata examples of the book (`jsonata-example` blocks) run against these do
 | `invoice.json` | An account with orders of products |
 | `library.json` | Books, loans and customers |
 
-They come from the JSONata documentation and test suite, © IBM Corp. and JSONata contributors,
-MIT license.
+They come from the JSONata documentation and test suite (MIT license).

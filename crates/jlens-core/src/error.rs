@@ -1,6 +1,6 @@
 //! Errors, error codes and diagnostics.
 //!
-//! Error codes and message templates follow jsonata-js (`src/jsonata.js`, © IBM Corp., MIT) so
+//! Error codes and message templates follow jsonata-js (`src/jsonata.js`, MIT) so
 //! that callers can rely on the same stable codes as other JSONata implementations.
 
 use std::fmt;

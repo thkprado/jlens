@@ -1,7 +1,7 @@
 //! The processed abstract syntax tree that the evaluator walks.
 //!
-//! The shape follows the output of `processAST` in jsonata-js (`src/parser.js`, © IBM Corp.,
-//! MIT): `.` chains become [`NodeKind::Path`] nodes with a list of steps, predicates become
+//! The shape follows the output of `processAST` in jsonata-js (`src/parser.js`, MIT):
+//! `.` chains become [`NodeKind::Path`] nodes with a list of steps, predicates become
 //! [`Stage`]s, and so on. Unlike the reference implementation, every node is typed, carries a
 //! byte [`Span`] covering its whole source text, and has a stable [`NodeId`].
 

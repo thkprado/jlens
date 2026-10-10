@@ -96,4 +96,4 @@ $sift({"a": 1, "b": null, "c": 0}, function($v) { $v != null })
 
 ---
 
-Adapted from the JSONata documentation (© IBM Corp. and JSONata contributors, MIT license).
+Adapted from the JSONata documentation (MIT license).

@@ -1,5 +1,4 @@
-//! Function signatures such as `<s-nn?:s>`. Ported from jsonata-js `src/signature.js`
-//! (© IBM Corp., MIT).
+//! Function signatures such as `<s-nn?:s>`. Ported from jsonata-js `src/signature.js` (MIT).
 //!
 //! A signature lists one symbol per parameter:
 //!

@@ -76,4 +76,4 @@ $clone({"a": [1, {"b": 2}]})
 
 ---
 
-Adapted from the JSONata documentation (© IBM Corp. and JSONata contributors, MIT license).
+Adapted from the JSONata documentation (MIT license).

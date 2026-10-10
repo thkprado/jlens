@@ -209,4 +209,4 @@ $parseInteger("12,345,678", "#,##0")
 
 ---
 
-Adapted from the JSONata documentation (© IBM Corp. and JSONata contributors, MIT license).
+Adapted from the JSONata documentation (MIT license).

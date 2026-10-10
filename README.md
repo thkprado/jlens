@@ -79,5 +79,5 @@ cargo bench -p jlens-core              # benchmarks
 
 ## License
 
-MIT. The vendored JSONata test suite and the documentation adapted from JSONata are © IBM Corp.
-and JSONata contributors, also under the MIT license.
+MIT. The vendored JSONata test suite, and the code and documentation ported or adapted from
+JSONata, are also under the MIT license; see [LICENSE](LICENSE).

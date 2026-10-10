@@ -113,4 +113,4 @@ $toMillis("2018-12-10 14:00 +01:00", "[Y]-[M]-[D] [H]:[m] [Z]") ~> $fromMillis()
 
 ---
 
-Adapted from the JSONata documentation (© IBM Corp. and JSONata contributors, MIT license).
+Adapted from the JSONata documentation (MIT license).

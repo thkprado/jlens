@@ -37,6 +37,6 @@ esm.sh through an import map, so it needs network access.
 The [WebAssembly guide](../../docs/src/guides/wasm.md) documents the API used here.
 
 The try.jsonata.org samples come from the
-[JSONata Exerciser](https://github.com/jsonata-js/jsonata-exerciser) (`src/sample.js`), © IBM Corp.
-2016, 2020, MIT license. Its Bindings sample binds a JavaScript function (`Math.cos`); jlens
+[JSONata Exerciser](https://github.com/jsonata-js/jsonata-exerciser) (`src/sample.js`), MIT license.
+Its Bindings sample binds a JavaScript function (`Math.cos`); jlens
 bindings are JSON values, so this version binds `$pi` and writes the cosine in JSONata.

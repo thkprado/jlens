@@ -1,0 +1,12 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"errors\", \"U2001\", \"--json\"], None)"
+---
+exit: 0
+--- stdout
+{
+  "code": "U2001",
+  "category": "guardrail",
+  "template": "The input is not valid JSON: {{{message}}}"
+}
+--- stderr

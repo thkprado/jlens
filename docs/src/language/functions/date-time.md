@@ -85,4 +85,4 @@ $toMillis("2018-12-10T10:00:00")
 
 ---
 
-Adapted from the JSONata documentation (© IBM Corp. and JSONata contributors, MIT license).
+Adapted from the JSONata documentation (MIT license).

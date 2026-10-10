@@ -68,4 +68,4 @@ $average([5, 1, 3, 7, 4])
 
 ---
 
-Adapted from the JSONata documentation (© IBM Corp. and JSONata contributors, MIT license).
+Adapted from the JSONata documentation (MIT license).

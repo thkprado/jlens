@@ -265,5 +265,5 @@ $replace("265USD", /([0-9]+)USD/, "$$$1")
 
 ---
 
-Adapted from the JSONata documentation (© IBM Corp. and JSONata contributors, MIT license).
+Adapted from the JSONata documentation (MIT license).
 The functions that format numbers as strings are on the [numeric functions](numeric.md) page.

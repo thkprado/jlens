@@ -3,6 +3,7 @@
 //! Exit codes: `0` success, `1` the expression has errors (syntax or evaluation), `2` usage or
 //! I/O problems (unreadable files, invalid JSON input).
 
+mod errors;
 mod eval;
 mod functions;
 mod output;
@@ -39,6 +40,8 @@ enum Command {
     Check(CheckArgs),
     /// List the built-in functions, or describe one.
     Functions(functions::FunctionsArgs),
+    /// List the error and warning codes, or describe one.
+    Errors(errors::ErrorsArgs),
     /// Infer schemas from sample documents and query the language service.
     #[command(subcommand)]
     Schema(schema::SchemaCommand),
@@ -137,6 +140,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Command::Eval(args) => eval::run(args),
         Command::Check(args) => check(args),
         Command::Functions(args) => functions::run(args),
+        Command::Errors(args) => errors::run(args),
         Command::Schema(cmd) => schema::run(cmd),
         Command::Ast(args) => ast(args),
         Command::Lsp => {

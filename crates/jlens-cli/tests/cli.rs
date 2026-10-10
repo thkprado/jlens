@@ -307,6 +307,32 @@ fn functions() {
 }
 
 #[test]
+fn errors() {
+    snapshot!("errors_list", &["errors"]);
+    snapshot!("errors_one", &["errors", "s0202"]);
+    snapshot!("errors_one_json", &["errors", "U2001", "--json"]);
+    snapshot!("errors_unknown", &["errors", "X9999"]);
+}
+
+#[test]
+fn errors_json_matches_catalog() {
+    let out = Command::cargo_bin("jlens")
+        .unwrap()
+        .args(["errors", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let entries: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap();
+    let catalog = jlens_core::error::catalog();
+    assert_eq!(entries.len(), catalog.len());
+    for (entry, e) in entries.iter().zip(catalog) {
+        assert_eq!(entry["code"], e.code);
+        assert_eq!(entry["template"], e.template);
+        assert!(entry["category"].is_string());
+    }
+}
+
+#[test]
 fn schema() {
     snapshot!(
         "schema_infer",

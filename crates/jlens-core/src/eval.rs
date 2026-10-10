@@ -1,4 +1,4 @@
-//! The tree-walking evaluator. Ported from jsonata-js `src/jsonata.js` (© IBM Corp., MIT).
+//! The tree-walking evaluator. Ported from jsonata-js `src/jsonata.js` (MIT).
 //!
 //! The structure mirrors the reference implementation function by function (`evaluatePath`,
 //! `evaluateStep`, `evaluateTupleStep`, `evaluateFilter`, ...), because JSONata's semantics

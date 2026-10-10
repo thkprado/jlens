@@ -22,6 +22,7 @@ All notable changes are recorded here. The format follows
   command can be replayed with the same output.
 - `jlens check -f` takes several files and glob patterns (expanded by `jlens`), and
   `--deny-warnings` makes warnings fail with exit code 1.
+- `jlens errors [CODE] [--json]` lists the error and warning codes, or describes one.
 
 ### Changed
 

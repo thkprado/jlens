@@ -3,7 +3,7 @@
 //
 // The Invoice, Address, Schema, Library and Bindings examples are the samples of the JSONata
 // Exerciser (https://try.jsonata.org, https://github.com/jsonata-js/jsonata-exerciser,
-// src/sample.js), © IBM Corp. 2016, 2020, MIT license. The Bindings example is adapted: the
+// src/sample.js), MIT license. The Bindings example is adapted: the
 // Exerciser binds a JavaScript function (Math.cos), and jlens bindings are JSON values, so $cosine
 // is written in JSONata.
 

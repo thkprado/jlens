@@ -36,5 +36,5 @@ assert_eq!(total, Some(json!(25)));
 
 ## License
 
-MIT. Parts are ported from [jsonata-js](https://github.com/jsonata-js/jsonata), © IBM Corp. and
-JSONata contributors, also MIT.
+MIT. Parts are ported from [jsonata-js](https://github.com/jsonata-js/jsonata), also MIT; see
+`LICENSE`.

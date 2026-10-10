@@ -31,8 +31,7 @@
 //! ```
 //!
 //! Parts of this crate are ported from [jsonata-js](https://github.com/jsonata-js/jsonata)
-//! (© IBM Corp. and JSONata contributors, MIT license); the ported modules say so in their
-//! documentation.
+//! (MIT license, reproduced in `LICENSE`); the ported modules say so in their documentation.
 
 pub mod annotation;
 pub mod ast;

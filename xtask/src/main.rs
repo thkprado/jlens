@@ -72,6 +72,17 @@ fn conformance(update_baseline: bool) -> Result<()> {
     Ok(())
 }
 
+/// The only edit made to the vendored suite: a company in the sample data is renamed (text,
+/// replacement) in these files. It does not change what the cases test.
+const SUITE_EDITS: ((&str, &str), &[&str]) = (
+    ("IBM UK", "Acme UK"),
+    &[
+        "datasets/dataset21.json",
+        "groups/transform/case036.json",
+        "groups/transform/case037.json",
+    ],
+);
+
 fn update_suite(checkout: &Path) -> Result<()> {
     let src = checkout.join("test/test-suite");
     if !src.join("groups").is_dir() {
@@ -90,6 +101,16 @@ fn update_suite(checkout: &Path) -> Result<()> {
     }
     fs::copy(src.join("TESTSUITE.md"), dest.join("TESTSUITE.md"))?;
     fs::copy(checkout.join("LICENSE"), dest.join("LICENSE"))?;
+    let ((from, to), files) = SUITE_EDITS;
+    for relative in files {
+        let path = dest.join(relative);
+        let text = fs::read_to_string(&path)?;
+        if text.contains(from) {
+            fs::write(&path, text.replace(from, to))?;
+        } else {
+            println!("note: {relative} no longer contains {from:?}; review SUITE_EDITS");
+        }
+    }
     println!("suite updated; remember to bump the pinned version in tests/jsonata-suite/README.md");
     Ok(())
 }

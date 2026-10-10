@@ -71,4 +71,4 @@ units. A character outside the Basic Multilingual Plane counts as two.
 
 ---
 
-Adapted from the JSONata documentation (© IBM Corp. and JSONata contributors, MIT license).
+Adapted from the JSONata documentation (MIT license).

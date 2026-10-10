@@ -1,5 +1,5 @@
 //! The Pratt (top-down operator precedence) parser. Ported from the `parser` function in
-//! jsonata-js `src/parser.js` (© IBM Corp., MIT), which builds on Vaughan Pratt's algorithm
+//! jsonata-js `src/parser.js` (MIT), which builds on Vaughan Pratt's algorithm
 //! and Douglas Crockford's TDOP framework.
 //!
 //! The parser produces a *raw* tree that mirrors the reference implementation's parse tree;

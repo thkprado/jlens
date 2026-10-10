@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"errors\", \"X9999\"], None)"
+---
+exit: 2
+--- stdout
+--- stderr
+error: there is no error code X9999; run `jlens errors` for the list

@@ -1,5 +1,5 @@
 //! Post-parse processing. Ported from `processAST` and its helpers in jsonata-js
-//! `src/parser.js` (© IBM Corp., MIT).
+//! `src/parser.js` (MIT).
 //!
 //! This stage adds semantic structure to the raw parse tree so that the evaluator's job is
 //! simpler:

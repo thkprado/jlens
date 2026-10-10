@@ -1,0 +1,10 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"errors\", \"s0202\"], None)"
+---
+exit: 0
+--- stdout
+S0202
+  category: Static errors (S)
+  message:  Expected {{value}}, got {{token}}
+--- stderr

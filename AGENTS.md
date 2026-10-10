@@ -16,7 +16,7 @@ in `docs/`.
 | `crates/jlens-lsp/src` | the language server: `server.rs` (message loop, requests), `config.rs` (`jlens.json`), `text.rs` (positions, incremental sync), `uri.rs` (paths of `file:` URIs) |
 | `crates/jlens-cli/src` | the `jlens` binary (clap); `jlens lsp` runs `jlens-lsp` |
 | `crates/jlens-wasm` | wasm-bindgen bindings; `src/types.d.ts` holds the hand-written TypeScript declarations; `tests/` holds the JS suite (`suite.mjs`), shared by Node and the browser |
-| `tests/jsonata-suite` | the vendored official suite (do not edit; `cargo xtask update-suite` replaces it) |
+| `tests/jsonata-suite` | the vendored official suite (do not edit by hand; `cargo xtask update-suite` replaces it and applies `SUITE_EDITS`) |
 | `tests/conformance` | `baseline.txt`, `overrides.json`, `REPORT.md` |
 | `docs/src` | the book; `language/functions.md` and `language/errors.md` are generated |
 | `docs/examples` | sample documents for the book's examples |

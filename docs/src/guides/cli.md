@@ -9,6 +9,7 @@ jlens eval      <EXPR> | -f FILE  [-i INPUT | --no-input] [--ndjson] [--filter]
                 [--explain | --audit json|text] [--audit-level decisions|full] [--trace-log FILE]
 jlens check     <EXPR> | -f FILE...  [--json] [--deny-warnings] [--schema SCHEMA]
 jlens functions [NAME] [--json]
+jlens errors    [CODE] [--json]
 jlens schema infer    SAMPLES...  [--each] [--overrides FILE] [-o SCHEMA]
 jlens schema complete <EXPR> | -f FILE  [--schema SCHEMA] [--cursor N] [--json]
 jlens ast       <EXPR> | -f FILE  [--tokens | --raw] [--recover]
@@ -225,6 +226,21 @@ $formatNumber($value, $picture, $options)
 ```
 
 The [function reference](../language/functions.md) is generated from the same catalog.
+
+## `jlens errors`
+
+Lists the error and warning codes by category, with their message templates. Given a code (in
+any case), it describes one; `--json` prints the catalog as JSON, each entry with its `code`,
+`category` (`static`, `type`, `dynamic`, `guardrail` or `warning`) and `template`.
+
+```text
+$ jlens errors S0202
+S0202
+  category: Static errors (S)
+  message:  Expected {{value}}, got {{token}}
+```
+
+The [error reference](../language/errors.md) is generated from the same catalog.
 
 ## `jlens schema`
 

@@ -43,5 +43,5 @@ The full guide is the "WebAssembly (browser)" chapter of the jlens book (`docs/s
 
 ## License
 
-MIT. The JSONata test suite and the documentation adapted from JSONata are © IBM Corp. and
-JSONata contributors, also under the MIT license.
+MIT. The code and documentation ported or adapted from JSONata are also under the MIT license;
+see `LICENSE`.

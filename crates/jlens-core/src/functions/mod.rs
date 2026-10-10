@@ -1,5 +1,5 @@
 //! The built-in function library. Ported from jsonata-js `src/functions.js` and
-//! `src/datetime.js` (© IBM Corp., MIT).
+//! `src/datetime.js` (MIT).
 //!
 //! Every built-in is described by a `Native` entry: its name, signature, declared parameter
 //! names (used when it is partially applied), category, a one-line summary and implementation.
