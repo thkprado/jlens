@@ -1,6 +1,6 @@
 //! Property tests: the language service never panics, whatever the text and the offset.
 
-use jlens_schema::{LanguageService, Schema};
+use jlens_schema::{FunctionDecl, LanguageService, Schema};
 use proptest::prelude::*;
 use serde_json::json;
 
@@ -9,7 +9,7 @@ const TOKENS: &[&str] = &[
     "customer", "login", "items", "type", "unitPrice", "`odd name`", "$", "$$", "$x", "$limit",
     "1", "'s'", "\"t\"", ".", "[", "]", "(", ")", "{", "}", ":", ",", ";", "=", "and", "in", "?",
     ":=", "~>", "&", "**", "^(", "@$v", "#$i", "function($v){", "$sum(", "$substring(",
-    "$map(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
+    "$map(", "$rate(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
 ];
 
 fn text() -> impl Strategy<Value = String> {
@@ -28,7 +28,13 @@ proptest! {
             "customer": {"login": "1", "name": "X"},
             "items": [{"type": "a", "unitPrice": 1.5, "odd name": true}]
         })]);
-        let service = LanguageService::new(Some(schema)).with_variable("limit", None);
+        let service = LanguageService::new(Some(schema))
+            .with_variable("limit", None)
+            .with_function(
+                FunctionDecl::new("rate", "A rate").signature("<s?:n>").params(["region"]),
+            )
+            // A host function that replaces a built-in.
+            .with_function(FunctionDecl::new("sum", ""));
         let diagnostics = service.diagnostics(&text);
         for d in &diagnostics {
             prop_assert!(d.span.start <= d.span.end && d.span.end <= text.len(), "{d:?}");

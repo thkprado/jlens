@@ -6,7 +6,7 @@
 
 use jlens_core::ast::{Node, Span};
 use jlens_core::{Diagnostic, Severity, parse_recover};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::shape::{Field, Schema, Shape};
 use crate::typing::{Event, Scope, Ty, Walker};
@@ -24,7 +24,8 @@ pub enum CompletionKind {
     Field,
     /// A variable in scope.
     Variable,
-    /// A built-in function.
+    /// A built-in function, or a host function declared with
+    /// [`LanguageService::with_function`].
     Function,
     /// `true`, `false`, `null`.
     Keyword,
@@ -84,6 +85,56 @@ pub struct SignatureHelp {
     pub summary: String,
 }
 
+/// A function the host application provides (a `jlens_core::HostFunction`), declared to the
+/// language service so that it is completed and documented like a built-in function.
+///
+/// It deserializes from `{"name", "signature", "params", "summary"}`; all but `name` are
+/// optional.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FunctionDecl {
+    /// The name, without the leading `$`.
+    pub name: String,
+    /// The signature, such as `<n-n?:n>`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    /// Parameter names, without `$`, shown by signature help.
+    pub params: Vec<String>,
+    /// One-line description.
+    pub summary: String,
+}
+
+impl FunctionDecl {
+    /// A declaration with a name and a summary.
+    pub fn new(name: impl Into<String>, summary: impl Into<String>) -> Self {
+        FunctionDecl {
+            name: name.into(),
+            summary: summary.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Sets the signature.
+    pub fn signature(mut self, signature: impl Into<String>) -> Self {
+        self.signature = Some(signature.into());
+        self
+    }
+
+    /// Sets the parameter names (without `$`).
+    pub fn params<S: Into<String>>(mut self, params: impl IntoIterator<Item = S>) -> Self {
+        self.params = params.into_iter().map(Into::into).collect();
+        self
+    }
+}
+
+/// A function as the service presents it: declared or built-in.
+struct FunctionView {
+    name: String,
+    signature: String,
+    params: Vec<String>,
+    summary: String,
+}
+
 /// Completion, diagnostics, hover and signature help for expressions over a schema.
 ///
 /// ```
@@ -101,6 +152,7 @@ pub struct SignatureHelp {
 pub struct LanguageService {
     schema: Option<Schema>,
     variables: Vec<(String, Option<Shape>)>,
+    functions: Vec<FunctionDecl>,
 }
 
 /// Lexical situation at an offset.
@@ -214,6 +266,7 @@ impl LanguageService {
         LanguageService {
             schema,
             variables: Vec::new(),
+            functions: Vec::new(),
         }
     }
 
@@ -222,6 +275,39 @@ impl LanguageService {
     pub fn with_variable(mut self, name: impl Into<String>, shape: Option<Shape>) -> Self {
         self.variables.push((name.into(), shape));
         self
+    }
+
+    /// Declares a host function the expression is evaluated with. It is completed, and shown by
+    /// hover and signature help, like a built-in function, and replaces a built-in function of
+    /// the same name.
+    pub fn with_function(mut self, function: FunctionDecl) -> Self {
+        self.functions.retain(|f| f.name != function.name);
+        self.functions.push(function);
+        self
+    }
+
+    /// The declared functions, then the built-in functions they do not replace.
+    fn functions(&self) -> Vec<FunctionView> {
+        let declared = self.functions.iter().map(|f| FunctionView {
+            name: f.name.clone(),
+            signature: f.signature.clone().unwrap_or_default(),
+            params: f.params.clone(),
+            summary: f.summary.clone(),
+        });
+        let built_in = jlens_core::function_catalog()
+            .into_iter()
+            .filter(|b| self.functions.iter().all(|f| f.name != b.name))
+            .map(|b| FunctionView {
+                name: b.name.to_owned(),
+                signature: b.signature,
+                params: b.params.iter().map(|p| (*p).to_owned()).collect(),
+                summary: b.summary.to_owned(),
+            });
+        declared.chain(built_in).collect()
+    }
+
+    fn function(&self, name: &str) -> Option<FunctionView> {
+        self.functions().into_iter().find(|f| f.name == name)
     }
 
     fn root_ty(&self) -> Ty<'_> {
@@ -240,7 +326,13 @@ impl LanguageService {
 
     /// Walks `root`, calling `visit` for each field reference and variable.
     fn walk<'s>(&'s self, root: &Node, visit: &mut dyn FnMut(Event<'_, 's>)) {
-        let externals = self.externals();
+        // Declared functions are external names too: a call to one is not typed as a built-in.
+        let mut externals = self.externals();
+        externals.extend(
+            self.functions
+                .iter()
+                .map(|f| (f.name.clone(), Ty::unknown())),
+        );
         let mut walker = Walker {
             root: self.root_ty(),
             externals: &externals,
@@ -349,12 +441,12 @@ impl LanguageService {
         let mut items = Vec::new();
         if variable_mode {
             items.extend(self.variable_items(&probe.scope, &prefix[1..]));
-            items.extend(function_items(&prefix[1..]));
+            items.extend(self.function_items(&prefix[1..]));
         } else {
             items.extend(self.field_items(probe.ctx.as_ref(), prefix));
             if !after_dot {
                 items.extend(self.variable_items(&probe.scope, prefix));
-                items.extend(function_items(prefix));
+                items.extend(self.function_items(prefix));
                 for kw in ["true", "false", "null"] {
                     if kw.starts_with(prefix) && !prefix.is_empty() {
                         items.push(CompletionItem {
@@ -463,6 +555,20 @@ impl LanguageService {
         items
     }
 
+    fn function_items(&self, prefix: &str) -> Vec<CompletionItem> {
+        self.functions()
+            .into_iter()
+            .filter(|f| f.name.starts_with(prefix))
+            .map(|f| CompletionItem {
+                label: format!("${}", f.name),
+                kind: CompletionKind::Function,
+                detail: (!f.signature.is_empty()).then(|| f.signature.clone()),
+                documentation: (!f.summary.is_empty()).then_some(f.summary),
+                insert_text: format!("${}", f.name),
+            })
+            .collect()
+    }
+
     /// Syntax errors, annotation warnings, and references to fields the schema does not have.
     pub fn diagnostics(&self, text: &str) -> Vec<Diagnostic> {
         let ast = parse_recover(text);
@@ -539,10 +645,7 @@ impl LanguageService {
                 consider(span, contents);
             }
             Event::Variable { node, name, ty, .. } => {
-                let contents = match jlens_core::function_catalog()
-                    .iter()
-                    .find(|f| f.name == name)
-                {
+                let contents = match self.function(name) {
                     Some(f) => format!("`${}{}`\n\n{}", f.name, f.signature, f.summary),
                     None => match ty.shapes.as_slice() {
                         [shape] => format!("`${name}`: {}", shape.type_summary()),
@@ -582,15 +685,13 @@ impl LanguageService {
                         .last()
                         .map_or(name_end, |(j, _)| j);
                     let name = text[name_start..name_end].strip_prefix('$')?;
-                    let f = jlens_core::function_catalog()
-                        .into_iter()
-                        .find(|f| f.name == name)?;
+                    let f = self.function(name)?;
                     return Some(SignatureHelp {
                         name: format!("${name}"),
-                        signature: f.signature.clone(),
+                        signature: f.signature,
                         params: f.params.iter().map(|p| format!("${p}")).collect(),
                         active_param: commas,
-                        summary: f.summary.to_owned(),
+                        summary: f.summary,
                     });
                 }
                 b',' if depth == 0 => commas += 1,
@@ -599,20 +700,6 @@ impl LanguageService {
         }
         None
     }
-}
-
-fn function_items(prefix: &str) -> Vec<CompletionItem> {
-    jlens_core::function_catalog()
-        .into_iter()
-        .filter(|f| f.name.starts_with(prefix))
-        .map(|f| CompletionItem {
-            label: format!("${}", f.name),
-            kind: CompletionKind::Function,
-            detail: Some(f.signature.clone()),
-            documentation: Some(f.summary.to_owned()),
-            insert_text: format!("${}", f.name),
-        })
-        .collect()
 }
 
 /// The candidate within edit distance 2 of `name`, if any.

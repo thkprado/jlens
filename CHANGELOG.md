@@ -12,6 +12,13 @@ All notable changes are recorded here. The format follows
   `Bindings::function`, with an optional signature that is checked like a built-in function's.
   They work with higher-order functions, partial application and `~>`, and take precedence over
   built-in functions of the same name. See ADR 0006.
+- Language service (`jlens-schema`): `LanguageService::with_function` declares host functions
+  (`FunctionDecl`), which completion, hover and signature help show like built-in functions.
+
+### Changed
+
+- Language service: a call to a declared variable or host function that has the name of a
+  built-in function is no longer typed as the built-in's result.
 - Web editor: an example selector, with the samples of try.jsonata.org (Invoice, Address, Schema,
   Library and an adapted Bindings) next to the store order rule. The chosen example is kept in
   the address (`#invoice`).

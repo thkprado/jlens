@@ -215,3 +215,55 @@ fn works_without_a_schema() {
     let fns = labels(&svc, "$upp|", None);
     assert_eq!(fns, ["$uppercase"]);
 }
+
+#[test]
+fn declared_host_functions_are_completed_and_documented() {
+    use jlens_schema::FunctionDecl;
+    let svc = service()
+        .with_function(
+            FunctionDecl::new("shipping", "Shipping cost of a weight to a region")
+                .signature("<ns?:n>")
+                .params(["weight", "region"]),
+        )
+        .with_function(FunctionDecl::new("sort", "The host's own sort"));
+
+    // Declared functions come first and replace built-ins of the same name.
+    let fns = labels(&svc, "$s|", Some(CompletionKind::Function));
+    assert_eq!(fns[..2], ["$shipping", "$sort"]);
+    assert_eq!(fns.iter().filter(|f| *f == "$sort").count(), 1);
+    let (text, offset) = cursor("$shi|");
+    let item = &svc.complete(&text, offset).items[0];
+    assert_eq!(item.detail.as_deref(), Some("<ns?:n>"));
+    assert_eq!(
+        item.documentation.as_deref(),
+        Some("Shipping cost of a weight to a region")
+    );
+    // Without a signature, there is no detail.
+    let (text, offset) = cursor("$sor|");
+    assert_eq!(svc.complete(&text, offset).items[0].detail, None);
+
+    let (text, offset) = cursor("$ship|ping(3)");
+    let hover = svc.hover(&text, offset).unwrap();
+    assert_eq!(
+        hover.contents,
+        "`$shipping<ns?:n>`\n\nShipping cost of a weight to a region"
+    );
+    let (text, offset) = cursor("$shipping(3, |)");
+    let help = svc.signature_help(&text, offset).unwrap();
+    assert_eq!(help.params, ["$weight", "$region"]);
+    assert_eq!(help.active_param, 1);
+    assert_eq!(help.summary, "Shipping cost of a weight to a region");
+
+    // The result of a host function is not typed as the built-in's.
+    assert_eq!(service().diagnostics("$sort(items)[0].nick").len(), 1);
+    assert!(svc.diagnostics("$sort(items)[0].nick").is_empty());
+}
+
+#[test]
+fn function_declarations_deserialize_from_json() {
+    use jlens_schema::FunctionDecl;
+    let decl: FunctionDecl =
+        serde_json::from_value(json!({"name": "tax", "signature": "<n:n>"})).unwrap();
+    assert_eq!(decl, FunctionDecl::new("tax", "").signature("<n:n>"));
+    assert!(serde_json::from_value::<FunctionDecl>(json!({"name": "x", "sig": "<n>"})).is_err());
+}

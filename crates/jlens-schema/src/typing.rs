@@ -463,6 +463,7 @@ impl<'s> Walker<'s, '_> {
         let builtin = name.is_some_and(|n| {
             jlens_core::function_catalog().iter().any(|f| f.name == n)
                 && !scope.iter().any(|(v, _)| v == n)
+                && !self.externals.iter().any(|(v, _)| v == n)
         });
         match name {
             Some(n) if builtin && PASSTHROUGH.contains(&n) => {

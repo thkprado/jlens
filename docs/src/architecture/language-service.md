@@ -50,7 +50,9 @@ computes the type of each node and applies the evaluator's context rules:
 - **Calls** to built-ins that return their first argument (`$sort`, `$filter`, `$reverse`,
   `$distinct`, `$shuffle`, `$single`, `$clone`, `$sift`) keep its type. `$append` returns the
   union of its arguments' types. Other built-ins return scalars, except those whose structure is
-  opaque, such as `$map` and `$lookup`, which return unknown types.
+  opaque, such as `$map` and `$lookup`, which return unknown types. A name bound outside the
+  expression (a declared variable or host function) is not a built-in, and its calls return
+  unknown types.
 
 While walking, the walker reports *events* to a visitor:
 - a field reference, with the context it is looked up in;
@@ -73,7 +75,7 @@ Completion has to work on text that does not parse yet, so it proceeds in four s
    because the sentinel completes it. Anything broken after the cursor becomes an error node.
 4. **The walk** finds the sentinel's event. For a field, it yields the context type, whose
    fields are the suggestions. It also yields the scope, whose variables are suggested with the
-   built-in functions.
+   declared host functions and the built-in functions.
 
 The two field paths that matter most, `items.` and `items[`, are therefore handled by the same
 machinery as `$map(items, function($i){ $i.`.
@@ -87,4 +89,5 @@ machinery as `$map(items, function($i){ $i.`.
   renders its type and documentation as Markdown.
 - **Signature help** scans backwards from the cursor for the unmatched `(` of a call, ignoring
   strings and comments and balancing brackets. It counts the top-level commas to find the
-  active parameter, and looks the function up in the built-in catalog.
+  active parameter, and looks the function up among the declared host functions, then in the
+  built-in catalog.

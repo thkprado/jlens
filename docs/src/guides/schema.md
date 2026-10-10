@@ -98,17 +98,27 @@ items.
 ### In Rust
 
 ```rust
-use jlens_schema::{LanguageService, Schema};
+use jlens_schema::{FunctionDecl, LanguageService, Schema};
 
 let schema = Schema::from_json_schema(&serde_json::from_str(&schema_text)?)?;
 let service = LanguageService::new(Some(schema))
-    .with_variable("approved", None);        // variables the rule is evaluated with
+    .with_variable("approved", None)         // variables the rule is evaluated with
+    .with_function(                          // and its host functions
+        FunctionDecl::new("shipping", "Shipping cost of a weight to a region")
+            .signature("<ns?:n>")
+            .params(["weight", "region"]),
+    );
 
 let completions = service.complete(text, cursor_byte_offset);
 let diagnostics = service.diagnostics(text);
 let hover = service.hover(text, cursor_byte_offset);
 let help = service.signature_help(text, cursor_byte_offset);
 ```
+
+Declare the [host functions](crate.md#host-functions) the expressions are evaluated with:
+they are completed first, and hover and signature help show their signature, parameters and
+summary. A declared function replaces a built-in function of the same name, as it does during
+evaluation.
 
 All offsets and spans in the Rust API are **byte** offsets into the expression text. The
 WebAssembly package converts them to and from the UTF-16 offsets that browsers and editors use.
@@ -134,7 +144,7 @@ looked up in. It follows the evaluator's rules:
 | `$map(items, function($i){ $i.` | Callback parameters of `$map`, `$filter`, `$single`, `$sort` and `$reduce` get the item type |
 | `$sort(items, …)[0].` | Functions that return their input (`$sort`, `$filter`, `$reverse`, …) keep its type |
 | `` items.`ty `` | Field names that need backquotes |
-| `$su` | Variables in scope, then built-in functions |
+| `$su` | Variables in scope, then declared host functions, then built-in functions |
 | `customer.login ` (after a space) | Operators: `and`, `or`, `in` |
 
 Each field suggestion carries:
