@@ -59,6 +59,24 @@ fn options() -> Result<()> {
 }
 
 #[test]
+fn reproducible() -> Result<()> {
+    use jlens_core::{Bindings, Expression, Options};
+    use serde_json::json;
+    // ANCHOR: reproducible
+    let options = Options::new()
+        .now(1_700_000_000_000) // $now(), $millis()
+        .seed(42); // $random(), $shuffle()
+    let expr = Expression::compile("{'at': $now(), 'order': $shuffle([1, 2, 3, 4, 5])}")?;
+    let bindings = Bindings::new();
+    let first = expr.evaluate_with(None, &bindings, &options)?.unwrap();
+    assert_eq!(first["at"], json!("2023-11-14T22:13:20.000Z"));
+    // Same expression, input and options: the same result.
+    assert_eq!(expr.evaluate_with(None, &bindings, &options)?, Some(first));
+    // ANCHOR_END: reproducible
+    Ok(())
+}
+
+#[test]
 fn errors() {
     use jlens_core::{Bindings, Expression};
     use serde_json::json;

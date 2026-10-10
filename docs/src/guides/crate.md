@@ -52,6 +52,19 @@ The default depth limit is 50,000 levels natively; the stack grows as needed. Th
 default timeout. Expressions nested more than 1,000 levels deep are rejected when compiled
 (`U1001`). See [Guardrails](../architecture/evaluator.md#guardrails).
 
+### Reproducible results
+
+`$now()` and `$millis()` read the system clock once per evaluation, and `$random()` and
+`$shuffle()` draw from a generator seeded from it. Fix both in `Options` to get the same result
+from the same expression, input and options, for tests or for replaying a decision:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:reproducible}}
+```
+
+A seed reproduces results with the same version of jlens, on any platform; it does not
+reproduce the numbers jsonata-js draws from `Math.random()`.
+
 ## Errors
 
 Every error has a stable [code](../language/errors.md): `S0xxx` for syntax errors, `T` for

@@ -55,11 +55,15 @@ impl Frame {
     }
 }
 
-/// Limits applied to one evaluation.
+/// Limits applied to one evaluation, and its fixed clock and seed.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Limits {
     pub max_depth: usize,
     pub timeout: Option<Duration>,
+    /// Milliseconds since the epoch to use instead of the system clock.
+    pub now: Option<i64>,
+    /// Seed for `$random` and `$shuffle` instead of one taken from the system clock.
+    pub seed: Option<u64>,
 }
 
 /// Default maximum evaluation depth. jsonata-js has no limit of its own and relies on the
@@ -172,11 +176,19 @@ pub(crate) fn evaluate(
         rng: 0,
         tracer,
     };
-    let since_epoch = web_time::SystemTime::now()
-        .duration_since(web_time::UNIX_EPOCH)
-        .unwrap_or_default();
-    ev.timestamp = since_epoch.as_millis() as f64;
-    ev.rng = (since_epoch.as_nanos() as u64) | 1;
+    let since_epoch = || {
+        web_time::SystemTime::now()
+            .duration_since(web_time::UNIX_EPOCH)
+            .unwrap_or_default()
+    };
+    ev.timestamp = match limits.now {
+        Some(millis) => millis as f64,
+        None => since_epoch().as_millis() as f64,
+    };
+    ev.rng = match limits.seed {
+        Some(seed) => splitmix64(seed) | 1,
+        None => (since_epoch().as_nanos() as u64) | 1,
+    };
     let env = Frame::new(None);
     for (name, value) in bindings.iter() {
         ev.bind(&env, name, Value::from_json(value));
@@ -210,6 +222,14 @@ pub(crate) fn evaluate(
         }
     }
     Ok(result?.to_json())
+}
+
+/// Spreads a user seed over all 64 bits, so that nearby seeds start the generator far apart.
+fn splitmix64(seed: u64) -> u64 {
+    let mut z = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 impl Evaluator<'_> {

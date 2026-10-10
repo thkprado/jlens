@@ -248,6 +248,8 @@ fn limits(options: &Options) -> eval::Limits {
     eval::Limits {
         max_depth: options.max_depth.unwrap_or(eval::DEFAULT_MAX_DEPTH),
         timeout: options.timeout,
+        now: options.now,
+        seed: options.seed,
     }
 }
 
@@ -314,7 +316,7 @@ impl FromIterator<(String, JsonValue)> for Bindings {
     }
 }
 
-/// Evaluation guardrails.
+/// Evaluation guardrails, and the clock and seed that make an evaluation reproducible.
 ///
 /// The struct is `#[non_exhaustive]`, so new options can be added without breaking callers:
 /// start from [`Options::new`] (or `Options::default()`) and chain the builder methods.
@@ -336,12 +338,31 @@ pub struct Options {
     /// Maximum evaluation depth (default 50,000; 1,000 on WebAssembly). Exceeding it raises
     /// `D1011`.
     pub max_depth: Option<usize>,
+    /// The evaluation's timestamp, in milliseconds since the epoch, for `$now()` and
+    /// `$millis()`. Default: the system clock when the evaluation starts.
+    pub now: Option<i64>,
+    /// Seed for `$random()` and `$shuffle()`. Default: one taken from the system clock.
+    pub seed: Option<u64>,
 }
 
 impl Options {
-    /// Creates options with no timeout and the default depth limit.
+    /// Creates options with no timeout, the default depth limit, the system clock and an
+    /// unseeded generator.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Fixes the evaluation's timestamp (`$now()`, `$millis()`), in milliseconds since the
+    /// epoch.
+    pub fn now(mut self, millis: i64) -> Self {
+        self.now = Some(millis);
+        self
+    }
+
+    /// Seeds `$random()` and `$shuffle()`: the same seed gives the same sequence.
+    pub fn seed(mut self, seed: u64) -> Self {
+        self.seed = Some(seed);
+        self
     }
 
     /// Sets the maximum wall-clock time for one evaluation (`D1012` when exceeded).

@@ -192,4 +192,16 @@ proptest! {
             );
         }
     }
+
+    #[test]
+    fn fixed_clock_and_seed_are_reproducible(now in any::<i64>(), seed in any::<u64>()) {
+        let expr = Expression::compile(
+            "[$now(), $millis(), $now('[FNn] [D1o] [MNn] [Y]', '-0500'), \
+              $toMillis('12:00', '[H]:[m]'), $random(), $shuffle([1..20])]",
+        )
+        .unwrap();
+        let options = Options::new().now(now).seed(seed);
+        let run = || format!("{:?}", expr.evaluate_with(None, &Bindings::new(), &options));
+        prop_assert_eq!(run(), run());
+    }
 }

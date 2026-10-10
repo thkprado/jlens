@@ -11,6 +11,8 @@ All notable changes are recorded here. The format follows
 - Language server: `jlens lsp` (crate `jlens-lsp`) offers completion, diagnostics, hover and
   signature help to editors. A `jlens.json` per workspace folder maps file patterns to a
   schema, variables and host functions. See the editors guide and ADR 0007.
+- Reproducible evaluations (`jlens-core`): `Options::now` fixes the timestamp of `$now()` and
+  `$millis()`, and `Options::seed` seeds `$random()` and `$shuffle()`.
 
 ### Changed
 
