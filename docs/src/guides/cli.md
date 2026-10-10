@@ -28,6 +28,30 @@ shells (`cmd.exe`, PowerShell) in particular make quoting expressions awkward. G
 
 Writing to a closed pipe, as in `jlens functions | head`, ends quietly with code 0.
 
+## For scripts and agents
+
+`jlens` keeps a contract with the programs that run it, recorded in
+[ADR 0008](../adr/0008-cli-machine-contract.md):
+
+- **Standard output is data**: results, JSON from `--json`, catalogs. **Standard error is for
+  people**: rendered diagnostics, summaries, usage errors. Never parse standard error.
+- **Decide on the exit code** (see the table above), not on whether anything was printed: an
+  undefined result prints nothing and still exits with 0.
+- **Match errors by code** (`S0202`, `T2001`, `D1012`…), never by message. Codes are listed in
+  the [error reference](../language/errors.md).
+- **The format never depends on the terminal.** A command prints the same thing when an agent
+  runs it and when a person copies it into a shell. Ask for machine output with a flag.
+- **Pass the expression with `-f FILE`** and the input with `-i FILE` or `--no-input`. This
+  avoids shell quoting, and an `eval` that would read standard input never waits on a terminal
+  by accident.
+- **Use `-c`** for one result per line, and `check --json` for diagnostics as JSON.
+
+Version 0.3 completes the contract, as the ADR describes: `eval --json` prints one envelope per
+evaluation, `{"ok":true,"result":…}`, `{"ok":true,"undefined":true}` or
+`{"ok":false,"error":{…}}`, with the input line number under `--ndjson`; `--now` and `--seed`
+make results that depend on the clock or on chance reproducible; and `eval` fails with code 2
+instead of waiting when standard input is a terminal.
+
 ## `jlens eval`
 
 Evaluates the expression against a JSON document and prints the result. The document comes from

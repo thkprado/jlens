@@ -58,3 +58,4 @@
   - [0005 Audit annotations in comments](adr/0005-comment-annotations.md)
   - [0006 Host functions](adr/0006-host-functions.md)
   - [0007 Language server](adr/0007-language-server.md)
+  - [0008 CLI machine contract](adr/0008-cli-machine-contract.md)

@@ -13,3 +13,4 @@ earlier one instead.
 | [0005](0005-comment-annotations.md) | Carry audit labels in JSONata doc-comments | Accepted |
 | [0006](0006-host-functions.md) | Host functions with a JSON boundary | Accepted |
 | [0007](0007-language-server.md) | A language server on the language service, configured by `jlens.json` | Accepted |
+| [0008](0008-cli-machine-contract.md) | A machine contract for the CLI: `--json` envelopes, exit codes, stdout for data | Accepted |
