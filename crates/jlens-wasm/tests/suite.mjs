@@ -1,5 +1,6 @@
 // Tests of the jlens WebAssembly package, shared by the Node.js runner (node.test.mjs) and the
-// browser runner (browser.html). Each case receives the initialized module.
+// browser runner (browser.html). Each case receives the initialized module and the environment:
+// `virtualTime` is true under headless Chrome's virtual time (`--virtual-time-budget`).
 
 const order = {
   number: "SO-12345",
@@ -101,9 +102,13 @@ export const cases = [
     });
   }],
 
-  ["guardrails", (j) => {
-    const loop = new j.Expression("($f := function($n){ $f($n + 1) }; $f(0))");
-    throws(() => loop.evaluate(undefined, null, { timeout: 20 }), (e) => equal(e.code, "D1012"));
+  ["guardrails", (j, env) => {
+    // Virtual time does not always advance during a synchronous loop, so there a wall-clock
+    // timeout might never fire and the page would hang. Node.js runs this check.
+    if (!env.virtualTime) {
+      const loop = new j.Expression("($f := function($n){ $f($n + 1) }; $f(0))");
+      throws(() => loop.evaluate(undefined, null, { timeout: 20 }), (e) => equal(e.code, "D1012"));
+    }
     const deep = new j.Expression("($f := function($n){ $n = 0 ? 0 : 1 + $f($n - 1) }; $f(100))");
     throws(() => deep.evaluate(undefined, null, { maxDepth: 100 }), (e) => equal(e.code, "D1011"));
     equal(deep.evaluate(), 100);

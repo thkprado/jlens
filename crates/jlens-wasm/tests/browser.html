@@ -19,7 +19,7 @@
         // Shown by `cargo xtask wasm-test` when the page hangs.
         console.log(`jlens test: ${name}`);
         try {
-          await run(jlens);
+          await run(jlens, { virtualTime: true });
           log.textContent += `ok   ${name}\n`;
         } catch (err) {
           failed++;

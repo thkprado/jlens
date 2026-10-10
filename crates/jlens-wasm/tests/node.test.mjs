@@ -9,5 +9,5 @@ import { cases } from "./suite.mjs";
 await init({ module_or_path: await readFile(new URL("../pkg/jlens_bg.wasm", import.meta.url)) });
 
 for (const [name, run] of cases) {
-  test(name, () => run(jlens));
+  test(name, () => run(jlens, { virtualTime: false }));
 }
