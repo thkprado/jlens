@@ -23,6 +23,8 @@ All notable changes are recorded here. The format follows
 - `jlens check -f` takes several files and glob patterns (expanded by `jlens`), and
   `--deny-warnings` makes warnings fail with exit code 1.
 - `jlens errors [CODE] [--json]` lists the error and warning codes, or describes one.
+- Cancellation (`jlens-core`): a `CancelToken` passed in `Options::cancel_token` stops an
+  evaluation from another thread, with the new code `U1003`.
 
 ### Changed
 

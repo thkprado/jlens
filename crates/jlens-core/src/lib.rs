@@ -61,6 +61,7 @@ pub use host::{HostCall, HostFunction};
 pub use json::format_json;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use indexmap::IndexMap;
@@ -247,6 +248,7 @@ fn limits(options: &Options) -> eval::Limits {
     eval::Limits {
         max_depth: options.max_depth.unwrap_or(eval::DEFAULT_MAX_DEPTH),
         timeout: options.timeout,
+        cancel_token: options.cancel_token.clone(),
         now: options.now,
         seed: options.seed,
     }
@@ -342,6 +344,8 @@ pub struct Options {
     pub now: Option<i64>,
     /// Seed for `$random()` and `$shuffle()`. Default: one taken from the system clock.
     pub seed: Option<u64>,
+    /// Stops the evaluation with `U1003` once the token is cancelled, from any thread.
+    pub cancel_token: Option<CancelToken>,
 }
 
 impl Options {
@@ -374,5 +378,51 @@ impl Options {
     pub fn max_depth(mut self, max_depth: usize) -> Self {
         self.max_depth = Some(max_depth);
         self
+    }
+
+    /// Lets `token` stop the evaluation (`U1003` once it is cancelled).
+    pub fn cancel_token(mut self, token: CancelToken) -> Self {
+        self.cancel_token = Some(token);
+        self
+    }
+}
+
+/// A handle that stops evaluations from another thread.
+///
+/// Clones share one flag: pass a clone in [`Options::cancel_token`], keep another, and call
+/// [`CancelToken::cancel`] to stop every evaluation that uses it. The evaluation checks the
+/// flag between steps, as it checks the timeout, and fails with `U1003`; a host function
+/// runs to completion first. Cancelling cannot be undone: an evaluation started with a
+/// cancelled token fails at once, so use a new token for each job.
+///
+/// ```
+/// use jlens_core::{Bindings, CancelToken, Expression, Options};
+///
+/// let token = CancelToken::new();
+/// let options = Options::new().cancel_token(token.clone());
+/// token.cancel();
+/// let err = Expression::compile("1 + 1")
+///     .unwrap()
+///     .evaluate_with(None, &Bindings::new(), &options)
+///     .unwrap_err();
+/// assert_eq!(err.code(), "U1003");
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct CancelToken(Arc<AtomicBool>);
+
+impl CancelToken {
+    /// Creates a token that is not cancelled.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Cancels the token: evaluations that use it stop with `U1003`.
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    /// Returns whether [`CancelToken::cancel`] has been called on this token or a clone.
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
     }
 }

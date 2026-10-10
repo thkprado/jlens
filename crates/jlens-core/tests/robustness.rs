@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use jlens_core::{Bindings, Document, Error, Expression, HostFunction, Options};
+use jlens_core::{Bindings, CancelToken, Document, Error, Expression, HostFunction, Options};
 use proptest::prelude::*;
 use serde_json::json;
 
@@ -190,6 +190,33 @@ proptest! {
                 &options,
                 &jlens_core::audit::AuditOptions::full(),
             );
+        }
+    }
+
+    #[test]
+    fn cancelled_token_stops_every_evaluation(source in expression()) {
+        if let Ok(expr) = Expression::compile(&source) {
+            let token = CancelToken::new();
+            token.cancel();
+            let options = Options::new().cancel_token(token);
+            let bindings = bindings();
+            let input = input();
+            let code = |r: Result<Option<serde_json::Value>, Error>| {
+                r.err().map(|e| e.code().to_string())
+            };
+            let expected = Some("U1003".to_string());
+            prop_assert_eq!(code(expr.evaluate_with(Some(&input), &bindings, &options)), expected.clone());
+            prop_assert_eq!(
+                code(expr.evaluate_document(&Document::new(&input), &bindings, &options)),
+                expected.clone()
+            );
+            let (result, _) = expr.evaluate_audited(
+                None,
+                &bindings,
+                &options,
+                &jlens_core::audit::AuditOptions::full(),
+            );
+            prop_assert_eq!(code(result), expected);
         }
     }
 

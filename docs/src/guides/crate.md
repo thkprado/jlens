@@ -52,6 +52,20 @@ The default depth limit is 50,000 levels natively; the stack grows as needed. Th
 default timeout. Expressions nested more than 1,000 levels deep are rejected when compiled
 (`U1001`). See [Guardrails](../architecture/evaluator.md#guardrails).
 
+### Cancellation
+
+A [`CancelToken`](https://docs.rs/jlens-core/latest/jlens_core/struct.CancelToken.html) stops an
+evaluation from another thread, for example when the request that started it goes away. Clones
+of a token share one flag:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:cancel}}
+```
+
+The evaluation checks the token between steps, as it checks the timeout, and fails with
+`U1003`. A host function that is running finishes first. A cancelled token stays cancelled, so
+create one per job.
+
 ### Reproducible results
 
 `$now()` and `$millis()` read the system clock once per evaluation, and `$random()` and

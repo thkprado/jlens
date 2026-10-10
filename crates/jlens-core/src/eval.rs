@@ -55,11 +55,12 @@ impl Frame {
     }
 }
 
-/// Limits applied to one evaluation, and its fixed clock and seed.
-#[derive(Debug, Clone, Copy)]
+/// Limits applied to one evaluation, its cancellation token, and its fixed clock and seed.
+#[derive(Debug, Clone)]
 pub(crate) struct Limits {
     pub max_depth: usize,
     pub timeout: Option<Duration>,
+    pub cancel_token: Option<crate::CancelToken>,
     /// Milliseconds since the epoch to use instead of the system clock.
     pub now: Option<i64>,
     /// Seed for `$random` and `$shuffle` instead of one taken from the system clock.
@@ -181,11 +182,11 @@ pub(crate) fn evaluate(
             .duration_since(web_time::UNIX_EPOCH)
             .unwrap_or_default()
     };
-    ev.timestamp = match limits.now {
+    ev.timestamp = match ev.limits.now {
         Some(millis) => millis as f64,
         None => since_epoch().as_millis() as f64,
     };
-    ev.rng = match limits.seed {
+    ev.rng = match ev.limits.seed {
         Some(seed) => splitmix64(seed) | 1,
         None => (since_epoch().as_nanos() as u64) | 1,
     };
@@ -282,6 +283,11 @@ impl Evaluator<'_> {
             && self.started.elapsed() > timeout
         {
             return Err(Error::new("D1012").with("value", timeout.as_millis() as u64));
+        }
+        if let Some(token) = &self.limits.cancel_token
+            && token.is_cancelled()
+        {
+            return Err(Error::new("U1003"));
         }
         Ok(())
     }

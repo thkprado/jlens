@@ -139,12 +139,13 @@ Raised while evaluating, for other run-time problems.
 
 ## Guardrail errors (U)
 
-Raised when an evaluation exceeds its configured limits, or needs what jlens does not support. `U2001` is raised by `jlens eval --json` for an input document that is not valid JSON.
+Raised when an evaluation exceeds its configured limits, is cancelled, or needs what jlens does not support. `U2001` is raised by `jlens eval --json` for an input document that is not valid JSON.
 
 | Code | Message |
 |---|---|
 | `U1001` | `{{{message}}}` |
 | `U1002` | `The function ${{{token}}} returned a promise: asynchronous functions are not supported` |
+| `U1003` | `The evaluation was cancelled` |
 | `U2001` | `The input is not valid JSON: {{{message}}}` |
 
 ## Warnings (W)

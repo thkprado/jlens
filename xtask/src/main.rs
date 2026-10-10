@@ -192,7 +192,7 @@ fn errors_page() -> String {
         (
             Category::Guardrail,
             "Guardrail errors (U)",
-            "Raised when an evaluation exceeds its configured limits, or needs what jlens does not support. \
+            "Raised when an evaluation exceeds its configured limits, is cancelled, or needs what jlens does not support. \
              `U2001` is raised by `jlens eval --json` for an input document that is not valid JSON.",
         ),
         (

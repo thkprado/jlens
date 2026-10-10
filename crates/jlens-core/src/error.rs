@@ -262,7 +262,7 @@ pub enum Category {
     Type,
     /// `D` — dynamic errors, raised while evaluating.
     Dynamic,
-    /// `U` — errors raised by user-defined guardrails (timeouts, depth limits), and by the
+    /// `U` — errors raised by user-defined guardrails (limits, cancellation), and by the
     /// `jlens` command-line interface for input that is not valid JSON (`U2001`).
     Guardrail,
     /// `W` — jlens warnings; they never stop evaluation.
@@ -410,6 +410,7 @@ catalog! {
     "D3141" => "{{{message}}}",
     "U1001" => "{{{message}}}",
     "U1002" => "The function ${{{token}}} returned a promise: asynchronous functions are not supported",
+    "U1003" => "The evaluation was cancelled",
     "U2001" => "The input is not valid JSON: {{{message}}}",
     "W0101" => "This annotation is not attached to an expression and will be ignored",
     "W0102" => "Unknown annotation tag @{{{tag}}}; expected @label, @message or @id",

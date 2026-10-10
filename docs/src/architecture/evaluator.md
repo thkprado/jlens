@@ -95,6 +95,7 @@ clears those frames when the evaluation ends.
 |---|---|---|---|
 | Evaluation depth | `Options::max_depth` | `D1011` | 50,000 native, 1,000 in Wasm |
 | Wall-clock time | `Options::timeout` | `D1012` | none |
+| Cancellation from another thread | `Options::cancel_token` | `U1003` | none |
 | Expression nesting | (fixed) | `U1001` | 1,000 levels, checked by the parser |
 
 jsonata-js has no depth limit of its own; it stops when the JavaScript stack overflows. jlens

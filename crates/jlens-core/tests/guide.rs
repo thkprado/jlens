@@ -59,6 +59,25 @@ fn options() -> Result<()> {
 }
 
 #[test]
+fn cancel() -> Result<()> {
+    use jlens_core::{Bindings, Expression, Options};
+    // ANCHOR: cancel
+    use jlens_core::CancelToken;
+    use std::{thread, time::Duration};
+
+    let token = CancelToken::new();
+    let options = Options::new().cancel_token(token.clone());
+    let forever = Expression::compile("($loop := function() { $loop() }; $loop())")?;
+    let worker = thread::spawn(move || forever.evaluate_with(None, &Bindings::new(), &options));
+    thread::sleep(Duration::from_millis(50));
+    token.cancel(); // from any thread that holds a clone
+    let err = worker.join().unwrap().unwrap_err();
+    assert_eq!(err.code(), "U1003");
+    // ANCHOR_END: cancel
+    Ok(())
+}
+
+#[test]
 fn reproducible() -> Result<()> {
     use jlens_core::{Bindings, Expression, Options};
     use serde_json::json;
