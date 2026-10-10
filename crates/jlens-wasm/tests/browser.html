@@ -16,6 +16,8 @@
     try {
       await init();
       for (const [name, run] of cases) {
+        // Shown by `cargo xtask wasm-test` when the page hangs.
+        console.log(`jlens test: ${name}`);
         try {
           await run(jlens);
           log.textContent += `ok   ${name}\n`;

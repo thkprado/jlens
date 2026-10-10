@@ -294,11 +294,14 @@ fn dump_dom_once(browser: &Path, url: &str, timeout: Duration) -> Result<Option<
             "--no-default-browser-check",
             "--virtual-time-budget=30000",
             "--dump-dom",
+            // Console messages and errors go to stderr, to explain a page that never finishes.
+            "--enable-logging=stderr",
+            "--v=0",
         ])
         .arg(format!("--user-data-dir={}", profile.display()))
         .arg(url)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("running {}", browser.display()))?;
     let mut stdout = child.stdout.take().expect("piped stdout");
@@ -306,6 +309,12 @@ fn dump_dom_once(browser: &Path, url: &str, timeout: Duration) -> Result<Option<
         let mut out = Vec::new();
         let _ = stdout.read_to_end(&mut out);
         out
+    });
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let log_reader = thread::spawn(move || {
+        let mut log = Vec::new();
+        let _ = stderr.read_to_end(&mut log);
+        log
     });
     let started = Instant::now();
     let finished = loop {
@@ -320,6 +329,19 @@ fn dump_dom_once(browser: &Path, url: &str, timeout: Duration) -> Result<Option<
         thread::sleep(Duration::from_millis(100));
     };
     let out = reader.join().unwrap_or_default();
+    let log = log_reader.join().unwrap_or_default();
+    if !finished {
+        // Show what the page logged last, to tell which step hung.
+        let log = String::from_utf8_lossy(&log);
+        let lines: Vec<&str> = log
+            .lines()
+            .filter(|l| l.contains("CONSOLE") || l.contains("ERROR"))
+            .collect();
+        println!("last browser log lines:");
+        for line in &lines[lines.len().saturating_sub(15)..] {
+            println!("  {line}");
+        }
+    }
     let _ = fs::remove_dir_all(&profile);
     Ok(finished.then(|| String::from_utf8_lossy(&out).into_owned()))
 }
