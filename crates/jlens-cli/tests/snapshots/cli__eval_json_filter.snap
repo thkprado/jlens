@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--json\", \"--filter\", \"a > 1\"], Some(r#\"{\"a\":2}\"#))"
+---
+exit: 0
+--- stdout
+{"ok":true,"result":{"a":2}}
+--- stderr

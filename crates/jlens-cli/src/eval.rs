@@ -41,6 +41,11 @@ pub struct EvalArgs {
     /// Print strings without quotes.
     #[arg(short, long)]
     raw_output: bool,
+    /// Print one JSON envelope per evaluation on stdout, errors included:
+    /// {"ok":true,"result":…}, {"ok":true,"undefined":true} or {"ok":false,"error":{…}}.
+    // Combining with --ndjson comes next (roadmap 0.3).
+    #[arg(long, conflicts_with_all = ["raw_output", "explain", "audit", "ndjson"])]
+    json: bool,
     /// Stop an evaluation after this many milliseconds (error D1012).
     #[arg(long, value_name = "MS")]
     timeout: Option<u64>,
@@ -82,10 +87,14 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
     let expr = match Expression::compile(&source) {
         Ok(expr) => expr,
         Err(err) => {
-            eprint!(
-                "{}",
-                report::render(&source, &name, &Diagnostic::from(&err))
-            );
+            if args.json {
+                output::line(&output::error_envelope(&err, &source))?;
+            } else {
+                eprint!(
+                    "{}",
+                    report::render(&source, &name, &Diagnostic::from(&err))
+                );
+            }
             return Ok(ExitCode::from(1));
         }
     };
@@ -114,16 +123,30 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
     let input = if args.no_input {
         None
     } else {
-        Some(match &args.input {
-            Some(path) => read_json(path)?,
+        let (text, name) = match &args.input {
+            Some(path) => (
+                fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?,
+                path.display().to_string(),
+            ),
             None => {
                 let mut text = String::new();
                 std::io::stdin()
                     .read_to_string(&mut text)
                     .context("reading stdin")?;
-                serde_json::from_str(&text).context("parsing stdin")?
+                (text, "stdin".to_owned())
             }
-        })
+        };
+        match serde_json::from_str(&text) {
+            Ok(doc) => Some(doc),
+            Err(e) => {
+                // Still exit code 2, but the envelope reports it too (ADR 0008).
+                if args.json {
+                    let err = jlens_core::Error::new("U2001").with("message", e.to_string());
+                    output::line(&output::error_envelope(&err, &source))?;
+                }
+                return Err(anyhow::Error::new(e).context(format!("parsing {name}")));
+            }
+        }
     };
 
     let auditing = args.explain || args.audit.is_some();
@@ -141,15 +164,25 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
                 if truthy(value.as_ref())
                     && let Some(doc) = &input
                 {
-                    output::line(&format.render(doc))?;
+                    output::line(&if args.json {
+                        output::ok_envelope(Some(doc))
+                    } else {
+                        format.render(doc)
+                    })?;
                 }
+            } else if args.json {
+                output::line(&output::ok_envelope(value.as_ref()))?;
             } else if let Some(value) = value {
                 output::line(&format.render(&value))?;
             }
             Ok(ExitCode::SUCCESS)
         }
         Err(err) => {
-            eprintln!("{err}");
+            if args.json {
+                output::line(&output::error_envelope(&err, &source))?;
+            } else {
+                eprintln!("{err}");
+            }
             Ok(ExitCode::from(1))
         }
     }

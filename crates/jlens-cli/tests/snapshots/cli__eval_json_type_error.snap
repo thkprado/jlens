@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--json\", \"customer.name + 1\", \"-i\", ORDER], None)"
+---
+exit: 1
+--- stdout
+{"ok":false,"error":{"code":"T2001","message":"The left side of the \"+\" operator must evaluate to a number","position":15,"line":1,"column":1}}
+--- stderr

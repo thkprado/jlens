@@ -1,0 +1,12 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--json\", \"-r\", \"x\", \"--no-input\"], None)"
+---
+exit: 2
+--- stdout
+--- stderr
+error: the argument '--json' cannot be used with '--raw-output'
+
+Usage: jlens eval --json --no-input <EXPR>
+
+For more information, try '--help'.

@@ -13,6 +13,10 @@ All notable changes are recorded here. The format follows
   schema, variables and host functions. See the editors guide and ADR 0007.
 - Reproducible evaluations (`jlens-core`): `Options::now` fixes the timestamp of `$now()` and
   `$millis()`, and `Options::seed` seeds `$random()` and `$shuffle()`.
+- `jlens eval --json` prints one JSON envelope per evaluation on standard output:
+  `{"ok":true,"result":…}`, `{"ok":true,"undefined":true}` or `{"ok":false,"error":{…}}`,
+  with the error's code, message, position, line and column. An input document that is not
+  valid JSON is reported with the new code `U2001`. See ADR 0008.
 
 ### Changed
 

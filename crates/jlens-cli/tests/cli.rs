@@ -23,6 +23,8 @@ fn jlens(args: &[&str], stdin: Option<&str>) -> String {
                 "<file not found>",
             )
             .replace("No such file or directory", "<file not found>")
+            // Usage lines name the binary.
+            .replace("jlens.exe", "jlens")
     };
     format!(
         "exit: {}\n--- stdout\n{}--- stderr\n{}",
@@ -110,6 +112,41 @@ fn eval_errors() {
         &["eval", "x", "-i", "fixtures/does-not-exist.json"]
     );
     snapshot!("eval_bad_json_stdin", &["eval", "x"], "{not json");
+}
+
+#[test]
+fn eval_json() {
+    snapshot!(
+        "eval_json_result",
+        &["eval", "--json", "customer.name", "-i", ORDER]
+    );
+    snapshot!(
+        "eval_json_undefined",
+        &["eval", "--json", "missing", "-i", ORDER]
+    );
+    snapshot!(
+        "eval_json_syntax_error",
+        &["eval", "--json", "--no-input", "(\n  $a := 1;\n  $a +\n)"]
+    );
+    snapshot!(
+        "eval_json_type_error",
+        &["eval", "--json", "customer.name + 1", "-i", ORDER]
+    );
+    snapshot!(
+        "eval_json_filter",
+        &["eval", "--json", "--filter", "a > 1"],
+        r#"{"a":2}"#
+    );
+    snapshot!(
+        "eval_json_filter_no_match",
+        &["eval", "--json", "--filter", "a > 1"],
+        r#"{"a":1}"#
+    );
+    snapshot!("eval_json_bad_input", &["eval", "--json", "x"], "{not json");
+    snapshot!(
+        "eval_json_conflict",
+        &["eval", "--json", "-r", "x", "--no-input"]
+    );
 }
 
 #[test]

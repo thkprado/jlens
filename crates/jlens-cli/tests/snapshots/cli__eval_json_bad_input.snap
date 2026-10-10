@@ -1,0 +1,9 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--json\", \"x\"], Some(\"{not json\"))"
+---
+exit: 2
+--- stdout
+{"ok":false,"error":{"code":"U2001","message":"The input is not valid JSON: key must be a string at line 1 column 2"}}
+--- stderr
+error: parsing stdin: key must be a string at line 1 column 2

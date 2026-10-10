@@ -24,8 +24,7 @@ pub fn render(source: &str, name: &str, d: &Diagnostic) -> String {
         .find('\n')
         .map_or(source.len(), |i| start + i);
     let line_text = source[line_start..line_end].trim_end_matches('\r');
-    let line_no = source[..line_start].matches('\n').count() + 1;
-    let column = source[line_start..start].chars().count() + 1;
+    let (line_no, column) = location(source, start);
     let end = d.span.end.clamp(start, line_end);
     let width = source[start..end].chars().count().max(1);
     let gutter = line_no.to_string().len();
@@ -43,6 +42,15 @@ pub fn render(source: &str, name: &str, d: &Diagnostic) -> String {
         "^".repeat(width)
     );
     out
+}
+
+/// The 1-based line and column of a byte offset in `source`, the column counted in characters.
+pub fn location(source: &str, offset: usize) -> (usize, usize) {
+    let offset = offset.min(source.len());
+    let line_start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+    let line = source[..line_start].matches('\n').count() + 1;
+    let column = source[line_start..offset].chars().count() + 1;
+    (line, column)
 }
 
 #[cfg(test)]

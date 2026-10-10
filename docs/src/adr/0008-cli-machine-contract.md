@@ -44,9 +44,9 @@ line of standard output:
 - `code` is the JSONata error code (`S0202`, `T2001`, `D1012`, `U1001`…), the one stable thing
   to match on. `message` is for people and may change.
 - `position` is the JSONata position of the error, a UTF-16 offset into the expression, as in
-  jsonata-js. `line` and `column` are 1-based and point at the same place, with the column
-  counted in characters, as the human report prints it. The three fields are absent when the
-  error has no location.
+  jsonata-js; it usually points just past the offending token. `line` and `column` are 1-based
+  and point at the start of the offending text, with the column counted in characters, as the
+  human report prints it. The three fields are absent when the error has no location.
 - With `--ndjson`, every envelope also carries `"line"`, the number of its input line, so
   results and errors can be paired with their input. Blank lines are skipped and produce no
   envelope.

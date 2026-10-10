@@ -4,7 +4,7 @@ The `jlens` binary evaluates, checks, explains and inspects JSONata expressions.
 
 ```text
 jlens eval      <EXPR> | -f FILE  [-i INPUT | --no-input] [--ndjson] [--filter]
-                [-b BINDINGS] [-c] [-r] [--timeout MS] [--max-depth N]
+                [-b BINDINGS] [-c | -r | --json] [--timeout MS] [--max-depth N]
                 [--explain | --audit json|text] [--audit-level decisions|full] [--trace-log FILE]
 jlens check     <EXPR> | -f FILE  [--json] [--schema SCHEMA]
 jlens functions [NAME] [--json]
@@ -44,13 +44,13 @@ Writing to a closed pipe, as in `jlens functions | head`, ends quietly with code
 - **Pass the expression with `-f FILE`** and the input with `-i FILE` or `--no-input`. This
   avoids shell quoting, and an `eval` that would read standard input never waits on a terminal
   by accident.
-- **Use `-c`** for one result per line, and `check --json` for diagnostics as JSON.
+- **Use `eval --json`** to get every outcome, errors included, as one line of JSON on standard
+  output (see [below](#machine-output---json)), and `check --json` for diagnostics as JSON.
 
-Version 0.3 completes the contract, as the ADR describes: `eval --json` prints one envelope per
-evaluation, `{"ok":true,"result":…}`, `{"ok":true,"undefined":true}` or
-`{"ok":false,"error":{…}}`, with the input line number under `--ndjson`; `--now` and `--seed`
-make results that depend on the clock or on chance reproducible; and `eval` fails with code 2
-instead of waiting when standard input is a terminal.
+Version 0.3 completes the contract, as the ADR describes: `--json` combines with `--ndjson`,
+each envelope carrying its input line number; `--now` and `--seed` make results that depend on
+the clock or on chance reproducible; and `eval` fails with code 2 instead of waiting when
+standard input is a terminal.
 
 ## `jlens eval`
 
@@ -72,11 +72,41 @@ $ jlens eval -f fixtures/shipping-rule.jsonata -i fixtures/online-store-order.js
 | `-b, --bindings FILE` | A JSON object whose fields are bound as variables: `{"limit": 10}` makes `$limit` available |
 | `-c, --compact` | One line per result |
 | `-r, --raw-output` | Print strings without quotes, like `jq -r` |
+| `--json` | Print a JSON envelope instead of the bare result (see below) |
 | `--timeout MS` | Stop an evaluation that runs longer (error `D1012`) |
 | `--max-depth N` | Stop an evaluation that nests deeper (error `D1011`); the default is 50,000 |
 
 Results are printed the way JavaScript prints JSON, so they match jsonata-js output: `2^64` prints
 as `18446744073709552000` and `1e21` as `1e+21`.
+
+### Machine output: `--json`
+
+With `--json`, every outcome is one compact JSON object, the *envelope*, on one line of
+standard output. Nothing needs to be read from standard error.
+
+| Outcome | Envelope |
+|---|---|
+| A result | `{"ok":true,"result":…}` |
+| An undefined result | `{"ok":true,"undefined":true}` |
+| An error | `{"ok":false,"error":{"code":…,"message":…,"position":…,"line":…,"column":…}}` |
+
+```text
+$ jlens eval --json -i fixtures/online-store-order.json 'customer.name + 1'
+{"ok":false,"error":{"code":"T2001","message":"The left side of the \"+\" operator must evaluate to a number","position":15,"line":1,"column":1}}
+```
+
+- Decide on `ok`, and match errors by `code`; `message` is for people and may change.
+- `line` and `column` (1-based, the column in characters) mark the start of the offending text
+  in the expression, as the human report does. `position` is the jsonata-js position, a UTF-16
+  offset usually just past the offending token. The three are absent when the error has no
+  location.
+- An input document that is not valid JSON gives an envelope with code `U2001`, and exit
+  code 2 as without `--json`.
+- With `--filter`, a matching document is the `result`, and a document that does not match
+  prints nothing.
+- `--json` cannot be combined with `-r`, `--explain` or `--audit`. In this version it cannot be
+  combined with `--ndjson` either.
+- Fields are only ever added to the envelope: ignore the ones you do not know.
 
 ### Many documents: `--ndjson`
 

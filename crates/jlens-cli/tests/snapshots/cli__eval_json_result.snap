@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--json\", \"customer.name\", \"-i\", ORDER], None)"
+---
+exit: 0
+--- stdout
+{"ok":true,"result":"Acme Stores"}
+--- stderr
