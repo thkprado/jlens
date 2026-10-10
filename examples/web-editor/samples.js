@@ -10,7 +10,7 @@
 export const samples = [
   {
     id: "store-order",
-    label: "Store order: free shipping rule",
+    label: "Free shipping",
     input: {
       number: "SO-12345",
       customer: { login: "alice.walker99", name: "Acme Stores" },
