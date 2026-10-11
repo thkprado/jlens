@@ -2,7 +2,8 @@
 //
 //   cargo xtask wasm && cd benches/compare && npm install && node compare.mjs
 //
-// For each case it prints the median time per evaluation over several rounds:
+// It first prints the time of the steps that convert the input. Then, for each case, it prints
+// the median time per evaluation over several rounds:
 // - jsonata-js: `await expression.evaluate(input)` (jsonata 2.x evaluation is asynchronous);
 // - jlens-wasm `evaluate`: a JavaScript object in and out (converted through JSON);
 // - jlens-wasm `evaluateJson`: JSON text in and out;
@@ -45,6 +46,14 @@ async function measure(run, rounds = 7) {
 const fmt = (us) => (us >= 1000 ? `${(us / 1000).toFixed(2)} ms` : `${us.toFixed(1)} µs`);
 
 console.log(`Node.js ${process.version}; input: ${spec.input} (${inputText.length} bytes)\n`);
+// The steps of converting the input, which `evaluate` takes on every call.
+const compact = JSON.stringify(input);
+console.log("| Step | Time |");
+console.log("|---|---:|");
+console.log(`| \`JSON.stringify\` of the input | ${fmt(await measure(() => JSON.stringify(input)))} |`);
+console.log(`| \`Document.fromJson\` of that text, then \`free\` | ${fmt(await measure(() => Document.fromJson(compact).free()))} |`);
+console.log(`| \`new Document\` of the input, then \`free\` | ${fmt(await measure(() => new Document(input).free()))} |\n`);
+
 const doc = new Document(input);
 console.log("| Case | jsonata-js | jlens-wasm `evaluate` | jlens-wasm `evaluateJson` | jlens-wasm `evaluateDocument` |");
 console.log("|---|---:|---:|---:|---:|");

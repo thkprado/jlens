@@ -29,6 +29,11 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Converting an input document is about 20% faster, natively and in WebAssembly: the objects of
+  a document share their keys instead of allocating each. `$each`, `$sift`, `$keys` and
+  transforms no longer copy keys either.
+- `jlens-wasm` is built with `opt-level = "s"` and `wasm-opt -Os` instead of `"z"` and `-Oz`:
+  evaluations are 5–38% faster, and the module grows from about 410 to 460 KiB gzipped.
 - `$fromMillis` fails with `D3132` for a picture marker whose component is unknown, also when it
   has a presentation (`'[Qx]'`), where it wrote nothing; jsonata-js writes "undefined".
 - The nesting limit (1,000 levels, `U1001`) also counts the operators of a chain: a chain of

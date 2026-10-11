@@ -1,6 +1,8 @@
 //! Higher-order, array, object and miscellaneous functions.
 
 use super::{Call, append, arg, boolean, hof_args, merge_sort, text};
+use std::rc::Rc;
+
 use crate::error::{Error, Result};
 use crate::eval::Evaluator;
 use crate::value::{self, Map, SEQUENCE, Value};
@@ -134,7 +136,7 @@ pub(super) fn sift(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
         let args = hof_args(
             &func,
             value.clone(),
-            Value::string(key.as_str()),
+            Value::String(key.clone()),
             obj.clone(),
         );
         if boolean(&call(ev, &func, args, c)?)? == Some(true) {
@@ -148,7 +150,7 @@ pub(super) fn sift(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
     })
 }
 
-fn entries(v: &Value) -> Vec<(String, Value)> {
+fn entries(v: &Value) -> Vec<(Rc<str>, Value)> {
     match v {
         Value::Object(o) => o
             .borrow()
@@ -159,7 +161,7 @@ fn entries(v: &Value) -> Vec<(String, Value)> {
     }
 }
 
-fn keys_of(v: &Value, out: &mut Vec<String>) {
+fn keys_of(v: &Value, out: &mut Vec<Rc<str>>) {
     match v {
         Value::Array(a) => {
             let mut merged = Vec::new();
@@ -237,7 +239,7 @@ pub(super) fn each(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
     let func = arg(&a, 1);
     let mut out = Vec::new();
     for (key, value) in entries(&obj) {
-        let args = hof_args(&func, value, Value::string(key.as_str()), obj.clone());
+        let args = hof_args(&func, value, Value::String(key.clone()), obj.clone());
         let res = call(ev, &func, args, c)?;
         if !res.is_undefined() {
             out.push(res);

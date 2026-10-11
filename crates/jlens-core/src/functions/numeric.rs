@@ -320,7 +320,7 @@ pub(super) fn format_number(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
         for (key, v) in options.borrow().iter() {
             let Some(s) = v.as_str() else { continue };
             let Some(c) = s.chars().next() else { continue };
-            match key.as_str() {
+            match key.as_ref() {
                 "decimal-separator" => p.decimal = c,
                 "grouping-separator" => p.grouping = c,
                 "exponent-separator" => p.exponent = c,

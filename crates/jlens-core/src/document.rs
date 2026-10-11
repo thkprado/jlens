@@ -1,11 +1,12 @@
 //! Input documents converted once, for many evaluations.
 
 use std::fmt;
+use std::rc::Rc;
 
-use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
+use serde::de::{Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::Value as JsonValue;
 
-use crate::value::{Map, Value};
+use crate::value::{Keys, Map, Value};
 
 /// A JSON document in jlens's internal representation.
 ///
@@ -75,13 +76,22 @@ impl From<&JsonValue> for Document {
 
 impl<'de> Deserialize<'de> for Value {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(ValueVisitor)
+        ValueSeed(&mut Keys::default()).deserialize(deserializer)
     }
 }
 
-struct ValueVisitor;
+/// Deserializes a value, sharing the keys of its objects through one table.
+struct ValueSeed<'k>(&'k mut Keys);
 
-impl<'de> Visitor<'de> for ValueVisitor {
+impl<'de> DeserializeSeed<'de> for ValueSeed<'_> {
+    type Value = Value;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for ValueSeed<'_> {
     type Value = Value;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -118,7 +128,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
         let mut items = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-        while let Some(item) = seq.next_element::<Value>()? {
+        while let Some(item) = seq.next_element_seed(ValueSeed(self.0))? {
             items.push(item);
         }
         Ok(Value::array(items, 0))
@@ -128,9 +138,33 @@ impl<'de> Visitor<'de> for ValueVisitor {
         let mut map =
             Map::with_capacity_and_hasher(access.size_hint().unwrap_or(0), Default::default());
         // A repeated key keeps its first position and takes the last value, as in `JSON.parse`.
-        while let Some((key, value)) = access.next_entry::<String, Value>()? {
+        while let Some(key) = access.next_key_seed(KeySeed(self.0))? {
+            let value = access.next_value_seed(ValueSeed(self.0))?;
             map.insert(key, value);
         }
         Ok(Value::object(map))
+    }
+}
+
+/// Deserializes a key into the shared one of the table.
+struct KeySeed<'k>(&'k mut Keys);
+
+impl<'de> DeserializeSeed<'de> for KeySeed<'_> {
+    type Value = Rc<str>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Rc<str>, D::Error> {
+        deserializer.deserialize_str(self)
+    }
+}
+
+impl<'de> Visitor<'de> for KeySeed<'_> {
+    type Value = Rc<str>;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a string")
+    }
+
+    fn visit_str<E>(self, s: &str) -> Result<Rc<str>, E> {
+        Ok(self.0.get(s))
     }
 }

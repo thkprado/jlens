@@ -721,7 +721,8 @@ impl Evaluator<'_> {
                     if let Value::Array(a) = &result {
                         for (ee, tuple) in a.items.iter().enumerate() {
                             if let Value::Object(o) = tuple {
-                                o.borrow_mut().insert(var.clone(), Value::Number(ee as f64));
+                                o.borrow_mut()
+                                    .insert(var.as_str().into(), Value::Number(ee as f64));
                             }
                         }
                     }
@@ -751,7 +752,7 @@ impl Evaluator<'_> {
                             let mut tuple = Map::default();
                             tuple.insert("@".into(), item);
                             if let Some(index) = &step.attrs.index {
-                                tuple.insert(index.clone(), Value::Number(ss as f64));
+                                tuple.insert(index.as_str().into(), Value::Number(ss as f64));
                             }
                             Value::object(tuple)
                         })
@@ -802,16 +803,16 @@ impl Evaluator<'_> {
                     }
                 } else {
                     if let Some(focus) = &step.attrs.focus {
-                        t.insert(focus.clone(), item);
+                        t.insert(focus.as_str().into(), item);
                         t.insert("@".into(), context.clone());
                     } else {
                         t.insert("@".into(), item);
                     }
                     if let Some(index) = &step.attrs.index {
-                        t.insert(index.clone(), Value::Number(bb as f64));
+                        t.insert(index.as_str().into(), Value::Number(bb as f64));
                     }
                     if let Some(label) = &step.attrs.ancestor_label {
-                        t.insert(label.clone(), context.clone());
+                        t.insert(label.as_str().into(), context.clone());
                     }
                 }
                 out.push(Value::object(t));
@@ -1033,7 +1034,7 @@ impl Evaluator<'_> {
         }
 
         // key -> (data, index of the key/value pair that produced it)
-        let mut groups: IndexMap<String, (Value, usize)> = IndexMap::new();
+        let mut groups: IndexMap<Rc<str>, (Value, usize)> = IndexMap::new();
         for item in &items {
             let frame = if reduce {
                 self.frame_from_tuple(env, item)
@@ -1060,7 +1061,7 @@ impl Evaluator<'_> {
                         *data = functions::append(std::mem::take(data), item.clone());
                     }
                     None => {
-                        groups.insert(key.to_string(), (item.clone(), pair_index));
+                        groups.insert(key, (item.clone(), pair_index));
                     }
                 }
             }
@@ -1467,7 +1468,7 @@ impl Evaluator<'_> {
                 let Value::Object(update) = &update else {
                     return Err(err_at("T2011", &def.update).with_value("value", &update));
                 };
-                let entries: Vec<(String, Value)> = update
+                let entries: Vec<(Rc<str>, Value)> = update
                     .borrow()
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))

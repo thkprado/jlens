@@ -6,8 +6,8 @@
 //! Groups:
 //! - `compile`: parsing and post-processing;
 //! - `evaluate`: evaluating each case against a 200-item document;
-//! - `document`: converting that document, and `evaluate_document`: the cases against it
-//!   converted once;
+//! - `document`: converting that document (with and without dropping it), and
+//!   `evaluate_document`: the cases against it converted once;
 //! - `audit`: the shipping rule without a tracer, and with audits at each level.
 
 use std::fs;
@@ -87,6 +87,10 @@ fn document(c: &mut Criterion) {
     });
     group.bench_function("Document::new", |b| {
         b.iter(|| Document::new(black_box(&input)))
+    });
+    // The two steps of `Document::new`: converting, then dropping the converted document.
+    group.bench_function("Document::new without drop", |b| {
+        b.iter_with_large_drop(|| Document::new(black_box(&input)))
     });
     group.bench_function("serde_json::from_str", |b| {
         b.iter(|| serde_json::from_str::<Value>(black_box(&text)).unwrap())

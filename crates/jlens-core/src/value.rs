@@ -8,6 +8,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -22,8 +23,32 @@ use crate::functions::Native;
 use crate::host::HostFunction;
 use crate::regex::Regex;
 
-/// The fields of an object, in insertion order.
-pub(crate) type Map = IndexMap<String, Value, foldhash::fast::RandomState>;
+/// The fields of an object, in insertion order. Keys are shared: the objects of a converted
+/// document that have the same key point to one string (see [`Keys`]).
+pub(crate) type Map = IndexMap<Rc<str>, Value, foldhash::fast::RandomState>;
+
+/// The keys met while converting one document, so that objects with the same keys (the items
+/// of an array, typically) share them instead of allocating each.
+#[derive(Default)]
+pub(crate) struct Keys(HashSet<Rc<str>, foldhash::fast::RandomState>);
+
+impl Keys {
+    /// Past this many distinct keys, new keys are allocated without being remembered: a
+    /// document whose keys are all different (identifiers used as keys) gains nothing from
+    /// the table.
+    const CAPACITY: usize = 1024;
+
+    pub(crate) fn get(&mut self, key: &str) -> Rc<str> {
+        if let Some(shared) = self.0.get(key) {
+            return shared.clone();
+        }
+        let key: Rc<str> = key.into();
+        if self.0.len() < Self::CAPACITY {
+            self.0.insert(key.clone());
+        }
+        key
+    }
+}
 
 /// A JSONata value.
 #[derive(Clone, Default)]
@@ -291,19 +316,29 @@ impl Value {
 
     /// Converts input JSON into a value.
     pub fn from_json(json: &JsonValue) -> Value {
+        Value::from_json_with(json, &mut Keys::default())
+    }
+
+    fn from_json_with(json: &JsonValue, keys: &mut Keys) -> Value {
         match json {
             JsonValue::Null => Value::Null,
             JsonValue::Bool(b) => Value::Bool(*b),
             JsonValue::Number(n) => Value::Number(n.as_f64().unwrap_or(f64::NAN)),
             JsonValue::String(s) => Value::string(s.as_str()),
-            JsonValue::Array(items) => {
-                Value::array(items.iter().map(Value::from_json).collect(), 0)
-            }
-            JsonValue::Object(map) => Value::object(
-                map.iter()
-                    .map(|(k, v)| (k.clone(), Value::from_json(v)))
+            JsonValue::Array(items) => Value::array(
+                items
+                    .iter()
+                    .map(|v| Value::from_json_with(v, keys))
                     .collect(),
+                0,
             ),
+            JsonValue::Object(map) => {
+                let mut out = Map::with_capacity_and_hasher(map.len(), Default::default());
+                for (k, v) in map {
+                    out.insert(keys.get(k), Value::from_json_with(v, keys));
+                }
+                Value::object(out)
+            }
         }
     }
 
@@ -325,7 +360,7 @@ impl Value {
             Value::Object(o) => JsonValue::Object(
                 o.borrow()
                     .iter()
-                    .filter_map(|(k, v)| v.to_json().map(|j| (k.clone(), j)))
+                    .filter_map(|(k, v)| v.to_json().map(|j| (k.to_string(), j)))
                     .collect(),
             ),
         })

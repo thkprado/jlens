@@ -108,7 +108,7 @@ cargo xtask wasm-test                             # after touching jlens-wasm or
   rewrites some paths; prefer the dedicated tools or PowerShell when that bites.
 - Floating point: in examples, round results that would print as `206.70000000000002`.
 - `wasm-opt` comes from the installed binaryen, or from npm `binaryen` through `npx`.
-  Without either, the package is about 60% larger.
+  Without either, the package is about 45% larger.
 - The browser tests run Chrome or Edge with `--headless=new --dump-dom` and virtual time
   (`--virtual-time-budget`), which does not always advance during synchronous work: a check that
   waits for wall-clock time (a timeout) can hang the page. Keep such checks out of the browser

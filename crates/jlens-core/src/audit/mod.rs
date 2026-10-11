@@ -444,7 +444,7 @@ fn capture(v: &Value, limits: &CaptureLimits, depth: usize) -> Option<JsonValue>
             let mut map = serde_json::Map::new();
             for (k, v) in o.iter().take(limits.max_items) {
                 if let Some(j) = capture(v, limits, depth + 1) {
-                    map.insert(k.clone(), j);
+                    map.insert(k.to_string(), j);
                 }
             }
             if o.len() > limits.max_items {

@@ -56,6 +56,9 @@ all = { level = "warn", priority = -1 }
 lto = true
 codegen-units = 1
 
+# Against `opt-level = "z"`, `"s"` makes evaluations 5-38% faster for a module 12% larger.
+# `3` would be faster still, but its larger frames use more of the JavaScript engine's stack:
+# deep recursion then overflows that stack before the depth limit stops it with `D1011`.
 [profile.wasm-release]
 inherits = "release"
-opt-level = "z"
+opt-level = "s"
