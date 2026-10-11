@@ -676,25 +676,30 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 }
 
 /// `Date.UTC(year, monthIndex, day, hours, minutes, seconds, millis)`, with JavaScript's
-/// normalization of out-of-range fields and of two-digit years.
+/// normalization of out-of-range fields and of two-digit years. Like V8, it gives NaN for a
+/// year beyond ±1,000,000 or a month beyond ±10,000,000, and for a time beyond ±8.64e15 ms.
 fn date_utc(year: f64, month: f64, day: f64, h: f64, mi: f64, s: f64, ms: f64) -> f64 {
     let fields = [year, month, day, h, mi, s, ms];
     if fields.iter().any(|f| !f.is_finite()) {
         return f64::NAN;
     }
-    let mut y = year.trunc() as i64;
-    if (0..=99).contains(&y) {
-        y += 1900;
+    let mut year = year.trunc();
+    if (0.0..=99.0).contains(&year) {
+        year += 1900.0;
     }
-    let m = month.trunc() as i64;
-    y += m.div_euclid(12);
-    let m = m.rem_euclid(12);
-    let days = days_from_civil(y, m + 1, 1) + day.trunc() as i64 - 1;
-    days as f64 * MILLIS_IN_A_DAY
+    let month = month.trunc();
+    if year.abs() > 1_000_000.0 || month.abs() > 10_000_000.0 {
+        return f64::NAN;
+    }
+    let (y, m) = (year as i64, month as i64);
+    let days =
+        days_from_civil(y + m.div_euclid(12), m.rem_euclid(12) + 1, 1) as f64 + day.trunc() - 1.0;
+    let time = days * MILLIS_IN_A_DAY
         + h.trunc() * 3_600_000.0
         + mi.trunc() * 60_000.0
         + s.trunc() * 1000.0
-        + ms.trunc()
+        + ms.trunc();
+    if time.abs() > 8.64e15 { f64::NAN } else { time }
 }
 
 /// The UTC fields of a timestamp, like the `getUTC*` methods of `Date`.

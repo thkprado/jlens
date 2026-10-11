@@ -88,7 +88,9 @@ The `Fuzz` workflow runs every target for ten minutes each week, or for as long 
 started by hand. Each target starts from seeds that `cargo xtask fuzz-seed` writes to
 `fuzz/corpus/`: the expressions and input documents of the JSONata suite, and a few regular
 expressions and pictures. It also starts from the corpus its last run kept. A crash fails the
-run, and the input that caused it is uploaded with the run.
+run, and the input that caused it is uploaded with the run, along with the corpus: a stack
+overflow stops the target before libFuzzer can write the input, which is then among the corpus
+files.
 
 cargo-fuzz needs nightly Rust and Linux or macOS. To reproduce a crash, on Linux:
 

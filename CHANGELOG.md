@@ -14,7 +14,9 @@ All notable changes are recorded here. The format follows
   (`$fromMillis(0, '[,2]')`) or gives fractional seconds a name presentation
   (`$fromMillis(0, '[fn]')`, now `D3133`) or a width beyond the string size limit
   (`'[Y,99999999999]'`, now `U1001`), `$parseInteger` with a picture whose digits are not
-  ASCII on text with other characters (`$parseInteger('12', '##０')`), and `$formatNumber`
+  ASCII on text with other characters (`$parseInteger('12', '##０')`), `$toMillis` with a year
+  of dozens of digits (dates beyond JavaScript's range, ±8.64e15 ms, now give undefined, as in
+  jsonata-js), and `$formatNumber`
   rounding a very large number to many decimals (`$formatNumber(1e300, '#.000…')`).
 - A long width with a grouping separator (`$fromMillis(0, '[D0:0,1000000]')`) took quadratic
   time: separators are now inserted in one pass. Found by fuzzing.

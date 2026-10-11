@@ -65,8 +65,12 @@ jobs:
         with:
           path: fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+      # A stack overflow kills the process before libFuzzer writes the input, so the corpus goes
+      # along: the input is among its files.
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: fuzz-${{ matrix.target }}
-          path: fuzz/artifacts/${{ matrix.target }}/
+          path: |
+            fuzz/artifacts/${{ matrix.target }}/
+            fuzz/corpus/${{ matrix.target }}/

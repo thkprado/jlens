@@ -391,6 +391,19 @@ fn fuzz_crashes_stay_fixed() {
         ),
         ("$fromMillis(0, '[Y01,99999999999999999999]')", Err("U1001")),
         ("$fromMillis(0, '[Y,3-4]')", Ok(json!("1970"))),
+        // A year with dozens of digits overflowed the calendar arithmetic.
+        (
+            "$toMillis('444444444444444444440008-10-21', '[Y0000]-[M01]-[D01]')",
+            Ok(json!(null)),
+        ),
+        (
+            "$toMillis('275760-09-13', '[Y0001]-[M01]-[D01]')",
+            Ok(json!(8_640_000_000_000_000_u64)),
+        ),
+        (
+            "$toMillis('275760-09-14', '[Y0001]-[M01]-[D01]')",
+            Ok(json!(null)),
+        ),
         // A long width with a separator took quadratic time.
         (
             "$length($fromMillis(0, '[DU0,1020449:]'))",
