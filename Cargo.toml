@@ -4,7 +4,7 @@ members = ["crates/*", "xtask"]
 default-members = ["crates/*"]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -16,9 +16,9 @@ keywords = ["jsonata", "json", "query", "transform", "rules"]
 categories = ["parser-implementations", "encoding", "command-line-utilities", "wasm"]
 
 [workspace.dependencies]
-jlens-core = { path = "crates/jlens-core", version = "0.5.0" }
-jlens-schema = { path = "crates/jlens-schema", version = "0.5.0" }
-jlens-lsp = { path = "crates/jlens-lsp", version = "0.5.0" }
+jlens-core = { path = "crates/jlens-core", version = "0.6.0" }
+jlens-schema = { path = "crates/jlens-schema", version = "0.6.0" }
+jlens-lsp = { path = "crates/jlens-lsp", version = "0.6.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 indexmap = { version = "2", features = ["serde"] }
@@ -37,7 +37,7 @@ js-sys = "0.3"
 console_error_panic_hook = "0.1"
 ryu-js = "1"
 # The fork of regress whose matches stop within the evaluation's limits (ADR 0009).
-regress = { package = "jlens-regress", path = "crates/jlens-regress", version = "0.5.0", default-features = false, features = ["std", "prohibit-unsafe"] }
+regress = { package = "jlens-regress", path = "crates/jlens-regress", version = "0.6.0", default-features = false, features = ["std", "prohibit-unsafe"] }
 web-time = "1"
 stacker = "0.1"
 tracing = "0.1"
