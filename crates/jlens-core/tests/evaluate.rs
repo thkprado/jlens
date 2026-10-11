@@ -178,6 +178,12 @@ fn quirks_found_by_the_differential_tests_match_jsonata_js() {
     assert_eq!(formatted(0), Some(json!(",0,")));
     assert_eq!(formatted(1234), Some(json!("12,34,")));
     assert_eq!(formatted(1234567), Some(json!("12,34,567")));
+    // `$base64decode` reads each UTF-16 code unit as its low byte, as Node's `Buffer` does:
+    // `𝄞` is U+D834 U+DD1E, read as the digit `4` and an ignored byte.
+    let decoded = |s: &str| eval(&format!("$base64decode('{s}')"), json!(null));
+    assert_eq!(decoded("hello 𝄞"), decoded("hello4"));
+    assert_eq!(decoded("helloŁ"), decoded("helloA"));
+    assert_eq!(decoded("aĀb"), Some(json!("i")));
 }
 
 #[test]

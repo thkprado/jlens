@@ -466,8 +466,9 @@ pub(super) fn base64decode(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
+    // Node reads each UTF-16 code unit as its low byte: `Ĵ` (U+0134) is the digit `4`.
     let mut sextets = Vec::with_capacity(s.len());
-    for c in s.chars() {
+    for c in s.encode_utf16().map(|u| u as u8 as char) {
         let v = match c {
             'A'..='Z' => c as u32 - 'A' as u32,
             'a'..='z' => c as u32 - 'a' as u32 + 26,

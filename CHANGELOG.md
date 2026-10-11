@@ -40,6 +40,9 @@ pictures and decoders, and the released packages prove where they were built.
 - `$formatInteger` in Roman numerals (`'I'`) of a huge number (`1e21`) tried to write an `M`
   per thousand, which ran past the timeout until memory ran out; it now fails with `U1001`
   beyond `Options::max_string_length`. jsonata-js overflows its stack.
+- `$base64decode` reads each UTF-16 code unit of its argument as its low byte, as jsonata-js
+  does in Node: a character outside Latin-1 may count as a Base64 digit (`Ĵ` as `4`) instead of
+  being ignored.
 
 ## [0.5.0]
 
