@@ -240,6 +240,10 @@ fn check() {
         ]
     );
     snapshot!(
+        "check_function_warnings",
+        &["check", "$summ(price) + $count()"]
+    );
+    snapshot!(
         "check_annotation_warning",
         &["check", "/** @label \"x\" @owner \"me\" */ a > 1"]
     );

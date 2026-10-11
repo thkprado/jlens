@@ -84,7 +84,11 @@ machinery as `$map(items, function($i){ $i.`.
 
 - **Diagnostics** combine the recovering parser's errors and annotation warnings with `W0201`
   for every field reference whose context is fully known (`Ty::is_known_objects`) but lacks the
-  field. A Levenshtein distance of at most 2 picks the "did you mean" suggestion.
+  field. A Levenshtein distance of at most 2 picks the "did you mean" suggestion. The walk also
+  reports every call of a `$name` and every name it binds (`:=`, parameters, `@`, `#`); the calls
+  are checked after the walk, because a function may call a name bound after it, or itself.
+  Calls of unknown names get `W0202`, and calls whose argument count the signature rejects get
+  `W0203`: parameters marked `?` or `-` are optional, and `+` accepts any number.
 - **Hover** keeps the innermost field or variable event whose span contains the offset, and
   renders its type and documentation as Markdown.
 - **Signature help** scans backwards from the cursor for the unmatched `(` of a call, ignoring

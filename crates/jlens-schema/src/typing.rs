@@ -166,6 +166,16 @@ pub(crate) enum Event<'a, 's> {
         ty: &'a Ty<'s>,
         scope: &'a Scope<'s>,
     },
+    /// A call of a function named by a variable, `$name(...)`, or its partial application.
+    Call {
+        /// The `$name` node.
+        node: &'a Node,
+        name: &'a str,
+        /// The number of arguments, the value applied with `~>` included.
+        args: usize,
+    },
+    /// A variable bound by `:=`, a function parameter, `@$name` or `#$name`.
+    Bind { name: &'a str },
 }
 
 /// Functions whose result has the type of their first argument.
@@ -227,10 +237,14 @@ impl<'s> Walker<'s, '_> {
                         }
                     }
                     if let Some(index) = &step.attrs.index {
+                        (self.visit)(Event::Bind { name: index });
                         scope.push((index.clone(), Ty::scalar()));
                     }
                     match &step.attrs.focus {
-                        Some(focus) => scope.push((focus.clone(), elements)),
+                        Some(focus) => {
+                            (self.visit)(Event::Bind { name: focus });
+                            scope.push((focus.clone(), elements));
+                        }
                         None => cur = elements,
                     }
                     result = res;
@@ -318,6 +332,7 @@ impl<'s> Walker<'s, '_> {
             NodeKind::Bind { lhs, rhs } => {
                 let ty = self.walk(rhs, ctx, scope);
                 if let NodeKind::Variable { name } = &lhs.kind {
+                    (self.visit)(Event::Bind { name });
                     scope.push((name.clone(), ty.clone()));
                 }
                 ty
@@ -325,6 +340,13 @@ impl<'s> Walker<'s, '_> {
             NodeKind::Function { procedure, args } => self.call(procedure, args, None, ctx, scope),
             NodeKind::Partial { procedure, args } => {
                 self.walk(procedure, ctx, scope);
+                if let NodeKind::Variable { name } = &procedure.kind {
+                    (self.visit)(Event::Call {
+                        node: procedure,
+                        name,
+                        args: args.len(),
+                    });
+                }
                 for a in args {
                     self.walk(a, ctx, scope);
                 }
@@ -422,6 +444,7 @@ impl<'s> Walker<'s, '_> {
     fn lambda(&mut self, def: &LambdaDef, hints: &[Ty<'s>], ctx: &Ty<'s>, scope: &mut Scope<'s>) {
         let mark = scope.len();
         for (i, p) in def.params.iter().enumerate() {
+            (self.visit)(Event::Bind { name: p });
             scope.push((p.clone(), hints.get(i).cloned().unwrap_or_else(Ty::unknown)));
         }
         self.walk(&def.body, ctx, scope);
@@ -441,6 +464,13 @@ impl<'s> Walker<'s, '_> {
             NodeKind::Variable { name } => Some(name.as_str()),
             _ => None,
         };
+        if let Some(name) = name {
+            (self.visit)(Event::Call {
+                node: procedure,
+                name,
+                args: args.len() + usize::from(applied.is_some()),
+            });
+        }
         let mut types: Vec<Ty<'s>> = applied.into_iter().collect();
         for arg in args {
             let first = types.first().cloned().unwrap_or_else(Ty::unknown);

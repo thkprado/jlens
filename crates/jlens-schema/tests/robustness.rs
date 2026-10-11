@@ -9,7 +9,7 @@ const TOKENS: &[&str] = &[
     "customer", "login", "items", "type", "unitPrice", "`odd name`", "$", "$$", "$x", "$limit",
     "1", "'s'", "\"t\"", ".", "[", "]", "(", ")", "{", "}", ":", ",", ";", "=", "and", "in", "?",
     ":=", "~>", "&", "**", "^(", "@$v", "#$i", "function($v){", "$sum(", "$substring(",
-    "$map(", "$rate(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
+    "$map(", "$rate(", "$summ(", "$bad(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
 ];
 
 fn text() -> impl Strategy<Value = String> {
@@ -34,7 +34,9 @@ proptest! {
                 FunctionDecl::new("rate", "A rate").signature("<s?:n>").params(["region"]),
             )
             // A host function that replaces a built-in.
-            .with_function(FunctionDecl::new("sum", ""));
+            .with_function(FunctionDecl::new("sum", ""))
+            // A signature that does not parse: calls are not checked against it.
+            .with_function(FunctionDecl::new("bad", "").signature("<x<n>"));
         let diagnostics = service.diagnostics(&text);
         for d in &diagnostics {
             prop_assert!(d.span.start <= d.span.end && d.span.end <= text.len(), "{d:?}");

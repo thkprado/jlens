@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `jlens check` and the language service warn about calls of unknown functions (`W0202`, with a
+  "did you mean" suggestion) and about calls with a number of arguments the function's
+  signature does not accept (`W0203`). Host functions declared to the service, or in
+  `jlens.json`, are known.
+
 ## [0.3.0]
 
 ### Added

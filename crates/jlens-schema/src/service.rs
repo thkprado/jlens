@@ -5,6 +5,7 @@
 //! (browsers) convert at the boundary; the Wasm package does that.
 
 use jlens_core::ast::{Node, Span};
+use jlens_core::signature::Signature;
 use jlens_core::{Diagnostic, Severity, parse_recover};
 use serde::{Deserialize, Serialize};
 
@@ -569,38 +570,96 @@ impl LanguageService {
             .collect()
     }
 
-    /// Syntax errors, annotation warnings, and references to fields the schema does not have.
+    /// Syntax errors, annotation warnings, references to fields the schema does not have, and
+    /// calls of unknown functions or with the wrong number of arguments.
     pub fn diagnostics(&self, text: &str) -> Vec<Diagnostic> {
         let ast = parse_recover(text);
         let mut out = ast.diagnostics.clone();
-        if self.schema.is_some() {
-            let mut visit = |event: Event<'_, '_>| {
-                if let Event::Field {
-                    node, name, ctx, ..
-                } = event
-                    && ctx.is_known_objects()
-                    && ctx.fields().iter().all(|(n, _)| *n != name)
-                {
-                    let known: Vec<&str> = ctx.fields().iter().map(|(n, _)| *n).collect();
-                    let hint = match closest(name, &known) {
-                        Some(s) => format!("; did you mean `{s}`?"),
-                        None => String::new(),
-                    };
-                    let quoted = text[node.span.start..].starts_with('`');
-                    let len = name.len() + if quoted { 2 } else { 0 };
-                    let span =
-                        Span::new(node.span.start, (node.span.start + len).min(node.span.end));
-                    out.push(Diagnostic::new(
-                        Severity::Warning,
-                        "W0201",
-                        span,
-                        &[("token", name), ("hint", &hint)],
-                    ));
-                }
-            };
-            self.walk(&ast.root, &mut visit);
-        }
+        // Calls are checked after the walk: a name bound later can be called by a function
+        // defined earlier, or by itself.
+        let mut calls: Vec<(Span, String, usize)> = Vec::new();
+        let mut bound: Vec<String> = Vec::new();
+        let mut visit = |event: Event<'_, '_>| match event {
+            Event::Field {
+                node, name, ctx, ..
+            } if self.schema.is_some()
+                && ctx.is_known_objects()
+                && ctx.fields().iter().all(|(n, _)| *n != name) =>
+            {
+                let known: Vec<&str> = ctx.fields().iter().map(|(n, _)| *n).collect();
+                let quoted = text[node.span.start..].starts_with('`');
+                let len = name.len() + if quoted { 2 } else { 0 };
+                let span = Span::new(node.span.start, (node.span.start + len).min(node.span.end));
+                out.push(Diagnostic::new(
+                    Severity::Warning,
+                    "W0201",
+                    span,
+                    &[("token", name), ("hint", &did_you_mean(name, &known, ""))],
+                ));
+            }
+            Event::Call { node, name, args } => calls.push((node.span, name.to_owned(), args)),
+            Event::Bind { name } => bound.push(name.to_owned()),
+            _ => {}
+        };
+        self.walk(&ast.root, &mut visit);
+        out.extend(self.call_diagnostics(&calls, &bound));
         out.sort_by_key(|d| d.span.start);
+        out
+    }
+
+    /// `W0202` for calls of functions that are neither built in, declared, nor bound in the
+    /// expression, and `W0203` for calls with a number of arguments their signature rejects.
+    fn call_diagnostics(
+        &self,
+        calls: &[(Span, String, usize)],
+        bound: &[String],
+    ) -> Vec<Diagnostic> {
+        let functions = self.functions();
+        let mut out = Vec::new();
+        for (span, name, count) in calls {
+            if name.is_empty()
+                || name == "$"
+                || bound.contains(name)
+                || self.variables.iter().any(|(v, _)| v == name)
+            {
+                continue;
+            }
+            let Some(function) = functions.iter().find(|f| f.name == *name) else {
+                let known: Vec<&str> = functions.iter().map(|f| f.name.as_str()).collect();
+                out.push(Diagnostic::new(
+                    Severity::Warning,
+                    "W0202",
+                    *span,
+                    &[("token", name), ("hint", &did_you_mean(name, &known, "$"))],
+                ));
+                continue;
+            };
+            let Some((min, max)) = arity(&function.signature) else {
+                continue;
+            };
+            if *count < min || max.is_some_and(|max| *count > max) {
+                let arguments = |n: usize| match n {
+                    1 => "1 argument".to_owned(),
+                    n => format!("{n} arguments"),
+                };
+                let expected = match max {
+                    Some(max) if max == min => arguments(max),
+                    Some(max) if min == 0 => format!("at most {}", arguments(max)),
+                    Some(max) => format!("{min} to {max} arguments"),
+                    None => format!("at least {}", arguments(min)),
+                };
+                out.push(Diagnostic::new(
+                    Severity::Warning,
+                    "W0203",
+                    *span,
+                    &[
+                        ("token", name),
+                        ("expected", &expected),
+                        ("count", &count.to_string()),
+                    ],
+                ));
+            }
+        }
         out
     }
 
@@ -654,6 +713,7 @@ impl LanguageService {
                 };
                 consider(node.span, contents);
             }
+            Event::Call { .. } | Event::Bind { .. } => {}
         };
         self.walk(&ast.root, &mut visit);
         best.map(|(range, contents)| Hover { range, contents })
@@ -699,6 +759,27 @@ impl LanguageService {
             }
         }
         None
+    }
+}
+
+/// The fewest and the most arguments a signature accepts (`None`: no limit), or `None` when
+/// there is no signature to check against. Parameters marked `?` are optional, and so are those
+/// marked `-`, which take the context value; `+` takes any number.
+fn arity(signature: &str) -> Option<(usize, Option<usize>)> {
+    if signature.is_empty() {
+        return None;
+    }
+    let params = Signature::parse(signature).ok()?.params;
+    let min = params.iter().filter(|p| !p.pattern.ends_with('?')).count();
+    let variadic = params.iter().any(|p| p.pattern.ends_with('+'));
+    Some((min, (!variadic).then_some(params.len())))
+}
+
+/// `; did you mean `{prefix}{candidate}`?` for the closest candidate, or nothing.
+fn did_you_mean(name: &str, candidates: &[&str], prefix: &str) -> String {
+    match closest(name, candidates) {
+        Some(s) => format!("; did you mean `{prefix}{s}`?"),
+        None => String::new(),
     }
 }
 

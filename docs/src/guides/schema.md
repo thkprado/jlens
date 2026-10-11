@@ -165,7 +165,12 @@ Completion works on incomplete expressions too, such as `$count(items[` or
 - syntax errors, from the recovering parser;
 - [annotation](../language/annotations.md) warnings;
 - `W0201` warnings for field names the schema does not have, with a "did you mean" suggestion
-  when a field name is close.
+  when a field name is close;
+- `W0202` warnings for calls of unknown functions, with the same kind of suggestion, and `W0203`
+  warnings for calls with too few or too many arguments for the function's signature. These need
+  no schema. A function is known when it is built in, declared with
+  `LanguageService::with_function` (or in `jlens.json`), or bound anywhere in the expression; a
+  variable declared with `with_variable` may hold a function, so its calls are not checked.
 
 Missing fields are reported only where the context is fully known. Nothing is reported after a
 user-defined function, an object constructor or `$lookup`, so the warnings do not produce false

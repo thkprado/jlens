@@ -183,6 +183,107 @@ fn diagnostics_report_unknown_fields() {
 }
 
 #[test]
+fn diagnostics_report_unknown_functions_and_argument_counts() {
+    use jlens_schema::FunctionDecl;
+    let svc = LanguageService::new(None)
+        .with_variable("callback", None)
+        .with_function(FunctionDecl::new("shipping", "").signature("<ns?:n>"))
+        .with_function(FunctionDecl::new("audit", ""));
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("$sum([1]) + $substring('abc', 1) + $string()", &[]),
+        (
+            "$summ([1])",
+            &[("W0202", "Unknown function $summ; did you mean `$sum`?")],
+        ),
+        (
+            "$frobnicate(1)",
+            &[("W0202", "Unknown function $frobnicate")],
+        ),
+        (
+            "$count()",
+            &[("W0203", "Function $count takes 1 argument but is given 0")],
+        ),
+        (
+            "$substring('abc', 1, 2, 3)",
+            &[(
+                "W0203",
+                "Function $substring takes 1 to 3 arguments but is given 4",
+            )],
+        ),
+        (
+            "$string(1, true, 3)",
+            &[(
+                "W0203",
+                "Function $string takes at most 2 arguments but is given 3",
+            )],
+        ),
+        (
+            "$zip()",
+            &[(
+                "W0203",
+                "Function $zip takes at least 1 argument but is given 0",
+            )],
+        ),
+        // The value applied with `~>` is the first argument.
+        ("'abc' ~> $substring(1)", &[]),
+        (
+            "'abc' ~> $uppercase(1)",
+            &[(
+                "W0203",
+                "Function $uppercase takes at most 1 argument but is given 2",
+            )],
+        ),
+        // Partial application counts the placeholders.
+        ("$substring(?, 1)('abc')", &[]),
+        (
+            "$sum(?, ?)",
+            &[("W0203", "Function $sum takes 1 argument but is given 2")],
+        ),
+        // Names bound in the expression, wherever they are bound, and declared names.
+        (
+            "($f := function($n) { $n < 1 ? 0 : $f($n - 1) }; $f(3))",
+            &[],
+        ),
+        (
+            "($g := function() { $h() }; $h := function() { 1 }; $g())",
+            &[],
+        ),
+        ("function($fn) { $fn(1, 2) }", &[]),
+        (
+            "($count := function($a, $b) { $a + $b }; $count(1, 2))",
+            &[],
+        ),
+        ("a@$x.$x()", &[]),
+        ("$callback(1) + $audit(1, 2, 3)", &[]),
+        // Declared functions with a signature are checked against it.
+        ("$shipping(1)", &[]),
+        (
+            "$shipping(1, 'eu', 3)",
+            &[(
+                "W0203",
+                "Function $shipping takes 1 to 2 arguments but is given 3",
+            )],
+        ),
+        // `$` and `$$` hold values, not functions, but are not names to suggest for.
+        ("$()", &[]),
+    ];
+    for (text, expected) in cases {
+        let got: Vec<(String, String)> = svc
+            .diagnostics(text)
+            .into_iter()
+            .map(|d| (d.code, d.message))
+            .collect();
+        let expected: Vec<(String, String)> = expected
+            .iter()
+            .map(|(c, m)| ((*c).into(), (*m).into()))
+            .collect();
+        assert_eq!(got, expected, "{text}");
+    }
+    let d = &svc.diagnostics("1 + $summ(2)")[0];
+    assert_eq!((d.span.start, d.span.end), (4, 9));
+}
+
+#[test]
 fn hover_and_signature_help() {
     let svc = service();
     let (text, offset) = cursor("items.t|ax");

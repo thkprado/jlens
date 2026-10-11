@@ -177,9 +177,11 @@ These options apply to a single document; they cannot be combined with `--ndjson
 
 ## `jlens check`
 
-Parses the expression with error recovery and reports every problem it finds. With `--schema`,
-it also reports field names that the schema does not have (see the
-[schema guide](schema.md)). Each problem is shown in context:
+Parses the expression with error recovery and reports every problem it finds. It warns about
+calls of functions that are neither built in nor bound in the expression (`W0202`, with a
+suggestion such as `$summ` → `$sum`), and about calls with a number of arguments the function's
+signature does not accept (`W0203`). With `--schema`, it also reports field names that the
+schema does not have (see the [schema guide](schema.md)). Each problem is shown in context:
 
 ```text
 $ jlens check 'Account.Order[0;].Product'
@@ -205,6 +207,9 @@ characters), then the severity, code, message and `span`, in byte offsets into t
 $ jlens check --json 'a +'
 [{"line":1,"column":4,"severity":"error","code":"S0207","message":"Unexpected end of expression","span":{"start":3,"end":3}}]
 ```
+
+The host functions an application provides are not known to `check` yet, so their calls get
+`W0202`. The [language server](editors.md) knows the ones declared in `jlens.json`.
 
 To validate a directory of rules in CI, warnings included:
 

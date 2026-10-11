@@ -335,6 +335,19 @@ fn completion_hover_and_signature_help() {
         client.at("textDocument/signatureHelp", &rule, 0, 0),
         Value::Null
     );
+
+    // Declared functions are known, and checked against their signature.
+    let calls = folder.uri("calls.jsonata");
+    client.open(
+        &calls,
+        "$shipping(2, 'eu') + $shiping(2, 'eu') + $shipping(2)",
+    );
+    let codes: Vec<String> = client
+        .diagnostics(&calls)
+        .into_iter()
+        .map(|d| d.0)
+        .collect();
+    assert_eq!(codes, ["W0202", "W0203"]);
     client.shutdown();
 }
 
