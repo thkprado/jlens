@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 
 mod differential;
 mod docs;
+mod fuzz;
 mod release;
 mod wasm;
 
@@ -22,6 +23,7 @@ commands:
   differential [--cases N] [--seed S]
                                     run N generated expressions (1000) in jlens and jsonata-js
                                     and report where they differ (needs benches/compare installed)
+  fuzz-seed                         seed the corpora of the fuzz targets with the JSONata suite
   wasm [--dev]                      build the browser package in crates/jlens-wasm/pkg
   wasm-test [--require-browser] [--example]
                                     build the package and test it in Node.js and a headless browser
@@ -36,6 +38,7 @@ fn main() -> Result<()> {
         Some("gen-docs") => gen_docs(args.iter().any(|a| a == "--check")),
         Some("doc-check") => docs::check(),
         Some("differential") => differential::run(&args[1..]),
+        Some("fuzz-seed") => fuzz::seed(),
         Some("wasm") => wasm::build(args.iter().any(|a| a == "--dev")),
         Some("wasm-test") => wasm::test(
             args.iter().any(|a| a == "--require-browser"),

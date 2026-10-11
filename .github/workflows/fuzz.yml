@@ -1,0 +1,70 @@
+name: Fuzz
+
+# Coverage-guided fuzzing of the parser and the evaluator (cargo-fuzz, libFuzzer; see "Fuzzing"
+# in docs/src/architecture/conformance.md). Each target starts from the expressions of the
+# JSONata suite and from the corpus of its last run. A crash fails the run and uploads the input
+# that caused it: reproduce it on Linux with
+# `cargo +nightly fuzz run <target> --sanitizer none --debug-assertions <file>`.
+
+on:
+  schedule:
+    - cron: "37 4 * * 3"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "How long to fuzz each target, in seconds"
+        default: "600"
+
+# Jobs read the repository; a job that needs more asks for it.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [parse, parse_recover, evaluate]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            fuzz -> target
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - uses: actions/cache/restore@v6
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Seed the corpus with the JSONata suite
+        run: cargo xtask fuzz-seed
+      - name: Fuzz
+        env:
+          TARGET: ${{ matrix.target }}
+          SECONDS_EACH: ${{ inputs.seconds || '600' }}
+        # No sanitizer: jlens forbids `unsafe`, and AddressSanitizer reports false positives
+        # when stacker switches stacks. Debug assertions turn arithmetic overflows into panics.
+        run: >-
+          cargo +nightly fuzz run "$TARGET" --sanitizer none --debug-assertions
+          -- -max_total_time="$SECONDS_EACH" -timeout=10
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/

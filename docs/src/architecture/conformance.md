@@ -64,6 +64,40 @@ The property tests found two bugs:
 
 Both have regression tests.
 
+## Fuzzing
+
+Property tests draw their inputs at random. Coverage-guided fuzzing (`cargo-fuzz`, with
+libFuzzer) keeps the inputs that reach new code and mutates them, so it finds the paths that
+random inputs rarely reach. The targets live in `fuzz/`, a crate outside the workspace:
+
+| Target | Input | What must hold |
+|---|---|---|
+| `parse` | An expression | Strict parsing never panics |
+| `parse_recover` | An expression | Recovering parsing never panics; diagnostic spans stay inside the source |
+| `evaluate` | An expression, optionally followed by a NUL byte and a JSON input document | Compiling, then evaluating with and without input, against a `Document` and audited, never panics |
+
+Evaluations run with a timeout, a depth limit, size caps, and a fixed clock and seed. Each
+target runs on a thread with a 1 MB stack, the size of the main thread's stack on Windows, so
+that recursion that does not grow the stack overflows on Linux too. The build has debug
+assertions, so an arithmetic overflow is a crash.
+
+The `Fuzz` workflow runs every target for ten minutes each week, or for as long as asked when
+started by hand. Each target starts from the expressions and input documents of the JSONata
+suite (`cargo xtask fuzz-seed` writes them to `fuzz/corpus/`) and from the corpus its last run
+kept. A crash fails the run, and the input that caused it is uploaded with the run.
+
+cargo-fuzz needs nightly Rust and Linux or macOS. To reproduce a crash, on Linux:
+
+```sh
+cargo install cargo-fuzz
+cargo xtask fuzz-seed
+cargo +nightly fuzz run evaluate --sanitizer none --debug-assertions            # fuzz
+cargo +nightly fuzz run evaluate --sanitizer none --debug-assertions <crash file>  # one input
+```
+
+Each crash becomes an ordinary test in the crate where the bug was, which runs with
+`cargo test` on every platform.
+
 ## Differential testing
 
 The suite covers the cases its authors thought of. Differential testing covers others: it

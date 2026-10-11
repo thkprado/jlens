@@ -1,0 +1,41 @@
+# Coverage-guided fuzzing (cargo-fuzz, nightly). Not a member of the main workspace: it needs
+# nightly and libFuzzer. See "Fuzzing" in docs/src/architecture/conformance.md.
+
+[package]
+name = "jlens-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+jlens-core = { path = "../crates/jlens-core" }
+serde_json = "1"
+
+# A workspace of its own, so that the main workspace does not claim this crate.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "parse"
+path = "fuzz_targets/parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_recover"
+path = "fuzz_targets/parse_recover.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "evaluate"
+path = "fuzz_targets/evaluate.rs"
+test = false
+doc = false
+bench = false

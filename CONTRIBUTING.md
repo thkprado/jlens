@@ -41,6 +41,7 @@ PROPTEST_CASES=100000 cargo test -p jlens-core --test robustness
 cargo xtask serve                              # serve the repository, for examples/web-editor
 (cd benches/compare && npm install && node compare.mjs && node doc-examples.mjs)
 cargo xtask differential                       # generated expressions, jlens against jsonata-js
+cargo +nightly fuzz run evaluate --sanitizer none --debug-assertions  # fuzzing, Linux only
 ```
 
 ## Guidelines

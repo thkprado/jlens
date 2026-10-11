@@ -29,6 +29,11 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets
       - run: cargo clippy -p jlens-core --features tracing
+      - name: Fuzz targets build
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cargo fmt --manifest-path fuzz/Cargo.toml --check
+          cargo clippy --manifest-path fuzz/Cargo.toml --all-targets
       - run: cargo test --workspace
       - name: Generated docs are up to date
         run: cargo xtask gen-docs --check
