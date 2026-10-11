@@ -1,0 +1,48 @@
+[package]
+name = "jlens-regress"
+description = "Fork of regress 0.10.5 (EcmaScript regular expressions) whose matches can be interrupted"
+version.workspace = true
+authors = ["ridiculousfish <corydoras@ridiculousfish.com>", "jlens contributors"]
+license = "MIT OR Apache-2.0"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/jlens-regress"
+keywords = ["regex", "regexp"]
+categories = ["text-processing"]
+edition = "2024"
+rust-version.workspace = true
+readme = "README.md"
+include = ["src/**/*", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
+
+# The library keeps upstream's name, so the code, the tests and the doc tests stay as in
+# regress 0.10.5 (see ADR 0009).
+[lib]
+name = "regress"
+
+[features]
+default = ["backend-pikevm", "std"]
+
+std = ["memchr/std"]
+
+# Enables the PikeVM backend.
+backend-pikevm = []
+
+# Prefers indexes to pointers for bytecode IP and string positions, for the paranoid.
+index-positions = []
+
+# Prohibits all uses of unsafe code, for the paranoid.
+prohibit-unsafe = []
+
+# Enables UTF-16 support. This disables some optimizations, so it should only be used when necessary.
+utf16 = []
+
+# Enables Pattern trait implementation for str::find, str::contains, etc.
+pattern = []
+
+[dependencies]
+hashbrown = "0.16.0"
+memchr = { version = "2.4.0", default-features = false }
+
+# Upstream code that newer clippy versions flag; left as is to keep the diff small.
+[lints.clippy]
+single_range_in_vec_init = "allow"

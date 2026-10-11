@@ -40,6 +40,12 @@ Choices to make:
      instructions run between them, nested lookarounds included. The exact unit and *N* are
      settled by measurement during implementation. Targets: on the catastrophic cases, under
      1 ms between two checks in a release build; on `benches/`, under 2 % slower.
+   - As implemented in `jlens-regress`: a step is a failure that sends the backtracker back to
+     its stack, or an iteration of a loop, and *N* is 1,024. Measured with
+     `cargo run --release -p jlens-regress --example interrupt_cost` on 2026-10-11: on five
+     catastrophic patterns, a median of 9 to 13 µs between two checks (maximum about 0.2 ms,
+     scheduling noise included); on ordinary matches, within the noise of the run (±4 %, a few
+     nanoseconds per call).
    - jlens passes a check only when the evaluation has a timeout or a cancellation token. Without
      either, the match runs the unchanged code path (the check is a type parameter, so the
      "no check" version compiles to the current code). As with the tracer (ADR 0004), a feature
