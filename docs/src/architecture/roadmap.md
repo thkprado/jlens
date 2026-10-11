@@ -27,6 +27,7 @@ The [changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md) lists 
 | 0.2.0 | Host functions in Rust and WebAssembly ([ADR 0006](../adr/0006-host-functions.md)), and their declarations in the language service; the web editor's example selector |
 | 0.3.0 | The language server `jlens lsp` and `jlens.json` ([ADR 0007](../adr/0007-language-server.md), [editors guide](../guides/editors.md)); the CLI's machine contract ([ADR 0008](../adr/0008-cli-machine-contract.md)): `eval --json`, `--now` and `--seed`, `check` over several files, `jlens errors`; cancellation and size caps in `jlens-core` |
 | 0.4.0 | `check` warns about unknown functions, wrong argument counts and types, and undeclared variables, and reads `jlens.json`; `jlens test` runs files of test cases; prebuilt binaries, installable with `cargo binstall` |
+| 0.5.0 | A cap on the size of a result (`U1001`); the size caps, clock and seed in the WebAssembly package, and the size caps in `jlens eval` and `jlens test`; differential testing against jsonata-js (`cargo xtask differential`); every binary built before a release publishes anything; a security policy |
 
 ## Priorities
 
@@ -72,11 +73,11 @@ tests them and explains their results before they ship.
 
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
-| 1 | The release workflow builds every binary before it publishes anything, and CI builds the release targets on each push to `main` | `crates` and `npm` need `binaries`; the CI job is green on `main` | done |
-| 2 | The library's guarantees are checked: a CI job with the declared minimum Rust version (1.88), `cargo-deny` for advisories and licenses, and a `SECURITY.md` for reporting vulnerabilities | CI jobs green; `SECURITY.md` linked from the README and CONTRIBUTING | done |
-| 3 | A cap on the total size of a result, which counts a shared value each time it appears, so that a short expression that nests the same array cannot exhaust memory when the result is serialized (`U1001`) | Property tests; such an expression stops with `U1001` | done |
-| 4 | The WebAssembly package takes every option of `jlens-core` but cancellation (`maxStringLength`, `maxArrayLength`, the size cap of item 3, `now`, `seed`), and `jlens eval` and `jlens test` take the size caps | Tests in the JS suite and the CLI; the guides list the options | done |
-| 5 | Differential testing against jsonata-js 2.2.2: generated expressions and inputs run in both engines, which must agree on the result or the error code | A `cargo xtask` command and a scheduled CI job; each divergence fixed, or documented in the compatibility page and the overrides | done |
+| 1 | The release workflow builds every binary before it publishes anything, and CI builds the release targets on each push to `main` | `crates` and `npm` need `binaries`; the CI job is green on `main` | **done** |
+| 2 | The library's guarantees are checked: a CI job with the declared minimum Rust version (1.88), `cargo-deny` for advisories and licenses, and a `SECURITY.md` for reporting vulnerabilities | CI jobs green; `SECURITY.md` linked from the README and CONTRIBUTING | **done** |
+| 3 | A cap on the total size of a result, which counts a shared value each time it appears, so that a short expression that nests the same array cannot exhaust memory when the result is serialized (`U1001`) | Property tests; such an expression stops with `U1001` | **done** |
+| 4 | The WebAssembly package takes every option of `jlens-core` but cancellation (`maxStringLength`, `maxArrayLength`, the size cap of item 3, `now`, `seed`), and `jlens eval` and `jlens test` take the size caps | Tests in the JS suite and the CLI; the guides list the options | **done** |
+| 5 | Differential testing against jsonata-js 2.2.2: generated expressions and inputs run in both engines, which must agree on the result or the error code | A `cargo xtask` command and a scheduled CI job; each divergence fixed, or documented in the compatibility page and the overrides | **done** |
 
 ## Later
 

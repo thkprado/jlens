@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0]
+
+Guardrails for untrusted expressions and checked compatibility: a cap on the size of a result,
+every size cap in the WebAssembly package and the CLI, safer releases, and fixes found by
+comparing generated expressions with jsonata-js.
+
 ### Added
 
 - A size limit on the result (`jlens-core`): `Options::max_result_size` (256 MiB of compact
@@ -186,7 +192,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/thkprado/jlens/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/thkprado/jlens/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/thkprado/jlens/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/thkprado/jlens/compare/v0.1.1...v0.2.0
