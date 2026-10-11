@@ -2,11 +2,12 @@
 
 use crate::{
     api, charclasses,
-    codepointset::{CodePointSet, Interval, interval_contains},
+    codepointset::{CodePoint, CodePointSet, Interval, interval_contains},
+    insn::MAX_CHAR_SET_LENGTH,
     ir,
     types::{
         BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
-        MAX_LOOPS,
+        MAX_LOOPS, MAX_NESTING_DEPTH,
     },
     unicode::{
         self, PropertyEscapeKind, unicode_property_from_str, unicode_property_name_from_str,
@@ -14,10 +15,10 @@ use crate::{
     unicodetables::{id_continue_ranges, id_start_ranges},
     util::to_char_sat,
 };
-use core::{fmt, iter::Peekable};
+use core::{fmt, iter::Peekable, mem};
 #[cfg(feature = "std")]
 use std::collections::HashMap;
-#[cfg(not(feature = "std"))]
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
 use {
     alloc::{
         boxed::Box,
@@ -45,7 +46,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 enum ClassAtom {
-    CodePoint(u32),
+    CodePoint(CodePoint),
     CharacterClass {
         class_type: CharacterClassType,
         positive: bool,
@@ -77,25 +78,17 @@ impl ClassSet {
         } else {
             self.codepoints
         };
-        if codepoints.is_empty() && self.alternatives.0.is_empty() {
-            ir::Node::Bracket(BracketContents {
-                invert: negate_set,
-                cps: codepoints,
-            })
-        } else if codepoints.is_empty() {
-            make_alt(self.alternatives.to_nodes(icase))
-        } else if self.alternatives.0.is_empty() {
-            ir::Node::Bracket(BracketContents {
-                invert: negate_set,
-                cps: codepoints,
-            })
+        let codepoints_empty = codepoints.is_empty();
+        let bracket = ir::Node::Bracket(BracketContents {
+            invert: negate_set,
+            cps: codepoints,
+        });
+        if self.alternatives.0.is_empty() {
+            bracket
+        } else if codepoints_empty {
+            self.alternatives.into_node(icase)
         } else {
-            let mut nodes = self.alternatives.to_nodes(icase);
-            nodes.push(ir::Node::Bracket(BracketContents {
-                invert: negate_set,
-                cps: codepoints,
-            }));
-            make_alt(nodes)
+            make_alt(Vec::from([self.alternatives.into_node(icase), bracket]))
         }
     }
 
@@ -138,7 +131,7 @@ impl ClassSet {
                 }
                 self.alternatives.0.clear();
                 if found_alternative {
-                    self.alternatives.0.push(Vec::from([c]));
+                    self.alternatives.0.push(Box::from([c]));
                 }
             }
             ClassSetOperand::CharacterClassEscape(cps) => {
@@ -166,7 +159,7 @@ impl ClassSet {
                 }
                 self.codepoints.intersect(class.codepoints.intervals());
                 self.codepoints.add_set(retained_codepoints);
-                self.alternatives.intersect(class.alternatives);
+                self.alternatives.intersect(&class.alternatives);
                 self.alternatives.extend(retained_alternatives);
             }
             ClassSetOperand::ClassStringDisjunction(s) => {
@@ -177,7 +170,7 @@ impl ClassSet {
                     }
                 }
                 self.codepoints = retained;
-                self.alternatives.intersect(s);
+                self.alternatives.intersect(&s);
             }
         }
     }
@@ -186,8 +179,7 @@ impl ClassSet {
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
                 self.codepoints.remove(&[Interval { first: c, last: c }]);
-                self.alternatives
-                    .remove(ClassSetAlternativeStrings(Vec::from([Vec::from([c])])));
+                self.alternatives.remove(&[Box::from([c])]);
             }
             ClassSetOperand::CharacterClassEscape(cps) => {
                 self.codepoints.remove(cps.intervals());
@@ -197,7 +189,7 @@ impl ClassSet {
                         to_remove.0.push(alternative.clone());
                     }
                 }
-                self.alternatives.remove(to_remove);
+                self.alternatives.remove(&to_remove);
             }
             ClassSetOperand::Class(class) => {
                 let mut codepoints_removed = CodePointSet::new();
@@ -214,8 +206,8 @@ impl ClassSet {
                 }
                 self.codepoints.remove(codepoints_removed.intervals());
                 self.codepoints.remove(class.codepoints.intervals());
-                self.alternatives.remove(alternatives_removed);
-                self.alternatives.remove(class.alternatives);
+                self.alternatives.remove(&alternatives_removed);
+                self.alternatives.remove(&class.alternatives);
             }
             ClassSetOperand::ClassStringDisjunction(s) => {
                 let mut to_remove = CodePointSet::new();
@@ -225,7 +217,7 @@ impl ClassSet {
                     }
                 }
                 self.codepoints.remove(to_remove.intervals());
-                self.alternatives.remove(s);
+                self.alternatives.remove(&s);
             }
         }
     }
@@ -234,52 +226,58 @@ impl ClassSet {
 /// Represents all different types of class set operands.
 #[derive(Debug, Clone)]
 enum ClassSetOperand {
-    ClassSetCharacter(u32),
+    ClassSetCharacter(CodePoint),
     CharacterClassEscape(CodePointSet),
     Class(ClassSet),
     ClassStringDisjunction(ClassSetAlternativeStrings),
 }
 
+/// A list of strings matching some property, for use in 'v' regular expressions.
 #[derive(Debug, Clone)]
-struct ClassSetAlternativeStrings(Vec<Vec<u32>>);
+struct ClassSetAlternativeStrings(Vec<Box<[CodePoint]>>);
 
 impl ClassSetAlternativeStrings {
     fn new() -> Self {
         ClassSetAlternativeStrings(Vec::new())
     }
 
-    fn extend(&mut self, other: Self) {
-        self.0.extend(other.0);
+    fn extend(&mut self, other: impl IntoIterator<Item = Box<[CodePoint]>>) {
+        self.0.extend(other);
     }
 
-    fn intersect(&mut self, other: Self) {
-        let mut retained = Vec::new();
-        for string in &self.0 {
-            for other_string in &other.0 {
-                if string == other_string {
-                    retained.push(string.clone());
-                    break;
-                }
-            }
+    fn intersect(&mut self, other: &[Box<[CodePoint]>]) {
+        self.0.retain(|string| other.contains(string));
+    }
+
+    fn remove(&mut self, other: &[Box<[CodePoint]>]) {
+        self.0.retain(|string| !other.contains(string));
+    }
+
+    fn into_node(self, icase: bool) -> ir::Node {
+        // ClassSetAlternativeStrings are matched longest first.
+        // "iterating in descending order of length" per ES2027
+        let mut alternatives = self.0;
+        #[allow(clippy::unnecessary_sort_by)]
+        alternatives.sort_by(|a, b| b.len().cmp(&a.len()));
+        ir::Node::StringSet {
+            alternatives,
+            icase,
         }
-        self.0 = retained;
     }
+}
 
-    fn remove(&mut self, other: Self) {
-        self.0.retain(|string| !other.0.contains(string));
+impl core::ops::Deref for ClassSetAlternativeStrings {
+    type Target = [Box<[CodePoint]>];
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
+}
 
-    fn to_nodes(&self, icase: bool) -> Vec<ir::Node> {
-        let mut nodes = Vec::new();
-        for string in &self.0 {
-            nodes.push(ir::Node::Cat(
-                string
-                    .iter()
-                    .map(|cp| ir::Node::Char { c: *cp, icase })
-                    .collect::<Vec<_>>(),
-            ));
-        }
-        nodes
+impl IntoIterator for ClassSetAlternativeStrings {
+    type Item = Box<[CodePoint]>;
+    type IntoIter = <Vec<Box<[CodePoint]>> as IntoIterator>::IntoIter;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -313,7 +311,8 @@ fn make_alt(nodes: ir::NodeList) -> ir::Node {
 
 /// \return a CodePointSet for a given character escape (positive or negative).
 /// See ES9 21.2.2.12.
-fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet {
+/// Returns the positive (non-inverted) code point set for a character class.
+fn codepoints_from_class_positive(ct: CharacterClassType) -> CodePointSet {
     let mut cps;
     match ct {
         CharacterClassType::Digits => {
@@ -328,19 +327,28 @@ fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet
                 cps.add(iv)
             }
         }
-    };
-    if !positive {
-        cps = cps.inverted()
     }
     cps
 }
 
+/// Returns code points for a character class, optionally inverted.
+fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet {
+    let cps = codepoints_from_class_positive(ct);
+    if positive { cps } else { cps.inverted() }
+}
+
 /// \return a Bracket for a given character escape (positive or negative).
-fn make_bracket_class(ct: CharacterClassType, positive: bool) -> ir::Node {
-    ir::Node::Bracket(BracketContents {
-        invert: false,
-        cps: codepoints_from_class(ct, positive),
-    })
+/// For icase mode, we expand the positive set first, then invert if needed.
+fn make_bracket_class(ct: CharacterClassType, positive: bool, icase: bool) -> ir::Node {
+    // Get the positive (non-inverted) set, perform any icase expansion, then maybe invert.
+    let mut cps = codepoints_from_class_positive(ct);
+    if icase {
+        cps = unicode::add_icase_code_points(cps);
+    }
+    if !positive {
+        cps = cps.inverted();
+    }
+    ir::Node::Bracket(BracketContents { invert: false, cps })
 }
 
 fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom) {
@@ -367,6 +375,30 @@ struct LookaroundParams {
     backwards: bool,
 }
 
+/// Represents an alternative path in a regex pattern.
+/// For example, in `/(?<a>x)|(?<a>y)/`, the two occurrences of 'a' are in different
+/// alternative paths (separated by |), so they don't conflict.
+/// Each element in the vector is (depth, alternative_index) where:
+/// - depth: parenthesis nesting level (0 = top level)
+/// - alternative_index: which alternative at that depth (0 = first, 1 = second after |, etc.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AlternativePath {
+    /// Vector of (depth, alternative_index) pairs representing the path through alternatives
+    segments: Vec<(usize, usize)>,
+}
+
+impl AlternativePath {
+    /// Check if two alternative paths conflict (i.e., are in the same alternative branch).
+    /// Two paths conflict if they share the same alternative indices at all common depth levels.
+    /// Example:
+    ///   - [(0, 0)] and [(0, 0), (1, 0)] conflict (second is nested within first)
+    ///   - [(0, 0)] and [(0, 1)] don't conflict (different alternatives at depth 0)
+    fn conflicts_with(&self, other: &AlternativePath) -> bool {
+        let min_len = self.segments.len().min(other.segments.len());
+        self.segments[..min_len] == other.segments[..min_len]
+    }
+}
+
 /// Represents the state used to parse a regex.
 struct Parser<I>
 where
@@ -387,11 +419,16 @@ where
     /// Maximum number of capturing groups.
     group_count_max: u32,
 
-    /// Named capture group references.
-    named_group_indices: HashMap<CaptureGroupName, u32>,
+    /// A map each from capture group name to corresponding group indices in order.
+    /// Note duplicate names may appear in distinct alternations, per the TC39 proposal.
+    /// See <https://github.com/tc39/proposal-duplicate-named-capturing-groups>
+    named_group_indices: HashMap<CaptureGroupName, Vec<u32>>,
 
     /// Whether a lookbehind was encountered.
     has_lookbehind: bool,
+
+    /// Current recursion nesting depth.
+    depth: u32,
 }
 
 impl<I> Parser<I>
@@ -424,12 +461,16 @@ where
         true
     }
 
-    /// Fold a character if icase.
-    fn fold_if_icase(&self, c: u32) -> u32 {
-        if self.flags.icase {
-            unicode::fold_code_point(c, self.flags.unicode)
-        } else {
-            c
+    /// Build a node matching a code point `c`, optionally with case-insensitivity.
+    fn char_node(&self, c: u32) -> ir::Node {
+        if !self.flags.icase {
+            return ir::Node::Char { c };
+        }
+        let class = unicode::expand_code_point(c, self.flags.icase, self.flags.unicode);
+        match class.len() {
+            1 => ir::Node::Char { c: class[0] },
+            2..=MAX_CHAR_SET_LENGTH => ir::Node::CharSet(class),
+            _ => panic!("Unicode case fold exceeded maximum expansion"),
         }
     }
 
@@ -466,10 +507,15 @@ where
 
     /// ES6 21.2.2.3 Disjunction.
     fn consume_disjunction(&mut self) -> Result<ir::Node, Error> {
+        self.depth += 1;
+        if self.depth > MAX_NESTING_DEPTH {
+            return error("Regular expression is too deeply nested");
+        }
         let mut terms = vec![self.consume_term()?];
         while self.try_consume('|') {
             terms.push(self.consume_term()?)
         }
+        self.depth -= 1;
         Ok(make_alt(terms))
     }
 
@@ -517,12 +563,18 @@ where
                         // Term :: Assertion :: \b
                         'b' => {
                             self.consume('b');
-                            result.push(ir::Node::WordBoundary { invert: false });
+                            result.push(ir::Node::WordBoundary {
+                                invert: false,
+                                unicode_icase: self.flags.unicode && self.flags.icase,
+                            });
                         }
                         // Term :: Assertion :: \B
                         'B' => {
                             self.consume('B');
-                            result.push(ir::Node::WordBoundary { invert: true });
+                            result.push(ir::Node::WordBoundary {
+                                invert: true,
+                                unicode_icase: self.flags.unicode && self.flags.icase,
+                            });
                         }
                         // Term :: Atom :: \ AtomEscape :: CharacterEscape :: c AsciiLetter
                         // Term :: ExtendedAtom :: \ [lookahead = c]
@@ -534,20 +586,12 @@ where
                                 .map(|c| c.is_ascii_alphabetic())
                                 == Some(true)
                             {
-                                result.push(ir::Node::Char {
-                                    c: self.next().expect("char was not next") % 32,
-                                    icase: self.flags.icase,
-                                });
+                                let cp = self.next().expect("char was not next") % 32;
+                                result.push(self.char_node(cp));
                             } else {
                                 start_offset += 1;
-                                result.push(ir::Node::Char {
-                                    c: u32::from('\\'),
-                                    icase: self.flags.icase,
-                                });
-                                result.push(ir::Node::Char {
-                                    c: u32::from('c'),
-                                    icase: self.flags.icase,
-                                });
+                                result.push(self.char_node(u32::from('\\')));
+                                result.push(self.char_node(u32::from('c')));
                             }
                         }
                         // Term :: Atom :: \ AtomEscape
@@ -612,25 +656,20 @@ where
                         }
                         self.group_count += 1;
 
-                        // Parse capture group name.
+                        // Maybe the capture group has a name!
+                        let mut group_name = None;
                         if self.try_consume_str("?") {
-                            let group_name = if let Some(group_name) =
-                                self.try_consume_named_capture_group_name()
-                            {
-                                group_name
-                            } else {
+                            group_name = self.try_consume_named_capture_group_name();
+                            if group_name.is_none() {
                                 return error("Invalid token at named capture group identifier");
                             };
-                            let contents = self.consume_disjunction()?;
-                            result.push(ir::Node::NamedCaptureGroup(
-                                Box::new(contents),
-                                group,
-                                group_name,
-                            ))
-                        } else {
-                            let contents = self.consume_disjunction()?;
-                            result.push(ir::Node::CaptureGroup(Box::new(contents), group))
                         }
+                        let contents = Box::new(self.consume_disjunction()?);
+                        result.push(ir::Node::CaptureGroup {
+                            id: group,
+                            contents,
+                            name: group_name,
+                        })
                     }
                     if !self.try_consume(')') {
                         return error("Unbalanced parenthesis");
@@ -658,10 +697,8 @@ where
                     }
 
                     // Term :: ExtendedAtom :: ExtendedPatternCharacter
-                    result.push(ir::Node::Char {
-                        c: self.consume(c),
-                        icase: self.flags.icase,
-                    })
+                    let cp = self.consume(c);
+                    result.push(self.char_node(cp))
                 }
 
                 // Term :: Atom :: PatternCharacter :: SourceCharacter but not ^ $ \ . * + ? ( ) [ ] { } |
@@ -678,10 +715,7 @@ where
                 // Term :: ExtendedAtom :: ExtendedPatternCharacter
                 _ => {
                     self.consume(c);
-                    result.push(ir::Node::Char {
-                        c: self.fold_if_icase(c),
-                        icase: self.flags.icase,
-                    })
+                    result.push(self.char_node(c))
                 }
             }
 
@@ -989,7 +1023,8 @@ where
     }
 
     // CharacterClass :: ClassContents :: ClassSetExpression
-    fn consume_class_set_expression(&mut self, negate_set: bool) -> Result<ClassSet, Error> {
+    // `in_negated_class` forbids string operands. It does not invert the result.
+    fn consume_class_set_expression(&mut self, in_negated_class: bool) -> Result<ClassSet, Error> {
         let mut result = ClassSet::new();
 
         let first = match self.peek() {
@@ -997,7 +1032,7 @@ where
                 self.consume(']');
                 return Ok(result);
             }
-            Some(_) => self.consume_class_set_operand(negate_set)?,
+            Some(_) => self.consume_class_set_operand(in_negated_class)?,
             None => {
                 return error("Unbalanced class set bracket");
             }
@@ -1036,7 +1071,7 @@ where
                     match first {
                         ClassSetOperand::ClassSetCharacter(first) => {
                             let ClassSetOperand::ClassSetCharacter(last) =
-                                self.consume_class_set_operand(negate_set)?
+                                self.consume_class_set_operand(in_negated_class)?
                             else {
                                 return error("Invalid class set range");
                             };
@@ -1069,7 +1104,7 @@ where
                             self.consume(']');
                             return Ok(result);
                         }
-                        Some(_) => self.consume_class_set_operand(negate_set)?,
+                        Some(_) => self.consume_class_set_operand(in_negated_class)?,
                         None => return error("Unbalanced class set bracket"),
                     };
                     if self.peek() == Some(0x2D /* - */) {
@@ -1077,7 +1112,7 @@ where
                         match operand {
                             ClassSetOperand::ClassSetCharacter(first) => {
                                 let ClassSetOperand::ClassSetCharacter(last) =
-                                    self.consume_class_set_operand(negate_set)?
+                                    self.consume_class_set_operand(in_negated_class)?
                                 else {
                                     return error("Invalid class set range");
                                 };
@@ -1098,7 +1133,7 @@ where
             // ClassIntersection :: ClassSetOperand && [lookahead ≠ &]
             ClassSetOperator::Intersection => {
                 loop {
-                    let operand = self.consume_class_set_operand(negate_set)?;
+                    let operand = self.consume_class_set_operand(in_negated_class)?;
                     result.intersect_operand(operand);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
@@ -1114,7 +1149,7 @@ where
             // ClassSubtraction :: ClassSubtraction -- ClassSetOperand
             ClassSetOperator::Subtraction => {
                 loop {
-                    let operand = self.consume_class_set_operand(negate_set)?;
+                    let operand = self.consume_class_set_operand(in_negated_class)?;
                     result.subtract_operand(operand);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
@@ -1130,7 +1165,10 @@ where
         }
     }
 
-    fn consume_class_set_operand(&mut self, negate_set: bool) -> Result<ClassSetOperand, Error> {
+    fn consume_class_set_operand(
+        &mut self,
+        in_negated_class: bool,
+    ) -> Result<ClassSetOperand, Error> {
         use ClassSetOperand::*;
         let Some(cp) = self.peek() else {
             return error("Empty class set operand");
@@ -1139,12 +1177,17 @@ where
             // ClassSetOperand :: NestedClass :: [ [lookahead ≠ ^] ClassContents[+UnicodeMode, +UnicodeSetsMode] ]
             // ClassSetOperand :: NestedClass :: [^ ClassContents[+UnicodeMode, +UnicodeSetsMode] ]
             0x5B /* [ */ => {
+                self.depth += 1;
+                if self.depth > MAX_NESTING_DEPTH {
+                    return error("Regular expression is too deeply nested");
+                }
                 self.consume('[');
                 let negate_set = self.try_consume('^');
-                let result = self.consume_class_set_expression(negate_set)?;
+                let mut result = self.consume_class_set_expression(negate_set)?;
                 if negate_set {
-                    result.codepoints.inverted();
+                    result.codepoints = result.codepoints.inverted();
                 }
+                self.depth -= 1;
                 Ok(Class(result))
             }
             // ClassSetOperand :: NestedClass :: \ CharacterClassEscape
@@ -1170,16 +1213,16 @@ where
                                 Some(0x7D /* } */) => {
                                     self.consume('}');
                                     if !alternative.is_empty() {
-                                        alternatives.push(alternative.clone());
-                                        alternative.clear();
+                                        alternatives.push(alternative.into_boxed_slice());
                                     }
                                     break;
                                 }
                                 Some(0x7C /* | */) => {
                                     self.consume('|');
                                     if !alternative.is_empty() {
-                                        alternatives.push(alternative.clone());
-                                        alternative.clear();
+                                        let alternative = mem::take(&mut alternative).into_boxed_slice();
+                                        alternatives.push(alternative);
+
                                     }
                                 }
                                 Some(_) => {
@@ -1231,9 +1274,9 @@ where
                                     intervals.to_vec(),
                                 )))
                             }
-                            PropertyEscapeKind::StringSet(_) if negate_set => error("Invalid character escape"),
+                            PropertyEscapeKind::StringSet(_) if in_negated_class => error("Invalid character escape"),
                             PropertyEscapeKind::StringSet(strings) => {
-                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| s.to_vec()).collect())))
+                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| Box::from(*s)).collect())))
                             }
                         }
                     }
@@ -1475,13 +1518,18 @@ where
             }
             // CharacterEscape :: HexEscapeSequence :: x HexDigit HexDigit
             'x' => {
+                let orig_input = self.input.clone();
                 let hex_to_digit = |c: char| c.to_digit(16);
                 let x1 = self.next().and_then(char::from_u32).and_then(hex_to_digit);
                 let x2 = self.next().and_then(char::from_u32).and_then(hex_to_digit);
                 match (x1, x2) {
                     (Some(x1), Some(x2)) => Ok(x1 * 16 + x2),
                     // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
-                    _ if !self.flags.unicode => Ok(c),
+                    // Not a valid HexEscapeSequence. Restore the input.
+                    _ if !self.flags.unicode => {
+                        self.input = orig_input;
+                        Ok(c)
+                    }
                     _ => error("Invalid character escape"),
                 }
             }
@@ -1550,6 +1598,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Digits,
                     c == 'd' as u32,
+                    self.flags.icase,
                 ))
             }
 
@@ -1558,6 +1607,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Spaces,
                     c == 's' as u32,
+                    self.flags.icase,
                 ))
             }
 
@@ -1566,6 +1616,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Words,
                     c == 'w' as u32,
+                    self.flags.icase,
                 ))
             }
 
@@ -1577,27 +1628,29 @@ where
                 let property_escape = self.try_consume_unicode_property_escape()?;
                 match property_escape {
                     PropertyEscapeKind::CharacterClass(s) => {
-                        Ok(ir::Node::Bracket(BracketContents {
-                            invert: negate,
-                            cps: CodePointSet::from_sorted_disjoint_intervals(s.to_vec()),
-                        }))
+                        let mut cps = CodePointSet::from_sorted_disjoint_intervals(s.to_vec());
+                        if self.flags.icase {
+                            // Per ES2024: apply SimpleCaseFolding to the property set first.
+                            // For \P (inverted): complement before expansion so that case
+                            // variants of the complement are included (existential quantifier).
+                            if negate {
+                                cps = unicode::add_icase_code_points(cps.inverted());
+                            } else {
+                                cps = unicode::add_icase_code_points(cps);
+                            }
+                            Ok(ir::Node::Bracket(BracketContents { invert: false, cps }))
+                        } else {
+                            Ok(ir::Node::Bracket(BracketContents {
+                                invert: negate,
+                                cps,
+                            }))
+                        }
                     }
                     PropertyEscapeKind::StringSet(_) if negate => error("Invalid character escape"),
-                    PropertyEscapeKind::StringSet(strings) => Ok(make_alt(
-                        strings
-                            .iter()
-                            .map(|s| {
-                                ir::Node::Cat(
-                                    s.iter()
-                                        .map(|c| ir::Node::Char {
-                                            c: *c,
-                                            icase: self.flags.icase,
-                                        })
-                                        .collect(),
-                                )
-                            })
-                            .collect(),
-                    )),
+                    PropertyEscapeKind::StringSet(strings) => Ok(ir::Node::StringSet {
+                        alternatives: strings.iter().map(|s| Box::from(*s)).collect(),
+                        icase: self.flags.icase,
+                    }),
                 }
             }
 
@@ -1606,7 +1659,10 @@ where
             '1'..='9' if self.flags.unicode => {
                 let group = self.try_consume_decimal_integer_literal().unwrap();
                 if group <= self.group_count_max as usize {
-                    Ok(ir::Node::BackRef(group as u32))
+                    Ok(ir::Node::BackRef {
+                        group: group as u32,
+                        icase: self.flags.icase,
+                    })
                 } else {
                     error("Invalid character escape")
                 }
@@ -1620,51 +1676,72 @@ where
                 let group = self.try_consume_decimal_integer_literal().unwrap();
 
                 if group <= self.group_count_max as usize {
-                    Ok(ir::Node::BackRef(group as u32))
+                    Ok(ir::Node::BackRef {
+                        group: group as u32,
+                        icase: self.flags.icase,
+                    })
                 } else {
                     self.input = input;
                     let c = self.consume_character_escape()?;
-                    Ok(ir::Node::Char {
-                        c: self.fold_if_icase(c),
-                        icase: self.flags.icase,
-                    })
+                    Ok(self.char_node(c))
                 }
             }
 
             // [+NamedCaptureGroups] k GroupName
             'k' if self.flags.unicode || !self.named_group_indices.is_empty() => {
-                self.consume('k');
-
                 // The sequence `\k` must be the start of a backreference to a named capture group.
-                if let Some(group_name) = self.try_consume_named_capture_group_name() {
-                    if let Some(index) = self.named_group_indices.get(&group_name) {
-                        Ok(ir::Node::BackRef(*index + 1))
-                    } else {
-                        error(format!(
-                            "Backreference to invalid named capture group: {}",
-                            &group_name
-                        ))
+                // Note multiple capture groups may have the same name; we must map all of them to their indices.
+                self.consume('k');
+                // Must have a valid group name.
+                let Some(group_name) = self.try_consume_named_capture_group_name() else {
+                    return error("Invalid named backreference syntax");
+                };
+                // The group name must be the name of a previously defined capture group.
+                let Some(group_indices) = self.named_group_indices.get(&group_name) else {
+                    return error(format!(
+                        "Backreference to invalid named capture group: {}",
+                        group_name
+                    ));
+                };
+                // Note backreferences are 1-based.
+                let node = match group_indices.len() {
+                    0 => unreachable!("Should not have empty indices for group name"),
+                    1 => {
+                        // Common case of a backref matching a single group.
+                        ir::Node::BackRef {
+                            group: group_indices[0] + 1,
+                            icase: self.flags.icase,
+                        }
                     }
-                } else {
-                    error("Unexpected end of named backreference")
-                }
+                    _ => {
+                        // Unusual case of multiple groups sharing a name: the backref should try each in turn.
+                        // Lower to alternations of backreferences. Reverse to keep it right-associative: a | (b | (c | d))...
+                        let icase = self.flags.icase;
+                        let backrefs =
+                            group_indices
+                                .iter()
+                                .rev()
+                                .map(|group_index| ir::Node::BackRef {
+                                    group: *group_index + 1,
+                                    icase,
+                                });
+                        backrefs
+                            .reduce(|right, left| ir::Node::Alt(Box::new(left), Box::new(right)))
+                            .unwrap()
+                    }
+                };
+                Ok(node)
             }
 
             // [~NamedCaptureGroups] k GroupName
             'k' => {
                 self.consume('k');
-                Ok(ir::Node::Char {
-                    c: self.fold_if_icase(c),
-                    icase: self.flags.icase,
-                })
+                Ok(self.char_node(c))
             }
 
             _ => {
                 let c = self.consume_character_escape()?;
-                Ok(ir::Node::Char {
-                    c: self.fold_if_icase(c),
-                    icase: self.flags.icase,
-                })
+                Ok(self.char_node(c))
             }
         }
     }
@@ -1823,14 +1900,62 @@ where
     }
 
     // Quickly parse all capture groups.
+    // Per TC39 proposal, duplicate named groups are allowed in different alternatives.
     fn parse_capture_groups(&mut self) -> Result<(), Error> {
         let orig_input = self.input.clone();
+
+        // Pass 1: Collect all named capture groups with their alternative paths
+        let named_group_locations = self.collect_named_group_locations()?;
+
+        // Pass 2: Check for conflicts (duplicates in the same alternative path)
+        self.check_duplicate_conflicts(&named_group_locations)?;
+
+        self.input = orig_input;
+
+        Ok(())
+    }
+
+    /// Pass 1: Collect all named capture groups and record which alternative path each appears in.
+    fn collect_named_group_locations(
+        &mut self,
+    ) -> Result<HashMap<String, Vec<AlternativePath>>, Error> {
+        // Track parenthesis depth and alternative index at each depth
+        let mut paren_depth: usize = 0;
+        // Map from depth to current alternative index at that depth
+        let mut alt_indices: HashMap<usize, usize> = HashMap::new();
+        alt_indices.insert(0, 0);
+
+        // Map from group name to all alternative paths where it appears
+        let mut named_group_locations: HashMap<String, Vec<AlternativePath>> = HashMap::new();
 
         loop {
             match self.next().map(to_char_sat) {
                 Some('\\') => {
                     self.next();
                     continue;
+                }
+                Some('[') if self.flags.unicode_sets => {
+                    // In unicode_sets (`v`) mode character classes can nest,
+                    // e.g. `[[a][b]]`, so track bracket depth and stop only at
+                    // the matching `]`.
+                    let mut depth = 1usize;
+                    loop {
+                        match self.next().map(to_char_sat) {
+                            Some('\\') => {
+                                self.next();
+                                continue;
+                            }
+                            Some('[') => depth += 1,
+                            Some(']') => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            Some(_) => continue,
+                            None => break,
+                        }
+                    }
                 }
                 Some('[') => loop {
                     match self.next().map(to_char_sat) {
@@ -1844,28 +1969,87 @@ where
                     }
                 },
                 Some('(') => {
-                    if self.try_consume_str("?")
-                        && let Some(name) = self.try_consume_named_capture_group_name()
-                        && self
-                            .named_group_indices
-                            .insert(name, self.group_count_max)
-                            .is_some()
-                    {
-                        return error("Duplicate capture group name");
-                    }
-                    self.group_count_max = if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
-                        MAX_CAPTURE_GROUPS as u32
+                    // Determine whether we're a capturing group, and optionally the name.
+                    let is_capturing;
+                    let group_name;
+                    if self.try_consume_str("?") {
+                        group_name = self.try_consume_named_capture_group_name();
+                        is_capturing = group_name.is_some(); // (?:, (?=, (?!, etc. are non-capturing.
                     } else {
-                        self.group_count_max + 1
-                    };
+                        is_capturing = true;
+                        group_name = None; // Unnamed capture group
+                    }
+
+                    if let Some(name) = group_name {
+                        // Build current alternative path from depth 0 to current depth.
+                        let mut segments = Vec::new();
+                        for d in 0..=paren_depth {
+                            segments.push((d, *alt_indices.get(&d).unwrap_or(&0)));
+                        }
+
+                        // Record this location.
+                        named_group_locations
+                            .entry(name.clone())
+                            .or_default()
+                            .push(AlternativePath { segments });
+
+                        // Store all occurrences in named_group_indices.
+                        self.named_group_indices
+                            .entry(name)
+                            .or_default()
+                            .push(self.group_count_max);
+                    }
+
+                    if is_capturing {
+                        self.group_count_max =
+                            if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
+                                MAX_CAPTURE_GROUPS as u32
+                            } else {
+                                self.group_count_max + 1
+                            };
+                    }
+
+                    // Entering a new group.
+                    paren_depth += 1;
+                    alt_indices.insert(paren_depth, 0);
+                }
+                Some(')') => {
+                    // Exiting a group
+                    if paren_depth > 0 {
+                        alt_indices.remove(&paren_depth);
+                        paren_depth -= 1;
+                    }
+                }
+                Some('|') => {
+                    // Moving to next alternative at current depth
+                    *alt_indices.entry(paren_depth).or_insert(0) += 1;
                 }
                 Some(_) => continue,
                 None => break,
             }
         }
 
-        self.input = orig_input;
+        Ok(named_group_locations)
+    }
 
+    /// Pass 2: Check that named groups with the same name don't conflict.
+    /// Groups conflict if they appear in the same alternative path.
+    /// Per TC39 proposal, `/(?<a>x)|(?<a>y)/` is valid (different alternatives),
+    /// but `/(?<a>x)(?<a>y)/` is invalid (same alternative).
+    fn check_duplicate_conflicts(
+        &self,
+        named_group_locations: &HashMap<String, Vec<AlternativePath>>,
+    ) -> Result<(), Error> {
+        for paths in named_group_locations.values() {
+            // Check each pair of paths for this group name
+            for i in 0..paths.len() {
+                for j in (i + 1)..paths.len() {
+                    if paths[i].conflicts_with(&paths[j]) {
+                        return error("Duplicate capture group name");
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1936,6 +2120,7 @@ where
         named_group_indices: HashMap::new(),
         group_count_max: 0,
         has_lookbehind: false,
+        depth: 0,
     };
     p.try_parse()
 }

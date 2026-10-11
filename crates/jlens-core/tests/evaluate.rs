@@ -155,6 +155,16 @@ fn guardrails_stop_catastrophic_regexes() {
 }
 
 #[test]
+fn deeply_nested_regexes_are_syntax_errors() {
+    // regress 0.10.5 overflowed the stack parsing this; 0.12.0 caps the nesting.
+    let source = format!("/{}a{}/", "(".repeat(50_000), ")".repeat(50_000));
+    let err = Expression::compile(&source)
+        .and_then(|e| e.evaluate(None, &Bindings::new()))
+        .unwrap_err();
+    assert_eq!(err.code(), "S0302");
+}
+
+#[test]
 fn size_caps_stop_huge_values() {
     let code = |source: &str, options: &Options| {
         Expression::compile(source)

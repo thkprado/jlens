@@ -1,6 +1,7 @@
 use crate::cursor::Direction;
 use crate::indexing::{ElementType, InputIndexer};
 use crate::types::BracketContents;
+use crate::unicodetables::nonascii_folds_to_ascii_word_char;
 use crate::{cursor, unicode};
 
 pub trait CharProperties {
@@ -17,6 +18,12 @@ pub trait CharProperties {
             || 'A' as u32 <= c && c <= 'Z' as u32
             || '0' as u32 <= c && c <= '9' as u32
             || c == '_' as u32
+    }
+
+    /// \return whether this is a word char in Unicode case-insensitive mode.
+    /// This includes ASCII word chars and any character that folds to an ASCII word char.
+    fn is_word_char_unicode_icase(c: Self::Element) -> bool {
+        Self::is_word_char(c) || nonascii_folds_to_ascii_word_char(c.as_u32())
     }
 
     /// ES9 11.3
@@ -50,8 +57,12 @@ pub struct ASCIICharProperties {}
 impl CharProperties for ASCIICharProperties {
     type Element = u8;
 
-    fn fold(c: Self::Element, _: bool) -> Self::Element {
-        c.to_ascii_uppercase()
+    fn fold(c: Self::Element, unicode: bool) -> Self::Element {
+        if unicode {
+            c.to_ascii_lowercase()
+        } else {
+            c.to_ascii_uppercase()
+        }
     }
 }
 

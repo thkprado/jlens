@@ -11,10 +11,16 @@ pub const CODE_POINT_MAX: CodePoint = 0x10FFFF;
 /// An inclusive range of code points.
 /// This is more efficient than InclusiveRange because it does not need to carry
 /// around the `Option<bool>`.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Interval {
     pub(crate) first: CodePoint,
     pub(crate) last: CodePoint,
+}
+
+impl core::fmt::Debug for Interval {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "U+{:04X}-U+{:04X}", self.first, self.last)
+    }
 }
 
 /// A list of sorted, inclusive, non-empty ranges of code points.
@@ -243,6 +249,7 @@ impl CodePointSet {
 
     /// \return an inverted set: a set containing every code point NOT in the
     /// receiver.
+    #[must_use]
     pub fn inverted(&self) -> CodePointSet {
         // The intervals we collect.
         let mut inverted_ivs = Vec::new();

@@ -12,8 +12,12 @@ All notable changes are recorded here. The format follows
   `a` followed by `!`, now stops within the evaluation's timeout (`D1012`) or when its
   cancellation token is cancelled (`U1003`). Before, a single match could outlast the timeout by
   minutes or more, in Rust, in the CLI and in WebAssembly. Matches run on `jlens-regress`, a
-  fork of `regress` 0.10.5 whose backtracker polls the limits (ADR 0009); without a timeout or a
+  fork of `regress` whose backtracker polls the limits (ADR 0009); without a timeout or a
   token, nothing changes.
+- Regular expressions run on `regress` 0.12.0 instead of 0.10.5, with upstream's fixes: the
+  position restored when a lazy loop backtracks, `i` case folding, nested and negated character
+  classes, `\x` without hex digits. A pattern nested tens of thousands of levels deep overflowed
+  the stack; patterns nested more than 256 levels are now a syntax error (`S0302`).
 
 ## [0.5.0]
 

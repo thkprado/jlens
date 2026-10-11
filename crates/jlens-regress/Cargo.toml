@@ -1,6 +1,6 @@
 [package]
 name = "jlens-regress"
-description = "Fork of regress 0.10.5 (EcmaScript regular expressions) whose matches can be interrupted"
+description = "Fork of regress 0.12.0 (EcmaScript regular expressions) whose matches can be interrupted"
 version.workspace = true
 authors = ["ridiculousfish <corydoras@ridiculousfish.com>", "jlens contributors"]
 license = "MIT OR Apache-2.0"
@@ -15,7 +15,7 @@ readme = "README.md"
 include = ["src/**/*", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
 
 # The library keeps upstream's name, so the code, the tests and the doc tests stay as in
-# regress 0.10.5 (see ADR 0009).
+# regress 0.12.0 (see ADR 0009).
 [lib]
 name = "regress"
 
@@ -23,6 +23,9 @@ name = "regress"
 default = ["backend-pikevm", "std"]
 
 std = ["memchr/std"]
+
+# Enables dependencies needed for `no_std` + `alloc` builds.
+alloc = ["dep:hashbrown", "memchr/alloc"]
 
 # Enables the PikeVM backend.
 backend-pikevm = []
@@ -40,7 +43,7 @@ utf16 = []
 pattern = []
 
 [dependencies]
-hashbrown = "0.16.0"
+hashbrown = { version = ">=0.16, <0.18", optional = true }
 memchr = { version = "2.4.0", default-features = false }
 
 # Upstream code that newer clippy versions flag; left as is to keep the diff small.

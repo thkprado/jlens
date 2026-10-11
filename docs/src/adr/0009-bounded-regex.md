@@ -13,7 +13,8 @@ ran for 1.2 s at n = 20, 9.9 s at n = 23 and 80 s at n = 26. In WebAssembly the 
 freezes for that long. Untrusted expressions were the use case the 0.5 limits were built for,
 and a regex literal gets through them.
 
-What `regress` offers (0.10.5, the version in use, and 0.12.0, the latest):
+What `regress` offered when this was decided (0.10.5, the version in use, and 0.12.0, the
+latest):
 
 - **No limit and no hook.** Neither the public API nor the backtracker
   (`classicalbacktrack.rs`) has a step budget, a deadline, or a callback.
@@ -45,7 +46,11 @@ Choices to make:
      `cargo run --release -p jlens-regress --example interrupt_cost` on 2026-10-11: on five
      catastrophic patterns, a median of 9 to 13 µs between two checks (maximum about 0.2 ms,
      scheduling noise included); on ordinary matches, within the noise of the run (±4 %, a few
-     nanoseconds per call).
+     nanoseconds per call). Measured again after the rebase onto 0.12.0: the same times between
+     checks, and the same noise on ordinary matches except one, a backreference that backtracks
+     on every word (`(\w+)\s+\1` on prose), 10 % slower than `find_from` against 0 % on 0.10.5.
+     The code paths are the same; the difference comes from how the compiler inlines the
+     backtracker once the check is in. It applies only to evaluations with a timeout or a token.
    - jlens passes a check only when the evaluation has a timeout or a cancellation token. Without
      either, the match runs the unchanged code path (the check is a type parameter, so the
      "no check" version compiles to the current code). As with the tracer (ADR 0004), a feature
@@ -60,8 +65,12 @@ Choices to make:
    there is no new option.
 3. **The fork is a workspace crate, `jlens-regress`,** published on crates.io before
    `jlens-core`.
-   - It is `regress` 0.10.5 plus the interrupt API, and nothing else. The diff stays small so
-     that it is easy to review and to rebase.
+   - It is `regress` plus the interrupt API, and nothing else. The diff stays small so that it
+     is easy to review and to rebase. It started from 0.10.5 and was rebased onto 0.12.0 on
+     2026-10-11 for the fixes upstream made in between: JavaScript semantics (the position
+     restored when backtracking out of a lazy loop, `i` case folding, nested and negated
+     classes, `\x` as an identity escape, duplicate named groups), and a nesting limit in the
+     parser (256 levels), which turns a pattern that overflowed the stack into a syntax error.
    - It keeps the upstream licences (MIT or Apache-2.0) and says in its README that it is a
      fork, of which version, and why.
    - jlens builds it with `regress`'s `prohibit-unsafe` feature, so that no `unsafe` path runs.
@@ -110,8 +119,14 @@ run untrusted expressions to set a timeout. With one set, a regex can no longer 
   The compatibility page documents the difference.
 - The release publishes one more crate, first: the publish order in `release.yml` and the
   release checklist in CONTRIBUTING change. `cargo deny` checks its licence like any dependency.
-- Upgrading `regress` now means rebasing the fork. It stays on 0.10.5 until there is a reason to
-  move. The conformance baseline guards against changes in behaviour.
+- Upgrading `regress` now means rebasing the fork. The fork's tests run every backtracking match
+  of upstream's suite through the interrupt API as well, and the conformance baseline and
+  `cargo xtask differential` guard against changes in behaviour.
+- After 0.12.0, upstream added `Regex::find_from_budgeted` (commit `50bead7`, unreleased as of
+  2026-10-11): a count of backtracks that ends the search with "budget exhausted". It is not an
+  equivalent: a count cannot follow a deadline or a cancellation, and a search restarted with a
+  new budget starts over. The upstream proposal should build on it, for example with a callback
+  when the budget runs out.
 - This ADR replaces ADR 0002's statement that the evaluation timeout guards against
   pathological patterns. The rest of ADR 0002 stands.
 - Property tests generate patterns with nested quantifiers on inputs that cannot match, and

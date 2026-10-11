@@ -21,9 +21,9 @@ fn is_start_anchored(n: &Node) -> bool {
             // For concatenation, check if the first node is start-anchored
             nodes.first().is_some_and(is_start_anchored)
         }
-        Node::CaptureGroup(child, ..) | Node::NamedCaptureGroup(child, ..) => {
-            is_start_anchored(child)
-        }
+        Node::CaptureGroup { contents, .. } => is_start_anchored(contents),
+        // For alternation, both arms must be start-anchored
+        Node::Alt(left, right) => is_start_anchored(left) && is_start_anchored(right),
         // Other nodes are not anchored
         _ => false,
     }
@@ -125,7 +125,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
 
         Node::Empty => arbitrary,
         Node::Goal => arbitrary,
-        Node::BackRef(..) => arbitrary,
+        Node::BackRef { .. } => arbitrary,
 
         Node::CharSet(chars) => {
             // Pick the first bytes out.
@@ -137,6 +137,9 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
                 &bytes,
             ))))
         }
+
+        // StringSets come from TC39 "sequence properties" and are very rare - not worth optimizing.
+        Node::StringSet { .. } => arbitrary,
 
         // We assume that most char nodes have been optimized to ByteSeq or AnyBytes2, so skip
         // these.
@@ -157,9 +160,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         Node::WordBoundary { .. } => arbitrary,
 
         // Capture groups delegate to their contents.
-        Node::CaptureGroup(child, ..) | Node::NamedCaptureGroup(child, ..) => {
-            compute_start_predicate(child)
-        }
+        Node::CaptureGroup { contents, .. } => compute_start_predicate(contents),
 
         // Zero-width assertions are one of the few instructions that impose no start predicate.
         Node::LookaroundAssertion { .. } => None,

@@ -3,7 +3,7 @@
 use crate::api;
 use crate::types::{BracketContents, CaptureGroupID, CaptureGroupName};
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::ToString, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 #[derive(Debug, Copy, Clone)]
@@ -27,7 +27,7 @@ pub struct Quantifier {
 }
 
 /// The node types of our IR.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Node {
     /// Matches the empty string.
     Empty,
@@ -36,17 +36,16 @@ pub enum Node {
     Goal,
 
     /// Match a literal character.
-    /// If icase is true, then `c` MUST be already folded.
-    Char { c: u32, icase: bool },
+    Char { c: u32 },
 
     /// Match a literal sequence of bytes.
     ByteSequence(Vec<u8>),
 
     /// Match any of a set of *bytes*.
-    /// This may not exceed length MAX_BYTE_SET_LENGTH.
+    /// This may not exceed length MAX_CHAR_SET_LENGTH.
     ByteSet(Vec<u8>),
 
-    /// Match any of a set of *chars*, case-insensitive.
+    /// Match any of a set of *chars*.
     /// This may not exceed length MAX_CHAR_SET_LENGTH.
     CharSet(Vec<u32>),
 
@@ -70,21 +69,35 @@ pub enum Node {
     },
 
     /// Word boundary (\b or \B).
-    WordBoundary { invert: bool },
+    WordBoundary { invert: bool, unicode_icase: bool },
 
     /// A capturing group.
-    CaptureGroup(Box<Node>, CaptureGroupID),
-
-    /// A named capturing group.
-    NamedCaptureGroup(Box<Node>, CaptureGroupID, CaptureGroupName),
+    /// If the name is set, it is guaranteed nonempty.
+    /// Note that multiple capture groups may share the same name in different alternations.
+    CaptureGroup {
+        id: CaptureGroupID,
+        contents: Box<Node>,
+        name: Option<CaptureGroupName>,
+    },
 
     /// A backreference.
-    BackRef(u32),
+    /// Indices are 1-based. That is, it matches JS syntax: \1 is the first capture group,
+    /// not everything.
+    /// A backreference that logically may match multiple capture groups (through shared names)
+    /// are emitted through alternations of backreferences.
+    BackRef { group: u32, icase: bool },
 
     /// A bracket.
     Bracket(BracketContents),
 
-    /// A lookaround assertions like (?:) or (?!).
+    /// A priority ordered list of alternative strings, each as a sequence of code points,
+    /// and whether case-insensitive matching is enabled.
+    StringSet {
+        alternatives: Vec<Box<[u32]>>,
+        icase: bool,
+    },
+
+    /// A lookaround assertions like (?=...) or (?!...).
     LookaroundAssertion {
         negate: bool,
         backwards: bool,
@@ -174,10 +187,12 @@ impl Node {
         Some(match self {
             Node::Empty => Node::Empty,
             Node::Goal => Node::Goal,
-            &Node::Char { c, icase } => Node::Char { c, icase },
+            &Node::Char { c } => Node::Char { c },
             Node::ByteSequence(bytes) => Node::ByteSequence(bytes.clone()),
             Node::ByteSet(bytes) => Node::ByteSet(bytes.clone()),
             Node::CharSet(chars) => Node::CharSet(chars.clone()),
+            // string sets are often extremely large - don't try unrolling.
+            Node::StringSet { .. } => return None,
             Node::Cat(nodes) => {
                 let mut new_nodes = Vec::with_capacity(nodes.len());
                 for n in nodes {
@@ -220,11 +235,17 @@ impl Node {
                 quant: *quant,
             },
 
-            Node::CaptureGroup(..) | Node::NamedCaptureGroup(..) => {
+            Node::CaptureGroup { .. } => {
                 panic!("Refusing to duplicate a capture group");
             }
-            &Node::WordBoundary { invert } => Node::WordBoundary { invert },
-            &Node::BackRef(idx) => Node::BackRef(idx),
+            &Node::WordBoundary {
+                invert,
+                unicode_icase,
+            } => Node::WordBoundary {
+                invert,
+                unicode_icase,
+            },
+            &Node::BackRef { group, icase } => Node::BackRef { group, icase },
             Node::Bracket(bc) => Node::Bracket(bc.clone()),
             // Do not reverse into lookarounds, they already have the right sense.
             Node::LookaroundAssertion {
@@ -299,6 +320,7 @@ where
             | Node::ByteSequence(..)
             | Node::ByteSet(..)
             | Node::CharSet(..)
+            | Node::StringSet { .. }
             | Node::WordBoundary { .. }
             | Node::BackRef { .. }
             | Node::Bracket { .. }
@@ -316,9 +338,7 @@ where
             }
 
             Node::Loop { loopee, .. } | Node::Loop1CharBody { loopee, .. } => self.process(loopee),
-            Node::CaptureGroup(contents, ..) | Node::NamedCaptureGroup(contents, ..) => {
-                self.process(contents.as_ref())
-            }
+            Node::CaptureGroup { contents, .. } => self.process(contents.as_ref()),
 
             Node::LookaroundAssertion {
                 backwards,
@@ -371,6 +391,7 @@ where
             | Node::ByteSequence(..)
             | Node::ByteSet(..)
             | Node::CharSet(..)
+            | Node::StringSet { .. }
             | Node::MatchAny
             | Node::MatchAnyExceptLineTerminator
             | Node::Anchor { .. }
@@ -388,9 +409,7 @@ where
             Node::Loop { loopee, .. } | Node::Loop1CharBody { loopee, .. } => {
                 self.process(loopee);
             }
-            Node::CaptureGroup(contents, ..) | Node::NamedCaptureGroup(contents, ..) => {
-                self.process(contents.as_mut())
-            }
+            Node::CaptureGroup { contents, .. } => self.process(contents.as_mut()),
 
             Node::LookaroundAssertion {
                 backwards,
@@ -463,8 +482,12 @@ pub struct Regex {
 impl Regex {}
 
 fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Result {
-    for _ in 0..depth {
+    const MAX_DEPTH_DOTS: usize = 120;
+    for _ in 0..depth.min(MAX_DEPTH_DOTS) {
         write!(f, "..")?;
+    }
+    if depth > MAX_DEPTH_DOTS {
+        write!(f, "(+{}).. ", depth - MAX_DEPTH_DOTS)?;
     }
     match node {
         Node::Empty => {
@@ -473,8 +496,8 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
         Node::Goal => {
             writeln!(f, "Goal")?;
         }
-        Node::Char { c, icase: _ } => {
-            writeln!(f, "'{}'", &c.to_string())?;
+        Node::Char { c } => {
+            writeln!(f, "'{}'", c)?;
         }
         Node::ByteSequence(bytes) => {
             write!(f, "ByteSeq{} 0x", bytes.len())?;
@@ -502,6 +525,12 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
                 write!(f, "0x{:x}", { c })?;
             }
             writeln!(f)?;
+        }
+        Node::StringSet {
+            alternatives,
+            icase,
+        } => {
+            writeln!(f, "StringSet count={}, icase={}", alternatives.len(), icase)?;
         }
         Node::Cat(..) => {
             writeln!(f, "Cat")?;
@@ -531,17 +560,18 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
         Node::Loop1CharBody { quant, .. } => {
             writeln!(f, "Loop1Char {:?}", quant)?;
         }
-        Node::CaptureGroup(_node, idx, ..) => {
-            writeln!(f, "CaptureGroup {:?}", idx)?;
+        Node::CaptureGroup { id, name, .. } => {
+            if let Some(name) = name {
+                writeln!(f, "CaptureGroup {:?} {:?}", id, name)?;
+            } else {
+                writeln!(f, "CaptureGroup {:?}", id)?;
+            }
         }
-        Node::NamedCaptureGroup(_node, _, name) => {
-            writeln!(f, "NamedCaptureGroup {:?}", name)?;
-        }
-        &Node::WordBoundary { invert } => {
+        &Node::WordBoundary { invert, .. } => {
             let kind = if invert { "\\B" } else { "\\b" };
             writeln!(f, "WordBoundary {:?} ", kind)?;
         }
-        &Node::BackRef(group) => {
+        &Node::BackRef { group, .. } => {
             writeln!(f, "BackRef {:?} ", group)?;
         }
         Node::Bracket(contents) => {

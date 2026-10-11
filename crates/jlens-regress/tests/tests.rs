@@ -4,6 +4,7 @@
 // Work around dead code warnings: rust-lang issue #46379
 pub mod common;
 use common::*;
+use regress::Regex;
 
 fn test_zero_length_matches_tc(tc: TestConfig) {
     tc.compile(".*?").match_all("a").test_eq(vec!["", ""]);
@@ -156,6 +157,74 @@ fn group_modifiers_tc(tc: TestConfig) {
 #[test]
 fn group_modifiers() {
     test_with_configs(group_modifiers_tc)
+}
+
+fn group_modifier_backref_icase_tc(tc: TestConfig) {
+    // Backreference inside a case-insensitive modifier group should inherit icase.
+    // (?i:(a)\1) — both (a) and \1 are inside (?i:...), so the backreference
+    // should match case-insensitively.
+    let re = tc.compile(r"(?i:(a)\1)");
+    assert!(re.find("aA").is_some());
+    assert!(re.find("Aa").is_some());
+    assert!(re.find("aa").is_some());
+    assert!(re.find("AA").is_some());
+
+    // Backreference outside the modifier group should NOT inherit icase.
+    // (?i:(a))\1 — \1 is outside (?i:...), so it must match the captured text exactly.
+    let re = tc.compile(r"(?i:(a))\1");
+    assert!(re.find("aa").is_some()); // captures 'a', backref matches 'a'
+    assert!(re.find("AA").is_some()); // captures 'A', backref matches 'A'
+    assert!(re.find("aA").is_none()); // captures 'a', backref needs 'a' but gets 'A'
+    assert!(re.find("Aa").is_none()); // captures 'A', backref needs 'A' but gets 'a'
+
+    // Verify that without modifier group, global icase flag works on backrefs.
+    let re = tc.compilef(r"(a)\1", "i");
+    assert!(re.find("aA").is_some());
+    assert!(re.find("Aa").is_some());
+
+    // Without any icase, backreference is case-sensitive.
+    let re = tc.compile(r"(a)\1");
+    assert!(re.find("aa").is_some());
+    assert!(re.find("aA").is_none());
+}
+
+#[test]
+fn group_modifier_backref_icase() {
+    test_with_configs(group_modifier_backref_icase_tc)
+}
+
+fn unicode_property_escape_icase_tc(tc: TestConfig) {
+    // \p{Lu} matches uppercase letters. With icase flag, it should also match lowercase.
+    let re = tc.compilef(r"^\p{Lu}+$", "iu");
+    re.test_succeeds("ABC");
+    re.test_succeeds("abc"); // icase: lowercase should match too
+    re.test_succeeds("AbC");
+
+    // Without icase, \p{Lu} only matches uppercase.
+    let re = tc.compilef(r"^\p{Lu}+$", "u");
+    re.test_succeeds("ABC");
+    re.test_fails("abc");
+    re.test_fails("AbC");
+
+    // \P{Lu} (negated) with icase should match everything — per ES2024 existential
+    // quantifier semantics, for any char c there exists a case variant in complement(Lu)
+    // whose fold equals fold(c).
+    let re = tc.compilef(r"^\P{Lu}+$", "iu");
+    re.test_succeeds("123");
+    re.test_succeeds("abc");
+    re.test_succeeds("ABC"); // even uppercase matches because of existential semantics
+
+    // \P{Lu} without icase excludes uppercase.
+    let re = tc.compilef(r"^\P{Lu}+$", "u");
+    re.test_succeeds("123");
+    re.test_succeeds("abc");
+    re.test_fails("ABC");
+    re.test_fails("AbC");
+}
+
+#[test]
+fn unicode_property_escape_icase() {
+    test_with_configs(unicode_property_escape_icase_tc)
 }
 
 fn test_dotall_tc(tc: TestConfig) {
@@ -2145,4 +2214,309 @@ fn test_empty_alternation_in_capture() {
 fn test_empty_alternation_in_capture_tc(tc: TestConfig) {
     // Regression tests for empty alternations in capture groups.
     tc.compile("(z|)*?x").match1f("z0x").test_eq("x,");
+}
+
+// TC39 proposal: duplicate named capturing groups in different alternatives
+fn test_duplicate_named_groups_tc(tc: TestConfig) {
+    // Basic duplicate named groups in alternatives - the example from the TC39 proposal
+    let m = tc
+        .compile(r"(?<year>[0-9]{4})-[0-9]{2}|[0-9]{2}-(?<year>[0-9]{4})")
+        .find("2025-12")
+        .unwrap();
+    assert_eq!(m.group(0), Some(0..7));
+    assert_eq!(m.group(1), Some(0..4));
+    let ng = m.named_groups();
+    assert!(ng.eq([("year", Some(0..4))]));
+
+    // Test the other alternative
+    let m = tc
+        .compile(r"(?<year>[0-9]{4})-[0-9]{2}|[0-9]{2}-(?<year>[0-9]{4})")
+        .find("12-2025")
+        .unwrap();
+    assert_eq!(m.group(0), Some(0..7));
+    assert_eq!(m.group(2), Some(3..7));
+    let ng = m.named_groups();
+    assert!(ng.eq([("year", Some(3..7))]));
+
+    // Duplicate names in nested alternatives
+    let m = tc.compile(r"(?:(?<a>x)|(?<a>y))").find("x").unwrap();
+    let ng = m.named_groups();
+    assert!(ng.eq([("a", Some(0..1))]));
+
+    let m = tc.compile(r"(?:(?<a>x)|(?<a>y))").find("y").unwrap();
+    let ng = m.named_groups();
+    assert!(ng.eq([("a", Some(0..1))]));
+
+    // Multiple duplicate names
+    let m = tc
+        .compile(r"(?<x>a)(?<y>b)|(?<x>c)(?<y>d)")
+        .find("ab")
+        .unwrap();
+    let ng = m.named_groups();
+    assert!(ng.eq([("x", Some(0..1)), ("y", Some(1..2))]));
+
+    let m = tc
+        .compile(r"(?<x>a)(?<y>b)|(?<x>c)(?<y>d)")
+        .find("cd")
+        .unwrap();
+    let ng = m.named_groups();
+    assert!(ng.eq([("x", Some(0..1)), ("y", Some(1..2))]));
+
+    // Backreferences with duplicate names
+    // TODO: Backreferences with duplicate named groups require additional work
+    // in the matcher to determine which group participated. This is deferred.
+    //let m = tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
+    //    .find("xx")
+    //    .unwrap();
+    //assert_eq!(m.group(0), Some(0..2));
+
+    //let m = tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
+    //    .find("yy")
+    //    .unwrap();
+    //assert_eq!(m.group(0), Some(0..2));
+
+    //// Should NOT match when backreference doesn't match
+    //assert!(tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
+    //    .find("xy")
+    //    .is_none());
+}
+
+#[test]
+fn test_duplicate_named_groups() {
+    test_with_configs(test_duplicate_named_groups_tc)
+}
+
+// Test that duplicates in the SAME alternative are still rejected
+#[test]
+fn test_duplicate_named_groups_same_alternative_rejected() {
+    use regress::Regex;
+
+    // Should reject duplicates in the same alternative
+    assert!(Regex::new(r"(?<name>a)(?<name>b)").is_err());
+    assert!(Regex::new(r"(?<x>a)b(?<x>c)").is_err());
+
+    // Should reject duplicates in nested groups within same alternative
+    assert!(Regex::new(r"(?<a>x)(?:(?<a>y))").is_err());
+}
+
+// Allow nested brackets in v mode.
+#[test]
+fn test_v_mode_nested_class_scan() {
+    let re = regress::Regex::with_flags(r"^(?<n>[[0-9]\q{ab|cd}])$", "v").unwrap();
+    assert_eq!(re.find("5").unwrap().group(1), Some(0..1));
+    assert_eq!(re.find("ab").unwrap().group(1), Some(0..2));
+    assert_eq!(re.find("cd").unwrap().group(1), Some(0..2));
+    assert!(re.find("x").is_none());
+    assert!(re.find("12").is_none());
+
+    // The two `(?<x>)` groups share an alternative, so this is a duplicate name.
+    assert!(regress::Regex::with_flags(r"(?<x>1)[[a]\q{b|c}](?<x>2)", "v").is_err());
+
+    // Without `v`, classes don't nest: `[[a]]` is the class `[[a]` followed by a
+    // literal `]`, so the scan stops at the first `]`.
+    let re = regress::Regex::new(r"^[[a]]$").unwrap();
+    assert!(re.find("a]").is_some());
+    assert!(re.find("a").is_none());
+}
+
+#[test]
+fn test_ascii_unicode_icase_backref() {
+    test_with_configs(|tc| {
+        // Regression test for ASCII with Unicode case-insensitive folding.
+        let re = tc.compilef(r"^(x)\1$", "iu");
+        re.test_succeeds("xx");
+        re.test_succeeds("XX");
+        re.test_fails("xy");
+        re.test_fails("XY");
+    })
+}
+
+#[test]
+fn test_duplicate_named_groups_distinct_alternations_backref() {
+    test_with_configs(test_duplicate_named_groups_distinct_alternations_backref_tc)
+}
+
+// A named backreference to an alternation with duplicate named groups
+// should only match the group which participated in the match.
+fn test_duplicate_named_groups_distinct_alternations_backref_tc(tc: TestConfig) {
+    let pattern = r"^(?:(?<a>x)|(?<a>y))\k<a>$";
+
+    // Alterations with duplicate names groups: backref should match whichever group matched.
+    let re = tc.compile(pattern);
+    re.test_succeeds("xx");
+    re.test_succeeds("yy");
+    re.test_fails("xy");
+    re.test_fails("yx");
+
+    // Same but icase
+    let re = tc.compilef(pattern, "i");
+    re.test_succeeds("XX");
+    re.test_succeeds("YY");
+    re.test_fails("XY");
+    re.test_fails("YX");
+
+    // Same but unicode
+    let re = tc.compilef(pattern, "u");
+    re.test_succeeds("xx");
+    re.test_succeeds("yy");
+    re.test_fails("xy");
+    re.test_fails("yx");
+
+    // Same but icase unicode
+    let re = tc.compilef(pattern, "iu");
+    re.test_succeeds("XX");
+    re.test_succeeds("YY");
+    re.test_fails("XY");
+    re.test_fails("YX");
+}
+
+#[test]
+fn test_regression_142() {
+    // Regression test for issue #142.
+    use regress::Regex;
+    let _ = Regex::with_flags(r"\p{scx=Cyrl}", "u").expect("Should succeed");
+}
+
+#[test]
+fn test_lookbehind_long_byteseq_regression_146() {
+    // Regression test for issue #146.
+    // Lookbehinds reverse the order of their instructions but not the literal byte sequences
+    // for fast memcmp. If the byte sequence is overlong, the emitter splits it; ensure that the
+    // splits are properly reversed.
+    test_with_configs(|tc| {
+        // In lookbehind, instruction order is reversed, but ByteSequence
+        // contents are not. So splitting a long literal into chunks must still
+        // preserve correct backward execution at every length.
+        // Original report:
+        const REPORTED_NEEDLE: &str = r"(?<=aaaa={bbbbbbbbbb:c)";
+        const REPORTED_HAYSTACK: &str = r#"aaaa={bbbbbbbbbb:c"#;
+        assert_eq!(
+            tc.compile(REPORTED_NEEDLE)
+                .find(REPORTED_HAYSTACK)
+                .map(|m| m.range()),
+            Some(REPORTED_HAYSTACK.len()..REPORTED_HAYSTACK.len())
+        );
+
+        // Exhaustive test.
+        const ALPHABET: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-=";
+        let mut it = ALPHABET.chars().cycle();
+        for len in 0..=128 {
+            let haystack: String = it.by_ref().take(len).collect();
+            let needle = format!(r"(?<={haystack})");
+            assert_eq!(
+                tc.compile(&needle).find(&haystack).map(|m| m.range()),
+                Some(len..len),
+                "len={len}"
+            );
+        }
+    })
+}
+
+#[test]
+fn test_high_unicode_folds_to_ascii() {
+    test_with_configs(test_high_unicode_folds_to_ascii_tc)
+}
+
+fn test_high_unicode_folds_to_ascii_tc(tc: TestConfig) {
+    // The Kelvin character (U+212A) case-folds to lowercase k,
+    // which means that it's a word character iff we're using case-insensitive Unicode.
+    tc.test_match_fails(r"\b\u212A", "", "\u{212A}");
+    tc.test_match_succeeds(r"\b\u212A", "iu", "\u{212A}");
+    tc.test_match_fails(r"^\w$", "", "\u{212A}");
+    tc.test_match_succeeds(r"^\w$", "iu", "\u{212A}");
+    // \W should NOT match Kelvin in icase unicode mode (since it's a word char)
+    tc.test_match_succeeds(r"^\W$", "", "\u{212A}");
+    tc.test_match_fails(r"^\W$", "iu", "\u{212A}");
+
+    // U+017F (Latin Small Letter Long S) case-folds to 's'.
+    tc.test_match_fails(r"\b\u017F", "", "\u{017F}");
+    tc.test_match_succeeds(r"\b\u017F", "iu", "\u{017F}");
+    tc.test_match_fails(r"^\w$", "", "\u{017F}");
+    tc.test_match_succeeds(r"^\w$", "iu", "\u{017F}");
+    tc.test_match_succeeds(r"^\W$", "", "\u{017F}");
+    tc.test_match_fails(r"^\W$", "iu", "\u{017F}");
+
+    // U+0131 (Latin Small Letter Dotless I) does NOT case-fold to ASCII.
+    tc.test_match_fails(r"\b\u0131", "", "\u{0131}");
+    tc.test_match_fails(r"\b\u0131", "iu", "\u{0131}");
+    tc.test_match_fails(r"^\w$", "", "\u{0131}");
+    tc.test_match_fails(r"^\w$", "iu", "\u{0131}");
+    tc.test_match_succeeds(r"^\W$", "", "\u{0131}");
+    tc.test_match_succeeds(r"^\W$", "iu", "\u{0131}");
+}
+
+// Regression test for the case where a non-capturing group precedes the named groups,
+// which could cause off-by-one errors in group index tracking.
+#[test]
+fn test_duplicate_named_groups_with_noncapturing_prefix() {
+    test_with_configs(|tc| {
+        let pattern = r"^(?:(?<a>x)|(?<a>y))\k<a>$";
+
+        // Backrefs should match whichever group matched.
+        let re = tc.compile(pattern);
+        re.test_succeeds("xx");
+        re.test_succeeds("yy");
+        re.test_fails("xy");
+        re.test_fails("yx");
+    })
+}
+
+// Regression test for #141.
+// Loop unrolling can be too aggressive.
+#[test]
+fn test_loop_unroll_overflow() {
+    let pattern = r"(?:(?:b(?:(?:(?:(?:(?:(?:h(?:(?:Ba){6}){3}){3,}){3,}){3}){3}){3,}){3}){3,}){3}";
+
+    // Test with optimizations.
+    let mut flags = regress::Flags::default();
+    Regex::with_flags(pattern, flags).expect("Should compile");
+
+    // Test without optimizations.
+    flags.no_opt = true;
+    Regex::with_flags(pattern, flags).expect("Should compile");
+}
+
+// Byte offsets in `find` which split a UTF-8 character panic,
+// while out-of-range offsets simply yield no matches (JS `lastIndex` semantics).
+// Regression test for #159.
+#[test]
+fn test_find_from_char_boundaries() {
+    let re = Regex::new(".").unwrap();
+
+    // Valid boundary offsets in a multi-byte string keep working.
+    let text = "a😀b"; // bytes: 'a'=0, '😀'=1..5, 'b'=5
+    assert_eq!(re.find_from(text, 0).next().unwrap().range(), 0..1);
+    assert_eq!(re.find_from(text, 1).next().unwrap().range(), 1..5);
+    assert_eq!(re.find_from(text, 5).next().unwrap().range(), 5..6);
+    assert!(re.find_from(text, text.len()).next().is_none());
+
+    // A start inside a multi-byte character must panic cleanly rather than
+    // reading out of bounds.
+    let panics_with_boundary = |f: &dyn Fn()| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+            .err()
+            .and_then(|p| p.downcast_ref::<&str>().copied())
+            .is_some_and(|msg| msg.contains("char boundary"))
+    };
+
+    // Start inside a 4-byte character.
+    assert!(panics_with_boundary(&|| {
+        let _ = re.find_from("😀", 3).next();
+    }));
+    // Start inside a 2-byte character.
+    assert!(panics_with_boundary(&|| {
+        let _ = re.find_from("é", 1).next();
+    }));
+
+    // An out-of-range start is not an error: it yields no matches, mirroring
+    // JavaScript's `lastIndex` semantics rather than panicking.
+    assert!(re.find_from("abc", 4).next().is_none());
+    assert!(re.find_from("abc", 100).next().is_none());
+
+    // The ascii entry point steps byte-by-byte, so a start inside a multi-byte
+    // character is memory-safe and must NOT panic (it treats each byte as an
+    // element).
+    assert_eq!(re.find_from_ascii("😀", 3).next().unwrap().range(), 3..4);
+    // An out-of-range ascii start likewise yields no matches, not a panic.
+    assert!(re.find_from_ascii("abc", 4).next().is_none());
 }

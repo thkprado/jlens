@@ -1,4 +1,4 @@
-//! Interruptible matches (jlens-regress; not in regress 0.10.5).
+//! Interruptible matches (jlens-regress; not in regress 0.12.0).
 //!
 //! The backtracker counts steps: every failure that sends it back to its backtrack stack, and
 //! every iteration of a loop. Every [`INTERRUPT_INTERVAL`] steps it asks an [`Interrupt`]
@@ -35,7 +35,7 @@ impl<F: FnMut() -> bool> Interrupt for F {
     }
 }
 
-/// The interrupt of the matches that cannot be interrupted: the code of regress 0.10.5.
+/// The interrupt of the matches that cannot be interrupted: the code of regress 0.12.0.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoInterrupt;
 

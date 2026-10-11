@@ -170,11 +170,12 @@ fn unicode_sets_breaking_change_from_u_to_v_28() {
 }
 
 fn test_unicode_sets_matches(tc: TestConfig, expression: &str, matches: &[&str], fails: &[&str]) {
+    let cr = tc.compilef(expression, "v");
     for m in matches {
-        tc.test_match_succeeds(expression, "v", m);
+        cr.test_succeeds(m);
     }
     for f in fails {
-        tc.test_match_fails(expression, "v", f);
+        cr.test_fails(f);
     }
 }
 
@@ -3155,4 +3156,59 @@ fn test_stuff() {
 fn test_stuff_tc(tc: TestConfig) {
     let r = tc.compilef("c|abc", "i").match1f("\u{83}x0abcdef");
     assert_eq!(r, "abc");
+}
+
+/// Case-insensitive `\q{}` string sets match every case variant.
+#[test]
+fn unicode_sets_qstring_icase() {
+    test_with_configs(|tc| {
+        for input in ["ab", "aB", "Ab", "AB"] {
+            tc.test_match_succeeds(r"^[\q{aB}]$", "vi", input);
+        }
+        tc.test_match_fails(r"^[\q{aB}]$", "vi", "ax");
+        // A longer icase alternative (\q{} is only valid inside a class).
+        tc.test_match_succeeds(r"^[\q{abc}]$", "vi", "ABC");
+        tc.test_match_succeeds(r"^[\q{abc}]$", "vi", "aBc");
+    });
+}
+
+/// `v`-mode string-set alternatives are matched longest-first,
+/// regardless of the order in which they are written. So both `[\q{a|abc}]` and
+/// `[\q{abc|a}]` must match the full "abc", not just the leading "a".
+#[test]
+fn unicode_sets_qstring_longest_first() {
+    test_with_configs(|tc| {
+        assert_eq!(tc.compilef(r"[\q{a|abc}]", "v").match1f("abc"), "abc");
+        assert_eq!(tc.compilef(r"[\q{abc|a}]", "v").match1f("abc"), "abc");
+        // Equal-length alternatives keep source-order priority.
+        assert_eq!(tc.compilef(r"[\q{ab|ba}]", "v").match1f("ab"), "ab");
+    });
+}
+
+/// A negated *nested* class `[^...]` used as a set operand must have its code
+/// points inverted. Regression test: previously the inversion was dropped, so
+/// `[[^a]]` behaved like `[a]`.
+#[test]
+fn unicode_sets_negated_nested_class() {
+    test_with_configs(|tc| {
+        // Bare negated nested class: `[[^a]]` is "everything except a".
+        test_unicode_sets_matches(tc, "[[^a]]", &["b", "c", "0", "z"], &["a"]);
+        test_unicode_sets_matches(tc, "[^[^a]]", &["a"], &["b", "c", "0", "z"]);
+        // Negated nested class containing a character-class escape.
+        test_unicode_sets_matches(tc, r"[[^\d]]", &["a", "x", "_"], &["5", "0"]);
+        // Intersection: word characters except `_`.
+        test_unicode_sets_matches(tc, r"[\w&&[^_]]", &["a", "5", "Z"], &["_", " "]);
+        // Union: `a` unioned with "not b" is everything except `b`.
+        test_unicode_sets_matches(tc, "[a[^b]]", &["a", "c", "0"], &["b"]);
+        // Subtraction: lowercase letters minus the non-vowels leaves the vowels.
+        test_unicode_sets_matches(tc, "[[a-z]--[^aeiou]]", &["a", "e", "u"], &["b", "z"]);
+
+        // None of these should parse without the 'v' flag.
+        test_parse_fails_flags("[[^a]]", "u");
+        test_parse_fails_flags("[^[^a]]", "u");
+        test_parse_fails_flags(r"[[^\d]]", "u");
+        test_parse_fails_flags(r"[\w&&[^_]]", "u");
+        test_parse_fails_flags("[a[^b]]", "u");
+        test_parse_fails_flags("[[a-z]--[^aeiou]]", "u");
+    });
 }

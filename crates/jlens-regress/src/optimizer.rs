@@ -1,14 +1,34 @@
 //! Optimizations on regex IR
 
-use crate::insn::{MAX_BYTE_SET_LENGTH, MAX_CHAR_SET_LENGTH};
+use crate::insn::MAX_CHAR_SET_LENGTH;
 use crate::ir::*;
 use crate::types::BracketContents;
-use crate::unicode;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
 
 /// When unrolling a loop, the largest minimum count we will unroll.
 const LOOP_UNROLL_THRESHOLD: usize = 5;
+
+/// How many nodes we will inspect in a loop body before refusing to unroll it.
+const UNROLL_BODY_BUDGET: usize = 256;
+
+/// Check whether the body of a loop can be unrolled.
+/// The 'budget' indicates the numbers of nodes remaining before we give up.
+/// We also skip loops with nested loops.
+fn is_unrollable(node: &Node, budget: &mut usize) -> bool {
+    if *budget == 0 {
+        return false;
+    }
+    *budget -= 1;
+    match node {
+        Node::Loop { .. } | Node::Loop1CharBody { .. } => false,
+        Node::Cat(nodes) => nodes.iter().all(|n| is_unrollable(n, budget)),
+        Node::Alt(left, right) => is_unrollable(left, budget) && is_unrollable(right, budget),
+        Node::CaptureGroup { contents, .. } => is_unrollable(contents, budget),
+        Node::LookaroundAssertion { contents, .. } => is_unrollable(contents, budget),
+        _ => true,
+    }
+}
 
 /// Things that a Pass may do.
 pub enum PassAction {
@@ -113,7 +133,7 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
 
         // Note: do not remove empty sets. These always match against one character; an empty set
         // should just fail.
-        Node::ByteSet(..) | Node::CharSet(..) => PassAction::Keep,
+        Node::ByteSet(..) | Node::CharSet(..) | Node::StringSet { .. } => PassAction::Keep,
         Node::Cat(nodes) => {
             let blen = nodes.len();
             nodes.retain(|nn| !nn.is_empty());
@@ -156,7 +176,7 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
             }
         }
         Node::Loop1CharBody { .. } => PassAction::Keep,
-        Node::CaptureGroup(..) | Node::NamedCaptureGroup(..) => {
+        Node::CaptureGroup { .. } => {
             // Capture groups could in principle be optimized if they only match empties.
             PassAction::Keep
         }
@@ -178,7 +198,7 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
 /// Check if a node contains any capture groups (direct or nested)
 fn contains_capture_groups(node: &Node) -> bool {
     match node {
-        Node::CaptureGroup(_, _) | Node::NamedCaptureGroup(_, _, _) => true,
+        Node::CaptureGroup { .. } => true,
         Node::Cat(nodes) => nodes.iter().any(contains_capture_groups),
         Node::Alt(left, right) => contains_capture_groups(left) || contains_capture_groups(right),
         Node::Loop { loopee, .. } => contains_capture_groups(loopee),
@@ -277,54 +297,6 @@ fn decat(n: &mut Node, _w: &Walk) -> PassAction {
     }
 }
 
-/// Unfold icase chars.
-/// That means for case-insensitive characters, figure out everything that they
-/// could match.
-/// TODO: evaluate unfolding performance and consider a cache within the optimizer.
-fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
-    match *n {
-        Node::Char { c, icase } if icase && !w.unicode => {
-            let unfolded = unicode::unfold_uppercase_char(c);
-            debug_assert!(
-                unfolded.contains(&c),
-                "Char should always unfold to at least itself"
-            );
-            match unfolded.len() {
-                0 => panic!("Char should always unfold to at least itself"),
-                1 => {
-                    // Character does not fold or unfold at all.
-                    PassAction::Replace(Node::Char { c, icase: false })
-                }
-                2..=MAX_BYTE_SET_LENGTH => {
-                    // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet(unfolded))
-                }
-                _ => panic!("Unfolded to more characters than we believed possible"),
-            }
-        }
-        Node::Char { c, icase } if icase => {
-            let unfolded = unicode::unfold_char(c);
-            debug_assert!(
-                unfolded.contains(&c),
-                "Char should always unfold to at least itself"
-            );
-            match unfolded.len() {
-                0 => panic!("Char should always unfold to at least itself"),
-                1 => {
-                    // Character does not fold or unfold at all.
-                    PassAction::Replace(Node::Char { c, icase: false })
-                }
-                2..=MAX_BYTE_SET_LENGTH => {
-                    // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet(unfolded))
-                }
-                _ => panic!("Unfolded to more characters than we believed possible"),
-            }
-        }
-        _ => PassAction::Keep,
-    }
-}
-
 // Perform simple unrolling of loops that have a minimum.
 fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
     match n {
@@ -333,14 +305,18 @@ fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
             quant,
             enclosed_groups,
         } => {
-            // TODO: consider ignoring loops with nested sub-loops?
-
             // Do not unroll loops with enclosed groups.
             if enclosed_groups.start < enclosed_groups.end {
                 return PassAction::Keep;
             }
             // Do not unroll large loops, or loops which may execute zero times.
             if quant.min == 0 || quant.min > LOOP_UNROLL_THRESHOLD {
+                return PassAction::Keep;
+            }
+            // Refuse to unroll a body containing nested loops or one too large to
+            // be worth duplicating; both would multiply loops (issue #141).
+            let mut budget = UNROLL_BODY_BUDGET;
+            if !is_unrollable(loopee, &mut budget) {
                 return PassAction::Keep;
             }
 
@@ -417,7 +393,7 @@ fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
         }
     }
     match n {
-        Node::Char { c, icase } if !*icase => {
+        Node::Char { c } => {
             if let Some(c) = char::from_u32(*c) {
                 let mut buff = [0; 4];
                 PassAction::Replace(Node::ByteSequence(
@@ -526,9 +502,6 @@ pub fn optimize(r: &mut Regex) {
     loop {
         let mut changed = false;
         changed |= run_pass(r, &mut decat);
-        if r.flags.icase {
-            changed |= run_pass(r, &mut unfold_icase_chars);
-        }
         changed |= run_pass(r, &mut unroll_loops);
         changed |= run_pass(r, &mut promote_1char_loops);
         #[cfg(not(feature = "utf16"))]

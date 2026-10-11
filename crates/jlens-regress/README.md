@@ -1,7 +1,7 @@
 # jlens-regress
 
-**This is a fork of [regress](https://github.com/ridiculousfish/regress) 0.10.5** (upstream
-commit `f74c8c3`), made for [jlens](https://github.com/thkprado/jlens), a JSONata engine. It adds
+**This is a fork of [regress](https://github.com/ridiculousfish/regress) 0.12.0** (upstream
+commit `aae35de`), made for [jlens](https://github.com/thkprado/jlens), a JSONata engine. It adds
 one thing: a match that can be interrupted.
 
 `Regex::find_from_interruptible(text, start, interrupt)` searches like
@@ -22,7 +22,7 @@ let deadline = Instant::now() + Duration::from_millis(10);
 assert!(re.find_from_interruptible(&text, 0, || Instant::now() >= deadline).is_err());
 ```
 
-The library keeps upstream's name, `regress`. Everything else is regress 0.10.5, under the same
+The library keeps upstream's name, `regress`. Everything else is regress 0.12.0, under the same
 licences (MIT or Apache-2.0, see `LICENSE-MIT` and `LICENSE-APACHE`). The same API is to be
 proposed upstream; once a regress release offers an equivalent, jlens goes back to regress and
 this crate is deprecated. Report problems with the interrupt at jlens, and anything else at
@@ -87,3 +87,8 @@ You can see how things get compiled with the `dump-phases` cli flag:
 You can run a little benchmark too, for example:
 
     > cargo run --release -- 'abcd' --flags 'i' --bench ~/3200.txt
+
+
+## No AI slop
+
+As written.

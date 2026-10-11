@@ -5,7 +5,6 @@ use crate::bytesearch;
 use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
-use crate::indexing;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
 #[cfg(not(feature = "utf16"))]
 use crate::insn::StartPredicate;
@@ -260,10 +259,6 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                 let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::Char { c })
             }
-            &Insn::CharICase(c) => {
-                let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::CharICase { c })
-            }
             &Insn::Bracket(idx) => {
                 let bc = &re.brackets[idx];
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::Bracket { bc })
@@ -336,10 +331,6 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
             &Insn::Char(c) => {
                 let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
                 Self::compute_max_pos(input, pos, limit, dir, scm::Char { c })
-            }
-            &Insn::CharICase(c) => {
-                let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
-                Self::compute_max_pos(input, pos, limit, dir, scm::CharICase { c })
             }
             &Insn::Bracket(idx) => {
                 let bc = &re.brackets[idx];
@@ -747,14 +738,6 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                         next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
 
-                    &Insn::CharICase(c) => {
-                        let m = match <<Input as indexing::InputIndexer>::Element as indexing::ElementType>::try_from(c) {
-                            Some(c) => scm::CharICase { c }.matches(input, dir, &mut pos),
-                            None => false,
-                        };
-                        next_or_bt!(m)
-                    }
-
                     Insn::AsciiBracket(bitmap) => next_or_bt!(
                         scm::MatchByteSet { bytes: bitmap }.matches(input, dir, &mut pos)
                     ),
@@ -786,6 +769,17 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                         let curr_wordchar = input
                             .peek_right(pos)
                             .is_some_and(Input::CharProps::is_word_char);
+                        let is_boundary = prev_wordchar != curr_wordchar;
+                        next_or_bt!(is_boundary != invert)
+                    }
+
+                    &Insn::WordBoundaryUnicodeICase { invert } => {
+                        let prev_wordchar = input
+                            .peek_left(pos)
+                            .is_some_and(Input::CharProps::is_word_char_unicode_icase);
+                        let curr_wordchar = input
+                            .peek_right(pos)
+                            .is_some_and(Input::CharProps::is_word_char_unicode_icase);
                         let is_boundary = prev_wordchar != curr_wordchar;
                         next_or_bt!(is_boundary != invert)
                     }
@@ -864,14 +858,17 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                         next_or_bt!(true)
                     }
 
-                    &Insn::BackRef(cg_idx) => {
+                    &Insn::BackRef {
+                        group: cg_idx,
+                        icase,
+                    } => {
                         let cg = self.s.groups.mat(cg_idx as usize);
                         // Backreferences to a capture group that did not match always succeed (ES5
                         // 15.10.2.9).
                         // Note we may be in the capture group we are examining, e.g. /(abc\1)/.
                         let matched;
                         if let Some(orig_range) = cg.as_range() {
-                            if re.flags.icase {
+                            if icase {
                                 matched = matchers::backref_icase(input, dir, orig_range, &mut pos);
                             } else {
                                 matched = matchers::backref(input, dir, orig_range, &mut pos);
@@ -1198,7 +1195,7 @@ impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, AsciiInput<'t>> {
     type AsAscii = BacktrackExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
-        let input = AsciiInput::new(text);
+        let input = AsciiInput::new(text, re.flags.unicode);
         Self {
             input,
             matcher: MatchAttempter::new(re, input.left_end()),

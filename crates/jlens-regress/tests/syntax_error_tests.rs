@@ -28,6 +28,39 @@ fn test_excessive_capture_groups() {
 }
 
 #[test]
+fn test_excessive_nesting() {
+    // Deeply nested constructs must be rejected with an error rather than
+    // overflowing the parser's stack. See the MAX_NESTING_DEPTH limit.
+    let deep = 5000;
+
+    // Non-capturing groups: increment no other counter, so this is the purest
+    // unbounded-recursion vector.
+    let noncap = format!("{}a{}", "(?:".repeat(deep), ")".repeat(deep));
+    test_1_error(&noncap, "too deeply nested");
+
+    // Capturing groups.
+    let cap = format!("{}a{}", "(".repeat(deep), ")".repeat(deep));
+    test_1_error(&cap, "too deeply nested");
+
+    // Nested `v`-mode class-set expressions recurse on their own path.
+    let vclass = format!("{}a{}", "[".repeat(deep), "]".repeat(deep));
+    let res = regress::Regex::with_flags(&vclass, "v");
+    assert!(res.is_err(), "Deeply nested v-mode class should not parse");
+    assert!(
+        res.err().unwrap().text.contains("too deeply nested"),
+        "Expected nesting error for deeply nested v-mode class"
+    );
+
+    // A pattern nested well within the limit must still compile.
+    let shallow = 200;
+    let ok = format!("{}a{}", "(?:".repeat(shallow), ")".repeat(shallow));
+    assert!(
+        regress::Regex::with_flags(&ok, "u").is_ok(),
+        "Pattern nested within the limit should compile"
+    );
+}
+
+#[test]
 fn test_syntax_errors() {
     test_1_error(r"*", "Invalid atom character");
     test_1_error(r"x**", "Invalid atom character");
@@ -59,4 +92,26 @@ fn test_syntax_errors() {
 
     test_1_error(r"\2(a)", "Invalid character escape");
     test_1_error("(?q:abc)", "Invalid group modifier");
+}
+
+#[test]
+fn test_invalid_hex_escape() {
+    // Regression test for #134
+    // In non-unicode mode, `\x` not followed by two hex digits is an identity
+    // escape for `x` alone.
+    let res = regress::Regex::with_flags(r"\1\x(", "");
+    assert!(res.is_err());
+    assert!(
+        res.err().unwrap().text.contains("Unbalanced parenthesis"),
+        "Expected the leftover '(' to be treated as an unterminated group"
+    );
+
+    // The hex digits are only consumed when they actually parse as hex.
+    let re = regress::Regex::with_flags(r"\x41", "").unwrap();
+    assert!(re.find("A").is_some());
+
+    // With just one valid hex digit, only `x` is the identity escape; the
+    // stray digit remains as a literal character.
+    let re = regress::Regex::with_flags(r"\xg1", "").unwrap();
+    assert!(re.find("xg1").is_some());
 }

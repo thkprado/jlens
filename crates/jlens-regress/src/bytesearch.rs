@@ -1,8 +1,6 @@
 use crate::insn::MAX_CHAR_SET_LENGTH;
 use core::fmt;
 extern crate memchr;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Facilities for searching bytes.
 pub trait ByteSearcher {
@@ -281,9 +279,9 @@ impl ByteBitmap {
         }
 
         for &chunk in body {
-            // Use LE. Here index 0 is the earliest address.
-            let byte_idxs = ((chunk >> 4) & 0x0F0F0F0F).to_le_bytes();
-            let bit_idxs = (chunk & 0x0F0F0F0F).to_le_bytes();
+            // Use native endian to match memory layout. Here index 0 is the earliest address.
+            let byte_idxs = ((chunk >> 4) & 0x0F0F0F0F).to_ne_bytes();
+            let bit_idxs = (chunk & 0x0F0F0F0F).to_ne_bytes();
             if (bm[byte_idxs[0] as usize] & (1 << bit_idxs[0])) != 0 {
                 return Some(offset);
             }
