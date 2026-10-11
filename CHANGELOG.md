@@ -10,6 +10,14 @@ All notable changes are recorded here. The format follows
 
 - `jlens lsp` keeps running when a bug makes a request panic: it answers that request with an
   `InternalError`, and logs a notification that panics, instead of stopping.
+- Panics found by fuzzing: a date/time picture marker that starts with a comma
+  (`$fromMillis(0, '[,2]')`), and `$parseInteger` with a picture whose digits are not ASCII on
+  text with other characters (`$parseInteger('12', '##０')`).
+
+### Changed
+
+- `$fromMillis` fails with `D3132` for a picture marker whose component is unknown, also when it
+  has a presentation (`'[Qx]'`), where it wrote nothing; jsonata-js writes "undefined".
 
 ## [0.7.0]
 

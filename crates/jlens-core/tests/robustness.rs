@@ -317,3 +317,32 @@ fn catastrophic_regexes_stop_within_the_timeout() {
         panic!("{e}");
     }
 }
+
+/// Inputs that made the fuzz targets (`fuzz/`) panic, with what they give now: a result, or an
+/// error code.
+#[test]
+fn fuzz_crashes_stay_fixed() {
+    let cases: &[(&str, Result<serde_json::Value, &str>)] = &[
+        // A picture marker that starts with a comma: an unknown component.
+        ("$fromMillis(0, '[,2]')", Err("D3132")),
+        ("$fromMillis(0, '[,DWwo]')", Err("D3132")),
+        ("$fromMillis(0, '[,,]')", Err("D3132")),
+        ("$toMillis('1', '[,]')", Err("D3133")),
+        // Characters below the picture's digit family end the number.
+        ("$parseInteger('１２ [1]３４０', 'map###０')", Ok(json!(12))),
+        ("$parseInteger('－１２x', '０')", Ok(json!(-12))),
+        ("$parseInteger('12', '##０')", Ok(json!(null))),
+    ];
+    for (source, expected) in cases {
+        let result = Expression::compile(source).unwrap().evaluate_with(
+            None,
+            &Bindings::new(),
+            &Options::new(),
+        );
+        let got = match &result {
+            Ok(v) => Ok(v.clone().unwrap_or(serde_json::Value::Null)),
+            Err(e) => Err(e.code()),
+        };
+        assert_eq!(&got, expected, "{source}");
+    }
+}

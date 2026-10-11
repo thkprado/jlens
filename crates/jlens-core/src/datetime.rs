@@ -579,7 +579,14 @@ fn integer_matcher(format: &IntegerFormat) -> Result<(String, Parser)> {
                     if f.zero_code != 0x30 {
                         digits = digits
                             .chars()
-                            .map(|c| char::from_u32(c as u32 + 0x30 - f.zero_code).unwrap_or(c))
+                            // A character below the digit family is no digit: it ends the
+                            // number (jsonata-js throws a `RangeError`).
+                            .map(|c| {
+                                (c as u32 + 0x30)
+                                    .checked_sub(f.zero_code)
+                                    .and_then(char::from_u32)
+                                    .unwrap_or(char::REPLACEMENT_CHARACTER)
+                            })
                             .collect();
                     }
                     js_parse_int(&digits)
@@ -924,7 +931,9 @@ fn analyse_datetime_picture(picture: &str) -> Result<Vec<Part>> {
                         min: parse_width(min),
                         max: parse_width(max),
                     });
-                    marker[1..comma].iter().collect()
+                    // `substring(1, comma)` swaps its arguments when the marker starts
+                    // with the comma: the presentation is then the comma itself.
+                    marker[comma.min(1)..comma.max(1)].iter().collect()
                 }
                 None => marker.iter().skip(1).collect(),
             };
@@ -1114,7 +1123,8 @@ fn format_component(
         _ => match value {
             Component::Text(t) => Ok(t),
             Component::Number(n) => Ok(js_number(n)),
-            Component::None => Ok(String::new()),
+            // jsonata-js writes "undefined" for an unknown component given a presentation.
+            Component::None => Err(Error::new("D3132").with("value", m.component.to_string())),
         },
     }
 }
