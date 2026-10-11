@@ -114,6 +114,36 @@ export const cases = [
     equal(deep.evaluate(), 100);
   }],
 
+  ["size limits", (j) => {
+    const long = new j.Expression("$pad('', 100, 'x')");
+    throws(() => long.evaluate(null, null, { maxStringLength: 50 }), (e) => equal(e.code, "U1001"));
+    equal(long.evaluate(null, null, { maxStringLength: 100 }).length, 100);
+    const wide = new j.Expression("[1..100]");
+    throws(() => wide.evaluate(null, null, { maxArrayLength: 50 }), (e) => equal(e.code, "U1001"));
+    // The same object twice: each copy counts toward the result's size.
+    const shared = new j.Expression("($x := {'s': $pad('', 40, 'x')}; {'l': $x, 'r': $x})");
+    throws(() => shared.evaluate(null, null, { maxResultSize: 80 }), (e) => equal(e.code, "U1001"));
+    throws(() => shared.evaluateJson(null, null, { maxResultSize: 80 }), (e) => equal(e.code, "U1001"));
+    equal(shared.evaluate(null, null, { maxResultSize: 200 }).r.s.length, 40);
+    equal(shared.evaluateWithAudit(null, null, { maxResultSize: 80 }).error.code, "U1001", "audited");
+  }],
+
+  ["clock and seed", (j) => {
+    const clock = new j.Expression("$now()");
+    const now = Date.UTC(2024, 0, 2, 3, 4, 5);
+    const iso = "2024-01-02T03:04:05.000Z";
+    equal(clock.evaluate(null, null, { now }), iso, "milliseconds");
+    equal(clock.evaluate(null, null, { now: new Date(now) }), iso, "Date");
+    equal(clock.evaluate(null, null, { now: iso }), iso, "ISO string");
+    const random = new j.Expression("[1..5].$random()");
+    equal(random.evaluate(null, null, { seed: 7 }), random.evaluate(null, null, { seed: 7 }), "same seed");
+    ok(
+      JSON.stringify(random.evaluate(null, null, { seed: 7 })) !==
+        JSON.stringify(random.evaluate(null, null, { seed: 8 })),
+      "different seeds",
+    );
+  }],
+
   ["deep recursion and nesting fail cleanly", (j) => {
     // The default depth limit stops the recursion before the engine's stack overflows (an
     // overflow would leave the module unusable).
@@ -221,6 +251,9 @@ export const cases = [
     throws(() => expr.evaluate(null, [1]), (e) => ok(e instanceof TypeError, "bindings array"));
     throws(() => expr.evaluate(null, () => 1), (e) => ok(e instanceof TypeError, "bindings function"));
     throws(() => expr.evaluate(null, null, { timeout: "soon" }), (e) => ok(e instanceof TypeError, "timeout"));
+    throws(() => expr.evaluate(null, null, { maxResultSize: -1 }), (e) => ok(e instanceof TypeError, "size"));
+    throws(() => expr.evaluate(null, null, { now: "yesterday" }), (e) => ok(e instanceof TypeError, "now"));
+    throws(() => expr.evaluate(null, null, { seed: 1.5 }), (e) => ok(e instanceof TypeError, "seed"));
     throws(
       () => expr.evaluateWithAudit(null, null, { level: "everything" }),
       (e) => ok(e instanceof TypeError, "level"),

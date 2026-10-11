@@ -186,7 +186,8 @@ pub fn bindings(
     Ok(out)
 }
 
-/// Reads `timeout` (milliseconds) and `maxDepth` from an options object.
+/// Reads the evaluation options: `timeout` (milliseconds), `maxDepth`, `maxStringLength`,
+/// `maxArrayLength`, `maxResultSize`, `now` and `seed`.
 pub fn options(options: Option<&Value>) -> Result<Options, JsValue> {
     let mut out = Options::default();
     let Some(options) = options else {
@@ -195,21 +196,60 @@ pub fn options(options: Option<&Value>) -> Result<Options, JsValue> {
     let Value::Object(map) = options else {
         return Err(type_error("options must be an object"));
     };
-    if let Some(v) = map.get("timeout").filter(|v| !v.is_null()) {
+    let get = |key: &str| map.get(key).filter(|v| !v.is_null());
+    let count = |key: &str| -> Result<Option<usize>, JsValue> {
+        get(key)
+            .map(|v| {
+                v.as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .ok_or_else(|| {
+                        type_error(&format!("options.{key} must be a non-negative integer"))
+                    })
+            })
+            .transpose()
+    };
+    if let Some(v) = get("timeout") {
         let ms = v
             .as_f64()
             .filter(|ms| *ms >= 0.0)
             .ok_or_else(|| type_error("options.timeout must be a number of milliseconds"))?;
         out.timeout = Some(std::time::Duration::from_secs_f64(ms / 1000.0));
     }
-    if let Some(v) = map.get("maxDepth").filter(|v| !v.is_null()) {
-        out.max_depth = Some(
+    out.max_depth = count("maxDepth")?;
+    out.max_string_length = count("maxStringLength")?;
+    out.max_array_length = count("maxArrayLength")?;
+    out.max_result_size = count("maxResultSize")?;
+    if let Some(v) = get("now") {
+        out.now = Some(now(v).ok_or_else(|| {
+            type_error(
+                "options.now must be milliseconds since the epoch, a Date or an ISO 8601 timestamp",
+            )
+        })?);
+    }
+    if let Some(v) = get("seed") {
+        out.seed = Some(
             v.as_u64()
-                .ok_or_else(|| type_error("options.maxDepth must be a positive integer"))?
-                as usize,
+                .ok_or_else(|| type_error("options.seed must be a non-negative integer"))?,
         );
     }
     Ok(out)
+}
+
+/// Reads `now`: an integer number of milliseconds, or a timestamp string (a `Date` arrives as
+/// its ISO 8601 string, through `JSON.stringify`).
+fn now(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(n) => n.as_i64(),
+        Value::String(text) => {
+            let expr =
+                jlens_core::Expression::compile("$toMillis($t)").expect("a valid expression");
+            match expr.evaluate(None, &Bindings::new().var("t", text.as_str())) {
+                Ok(Some(Value::Number(n))) => n.as_f64().map(|f| f as i64),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 /// The fields of a jlens error, as JSON, with offsets in UTF-16 code units.

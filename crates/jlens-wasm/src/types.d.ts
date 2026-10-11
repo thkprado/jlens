@@ -15,12 +15,29 @@ export type Bindings = Record<string, unknown>;
  */
 export type HostFunction = (...args: any[]) => unknown;
 
-/** Evaluation guardrails. */
+/** Evaluation guardrails, and the clock and seed that make an evaluation reproducible. */
 export interface EvaluateOptions {
   /** Maximum duration of one evaluation, in milliseconds (error `D1012`). */
   timeout?: number;
-  /** Maximum evaluation depth (error `D1011`). */
+  /** Maximum evaluation depth (default 1,000; error `D1011`). */
   maxDepth?: number;
+  /** Maximum length, in bytes of UTF-8, of a string the evaluation builds (default 256 MiB; error `U1001`). */
+  maxStringLength?: number;
+  /** Maximum number of items of an array the evaluation builds (default 16,777,216; error `U1001`). */
+  maxArrayLength?: number;
+  /**
+   * Maximum size of the result as compact JSON text, in bytes (default 256 MiB; error `U1001`).
+   * It also limits the arguments of a host function. A value that appears several times counts
+   * each time.
+   */
+  maxResultSize?: number;
+  /**
+   * The evaluation's timestamp for `$now()` and `$millis()`: milliseconds since the epoch, a
+   * `Date` or an ISO 8601 timestamp. Default: the system clock.
+   */
+  now?: number | Date | string;
+  /** Seed for `$random()` and `$shuffle()`: the same seed gives the same results. */
+  seed?: number;
 }
 
 /** A range of the expression source, in UTF-16 code units (`end` is exclusive). */

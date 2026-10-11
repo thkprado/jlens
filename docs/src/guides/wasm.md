@@ -88,7 +88,10 @@ expr.free();                                 // release it (or let the garbage c
   objects become strings, and functions and `undefined` fields are dropped.
 - **`bindings`** is an object of variables and functions: `{limit: 10}` makes `$limit`
   available, and a function becomes a [host function](#host-functions).
-- **`options`** takes `timeout` (milliseconds; error `D1012`) and `maxDepth` (error `D1011`).
+- **`options`** sets the [limits](#limits-and-memory) (`timeout`, `maxDepth`,
+  `maxStringLength`, `maxArrayLength`, `maxResultSize`), and the clock and seed that make an
+  evaluation reproducible: `now` fixes `$now()` and `$millis()` (milliseconds since the epoch,
+  a `Date` or an ISO 8601 timestamp), and `seed` fixes `$random()` and `$shuffle()`.
 - **The result** is a plain value, or `undefined` when the expression evaluates to undefined.
   Numbers and object key order are the same as in jsonata-js.
 
@@ -319,8 +322,15 @@ monaco.languages.registerCompletionItemProvider("jsonata", {
 | Limit | Default | Error |
 |---|---|---|
 | Evaluation depth (`maxDepth`) | 1,000 | `D1011` |
-| Evaluation time (`timeout`) | none | `D1012` |
+| Evaluation time (`timeout`, milliseconds) | none | `D1012` |
+| Length of a string built (`maxStringLength`, bytes of UTF-8) | 256 MiB | `U1001` |
+| Items of an array built (`maxArrayLength`) | 16,777,216 | `U1001` |
+| Size of the result as JSON text (`maxResultSize`, bytes) | 256 MiB | `U1001` |
 | Expression nesting | 1,000 levels | `U1001` |
+
+The size of the result counts a value each time it appears, as the JSON text does, and also
+limits the arguments passed to a host function. Wasm evaluations are synchronous, so there is
+no cancellation: use `timeout`.
 
 The depth limit is lower than on native targets (50,000). WebAssembly runs on the JavaScript
 engine's stack, which is about 1 MiB in V8, and deep recursion beyond it raises a JavaScript

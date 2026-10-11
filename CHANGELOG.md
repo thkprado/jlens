@@ -14,6 +14,10 @@ All notable changes are recorded here. The format follows
   converted. It also limits the arguments of host functions; `$string`, `$clone` and the
   transform operator check the JSON text they write against `Options::max_string_length`.
 
+- The WebAssembly package takes every evaluation option of `jlens-core` except cancellation:
+  `maxStringLength`, `maxArrayLength` and `maxResultSize` (`U1001`), `now` (milliseconds, a
+  `Date` or an ISO 8601 timestamp) and `seed`.
+
 - A security policy, `SECURITY.md`: vulnerabilities are reported privately through GitHub.
   CI now checks the minimum Rust version (1.88) and, with `cargo-deny`, the advisories and
   licenses of the dependencies.
