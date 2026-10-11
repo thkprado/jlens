@@ -7,6 +7,7 @@ use std::{env, fs};
 use anyhow::{Context, Result, bail};
 
 mod docs;
+mod release;
 mod wasm;
 
 const USAGE: &str = "\
@@ -21,6 +22,7 @@ commands:
   wasm-test [--require-browser] [--example]
                                     build the package and test it in Node.js and a headless browser
   serve                             serve the repository over HTTP (for examples/web-editor)
+  release-notes <version>           print the GitHub release notes of <version>, from CHANGELOG.md
 ";
 
 fn main() -> Result<()> {
@@ -35,6 +37,10 @@ fn main() -> Result<()> {
             args.iter().any(|a| a == "--example"),
         ),
         Some("serve") => wasm::serve_forever(),
+        Some("release-notes") => match args.get(1) {
+            Some(version) => release::print(version),
+            None => bail!("release-notes needs a version\n\n{USAGE}"),
+        },
         Some("update-suite") => match args.get(1) {
             Some(path) => update_suite(Path::new(path)),
             None => bail!("update-suite needs the path of a jsonata-js checkout\n\n{USAGE}"),

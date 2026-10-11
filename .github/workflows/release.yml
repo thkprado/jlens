@@ -1,7 +1,8 @@
 name: Release
 
 # Publishes the crates to crates.io and the WebAssembly package to npm when a version tag
-# (v0.1.0, ...) is pushed. Needs the repository secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN.
+# (v0.1.0, ...) is pushed, then drafts the GitHub release from CHANGELOG.md. Needs the
+# repository secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN.
 # See CONTRIBUTING.md for the release checklist.
 
 on:
@@ -59,3 +60,20 @@ jobs:
         working-directory: crates/jlens-wasm/pkg
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  github:
+    name: GitHub release (draft)
+    needs: [crates, npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo xtask release-notes "$GITHUB_REF_NAME" > notes.md
+      # A draft, published by hand after review (CONTRIBUTING.md).
+      - run: >-
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag
+          --title "jlens ${GITHUB_REF_NAME#v}" --notes-file notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -22,6 +22,9 @@ All notable changes are recorded here. The format follows
 
 ## [0.3.0]
 
+A language server for editors, reproducible evaluations, and a command line made for scripts
+and other programs.
+
 ### Added
 
 - Language server: `jlens lsp` (crate `jlens-lsp`) offers completion, diagnostics, hover and
@@ -57,6 +60,9 @@ All notable changes are recorded here. The format follows
   terminal.
 
 ## [0.2.0]
+
+Host functions: the application can give expressions its own functions, in Rust, in the
+language service and in JavaScript.
 
 ### Added
 

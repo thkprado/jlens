@@ -57,7 +57,9 @@ cargo xtask serve                              # serve the repository, for examp
 
 1. Update the version in `[workspace.package]` and in the `jlens-core`, `jlens-schema` and
    `jlens-lsp` entries of `[workspace.dependencies]` (`Cargo.toml`).
-2. Move the `Unreleased` entries of `CHANGELOG.md` under the new version.
+2. Move the `Unreleased` entries of `CHANGELOG.md` under the new version, and open the section
+   with a sentence that sums up the release. The section becomes the GitHub release notes;
+   preview them with `cargo xtask release-notes X.Y.Z`.
 3. Check that everything passes, including the packages:
 
    ```sh
@@ -67,12 +69,16 @@ cargo xtask serve                              # serve the repository, for examp
    ```
 
 4. Commit, tag `vX.Y.Z`, and push the tag. The `Release` workflow publishes `jlens-core`,
-   `jlens-schema`, `jlens-lsp` and `jlens-cli` to crates.io, in that order, and `jlens-wasm` to npm. It needs
-   the repository secrets `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`.
+   `jlens-schema`, `jlens-lsp` and `jlens-cli` to crates.io, in that order, and `jlens-wasm` to npm,
+   then drafts the GitHub release with the notes of the version. It needs the repository secrets
+   `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`.
 
    To publish by hand instead: `cargo publish -p jlens-core`, then `-p jlens-schema`, then
    `-p jlens-lsp`, then `-p jlens-cli`; then `npm publish --access public` in `crates/jlens-wasm/pkg` after
-   `cargo xtask wasm`.
+   `cargo xtask wasm`; then
+   `cargo xtask release-notes X.Y.Z > notes.md` and
+   `gh release create vX.Y.Z --draft --verify-tag --title "jlens X.Y.Z" --notes-file notes.md`.
+5. Review the draft on the Releases page, edit it if needed, and publish it.
 
 ## License
 
