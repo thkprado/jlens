@@ -1,0 +1,7 @@
+{
+  "expr": "[1..n]",
+  "cases": [
+    { "name": "within the cap", "input": { "n": 5 }, "result": [1, 2, 3, 4, 5] },
+    { "name": "beyond the cap", "input": { "n": 6 }, "error": "U1001" }
+  ]
+}

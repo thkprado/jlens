@@ -25,6 +25,8 @@ pub struct TestArgs {
     /// Stop an evaluation after this many milliseconds (error D1012).
     #[arg(long, value_name = "MS")]
     timeout: Option<u64>,
+    #[command(flatten)]
+    caps: eval::SizeCaps,
 }
 
 /// A case file: one expression and the cases it is evaluated with.
@@ -88,7 +90,7 @@ pub fn run(args: TestArgs) -> Result<ExitCode> {
     // Read every file first, so that an invalid one prints nothing on stdout.
     let suites = schema::expand(&args.files)?
         .into_iter()
-        .map(|path| load(path, args.timeout))
+        .map(|path| load(path, &args))
         .collect::<Result<Vec<_>>>()?;
     let (mut passed, mut failed) = (0, 0);
     let mut failures = Vec::new();
@@ -147,7 +149,7 @@ pub fn run(args: TestArgs) -> Result<ExitCode> {
 }
 
 /// Reads a case file, its expression, and checks that every case expects one outcome.
-fn load(path: PathBuf, timeout: Option<u64>) -> Result<Suite> {
+fn load(path: PathBuf, args: &TestArgs) -> Result<Suite> {
     let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let file: CaseFile =
         serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
@@ -161,7 +163,8 @@ fn load(path: PathBuf, timeout: Option<u64>) -> Result<Suite> {
         _ => bail!("{}: give either expr or file", path.display()),
     };
     let mut options = Options::new();
-    options.timeout = timeout.map(Duration::from_millis);
+    options.timeout = args.timeout.map(Duration::from_millis);
+    args.caps.apply(&mut options);
     options.seed = file.seed;
     options.now = match &file.now {
         None => None,

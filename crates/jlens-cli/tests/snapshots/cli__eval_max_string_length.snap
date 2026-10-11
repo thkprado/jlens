@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--no-input\", \"--max-string-length\", \"5\", \"'abc' & 'def'\"],\nNone)"
+---
+exit: 1
+--- stdout
+--- stderr
+U1001: A string would exceed the size limit of 5 bytes (at position 7)

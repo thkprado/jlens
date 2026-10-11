@@ -5,11 +5,13 @@ The `jlens` binary evaluates, checks, explains and inspects JSONata expressions.
 ```text
 jlens eval      <EXPR> | -f FILE  [-i INPUT | --no-input] [--ndjson] [--filter]
                 [-b BINDINGS] [-c | -r | --json] [--timeout MS] [--max-depth N]
+                [--max-string-length BYTES] [--max-array-length N] [--max-result-size BYTES]
                 [--now TIME] [--seed N]
                 [--explain | --audit json|text] [--audit-level decisions|full] [--trace-log FILE]
 jlens check     <EXPR> | -f FILE...  [--json] [--deny-warnings] [--schema SCHEMA]
                 [--config FILE] [--path FILE]
 jlens test      FILE...  [--json] [--timeout MS]
+                [--max-string-length BYTES] [--max-array-length N] [--max-result-size BYTES]
 jlens functions [NAME] [--json]
 jlens errors    [CODE] [--json]
 jlens schema infer    SAMPLES...  [--each] [--overrides FILE] [-o SCHEMA]
@@ -83,6 +85,9 @@ $ jlens eval -f fixtures/shipping-rule.jsonata -i fixtures/online-store-order.js
 | `--json` | Print a JSON envelope instead of the bare result (see below) |
 | `--timeout MS` | Stop an evaluation that runs longer (error `D1012`) |
 | `--max-depth N` | Stop an evaluation that nests deeper (error `D1011`); the default is 50,000 |
+| `--max-string-length BYTES` | Stop an evaluation that builds a longer string (error `U1001`); the default is 256 MiB |
+| `--max-array-length N` | Stop an evaluation that builds an array of more items (error `U1001`); the default is 16,777,216 |
+| `--max-result-size BYTES` | Stop an evaluation whose result is larger as compact JSON, counting a value each time it appears (error `U1001`); the default is 256 MiB |
 | `--now TIME` | The time seen by `$now()` and `$millis()`: milliseconds since the epoch, or an ISO 8601 timestamp such as `2026-01-01T00:00:00Z` |
 | `--seed N` | Seed `$random()` and `$shuffle()`: the same seed gives the same results |
 
@@ -288,7 +293,8 @@ tests/discount.json: 2 passed, 1 failed
 
 A failed case makes the exit code 1. A case file that cannot be read, or is invalid, ends with
 exit code 2 before any case runs. `--timeout` stops each evaluation after a number of
-milliseconds (error `D1012`).
+milliseconds (error `D1012`), and `--max-string-length`, `--max-array-length` and
+`--max-result-size` cap the size of what it builds, as they do for `eval` (error `U1001`).
 
 With `--json`, the outcome is one compact JSON object on standard output, with the number of
 cases that `passed` and `failed`, and the `failures`. Each failure has the `file`, the 1-based

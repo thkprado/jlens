@@ -208,6 +208,34 @@ fn eval_reproducible() {
 }
 
 #[test]
+fn eval_size_caps() {
+    snapshot!(
+        "eval_max_string_length",
+        &[
+            "eval",
+            "--no-input",
+            "--max-string-length",
+            "5",
+            "'abc' & 'def'"
+        ]
+    );
+    snapshot!(
+        "eval_max_array_length",
+        &["eval", "--no-input", "--max-array-length", "5", "[1..10]"]
+    );
+    snapshot!(
+        "eval_max_result_size",
+        &[
+            "eval",
+            "--no-input",
+            "--max-result-size",
+            "40",
+            "($o := {'name': 'abcdef'}; {'l': $o, 'r': $o})"
+        ]
+    );
+}
+
+#[test]
 fn eval_audit() {
     let mut doc: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(
@@ -390,6 +418,15 @@ fn test() {
     snapshot!(
         "test_json",
         &["test", "--json", "fixtures/cli/test/discount.json"]
+    );
+    snapshot!(
+        "test_size_caps",
+        &[
+            "test",
+            "--max-array-length",
+            "5",
+            "fixtures/cli/test/caps.json"
+        ]
     );
     snapshot!(
         "test_invalid",

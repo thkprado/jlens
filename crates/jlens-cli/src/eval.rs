@@ -52,6 +52,8 @@ pub struct EvalArgs {
     /// Stop an evaluation nested deeper than this (error D1011).
     #[arg(long, value_name = "N")]
     max_depth: Option<usize>,
+    #[command(flatten)]
+    caps: SizeCaps,
     /// The time seen by $now() and $millis(): milliseconds since the epoch, or an ISO 8601
     /// timestamp such as 2026-01-01T00:00:00Z.
     #[arg(long, value_name = "TIME", value_parser = parse_now)]
@@ -71,6 +73,32 @@ pub struct EvalArgs {
     /// Write every evaluation event to this file as JSON Lines.
     #[arg(long, value_name = "FILE", conflicts_with = "ndjson")]
     trace_log: Option<PathBuf>,
+}
+
+/// The size caps of an evaluation, taken by `eval` and `test`.
+#[derive(Args)]
+pub struct SizeCaps {
+    /// Stop an evaluation that builds a string longer than this many bytes (error U1001);
+    /// the default is 256 MiB.
+    #[arg(long, value_name = "BYTES")]
+    max_string_length: Option<usize>,
+    /// Stop an evaluation that builds an array of more items than this (error U1001); the
+    /// default is 16,777,216.
+    #[arg(long, value_name = "N")]
+    max_array_length: Option<usize>,
+    /// Stop an evaluation whose result is larger than this many bytes of compact JSON, counting
+    /// a value each time it appears (error U1001); the default is 256 MiB.
+    #[arg(long, value_name = "BYTES")]
+    max_result_size: Option<usize>,
+}
+
+impl SizeCaps {
+    /// Sets the caps that were given in `options`.
+    pub fn apply(&self, options: &mut Options) {
+        options.max_string_length = self.max_string_length;
+        options.max_array_length = self.max_array_length;
+        options.max_result_size = self.max_result_size;
+    }
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -119,6 +147,7 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
     let mut options = Options::new();
     options.timeout = args.timeout.map(Duration::from_millis);
     options.max_depth = args.max_depth;
+    args.caps.apply(&mut options);
     options.now = args.now;
     options.seed = args.seed;
     let format = Format {

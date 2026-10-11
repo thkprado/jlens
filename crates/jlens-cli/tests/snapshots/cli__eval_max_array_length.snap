@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--no-input\", \"--max-array-length\", \"5\", \"[1..10]\"], None)"
+---
+exit: 1
+--- stdout
+--- stderr
+U1001: An array would exceed the size limit of 5 items (at position 4)

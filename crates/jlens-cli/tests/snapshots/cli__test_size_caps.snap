@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"test\", \"--max-array-length\", \"5\", \"fixtures/cli/test/caps.json\"],\nNone)"
+---
+exit: 0
+--- stdout
+--- stderr
+fixtures/cli/test/caps.json: 2 passed, 0 failed

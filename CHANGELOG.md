@@ -18,6 +18,9 @@ All notable changes are recorded here. The format follows
   `maxStringLength`, `maxArrayLength` and `maxResultSize` (`U1001`), `now` (milliseconds, a
   `Date` or an ISO 8601 timestamp) and `seed`.
 
+- `jlens eval` and `jlens test` take the size caps: `--max-string-length`,
+  `--max-array-length` and `--max-result-size` (`U1001`).
+
 - A security policy, `SECURITY.md`: vulnerabilities are reported privately through GitHub.
   CI now checks the minimum Rust version (1.88) and, with `cargo-deny`, the advisories and
   licenses of the dependencies.

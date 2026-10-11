@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--no-input\", \"--max-result-size\", \"40\",\n\"($o := {'name': 'abcdef'}; {'l': $o, 'r': $o})\"], None)"
+---
+exit: 1
+--- stdout
+--- stderr
+U1001: The result would exceed the size limit of 40 bytes
