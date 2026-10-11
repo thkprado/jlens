@@ -4,18 +4,27 @@ name: Release
 # (v0.1.0, ...) is pushed, builds the jlens binaries, then drafts the GitHub release from
 # CHANGELOG.md with the binaries attached. Needs the repository secrets CARGO_REGISTRY_TOKEN and
 # NPM_TOKEN.
+# Run by hand (workflow_dispatch) with an existing tag, it publishes nothing: it builds the
+# binaries of that tag and drafts its release, for a release whose binaries failed.
 # See CONTRIBUTING.md for the release checklist.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing version tag (vX.Y.Z) whose binaries and draft release to build"
+        required: true
 
 env:
   CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   crates:
     name: crates.io
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -23,7 +32,7 @@ jobs:
       - name: The tag matches the workspace version
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          test "v$version" = "$GITHUB_REF_NAME"
+          test "v$version" = "$TAG"
       - run: cargo test --workspace
       # In dependency order; cargo waits for each crate to appear in the index.
       - run: cargo publish -p jlens-core
@@ -41,6 +50,7 @@ jobs:
 
   npm:
     name: npm
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -68,6 +78,7 @@ jobs:
   binaries:
     name: binary (${{ matrix.target }})
     strategy:
+      fail-fast: false
       matrix:
         include:
           - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
@@ -78,15 +89,24 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      # Static musl binaries run on any Linux distribution; jlens has no C dependencies.
+      # Static musl binaries run on any Linux distribution. psm (through stacker) compiles
+      # assembly, which needs the musl C compiler.
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          target=${{ matrix.target }}
+          echo "CC_${target//-/_}=musl-gcc" >> "$GITHUB_ENV"
       - run: cargo build --release --locked -p jlens-cli --target ${{ matrix.target }}
       - name: Package
         shell: bash
         run: |
-          name="jlens-${GITHUB_REF_NAME#v}-${{ matrix.target }}"
+          name="jlens-${TAG#v}-${{ matrix.target }}"
           mkdir "$name"
           cp LICENSE crates/jlens-cli/README.md "$name/"
           if [ "$RUNNER_OS" = Windows ]; then
@@ -107,13 +127,17 @@ jobs:
   github:
     name: GitHub release (draft)
     needs: [crates, npm, binaries]
+    # crates and npm are skipped when the workflow is run by hand.
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo xtask release-notes "$GITHUB_REF_NAME" > notes.md
+      - run: cargo xtask release-notes "$TAG" > notes.md
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -122,7 +146,7 @@ jobs:
         working-directory: dist
       # A draft, published by hand after review (CONTRIBUTING.md).
       - run: >-
-          gh release create "$GITHUB_REF_NAME" --draft --verify-tag
-          --title "jlens ${GITHUB_REF_NAME#v}" --notes-file notes.md dist/*
+          gh release create "$TAG" --draft --verify-tag
+          --title "jlens ${TAG#v}" --notes-file notes.md dist/*
         env:
           GH_TOKEN: ${{ github.token }}

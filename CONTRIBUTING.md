@@ -79,6 +79,10 @@ cargo xtask serve                              # serve the repository, for examp
    `cargo xtask wasm`; then
    `cargo xtask release-notes X.Y.Z > notes.md` and
    `gh release create vX.Y.Z --draft --verify-tag --title "jlens X.Y.Z" --notes-file notes.md`.
+
+   If a binary fails after the packages are published, fix the workflow on `main` and run it by
+   hand for the tag: `gh workflow run release.yml -f tag=vX.Y.Z`. That run publishes nothing; it
+   builds the binaries of the tag and drafts the release.
 5. Review the draft on the Releases page, edit it if needed, and publish it. `cargo binstall`
    finds the binaries once the release is published.
 
