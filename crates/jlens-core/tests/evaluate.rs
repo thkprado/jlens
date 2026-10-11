@@ -165,19 +165,54 @@ fn deeply_nested_regexes_are_syntax_errors() {
 }
 
 #[test]
-fn quirks_found_by_the_differential_tests_match_jsonata_js() {
+fn jsonata_js_quirks_that_expose_javascript_are_dropped() {
     let input = json!({"o": {"a": 1}, "list": [1, [null, []], true]});
-    let matched = |expr: &str| eval(expr, input.clone()).map(|m| m["match"].clone());
-    // A regex applied to a value that is not a string matches JavaScript's `String(value)`.
-    assert_eq!(matched("0 ~> /\\d+/"), Some(json!("0")));
-    assert_eq!(matched("missing ~> /\\w+/"), Some(json!("undefined")));
-    assert_eq!(matched("o ~> /\\[.*\\]/"), Some(json!("[object Object]")));
-    assert_eq!(matched("list ~> /.+/"), Some(json!("1,,,true")));
-    // Grouping positions beyond the number's digits count from the end of the string.
-    let formatted = |n: i32| eval(&format!("$formatNumber({n}, '#,##,##0')"), json!(null));
-    assert_eq!(formatted(0), Some(json!(",0,")));
-    assert_eq!(formatted(1234), Some(json!("12,34,")));
-    assert_eq!(formatted(1234567), Some(json!("12,34,567")));
+    // A regex applied to a value that is not a string gives undefined, not a match of
+    // JavaScript's `String(value)`.
+    for expr in [
+        r"0 ~> /\d+/",
+        r"missing ~> /\w+/",
+        r"o ~> /\[.*\]/",
+        "list ~> /.+/",
+    ] {
+        assert_eq!(eval(expr, input.clone()), None, "{expr}");
+    }
+    assert_eq!(eval("('abc' ~> /b/).match", json!(null)), Some(json!("b")));
+    // A grouping separator needs a digit on its left.
+    let formatted =
+        |n: i32, picture: &str| eval(&format!("$formatNumber({n}, '{picture}')"), json!(null));
+    for (n, expected) in [
+        (0, "0"),
+        (12, "12"),
+        (123, "123"),
+        (1234, "1,234"),
+        (12345, "12,345"),
+        (123456, "1,23,456"),
+        (1234567, "12,34,567"),
+        (-1234, "-1,234"),
+    ] {
+        assert_eq!(formatted(n, "#,##,##0"), Some(json!(expected)), "{n}");
+    }
+    assert_eq!(formatted(1234, "#,##,##0.00"), Some(json!("1,234.00")));
+    assert_eq!(formatted(1, "0,000"), Some(json!("0,001")));
+    // `$substringBefore` and `$substringAfter` without `chars` give the string unchanged.
+    let text = json!("a-undefined-b");
+    assert_eq!(
+        eval("$substringBefore($, missing)", text.clone()),
+        Some(text.clone())
+    );
+    assert_eq!(
+        eval("$substringAfter($, missing)", text.clone()),
+        Some(text.clone())
+    );
+    assert_eq!(
+        eval("$substringAfter($, '-')", text),
+        Some(json!("undefined-b"))
+    );
+}
+
+#[test]
+fn quirks_found_by_the_differential_tests_match_jsonata_js() {
     // `$base64decode` reads each UTF-16 code unit as its low byte, as Node's `Buffer` does:
     // `𝄞` is U+D834 U+DD1E, read as the digit `4` and an ignored byte.
     let decoded = |s: &str| eval(&format!("$base64decode('{s}')"), json!(null));
@@ -394,7 +429,7 @@ fn transforms_cannot_create_circular_objects() {
 #[test]
 fn missing_arguments_behave_as_in_javascript() {
     // Found by `cargo xtask differential`. jsonata-js computes `Math.pow(1, undefined)`, which is
-    // NaN, and searches for `String(undefined)` when `chars` is missing.
+    // NaN.
     for source in [
         "$power(1, nothing)",
         "$power(-1, nothing)",
@@ -406,16 +441,4 @@ fn missing_arguments_behave_as_in_javascript() {
             .unwrap_err();
         assert_eq!(err.code(), "D3061", "{source}");
     }
-    assert_eq!(
-        eval("$substringBefore(nothing)", json!("text")),
-        Some(json!("text"))
-    );
-    assert_eq!(
-        eval("$substringBefore(nothing)", json!("a undefined b")),
-        Some(json!("a "))
-    );
-    assert_eq!(
-        eval("$substringAfter(nothing)", json!("text")),
-        Some(json!("text"))
-    );
 }

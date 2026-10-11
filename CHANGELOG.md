@@ -6,6 +6,16 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Three jsonata-js quirks that expose JavaScript are no longer reproduced; the compatibility
+  notes list them as differences. A regular expression applied to a value that is not a string
+  (`x ~> /re/`) gives undefined again, instead of matching JavaScript's `String(value)`
+  (`undefined`, `[object Object]`). `$formatNumber` with irregular grouping writes a separator
+  only with a digit on its left: `$formatNumber(1234, '#,##,##0')` is "1,234", not "12,34,".
+  `$substringBefore` and `$substringAfter` without `chars` give the string unchanged, instead of
+  searching for the text "undefined".
+
 ## [0.6.0]
 
 Bounded regular expressions and signed packages: a catastrophic regular expression now stops

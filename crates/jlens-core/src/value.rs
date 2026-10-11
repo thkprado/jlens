@@ -437,43 +437,6 @@ pub(crate) fn js_number(n: f64) -> String {
     ryu_js::Buffer::new().format(n).to_owned()
 }
 
-/// Converts a value to a string like JavaScript's `String(value)`, which jsonata-js applies when
-/// a regular expression is given something other than a string (`undefined`, `[object Object]`,
-/// array items joined by commas). `None` for functions other than lambdas: JavaScript prints
-/// their source text.
-pub(crate) fn js_to_string(value: &Value) -> Option<String> {
-    let mut out = String::new();
-    // The items still to write at each level of nested arrays, and whether none was written yet.
-    let mut levels = vec![(std::slice::from_ref(value).iter(), true)];
-    while let Some((items, first)) = levels.last_mut() {
-        let Some(item) = items.next() else {
-            levels.pop();
-            continue;
-        };
-        if !std::mem::replace(first, false) {
-            out.push(',');
-        }
-        let in_array = levels.len() > 1;
-        match item {
-            Value::Array(a) => levels.push((a.items.iter(), true)),
-            // `Array.prototype.join` writes nothing for them.
-            Value::Undefined | Value::Null if in_array => {}
-            Value::Undefined => out.push_str("undefined"),
-            Value::Null => out.push_str("null"),
-            Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-            Value::Number(n) => out.push_str(&js_number(*n)),
-            Value::String(s) => out.push_str(s),
-            Value::Object(_) => out.push_str("[object Object]"),
-            Value::Function(f) => match **f {
-                // Lambdas are plain objects in jsonata-js.
-                Function::Lambda(_) | Function::Partial { .. } => out.push_str("[object Object]"),
-                _ => return None,
-            },
-        }
-    }
-    Some(out)
-}
-
 /// `Number(n.toPrecision(15))` for non-integers, as `$string` does before printing a number.
 pub(crate) fn round15(n: f64) -> f64 {
     if n.fract() == 0.0 || !n.is_finite() {

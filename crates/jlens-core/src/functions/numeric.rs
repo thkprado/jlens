@@ -607,16 +607,13 @@ fn format_number_with(value: f64, picture: &str, p: &Props) -> Result<String> {
         }
     } else {
         for &pos in &pic.integer_grouping {
-            // jsonata-js inserts with `slice(0, decimalPos - pos)`: when the number has fewer
-            // digits than the position, the index is negative and counts from the end
-            // (`$formatNumber(0, '#,##,##0')` is ",0,").
-            let at = decimal_pos as isize - pos as isize;
-            let at = if at < 0 {
-                (s.len() as isize + at).max(0) as usize
-            } else {
-                at as usize
-            };
-            s.insert(at, p.grouping);
+            // A separator needs a digit on its left. jsonata-js inserts one anyway, counting a
+            // negative index from the end (`$formatNumber(1234, '#,##,##0')` is "12,34,");
+            // jlens skips it (compatibility.md).
+            if pos >= decimal_pos {
+                continue;
+            }
+            s.insert(decimal_pos - pos, p.grouping);
             decimal_pos += 1;
         }
     }

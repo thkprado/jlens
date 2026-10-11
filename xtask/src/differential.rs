@@ -6,14 +6,15 @@
 //! and writes its outcomes next to them; the divergences are written to
 //! `target/differential/divergences.json`.
 //!
-//! Seven kinds of disagreement are not divergences, and are counted apart (see "Differential
+//! Eight kinds of disagreement are not divergences, and are counted apart (see "Differential
 //! testing" in `docs/src/architecture/conformance.md`): a JavaScript exception inside jsonata-js,
 //! which has no error code to compare; a case jsonata-js never finished; a jsonata-js result
 //! with half of a character, which a jlens string cannot hold; an expression with a
 //! regular expression literal on the left of `??` or `?:`, which the jsonata-js parser mangles;
 //! different error codes from an expression whose array or object constructors jsonata-js
-//! evaluates concurrently; an evaluation in which jsonata-js changed its input document; and a
-//! wildcard that gives jsonata-js's internal flag `sequence` as a `true` item.
+//! evaluates concurrently; an evaluation in which jsonata-js changed its input document; a
+//! wildcard that gives jsonata-js's internal flag `sequence` as a `true` item; and an expression
+//! that may meet one of the jsonata-js quirks that jlens dropped.
 
 use std::fs;
 use std::process::Command;
@@ -103,7 +104,7 @@ pub fn run(args: &[String]) -> Result<()> {
         .timeout(std::time::Duration::from_millis(TIMEOUT_MS))
         .max_depth(MAX_DEPTH);
     let (mut agreed, mut limits, mut crashed, mut hung, mut split) = (0, 0, 0, 0, 0);
-    let (mut mangled, mut raced, mut mutated, mut flagged) = (0, 0, 0, 0);
+    let (mut mangled, mut raced, mut mutated, mut flagged, mut dropped) = (0, 0, 0, 0, 0);
     let mut divergences = Vec::new();
     for ((expr, input), expected) in cases.iter().zip(&mut reference) {
         let changed_input = expected
@@ -137,6 +138,8 @@ pub fn run(args: &[String]) -> Result<()> {
             mutated += 1;
         } else if sequence_flag(expr, &actual, expected) {
             flagged += 1;
+        } else if dropped_quirk(expr) {
+            dropped += 1;
         } else {
             divergences.push(json!({
                 "expr": expr,
@@ -161,7 +164,8 @@ pub fn run(args: &[String]) -> Result<()> {
         "skipped: {limits} (limits), {crashed} (jsonata-js crashed), {hung} (jsonata-js hung), \
          {split} (jsonata-js split a character), {mangled} (regex left of ?? or ?:), \
          {raced} (concurrent errors), \
-         {mutated} (jsonata-js changed its input), {flagged} (wildcard over a sequence)"
+         {mutated} (jsonata-js changed its input), {flagged} (wildcard over a sequence), \
+         {dropped} (dropped quirk)"
     );
     if !divergences.is_empty() {
         let path = dir.join("divergences.json");
@@ -275,6 +279,52 @@ fn sequence_flag(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
         .root
         .walk(&mut |node: &Node| found |= matches!(node.kind, NodeKind::Wildcard));
     found
+}
+
+/// Whether `expr` may meet a jsonata-js quirk that jlens dropped (see "Differences" in
+/// `docs/src/language/compatibility.md`): a regex literal applied with `~>` to anything but a
+/// string literal, which jsonata-js matches as JavaScript's `String(value)`; `$formatNumber` with
+/// a literal picture whose integer part has irregular grouping (`'#,##,##0'`), where jsonata-js
+/// places separators with no digit on their left; and `$substringBefore` or `$substringAfter`
+/// whose `chars` is not a string literal, which jsonata-js searches as "undefined" when missing.
+fn dropped_quirk(expr: &str) -> bool {
+    let Ok(compiled) = Expression::compile(expr) else {
+        return false;
+    };
+    let mut found = false;
+    compiled.ast().root.walk(&mut |node: &Node| {
+        found |= match &node.kind {
+            NodeKind::Apply { lhs, rhs } => {
+                matches!(rhs.kind, NodeKind::Regex { .. })
+                    && !matches!(lhs.kind, NodeKind::String { .. })
+            }
+            NodeKind::Function { procedure, args } => match &procedure.kind {
+                NodeKind::Variable { name } if name == "formatNumber" => args.get(1).is_some_and(
+                    |a| matches!(&a.kind, NodeKind::String { value } if irregular_grouping(value)),
+                ),
+                NodeKind::Variable { name }
+                    if name == "substringBefore" || name == "substringAfter" =>
+                {
+                    !args
+                        .get(1)
+                        .is_some_and(|a| matches!(a.kind, NodeKind::String { .. }))
+                }
+                _ => false,
+            },
+            _ => false,
+        };
+    });
+    found
+}
+
+/// Whether the integer part of a sub-picture of `picture` has groups of different sizes after
+/// its first separator, as `#,##,##0` has.
+fn irregular_grouping(picture: &str) -> bool {
+    picture.split(';').any(|sub| {
+        let integer = sub.split('.').next().unwrap_or_default();
+        let sizes: Vec<usize> = integer.split(',').skip(1).map(str::len).collect();
+        sizes.windows(2).any(|w| w[0] != w[1])
+    })
 }
 
 /// JSON equality, where numbers are compared as floating-point values (jsonata-js writes `1`

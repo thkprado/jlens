@@ -61,6 +61,9 @@ error. jlens cannot represent that input, so it skips those two cases.
 | A function as the final result | The function object | `None`, like `JSON.stringify` |
 | Very large integers in results | Printed in full up to 1e21 | `serde_json` numbers. Integers above 2^53 become floats (same value, possibly in exponent notation) |
 | `$toMillis` of a date-time without an offset | Local time (per `Date.parse`) | UTC, so results never depend on the machine's time zone |
+| A regular expression applied to a value that is not a string (`x ~> /re/`) | `RegExp.prototype.exec` converts the value with JavaScript's `String()`: `undefined` is matched as "undefined", so `missing ~> /de/` finds `de`; an object becomes "[object Object]", an array its items joined by commas | Undefined, as for a function given a missing argument. The conversion exposes JavaScript's `String()` |
+| `$formatNumber` with irregular grouping (`'#,##,##0'`) on a number with no digit left of a grouping position | Separators at the start or in the wrong place: `$formatNumber(1234, '#,##,##0')` is "12,34," | "1,234": a separator needs a digit on its left, as the picture rules give. Indian grouping of small numbers is ordinary input |
+| `$substringBefore`, `$substringAfter` when `chars` is undefined | Search for the text "undefined": `$substringBefore('a-undefined-b', missing)` is "a-" | The string unchanged. The search exposes JavaScript's `String(undefined)` |
 | `$split(s, "")` | Splits into UTF-16 code units | Splits into characters (astral characters stay whole) |
 | `$random`, `$shuffle` | `Math.random` | A per-evaluation xorshift generator seeded from the clock |
 | Regular expressions | JavaScript `RegExp` | `jlens-regress`, a fork of `regress` 0.12.0 (ECMAScript syntax and semantics). Match positions are UTF-16 offsets. A pattern matches characters, not UTF-16 code units: `$match('a𝄞', /[^a]/)` matches `𝄞`, where jsonata-js matches its first half, a lone surrogate. A pattern nested more than 256 levels deep is a syntax error (`S0302`) |
@@ -95,14 +98,10 @@ extensions live in comments or in the host API, not in the language syntax.
 
 ## Quirks reproduced on purpose
 
-Both engines behave as described here. Each row gives the reason for copying it, or what jlens
-will change.
+Both engines behave as described here. Each row gives the reason for copying it.
 
 | Topic | jsonata-js and jlens | Decision |
 |---|---|---|
-| A regular expression applied to a value that is not a string (`x ~> /re/`) | `RegExp.prototype.exec` converts the value to a string: `undefined` is matched as "undefined", so `missing ~> /de/` finds `de`; an object of the input becomes "[object Object]", an array its items joined by commas. jlens converts every object this way, where jsonata-js throws a `TypeError` for an object built by the expression; jlens gives undefined for a built-in function or a regex, where jsonata-js matches its source code | To change: a value that is not a string will give undefined. The conversion exposes JavaScript's `String()` |
-| `$formatNumber` with irregular grouping (`'#,##,##0'`) on a number with fewer digits than a grouping position | Separators at the start or in the wrong place: `$formatNumber(1234, '#,##,##0')` is "12,34," | To change: "1,234", as the picture rules give. The result is wrong by the documentation, and Indian grouping of small numbers is ordinary input |
-| `$substringBefore`, `$substringAfter` when `chars` is undefined | Search for the text "undefined": `$substringBefore('a-undefined-b', missing)` is "a-" | To change: the string unchanged. The search exposes JavaScript's `String(undefined)` |
 | `$formatInteger` in letters (`'a'`, `'A'`) of a number above 2^53 | Computed in floating point: `value - 1` rounds to `value`, and the letters follow that rounding | Kept. The number is already a rounded double, so exact arithmetic on it gains no real precision, and letter numbering of such numbers is not ordinary input |
 | `$power(±1, e)` with `e` undefined | `D3061`: JavaScript's `Math.pow` gives NaN for 1^NaN, where IEEE `pow` gives 1 | Kept. Every base fails with `D3061` when the exponent is undefined, ±1 included |
 | `$base64encode`, `$base64decode` | Take the low byte of each UTF-16 code unit (Node's `Buffer`), so `$base64decode` reads `Ĵ` (U+0134) as the digit `4`, and text outside Latin-1 does not round-trip | Kept. Latin-1 text gives the same Base64 in both engines, which data exchanged between them relies on; encoding UTF-8 instead would change the result for any text outside ASCII |

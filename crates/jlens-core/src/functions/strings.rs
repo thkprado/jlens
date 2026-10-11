@@ -74,17 +74,14 @@ pub(super) fn substring(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     }))
 }
 
-/// The `chars` of `$substringBefore` and `$substringAfter`. When it is missing, jsonata-js
-/// searches for `String(undefined)`, the text "undefined".
-fn chars(args: &[Value]) -> Rc<str> {
-    text(args, 1).unwrap_or_else(|| Rc::from("undefined"))
-}
-
 pub(super) fn substring_before(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
-    let chars = chars(&a);
+    // jsonata-js searches for the text "undefined" when `chars` is missing (compatibility.md).
+    let Some(chars) = text(&a, 1) else {
+        return Ok(Value::String(s));
+    };
     Ok(match s.find(chars.as_ref()) {
         Some(pos) => Value::string(&s[..pos]),
         None => Value::String(s),
@@ -95,7 +92,9 @@ pub(super) fn substring_after(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
-    let chars = chars(&a);
+    let Some(chars) = text(&a, 1) else {
+        return Ok(Value::String(s));
+    };
     Ok(match s.find(chars.as_ref()) {
         Some(pos) => Value::string(&s[pos + chars.len()..]),
         None => Value::String(s),

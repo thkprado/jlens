@@ -89,7 +89,7 @@ that reaches either limit is skipped. The divergences are printed and written to
 `target/differential/divergences.json`. The command fails when there are any. A seed
 reproduces a run.
 
-Seven kinds of disagreement are known differences of jsonata-js, listed in the
+Eight kinds of disagreement are known differences of jsonata-js, listed in the
 [compatibility notes](../language/compatibility.md). They are not divergences; the command
 counts them apart:
 
@@ -115,6 +115,11 @@ counts them apart:
 - **Wildcard over a sequence**: the expression has a wildcard, and the jsonata-js result is
   jlens's with `true` items added. An array that jsonata-js builds from a path carries an own
   property `sequence: true`, which its wildcard enumerates with the items.
+- **Dropped quirk**: the expression may meet a jsonata-js quirk that jlens does not reproduce:
+  a regular expression literal applied with `~>` to anything but a string literal,
+  `$formatNumber` with a literal picture whose integer part has irregular grouping
+  (`'#,##,##0'`), or `$substringBefore` / `$substringAfter` whose `chars` is not a string
+  literal.
 
 The `Differential` workflow runs 20,000 cases from a new seed every week, and on demand with a
 chosen number of cases and seed. When it fails, the cases and outcomes are attached to the run.
