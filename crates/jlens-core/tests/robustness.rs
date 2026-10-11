@@ -87,6 +87,7 @@ fn valid() -> impl Strategy<Value = String> {
                 "$replace",
                 "$formatNumber",
                 "$formatBase",
+                "$formatInteger",
                 "$fromMillis",
                 "$toMillis",
                 "$zip",

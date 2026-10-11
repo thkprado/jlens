@@ -18,6 +18,16 @@ All notable changes are recorded here. The format follows
   position restored when a lazy loop backtracks, `i` case folding, nested and negated character
   classes, `\x` without hex digits. A pattern nested tens of thousands of levels deep overflowed
   the stack; patterns nested more than 256 levels are now a syntax error (`S0302`).
+- Three differences from jsonata-js found by the differential tests. A regular expression
+  applied to a value that is not a string (`x ~> /re/`) now matches the value converted to a
+  string as JavaScript does (`undefined`, `[object Object]`, array items joined by commas),
+  instead of giving undefined. `$formatNumber` with irregular grouping (`'#,##,##0'`) places the
+  separators as jsonata-js does when the number has fewer digits than a grouping position.
+  `$formatInteger` in letters (`'a'`, `'A'`) counts in floating point, so numbers above
+  2^53 give jsonata-js's letters.
+- `$formatInteger` in Roman numerals (`'I'`) of a huge number (`1e21`) tried to write an `M`
+  per thousand, which ran past the timeout until memory ran out; it now fails with `U1001`
+  beyond `Options::max_string_length`. jsonata-js overflows its stack.
 
 ## [0.5.0]
 

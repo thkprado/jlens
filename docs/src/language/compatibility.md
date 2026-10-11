@@ -56,6 +56,8 @@ extensions live in comments or in the host API, not in the language syntax.
 | Very large integers in results | Printed in full up to 1e21 | `serde_json` numbers. Integers above 2^53 become floats (same value, possibly in exponent notation) |
 | `$toMillis` of a date-time without an offset | Local time (per `Date.parse`) | UTC, so results never depend on the machine's time zone |
 | `$split(s, "")` | Splits into UTF-16 code units | Splits into characters (astral characters stay whole) |
+| A regular expression applied to a value that is not a string (`x ~> /re/`) | `RegExp.prototype.exec` converts the value to a string: `undefined` is matched as "undefined", an object of the input as "[object Object]", an array as its items joined by commas. Converting an object built by the expression throws a JavaScript `TypeError` | The same conversion, for every object. A built-in function or a regex given as the value gives undefined, where JavaScript would match its source code |
+| `$formatNumber` with irregular grouping (`'#,##,##0'`) on a number with fewer digits than a grouping position | Separators at the start or in the wrong place: `$formatNumber(1234, '#,##,##0')` is "12,34," | The same |
 | `$base64encode` | Takes the low byte of each UTF-16 code unit | The same; text outside Latin-1 does not round-trip, as in jsonata-js |
 | `$random`, `$shuffle` | `Math.random` | A per-evaluation xorshift generator seeded from the clock |
 | Regular expressions | JavaScript `RegExp` | `jlens-regress`, a fork of `regress` 0.12.0 (ECMAScript syntax and semantics). Match positions are UTF-16 offsets. A pattern nested more than 256 levels deep is a syntax error (`S0302`) |

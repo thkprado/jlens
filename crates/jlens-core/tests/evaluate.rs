@@ -165,6 +165,22 @@ fn deeply_nested_regexes_are_syntax_errors() {
 }
 
 #[test]
+fn quirks_found_by_the_differential_tests_match_jsonata_js() {
+    let input = json!({"o": {"a": 1}, "list": [1, [null, []], true]});
+    let matched = |expr: &str| eval(expr, input.clone()).map(|m| m["match"].clone());
+    // A regex applied to a value that is not a string matches JavaScript's `String(value)`.
+    assert_eq!(matched("0 ~> /\\d+/"), Some(json!("0")));
+    assert_eq!(matched("missing ~> /\\w+/"), Some(json!("undefined")));
+    assert_eq!(matched("o ~> /\\[.*\\]/"), Some(json!("[object Object]")));
+    assert_eq!(matched("list ~> /.+/"), Some(json!("1,,,true")));
+    // Grouping positions beyond the number's digits count from the end of the string.
+    let formatted = |n: i32| eval(&format!("$formatNumber({n}, '#,##,##0')"), json!(null));
+    assert_eq!(formatted(0), Some(json!(",0,")));
+    assert_eq!(formatted(1234), Some(json!("12,34,")));
+    assert_eq!(formatted(1234567), Some(json!("12,34,567")));
+}
+
+#[test]
 fn size_caps_stop_huge_values() {
     let code = |source: &str, options: &Options| {
         Expression::compile(source)
@@ -176,6 +192,11 @@ fn size_caps_stop_huge_values() {
     // 30 times a string of 10^7 bytes is over the default 256 MiB.
     let huge = r#"($s := $pad("", 10000000, "x"); $join([1..30].$s))"#;
     assert_eq!(code(huge, &Options::new()).as_deref(), Some("U1001"));
+    // An `M` per thousand: this Roman numeral would take 10^18 bytes.
+    assert_eq!(
+        code("$formatInteger(1e21, 'I')", &Options::new()).as_deref(),
+        Some("U1001")
+    );
 
     let strings = Options::new().max_string_length(10);
     assert_eq!(code(r#""abcde" & "fghij""#, &strings), None);

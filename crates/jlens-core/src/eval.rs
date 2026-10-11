@@ -1286,8 +1286,17 @@ impl Evaluator<'_> {
             }
             Function::Regex(re) => {
                 let mut args = args.into_iter();
-                let Some(Value::String(text)) = args.next() else {
-                    return Ok(Value::Undefined);
+                let text = match args.next().unwrap_or_default() {
+                    Value::String(text) => text,
+                    // jsonata-js hands any other value to `RegExp.prototype.exec`, which
+                    // converts it to a string: `undefined` itself is matched as "undefined".
+                    other => match crate::value::js_to_string(&other) {
+                        Some(text) => {
+                            self.check_string(text.len())?;
+                            Rc::from(text)
+                        }
+                        None => return Ok(Value::Undefined),
+                    },
                 };
                 let from = match args.next() {
                     Some(Value::Number(n)) if n > 0.0 => {

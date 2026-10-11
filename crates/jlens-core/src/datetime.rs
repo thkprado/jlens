@@ -260,11 +260,13 @@ fn roman_to_decimal(roman: &str) -> f64 {
     decimal
 }
 
-fn decimal_to_letters(mut value: u64, a: char) -> String {
+/// Computed in floating point, as in jsonata-js: above 2^53, `value - 1` rounds to `value`, and
+/// the letters follow that rounding.
+fn decimal_to_letters(mut value: f64, a: char) -> String {
     let mut letters = Vec::new();
-    while value > 0 {
-        letters.push(char::from_u32((value - 1) as u32 % 26 + a as u32).unwrap_or('?'));
-        value = (value - 1) / 26;
+    while value > 0.0 {
+        letters.push(char::from_u32(((value - 1.0) % 26.0) as u32 + a as u32).unwrap_or('?'));
+        value = ((value - 1.0) / 26.0).floor();
     }
     letters.iter().rev().collect()
 }
@@ -446,7 +448,7 @@ fn format_integer_with(value: f64, format: &IntegerFormat) -> Result<String> {
     let int = value as u64;
     let mut out = match format.primary {
         Primary::Letters => {
-            decimal_to_letters(int, if format.case == Case::Upper { 'A' } else { 'a' })
+            decimal_to_letters(value, if format.case == Case::Upper { 'A' } else { 'a' })
         }
         Primary::Roman => {
             let r = decimal_to_roman(int);
@@ -514,8 +516,13 @@ fn format_integer_with(value: f64, format: &IntegerFormat) -> Result<String> {
 }
 
 /// `$formatInteger`.
-pub(crate) fn format_integer(value: f64, picture: &str) -> Result<String> {
+/// Fails with `U1001` when the result would exceed `max_len` bytes.
+pub(crate) fn format_integer(value: f64, picture: &str, max_len: usize) -> Result<String> {
     let format = analyse_integer_picture(picture)?;
+    // A Roman numeral takes an `M` per thousand: `1e21` would need 10^18 bytes.
+    if format.primary == Primary::Roman && value.abs() / 1000.0 > max_len as f64 {
+        return Err(crate::value::string_too_long(max_len));
+    }
     format_integer_with(value.floor(), &format)
 }
 
@@ -1077,7 +1084,7 @@ fn format_component(
                         let mut s = format_integer_with(offset_hours, format)?;
                         if offset_minutes != 0.0 {
                             s.push(':');
-                            s.push_str(&format_integer(offset_minutes, "00")?);
+                            s.push_str(&format_integer(offset_minutes, "00", usize::MAX)?);
                         }
                         s
                     }
@@ -1394,14 +1401,25 @@ mod tests {
     #[test]
     fn integers_in_words_roman_and_letters() {
         assert_eq!(
-            format_integer(123.0, "w").unwrap(),
+            format_integer(123.0, "w", usize::MAX).unwrap(),
             "one hundred and twenty-three"
         );
-        assert_eq!(format_integer(21.0, "Ww;o").unwrap(), "Twenty-First");
-        assert_eq!(format_integer(1999.0, "I").unwrap(), "MCMXCIX");
-        assert_eq!(format_integer(28.0, "A").unwrap(), "AB");
-        assert_eq!(format_integer(1234567.0, "#,##0").unwrap(), "1,234,567");
-        assert_eq!(format_integer(3.0, "1;o").unwrap(), "3rd");
+        assert_eq!(
+            format_integer(21.0, "Ww;o", usize::MAX).unwrap(),
+            "Twenty-First"
+        );
+        assert_eq!(format_integer(1999.0, "I", usize::MAX).unwrap(), "MCMXCIX");
+        assert_eq!(format_integer(28.0, "A", usize::MAX).unwrap(), "AB");
+        // jsonata-js's floating-point arithmetic, past u64::MAX.
+        assert_eq!(
+            format_integer(1e21, "a", usize::MAX).unwrap(),
+            "olzyyselzqowgem"
+        );
+        assert_eq!(
+            format_integer(1234567.0, "#,##0", usize::MAX).unwrap(),
+            "1,234,567"
+        );
+        assert_eq!(format_integer(3.0, "1;o", usize::MAX).unwrap(), "3rd");
         assert_eq!(
             parse_integer("one hundred and twenty-three", "w").unwrap(),
             123.0

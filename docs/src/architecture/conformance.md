@@ -89,7 +89,7 @@ that reaches either limit is skipped. The divergences are printed and written to
 `target/differential/divergences.json`. The command fails when there are any. A seed
 reproduces a run.
 
-Four kinds of disagreement are known differences of jsonata-js, listed in the
+Five kinds of disagreement are known differences of jsonata-js, listed in the
 [compatibility notes](../language/compatibility.md). They are not divergences; the command
 counts them apart:
 
@@ -98,6 +98,10 @@ counts them apart:
   synchronous loop that the jsonata-js timeout cannot interrupt (`$match('abc', /b/) ?? 1`).
   The runner evaluates the cases in a worker thread, stops it, and goes on with the next case
   in a new one.
+- **Regex left of `??` or `?:`**: the outcomes differ, and the expression has a regular
+  expression literal on the left of `??` or `?:`. The jsonata-js parser copies that side through
+  JSON, which turns the regex into `{}`, so the expression hangs (counted above) or gives another
+  result.
 - **Concurrent errors**: both engines failed with different codes, and the expression has an
   array constructor with several items or an object constructor. jsonata-js evaluates those
   parts concurrently, so when two of them fail it reports whichever fails first in its

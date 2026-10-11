@@ -6,11 +6,12 @@
 //! and writes its outcomes next to them; the divergences are written to
 //! `target/differential/divergences.json`.
 //!
-//! Four kinds of disagreement are not divergences, and are counted apart (see "Differential
+//! Five kinds of disagreement are not divergences, and are counted apart (see "Differential
 //! testing" in `docs/src/architecture/conformance.md`): a JavaScript exception inside jsonata-js,
-//! which has no error code to compare; a case jsonata-js never finished; different error codes
-//! from an expression whose array or object constructors jsonata-js evaluates concurrently; and
-//! an evaluation in which jsonata-js changed its input document.
+//! which has no error code to compare; a case jsonata-js never finished; an expression with a
+//! regular expression literal on the left of `??` or `?:`, which the jsonata-js parser mangles;
+//! different error codes from an expression whose array or object constructors jsonata-js
+//! evaluates concurrently; and an evaluation in which jsonata-js changed its input document.
 
 use std::fs;
 use std::process::Command;
@@ -99,8 +100,8 @@ pub fn run(args: &[String]) -> Result<()> {
     let options = Options::new()
         .timeout(std::time::Duration::from_millis(TIMEOUT_MS))
         .max_depth(MAX_DEPTH);
-    let (mut agreed, mut limits, mut crashed, mut hung, mut raced, mut mutated) =
-        (0, 0, 0, 0, 0, 0);
+    let (mut agreed, mut limits, mut crashed, mut hung, mut mangled, mut raced, mut mutated) =
+        (0, 0, 0, 0, 0, 0, 0);
     let mut divergences = Vec::new();
     for ((expr, input), expected) in cases.iter().zip(&mut reference) {
         let changed_input = expected
@@ -122,6 +123,8 @@ pub fn run(args: &[String]) -> Result<()> {
             crashed += 1;
         } else if same(&actual, expected) {
             agreed += 1;
+        } else if regex_before_default(expr) {
+            mangled += 1;
         } else if actual["error"].is_string() && expected["error"].is_string() && concurrent(expr) {
             raced += 1;
         } else if changed_input {
@@ -148,7 +151,8 @@ pub fn run(args: &[String]) -> Result<()> {
     );
     println!(
         "skipped: {limits} (limits), {crashed} (jsonata-js crashed), {hung} (jsonata-js hung), \
-         {raced} (concurrent errors), {mutated} (jsonata-js changed its input)"
+         {mangled} (regex left of ?? or ?:), {raced} (concurrent errors), \
+         {mutated} (jsonata-js changed its input)"
     );
     if !divergences.is_empty() {
         let path = dir.join("divergences.json");
@@ -194,6 +198,28 @@ fn is_limit(outcome: &JsonValue) -> bool {
     outcome["error"]
         .as_str()
         .is_some_and(|code| LIMIT_CODES.contains(&code))
+}
+
+/// Whether `expr` has a regular expression literal on the left of `??` or `?:`. The jsonata-js
+/// parser copies that side through JSON, which turns the regex into `{}`: the expression then
+/// hangs (counted as such) or gives another result.
+fn regex_before_default(expr: &str) -> bool {
+    let Ok(compiled) = Expression::compile(expr) else {
+        return false;
+    };
+    let mut found = false;
+    compiled.ast().root.walk(&mut |node: &Node| {
+        // `a ?: b` and `a ?? b` are conditions whose test is `a` itself, or `$exists(a)`, both
+        // with the span of `a`.
+        if let NodeKind::Condition {
+            condition, then, ..
+        } = &node.kind
+            && condition.span == then.span
+        {
+            then.walk(&mut |n: &Node| found |= matches!(n.kind, NodeKind::Regex { .. }));
+        }
+    });
+    found
 }
 
 /// Whether jsonata-js evaluates parts of `expr` concurrently: the items of an array constructor
