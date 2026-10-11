@@ -104,7 +104,7 @@ struct CheckArgs {
     config: Option<PathBuf>,
     /// Give the expression of the argument the configuration of this file, as if it were its
     /// contents. The file need not exist.
-    #[arg(long, value_name = "FILE", requires = "expr")]
+    #[arg(long, value_name = "FILE", conflicts_with = "files")]
     path: Option<PathBuf>,
 }
 
