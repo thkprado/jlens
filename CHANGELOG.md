@@ -8,9 +8,20 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- A size limit on the result (`jlens-core`): `Options::max_result_size` (256 MiB of compact
+  JSON by default) counts a value each time it appears, so an expression that nests the same
+  object many times fails with `U1001` instead of exhausting memory when the result is
+  converted. It also limits the arguments of host functions; `$string`, `$clone` and the
+  transform operator check the JSON text they write against `Options::max_string_length`.
+
 - A security policy, `SECURITY.md`: vulnerabilities are reported privately through GitHub.
   CI now checks the minimum Rust version (1.88) and, with `cargo-deny`, the advisories and
   licenses of the dependencies.
+
+### Fixed
+
+- `*` and `**` over an array nested in itself many times fail with `U1001` beyond
+  `Options::max_array_length`, instead of aborting the process when memory runs out.
 
 ## [0.4.0]
 

@@ -330,6 +330,94 @@ impl Value {
             ),
         })
     }
+
+    /// Converts a value into JSON like [`Value::to_json`], failing when its compact JSON text
+    /// would be longer than `limit` bytes (see [`Value::json_fits`]). The size is measured
+    /// before anything is converted.
+    pub(crate) fn to_json_within(
+        &self,
+        limit: usize,
+    ) -> std::result::Result<Option<JsonValue>, TooLarge> {
+        let mut budget = limit;
+        if self.json_fits(&mut budget) {
+            Ok(self.to_json())
+        } else {
+            Err(TooLarge)
+        }
+    }
+
+    /// The JSON of a value shown in an error detail; `None` when it is undefined, or larger
+    /// than the default size limit of a result.
+    pub(crate) fn to_json_detail(&self) -> Option<JsonValue> {
+        self.to_json_within(crate::eval::DEFAULT_MAX_RESULT_SIZE)
+            .unwrap_or(None)
+    }
+
+    /// Spends the length of the value's compact JSON text from `budget`, and tells whether it
+    /// fitted. A value that appears several times (an object bound to a variable and nested in
+    /// itself, say) counts each time, as it does in the text, but the walk stops as soon as the
+    /// budget runs out. Escaped characters count as one byte, and numbers about as many bytes as
+    /// JavaScript prints.
+    pub(crate) fn json_fits(&self, budget: &mut usize) -> bool {
+        match self {
+            Value::Undefined | Value::Function(_) => true,
+            Value::Null => spend(budget, 4),
+            Value::Bool(b) => spend(budget, if *b { 4 } else { 5 }),
+            Value::Number(n) => spend(budget, number_len(*n)),
+            Value::String(s) => spend(budget, s.len() + 2),
+            Value::Array(a) => {
+                // The brackets and the commas; an undefined item or a function becomes `null`.
+                spend(budget, 1 + a.items.len().max(1))
+                    && a.items.iter().all(|v| match v {
+                        Value::Undefined | Value::Function(_) => spend(budget, 4),
+                        v => v.json_fits(budget),
+                    })
+            }
+            Value::Object(o) => {
+                let o = o.borrow();
+                // The opening brace, then for each member its quoted key, the colon, and the
+                // comma or closing brace after it.
+                spend(budget, if o.is_empty() { 2 } else { 1 })
+                    && o.iter().all(|(k, v)| match v {
+                        Value::Undefined | Value::Function(_) => true,
+                        v => spend(budget, k.len() + 4) && v.json_fits(budget),
+                    })
+            }
+        }
+    }
+}
+
+/// Takes `bytes` from `budget`; false when there are not enough left.
+fn spend(budget: &mut usize, bytes: usize) -> bool {
+    match budget.checked_sub(bytes) {
+        Some(rest) => {
+            *budget = rest;
+            true
+        }
+        None => false,
+    }
+}
+
+/// A value whose JSON text would exceed a size limit.
+#[derive(Debug)]
+pub(crate) struct TooLarge;
+
+/// The length of a number in JSON text: its digits for an integer, about as many as
+/// JavaScript prints otherwise, and 4 for `null` (a number that is not finite).
+fn number_len(n: f64) -> usize {
+    if !n.is_finite() {
+        4
+    } else if n.fract() == 0.0 && n.abs() < 9.007_199_254_740_992e15 {
+        let mut len = usize::from(n < 0.0) + 1;
+        let mut rest = (n as i64).unsigned_abs() / 10;
+        while rest > 0 {
+            len += 1;
+            rest /= 10;
+        }
+        len
+    } else {
+        ryu_js::Buffer::new().format(n).len()
+    }
 }
 
 /// A number as JSON: integral values become JSON integers, non-finite ones `null`.
@@ -385,17 +473,33 @@ pub(crate) fn write_json_string(out: &mut String, s: &str) {
 
 /// `JSON.stringify` with the replacer jsonata-js uses in `$string`: numbers are rounded to 15
 /// significant digits, infinite numbers raise D1001, functions become `""`.
-pub(crate) fn stringify(value: &Value, pretty: bool) -> Result<String> {
+pub(crate) fn stringify(value: &Value, pretty: bool, limit: usize) -> Result<String> {
     let mut out = String::new();
     let value = match value {
         Value::Array(a) if a.has(OUTER_WRAPPER) && !a.items.is_empty() => &a.items[0],
         v => v,
     };
-    write_json(&mut out, value, pretty, 0)?;
+    write_json(&mut out, value, pretty, 0, limit)?;
     Ok(out)
 }
 
-fn write_json(out: &mut String, value: &Value, pretty: bool, depth: usize) -> Result<()> {
+/// The error of a string that would exceed the size limit of `limit` bytes.
+pub(crate) fn string_too_long(limit: usize) -> Error {
+    Error::new("U1001").with(
+        "message",
+        format!("A string would exceed the size limit of {limit} bytes"),
+    )
+}
+
+/// Writes the JSON text of a value, failing as soon as the text is longer than `limit` bytes:
+/// a value that appears many times could otherwise make a text far too long to hold.
+fn write_json(
+    out: &mut String,
+    value: &Value,
+    pretty: bool,
+    depth: usize,
+    limit: usize,
+) -> Result<()> {
     let newline = |out: &mut String, depth: usize| {
         if pretty {
             out.push('\n');
@@ -425,7 +529,7 @@ fn write_json(out: &mut String, value: &Value, pretty: bool, depth: usize) -> Re
                     out.push(',');
                 }
                 newline(out, depth + 1);
-                write_json(out, item, pretty, depth + 1)?;
+                write_json(out, item, pretty, depth + 1, limit)?;
             }
             newline(out, depth);
             out.push(']');
@@ -448,13 +552,16 @@ fn write_json(out: &mut String, value: &Value, pretty: bool, depth: usize) -> Re
                 if pretty {
                     out.push(' ');
                 }
-                write_json(out, v, pretty, depth + 1)?;
+                write_json(out, v, pretty, depth + 1, limit)?;
             }
             if !first {
                 newline(out, depth);
             }
             out.push('}');
         }
+    }
+    if out.len() > limit {
+        return Err(string_too_long(limit));
     }
     Ok(())
 }
@@ -464,7 +571,7 @@ impl std::fmt::Debug for Value {
         match self {
             Value::Undefined => f.write_str("undefined"),
             Value::Function(_) => f.write_str("<function>"),
-            other => match stringify(other, false) {
+            other => match stringify(other, false, crate::eval::DEFAULT_MAX_STRING_LENGTH) {
                 Ok(s) => f.write_str(&s),
                 Err(_) => f.write_str("<invalid>"),
             },
@@ -487,14 +594,28 @@ mod tests {
     }
 
     #[test]
+    fn json_size_is_the_length_of_the_compact_text() {
+        let v = Value::from_json(&serde_json::json!({
+            "a": [1, -25, 2.5, null, true, false, 1e21],
+            "bc": "xyz",
+            "d": {},
+            "e": [],
+            "f": [{}]
+        }));
+        let len = stringify(&v, false, usize::MAX).unwrap().len();
+        assert!(v.to_json_within(len).is_ok());
+        assert!(v.to_json_within(len - 1).is_err());
+    }
+
+    #[test]
     fn stringify_matches_json_stringify() {
         let v = Value::from_json(&serde_json::json!({"a": [1, 2.5, null], "b": "x\"y\n", "c": {}}));
         assert_eq!(
-            stringify(&v, false).unwrap(),
+            stringify(&v, false, usize::MAX).unwrap(),
             r#"{"a":[1,2.5,null],"b":"x\"y\n","c":{}}"#
         );
         assert_eq!(
-            stringify(&v, true).unwrap(),
+            stringify(&v, true, usize::MAX).unwrap(),
             "{\n  \"a\": [\n    1,\n    2.5,\n    null\n  ],\n  \"b\": \"x\\\"y\\n\",\n  \"c\": {}\n}"
         );
     }

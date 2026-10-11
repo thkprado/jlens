@@ -240,7 +240,11 @@ proptest! {
                 .max_depth(300)
                 .now(0)
                 .seed(1);
-            let capped = options.clone().max_string_length(8).max_array_length(4);
+            let capped = options
+                .clone()
+                .max_string_length(8)
+                .max_array_length(4)
+                .max_result_size(16);
             let bindings = bindings();
             let input = input();
             let free = expr.evaluate_with(Some(&input), &bindings, &options);

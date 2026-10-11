@@ -352,7 +352,7 @@ pub(super) fn replace(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
             Value::String(r) => result.push_str(&r),
             other => {
                 let mut err = Error::new("D3012");
-                if let Some(v) = other.to_json() {
+                if let Some(v) = other.to_json_detail() {
                     err = err.with("value", v);
                 }
                 return Err(err);

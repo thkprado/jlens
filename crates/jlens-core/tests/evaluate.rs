@@ -168,6 +168,85 @@ fn size_caps_stop_huge_values() {
 }
 
 #[test]
+fn the_result_size_cap_counts_shared_values() {
+    let code = |source: &str, options: &Options| {
+        Expression::compile(source)
+            .unwrap()
+            .evaluate_with(None, &Bindings::new(), options)
+            .err()
+            .map(|e| e.code().to_owned())
+    };
+    // 2^30 copies of a 1,000-item array, built from 30 objects of two fields.
+    let nest = "$d := function($x, $n) { $n = 0 ? $x : $d({'l': $x, 'r': $x}, $n - 1) }";
+    let huge = format!("({nest}; $d([1..1000], 30))");
+    assert_eq!(code(&huge, &Options::new()).as_deref(), Some("U1001"));
+
+    let caps = Options::new()
+        .max_result_size(1 << 20)
+        .max_string_length(1 << 20)
+        .max_array_length(1 << 20);
+    for huge in [
+        format!("({nest}; [$d([1..1000], 30)])"),
+        format!("({nest}; $string($d([1..1000], 30)))"),
+        format!("({nest}; $d([1..1000], 30) & '')"),
+        format!("({nest}; $d([1..1000], 30) ~> |$| {{'b': 2}}|)"),
+        format!("({nest}; $count($d([1..1000], 30).**))"),
+        "($a := [1..2000]; $count({'a': $map([1..2000], function() { $a })}.*))".into(),
+    ] {
+        assert_eq!(code(&huge, &caps).as_deref(), Some("U1001"), "{huge}");
+    }
+    // A huge value that is not part of the result is fine, and an error that shows one leaves
+    // it out.
+    let inner = format!("({nest}; $d([1..1000], 30) ~> $type)");
+    assert_eq!(code(&inner, &caps), None);
+    let shown = format!("({nest}; $d([1..1000], 30) + 1)");
+    assert_eq!(code(&shown, &caps).as_deref(), Some("T2001"));
+
+    // The size is that of the compact JSON text: `"abcdefgh"` is 10 bytes.
+    let small = Options::new().max_result_size(10);
+    for ok in [r#""abcdefgh""#, "[1, 2, 3, 4]", "{'a': [1]}", "[1, $x, 3]"] {
+        assert_eq!(code(ok, &small), None, "{ok}");
+    }
+    for huge in [
+        r#""abcdefghi""#,
+        "[1, 2, 3, 4, 5]",
+        "{'abc': [1]}",
+        "[12, null, 3]",
+    ] {
+        assert_eq!(code(huge, &small).as_deref(), Some("U1001"), "{huge}");
+    }
+}
+
+#[test]
+fn the_result_size_cap_limits_host_function_arguments() {
+    use jlens_core::HostFunction;
+    let bindings = Bindings::new()
+        .function(
+            "count",
+            HostFunction::new(2, |args, _| Ok(Some(json!(args.len())))),
+        )
+        .function(
+            "context",
+            HostFunction::new(0, |_, call| Ok(Some(json!(call.input().is_some())))),
+        );
+    let small = Options::new().max_result_size(10);
+    let code = |source: &str| {
+        Expression::compile(source)
+            .unwrap()
+            .evaluate_with(None, &bindings, &small)
+            .err()
+            .map(|e| e.code().to_owned())
+    };
+    assert_eq!(code("$count([1, 2], [3, 4])"), None);
+    assert_eq!(code("$count([1, 2], [3, 4, 5])").as_deref(), Some("U1001"));
+    assert_eq!(code("($s := 'abcdefgh'; $s.$context())"), None);
+    assert_eq!(
+        code("($s := 'abcdefghi'; $s.$context())").as_deref(),
+        Some("U1001")
+    );
+}
+
+#[test]
 fn documents_are_reusable_and_unchanged_by_evaluation() {
     use jlens_core::Document;
     let text = r#"{"items": [{"code": "a", "n": 1}, {"code": "b", "n": 2}], "k": 1, "k": 2}"#;

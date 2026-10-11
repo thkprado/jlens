@@ -28,7 +28,7 @@ pub(super) fn number(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
         }
         other => {
             let mut err = Error::new("D3030").with("index", 1);
-            if let Some(v) = other.to_json() {
+            if let Some(v) = other.to_json_detail() {
                 err = err.with("value", v);
             }
             return Err(err);

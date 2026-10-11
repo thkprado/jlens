@@ -62,6 +62,7 @@ pub(crate) struct Limits {
     pub timeout: Option<Duration>,
     pub max_string_length: usize,
     pub max_array_length: usize,
+    pub max_result_size: usize,
     pub cancel_token: Option<crate::CancelToken>,
     /// Milliseconds since the epoch to use instead of the system clock.
     pub now: Option<i64>,
@@ -82,6 +83,9 @@ pub(crate) const DEFAULT_MAX_DEPTH: usize = 1_000;
 pub(crate) const DEFAULT_MAX_STRING_LENGTH: usize = 1 << 28;
 /// Default maximum number of items of a built array (above the 10^7 of a range, `D2014`).
 pub(crate) const DEFAULT_MAX_ARRAY_LENGTH: usize = 1 << 24;
+/// Default maximum size of a result as JSON text, in bytes (256 MiB, like a string): a value
+/// nested in itself a few times can stand for far more text than the memory it uses.
+pub(crate) const DEFAULT_MAX_RESULT_SIZE: usize = 1 << 28;
 
 /// The state of one evaluation.
 pub(crate) struct Evaluator<'t> {
@@ -121,7 +125,7 @@ trait WithValue {
 
 impl WithValue for Error {
     fn with_value(self, key: &str, v: &Value) -> Self {
-        match v.to_json() {
+        match v.to_json_detail() {
             Some(json) => self.with(key, json),
             None => self,
         }
@@ -224,14 +228,23 @@ pub(crate) fn evaluate(
             timestamp: ev.timestamp,
         });
     }
-    let result = ev.eval(&ast.root, &input, &env);
+    let result = ev.eval(&ast.root, &input, &env).and_then(|v| {
+        let limit = ev.limits.max_result_size;
+        let json = v.to_json_within(limit).map_err(|_| {
+            Error::new("U1001").with(
+                "message",
+                format!("The result would exceed the size limit of {limit} bytes"),
+            )
+        })?;
+        Ok((v, json))
+    });
     if let Some(t) = ev.tracer.as_deref_mut() {
         match &result {
-            Ok(v) => t.end(Outcome::Value(ValueRef(v))),
+            Ok((v, _)) => t.end(Outcome::Value(ValueRef(v))),
             Err(e) => t.end(Outcome::Error(e)),
         }
     }
-    Ok(result?.to_json())
+    Ok(result?.1)
 }
 
 /// Spreads a user seed over all 64 bits, so that nearby seeds start the generator far apart.
@@ -305,22 +318,21 @@ impl Evaluator<'_> {
     pub(crate) fn check_string(&self, len: usize) -> Result<()> {
         let limit = self.limits.max_string_length;
         if len > limit {
-            return Err(Error::new("U1001").with(
-                "message",
-                format!("A string would exceed the size limit of {limit} bytes"),
-            ));
+            return Err(value::string_too_long(limit));
         }
         Ok(())
+    }
+
+    /// The size limit of a built string, in bytes.
+    pub(crate) fn max_string_length(&self) -> usize {
+        self.limits.max_string_length
     }
 
     /// Fails with `U1001` when an array of `len` items would exceed the size limit.
     pub(crate) fn check_array(&self, len: usize) -> Result<()> {
         let limit = self.limits.max_array_length;
         if len > limit {
-            return Err(Error::new("U1001").with(
-                "message",
-                format!("An array would exceed the size limit of {limit} items"),
-            ));
+            return Err(array_too_long(limit));
         }
         Ok(())
     }
@@ -400,8 +412,8 @@ impl Evaluator<'_> {
             NodeKind::Number { value } => Value::Number(*value),
             NodeKind::Bool { value } => Value::Bool(*value),
             NodeKind::Null => Value::Null,
-            NodeKind::Wildcard => wildcard(input),
-            NodeKind::Descendant => descendants(input),
+            NodeKind::Wildcard => wildcard(input, self.limits.max_array_length)?,
+            NodeKind::Descendant => descendants(input, self.limits.max_array_length)?,
             NodeKind::Parent { label, .. } => env.lookup(label),
             NodeKind::Condition {
                 condition,
@@ -908,8 +920,9 @@ impl Evaluator<'_> {
             }),
             BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => comparison(&lhs, &rhs, op),
             BinaryOp::Concat => {
-                let l = functions::to_string(&lhs, false)?.unwrap_or_default();
-                let r = functions::to_string(&rhs, false)?.unwrap_or_default();
+                let limit = self.limits.max_string_length;
+                let l = functions::to_string(&lhs, false, limit)?.unwrap_or_default();
+                let r = functions::to_string(&rhs, false, limit)?.unwrap_or_default();
                 self.check_string(l.len() + r.len())
                     .map(|()| Value::string(l + &r))
             }
@@ -1195,7 +1208,7 @@ impl Evaluator<'_> {
                     Some(sig) => sig.validate(args, input)?,
                     None => args,
                 };
-                let result = host.call(&args, input)?;
+                let result = host.call(&args, input, self.limits.max_result_size)?;
                 self.check_size(result)
             }
             Function::Partial {
@@ -1221,7 +1234,9 @@ impl Evaluator<'_> {
                             env,
                         },
                     ),
-                    Function::Host(host) => host.call(&full, &Value::Undefined),
+                    Function::Host(host) => {
+                        host.call(&full, &Value::Undefined, self.limits.max_result_size)
+                    }
                     _ => Err(Error::new("T1006")),
                 }?;
                 self.check_size(result)
@@ -1566,7 +1581,16 @@ fn range(lhs: &Value, rhs: &Value) -> Result<Value> {
     ))
 }
 
-fn wildcard(input: &Value) -> Value {
+/// The error of an array that would exceed the size limit of `limit` items.
+fn array_too_long(limit: usize) -> Error {
+    Error::new("U1001").with(
+        "message",
+        format!("An array would exceed the size limit of {limit} items"),
+    )
+}
+
+/// `*`, whose result holds at most `max` items.
+fn wildcard(input: &Value, max: usize) -> Result<Value> {
     let input = match input {
         Value::Array(a) if a.has(OUTER_WRAPPER) && !a.items.is_empty() => &a.items[0],
         other => other,
@@ -1586,48 +1610,60 @@ fn wildcard(input: &Value) -> Value {
         for value in &values {
             match value {
                 Value::Array(_) => {
-                    let mut flat = Vec::new();
-                    flatten(value, &mut flat);
+                    flatten(value, &mut items, max)?;
                     plain = true;
-                    items.extend(flat);
                 }
                 other => items.push(other.clone()),
             }
         }
     }
-    Value::array(items, if plain { 0 } else { SEQUENCE })
+    Ok(Value::array(items, if plain { 0 } else { SEQUENCE }))
 }
 
-fn flatten(v: &Value, out: &mut Vec<Value>) {
+/// Appends the items of nested arrays to `out`, failing beyond `max` items: an array nested in
+/// itself flattens to far more items than it holds.
+fn flatten(v: &Value, out: &mut Vec<Value>, max: usize) -> Result<()> {
     match v {
-        Value::Array(a) => a.items.iter().for_each(|i| flatten(i, out)),
-        other => out.push(other.clone()),
+        Value::Array(a) => a.items.iter().try_for_each(|i| flatten(i, out, max)),
+        other => push_within(out, other.clone(), max),
     }
 }
 
-fn descendants(input: &Value) -> Value {
+fn push_within(out: &mut Vec<Value>, v: Value, max: usize) -> Result<()> {
+    if out.len() >= max {
+        return Err(array_too_long(max));
+    }
+    out.push(v);
+    Ok(())
+}
+
+/// `**`, whose result holds at most `max` items.
+fn descendants(input: &Value, max: usize) -> Result<Value> {
     if input.is_undefined() {
-        return Value::Undefined;
+        return Ok(Value::Undefined);
     }
     let mut out = Vec::new();
-    recurse_descendants(input, &mut out);
-    if out.len() == 1 {
+    recurse_descendants(input, &mut out, max)?;
+    Ok(if out.len() == 1 {
         out.pop().unwrap_or_default()
     } else {
         Value::sequence(out)
-    }
+    })
 }
 
-fn recurse_descendants(input: &Value, out: &mut Vec<Value>) {
+fn recurse_descendants(input: &Value, out: &mut Vec<Value>, max: usize) -> Result<()> {
     match input {
-        Value::Array(a) => a.items.iter().for_each(|i| recurse_descendants(i, out)),
+        Value::Array(a) => a
+            .items
+            .iter()
+            .try_for_each(|i| recurse_descendants(i, out, max)),
         Value::Object(o) => {
-            out.push(input.clone());
-            for v in o.borrow().values() {
-                recurse_descendants(v, out);
-            }
+            push_within(out, input.clone(), max)?;
+            o.borrow()
+                .values()
+                .try_for_each(|v| recurse_descendants(v, out, max))
         }
-        other => out.push(other.clone()),
+        other => push_within(out, other.clone(), max),
     }
 }
 

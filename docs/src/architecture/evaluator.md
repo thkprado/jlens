@@ -99,6 +99,7 @@ clears those frames when the evaluation ends.
 | Expression nesting | (fixed) | `U1001` | 1,000 levels, checked by the parser |
 | Length of a built string | `Options::max_string_length` | `U1001` | 256 MiB (in bytes of UTF-8) |
 | Items of a built array | `Options::max_array_length` | `U1001` | 16,777,216 |
+| Size of the result, and of the arguments of a host function | `Options::max_result_size` | `U1001` | 256 MiB (in bytes of compact JSON) |
 
 jsonata-js has no depth limit of its own; it stops when the JavaScript stack overflows. jlens
 needs limits so that it fails with an error instead of crashing the process.
@@ -122,9 +123,28 @@ The size limits stop an expression that doubles a string or an array on each ste
 whose steps multiply the length of a sequence, before it runs out of memory, which would abort
 the process. They are checked by the operators that build strings and arrays (`&`, ranges,
 array constructors, path steps) and on the value that each built-in or host function returns;
-`$join` checks the length before joining. They apply to each string and array, not to the
-total size of a result. The operators check before they build the value; a function's result
-is checked once it has returned.
+`$join` checks the length before joining. The operators check before they build the value; a
+function's result is checked once it has returned. `*` and `**`, which flatten nested arrays,
+count the items as they go.
+
+The string and array limits apply to each string and array on its own, and values are shared
+rather than copied: an object bound to a variable can be nested in a new object twice, then
+that object twice, and so on. Thirty such steps stand for about a billion copies of the first object while
+using little memory, until something writes them all out. So everything that writes a value
+out is limited too:
+
+- **The result**, which becomes JSON when the evaluation ends, is measured first: its size is
+  the length of its compact JSON text, counting a shared value each time it appears. The walk
+  stops once the size passes `Options::max_result_size`, and the evaluation fails with
+  `U1001`, before anything is converted. Escaped characters count as one byte, so the size is
+  slightly below the length of the text that `format_json` prints.
+- **The arguments of a host function** are measured together in the same way, and so is its
+  context value (`HostCall::input`).
+- **`$string`, `$clone`** (and the transform operator, which clones its input) and `&` write
+  JSON text, which is a string: the text is checked against `Options::max_string_length` as it
+  is written.
+- **The `value` of an error** (`T2001`, `T0410` and others) is left out when it is larger than
+  the default size of a result.
 
 ## Tracing hooks
 

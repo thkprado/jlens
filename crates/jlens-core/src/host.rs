@@ -1,11 +1,12 @@
 //! Functions provided by the host application (see ADR 0006).
 
+use std::cell::Cell;
 use std::fmt;
 use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::signature::Signature;
 use crate::value::{OUTER_WRAPPER, Value};
 
@@ -97,10 +98,31 @@ impl HostFunction {
     }
 
     /// Calls the function with evaluated arguments, converting them to JSON and the result back.
-    pub(crate) fn call(&self, args: &[Value], input: &Value) -> Result<Value> {
-        let args: Vec<Option<JsonValue>> = args.iter().map(Value::to_json).collect();
-        let result = (self.imp)(&args, &HostCall { input })?;
-        Ok(result.as_ref().map_or(Value::Undefined, Value::from_json))
+    /// The arguments together, and the context value, are limited to `limit` bytes of JSON.
+    pub(crate) fn call(&self, args: &[Value], input: &Value, limit: usize) -> Result<Value> {
+        let too_large = || {
+            Error::new("U1001").with(
+                "message",
+                format!(
+                    "The arguments of a host function would exceed the size limit of {limit} bytes"
+                ),
+            )
+        };
+        let mut budget = limit;
+        if !args.iter().all(|arg| arg.json_fits(&mut budget)) {
+            return Err(too_large());
+        }
+        let json: Vec<Option<JsonValue>> = args.iter().map(Value::to_json).collect();
+        let call = HostCall {
+            input,
+            limit,
+            too_large: Cell::new(false),
+        };
+        let result = (self.imp)(&json, &call);
+        if call.too_large.get() {
+            return Err(too_large());
+        }
+        Ok(result?.as_ref().map_or(Value::Undefined, Value::from_json))
     }
 }
 
@@ -119,6 +141,9 @@ impl fmt::Debug for HostFunction {
 /// The context of a call to a [`HostFunction`].
 pub struct HostCall<'a> {
     input: &'a Value,
+    limit: usize,
+    /// Set when the context value was too large to convert; the call then fails with `U1001`.
+    too_large: Cell<bool>,
 }
 
 impl HostCall<'_> {
@@ -126,12 +151,18 @@ impl HostCall<'_> {
     /// current item in `items.$f()`. `None` when it is undefined.
     ///
     /// The value is converted to JSON when this method is called, so a function that does not
-    /// need it does not pay for converting it.
+    /// need it does not pay for converting it. A value larger than the size limit of a result
+    /// (`Options::max_result_size`) is `None`, and the evaluation then fails with `U1001`,
+    /// whatever the function returns.
     pub fn input(&self) -> Option<JsonValue> {
-        match self.input {
+        let input = match self.input {
             // The input array, wrapped so that it counts as a single context value.
-            Value::Array(a) if a.has(OUTER_WRAPPER) && a.len() == 1 => a.items[0].to_json(),
-            v => v.to_json(),
-        }
+            Value::Array(a) if a.has(OUTER_WRAPPER) && a.len() == 1 => &a.items[0],
+            v => v,
+        };
+        input.to_json_within(self.limit).unwrap_or_else(|_| {
+            self.too_large.set(true);
+            None
+        })
     }
 }

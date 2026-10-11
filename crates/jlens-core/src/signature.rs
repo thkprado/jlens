@@ -218,7 +218,7 @@ impl Signature {
                 good_to = partial[index].1;
             }
             let mut err = Error::new("T0410").with("index", good_to + 1);
-            if let Some(v) = args.get(good_to).and_then(Value::to_json) {
+            if let Some(v) = args.get(good_to).and_then(Value::to_json_detail) {
                 err = err.with("value", v);
             }
             return Err(err);
@@ -234,7 +234,7 @@ impl Signature {
                         validated.push(context.clone());
                     } else {
                         let mut err = Error::new("T0411").with("index", arg_index + 1);
-                        if let Some(v) = context.to_json() {
+                        if let Some(v) = context.to_json_detail() {
                             err = err.with("value", v);
                         }
                         return Err(err);
@@ -270,7 +270,7 @@ impl Signature {
                                 "type",
                                 array_type_name(param.subtype.as_deref().unwrap_or("")),
                             );
-                            if let Some(v) = arg.to_json() {
+                            if let Some(v) = arg.to_json_detail() {
                                 err = err.with("value", v);
                             }
                             return Err(err);

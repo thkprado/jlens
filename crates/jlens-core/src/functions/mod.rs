@@ -140,9 +140,9 @@ natives! {
     };
 
     // String
-    "string" "<x-b?:s>" ["arg", "prettify"] 1 String "Casts a value to a string; objects and arrays become JSON" => |_, a, _| {
+    "string" "<x-b?:s>" ["arg", "prettify"] 1 String "Casts a value to a string; objects and arrays become JSON" => |ev, a, _| {
         let pretty = matches!(arg(&a, 1), Value::Bool(true));
-        Ok(to_string(&arg(&a, 0), pretty)?.map_or(Value::Undefined, Value::string))
+        Ok(to_string(&arg(&a, 0), pretty, ev.max_string_length())?.map_or(Value::Undefined, Value::string))
     };
     "substring" "<s-nn?:s>" ["str", "start", "length"] 3 String "Characters from a start position, optionally limited to a length" => s::substring;
     "substringBefore" "<s-s:s>" ["str", "chars"] 2 String "The part of a string before the first occurrence of a substring" => s::substring_before;
@@ -214,7 +214,7 @@ natives! {
     "assert" "<bs?:x>" ["condition", "message"] 2 Misc "Raises an error (D3141) when a condition is false" => c::assert;
     "type" "<x:s>" ["value"] 1 Misc "The type of a value: null, number, string, boolean, array, object or function" => c::type_;
     "eval" "<sx?:x>" ["expr", "focus"] 2 Misc "Parses and evaluates a JSONata expression given as a string" => c::eval;
-    "clone" "<(oa)-:o>" ["arg"] 1 Misc "A deep copy of a value" => |_, a, _| clone(&arg(&a, 0));
+    "clone" "<(oa)-:o>" ["arg"] 1 Misc "A deep copy of a value" => |ev, a, _| clone(&arg(&a, 0), ev.max_string_length());
 
     // Encoding
     "base64encode" "<s-:s>" ["str"] 1 Encoding "Encodes a string as Base64 (each character taken as a byte)" => s::base64encode;
@@ -349,7 +349,7 @@ pub(crate) fn append(a: Value, b: Value) -> Value {
 }
 
 /// `$string`: `None` for undefined.
-pub(crate) fn to_string(v: &Value, pretty: bool) -> Result<Option<String>> {
+pub(crate) fn to_string(v: &Value, pretty: bool, limit: usize) -> Result<Option<String>> {
     Ok(Some(match v {
         Value::Undefined => return Ok(None),
         Value::String(s) => s.to_string(),
@@ -357,7 +357,7 @@ pub(crate) fn to_string(v: &Value, pretty: bool) -> Result<Option<String>> {
         Value::Number(n) if !n.is_finite() => {
             return Err(Error::new("D3001").with("value", value::json_number(*n)));
         }
-        other => value::stringify(other, pretty)?,
+        other => value::stringify(other, pretty, limit)?,
     }))
 }
 
@@ -383,9 +383,10 @@ fn extreme(items: &Value, pick: fn(f64, f64) -> f64) -> Result<Value> {
     }
 }
 
-/// `$clone`: a deep copy made the way jsonata-js does it, by serializing and parsing.
-pub(crate) fn clone(v: &Value) -> Result<Value> {
-    let Some(text) = to_string(v, false)? else {
+/// `$clone`: a deep copy made the way jsonata-js does it, by serializing and parsing. The text
+/// is limited to `limit` bytes, like a string.
+pub(crate) fn clone(v: &Value, limit: usize) -> Result<Value> {
+    let Some(text) = to_string(v, false, limit)? else {
         return Ok(Value::Undefined);
     };
     let json: serde_json::Value = serde_json::from_str(&text)

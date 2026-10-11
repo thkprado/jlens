@@ -254,6 +254,9 @@ fn limits(options: &Options) -> eval::Limits {
         max_array_length: options
             .max_array_length
             .unwrap_or(eval::DEFAULT_MAX_ARRAY_LENGTH),
+        max_result_size: options
+            .max_result_size
+            .unwrap_or(eval::DEFAULT_MAX_RESULT_SIZE),
         cancel_token: options.cancel_token.clone(),
         now: options.now,
         seed: options.seed,
@@ -358,6 +361,10 @@ pub struct Options {
     /// Maximum number of items in an array or sequence that the evaluation builds (default
     /// 16,777,216). Exceeding it raises `U1001`.
     pub max_array_length: Option<usize>,
+    /// Maximum size of the result as compact JSON text, in bytes (default 268,435,456:
+    /// 256 MiB), which also limits the arguments of a host function. A value that appears
+    /// several times counts each time, as it does in the text. Exceeding it raises `U1001`.
+    pub max_result_size: Option<usize>,
 }
 
 impl Options {
@@ -403,6 +410,13 @@ impl Options {
     /// exceeded).
     pub fn max_array_length(mut self, items: usize) -> Self {
         self.max_array_length = Some(items);
+        self
+    }
+
+    /// Sets the maximum size, in bytes of compact JSON text, of the result and of the
+    /// arguments of a host function (`U1001` when exceeded).
+    pub fn max_result_size(mut self, bytes: usize) -> Self {
+        self.max_result_size = Some(bytes);
         self
     }
 
