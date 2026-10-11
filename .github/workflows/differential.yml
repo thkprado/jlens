@@ -1,0 +1,50 @@
+name: Differential
+
+# Generated expressions run in jlens and in jsonata-js 2.2.2, which must agree on the result or
+# the error code (`cargo xtask differential`; see "Differential testing" in
+# docs/src/architecture/conformance.md). Each run draws a new seed, which it prints: a failure is
+# reproduced locally with `cargo xtask differential --cases <N> --seed <S>`.
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: "How many expressions to generate"
+        default: "20000"
+      seed:
+        description: "The seed (empty: a new one)"
+        default: ""
+
+# Jobs read the repository; a job that needs more asks for it.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  differential:
+    name: jlens against jsonata-js
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install jsonata-js
+        working-directory: benches/compare
+        run: npm ci
+      - name: Compare
+        env:
+          CASES: ${{ inputs.cases || '20000' }}
+          SEED: ${{ inputs.seed }}
+        run: cargo xtask differential --cases "$CASES" ${SEED:+--seed "$SEED"}
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: differential
+          path: target/differential/

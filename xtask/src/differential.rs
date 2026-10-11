@@ -5,13 +5,19 @@
 //! `target/differential/cases.json`; `benches/compare/differential.mjs` runs them in jsonata-js
 //! and writes its outcomes next to them; the divergences are written to
 //! `target/differential/divergences.json`.
+//!
+//! Three kinds of disagreement are not divergences, and are counted apart (see "Differential
+//! testing" in `docs/src/architecture/conformance.md`): a JavaScript exception inside jsonata-js,
+//! which has no error code to compare; different error codes from an expression whose array or
+//! object constructors jsonata-js evaluates concurrently; and an evaluation in which jsonata-js
+//! changed its input document.
 
 use std::fs;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
-use jlens_core::{Bindings, Expression, Options};
+use jlens_core::{Bindings, Expression, Node, NodeKind, Options};
 use serde_json::{Value as JsonValue, json};
 
 use crate::root;
@@ -77,7 +83,7 @@ pub fn run(args: &[String]) -> Result<()> {
     if !status.success() {
         bail!("the jsonata-js runner failed: {status}");
     }
-    let reference: Vec<JsonValue> = serde_json::from_str(&fs::read_to_string(&outcomes_path)?)?;
+    let mut reference: Vec<JsonValue> = serde_json::from_str(&fs::read_to_string(&outcomes_path)?)?;
     if reference.len() != cases.len() {
         bail!(
             "the jsonata-js runner wrote {} outcomes for {} cases",
@@ -93,14 +99,28 @@ pub fn run(args: &[String]) -> Result<()> {
     let options = Options::new()
         .timeout(std::time::Duration::from_millis(TIMEOUT_MS))
         .max_depth(MAX_DEPTH);
-    let (mut agreed, mut skipped) = (0, 0);
+    let (mut agreed, mut limits, mut crashed, mut raced, mut mutated) = (0, 0, 0, 0, 0);
     let mut divergences = Vec::new();
-    for ((expr, input), expected) in cases.iter().zip(&reference) {
+    for ((expr, input), expected) in cases.iter().zip(&mut reference) {
+        let changed_input = expected
+            .as_object_mut()
+            .and_then(|o| o.remove("mutated"))
+            .is_some();
+        let expected = &*expected;
         let actual = outcome(expr, input.map(|i| &inputs[i]), &bindings, &options);
         if [&actual, expected].iter().any(|o| is_limit(o)) {
-            skipped += 1;
+            limits += 1;
+        } else if expected["error"]
+            .as_str()
+            .is_some_and(|e| e.starts_with("js:"))
+        {
+            crashed += 1;
         } else if same(&actual, expected) {
             agreed += 1;
+        } else if actual["error"].is_string() && expected["error"].is_string() && concurrent(expr) {
+            raced += 1;
+        } else if changed_input {
+            mutated += 1;
         } else {
             divergences.push(json!({
                 "expr": expr,
@@ -118,8 +138,12 @@ pub fn run(args: &[String]) -> Result<()> {
         println!("  jsonata-js: {}\n", d["jsonata-js"]);
     }
     println!(
-        "{count} cases (seed {seed}): {agreed} agree, {} differ, {skipped} skipped (limits)",
+        "{count} cases (seed {seed}): {agreed} agree, {} differ",
         divergences.len()
+    );
+    println!(
+        "skipped: {limits} (limits), {crashed} (jsonata-js crashed), {raced} (concurrent \
+         errors), {mutated} (jsonata-js changed its input)"
     );
     if !divergences.is_empty() {
         let path = dir.join("divergences.json");
@@ -165,6 +189,26 @@ fn is_limit(outcome: &JsonValue) -> bool {
     outcome["error"]
         .as_str()
         .is_some_and(|code| LIMIT_CODES.contains(&code))
+}
+
+/// Whether jsonata-js evaluates parts of `expr` concurrently: the items of an array constructor
+/// and the values of an object constructor (`Promise.all`). When two of them fail, the error it
+/// reports is the one raised first in its asynchronous schedule, not necessarily the first in
+/// order, which jlens reports.
+fn concurrent(expr: &str) -> bool {
+    let Ok(compiled) = Expression::compile(expr) else {
+        return false;
+    };
+    let mut found = false;
+    compiled.ast().root.walk(&mut |node: &Node| {
+        found |= match &node.kind {
+            NodeKind::Array { items } => items.len() > 1,
+            // One pair makes several groups when the input is an array.
+            NodeKind::Object { .. } => true,
+            _ => node.attrs.group.is_some(),
+        };
+    });
+    found
 }
 
 /// JSON equality, where numbers are compared as floating-point values (jsonata-js writes `1`

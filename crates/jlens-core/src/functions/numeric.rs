@@ -155,7 +155,12 @@ pub(super) fn power(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
         return Ok(Value::Undefined);
     };
     let exp = num(&a, 1).unwrap_or(f64::NAN);
-    let result = base.powf(exp);
+    // JavaScript's `Math.pow`, which unlike IEEE `pow` gives NaN for 1^NaN and (±1)^±Infinity.
+    let result = if base.abs() == 1.0 && !exp.is_finite() {
+        f64::NAN
+    } else {
+        base.powf(exp)
+    };
     if !result.is_finite() {
         return Err(Error::new("D3061")
             .with("value", base)

@@ -85,3 +85,18 @@ the keys of an object in order. Both engines run with a timeout and a depth limi
 that reaches either limit is skipped. The divergences are printed and written to
 `target/differential/divergences.json`. The command fails when there are any. A seed
 reproduces a run.
+
+Three kinds of disagreement are known differences of jsonata-js, listed in the
+[compatibility notes](../language/compatibility.md). They are not divergences; the command
+counts them apart:
+
+- **jsonata-js crashed**: it threw a JavaScript exception, which has no error code to compare.
+- **Concurrent errors**: both engines failed with different codes, and the expression has an
+  array constructor with several items or an object constructor. jsonata-js evaluates those
+  parts concurrently, so when two of them fail it reports whichever fails first in its
+  asynchronous schedule. jlens reports the first in source order.
+- **jsonata-js changed its input**: the jsonata-js runner saw the input document change during
+  the evaluation (a group-by on an empty array adds an item to it), and the outcomes differ.
+
+The `Differential` workflow runs 20,000 cases from a new seed every week, and on demand with a
+chosen number of cases and seed. When it fails, the cases and outcomes are attached to the run.

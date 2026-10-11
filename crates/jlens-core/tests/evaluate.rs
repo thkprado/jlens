@@ -326,3 +326,32 @@ fn transforms_cannot_create_circular_objects() {
         Some(json!({"items": [{"a": 1, "copy": {"a": 1}}]}))
     );
 }
+
+#[test]
+fn missing_arguments_behave_as_in_javascript() {
+    // Found by `cargo xtask differential`. jsonata-js computes `Math.pow(1, undefined)`, which is
+    // NaN, and searches for `String(undefined)` when `chars` is missing.
+    for source in [
+        "$power(1, nothing)",
+        "$power(-1, nothing)",
+        "$power(2, nothing)",
+    ] {
+        let err = Expression::compile(source)
+            .unwrap()
+            .evaluate(Some(&json!({})), &Bindings::new())
+            .unwrap_err();
+        assert_eq!(err.code(), "D3061", "{source}");
+    }
+    assert_eq!(
+        eval("$substringBefore(nothing)", json!("text")),
+        Some(json!("text"))
+    );
+    assert_eq!(
+        eval("$substringBefore(nothing)", json!("a undefined b")),
+        Some(json!("a "))
+    );
+    assert_eq!(
+        eval("$substringAfter(nothing)", json!("text")),
+        Some(json!("text"))
+    );
+}

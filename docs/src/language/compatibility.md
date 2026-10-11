@@ -46,6 +46,9 @@ extensions live in comments or in the host API, not in the language syntax.
 | Very long strings and arrays | Limited by the JavaScript engine (a `RangeError`, or running out of memory) | `U1001` beyond `Options::max_string_length` (256 MiB) or `Options::max_array_length` (16,777,216 items) |
 | A very large result, such as an object nested in itself many times | Limited by the JavaScript engine when the result is serialized | `U1001` beyond `Options::max_result_size` (256 MiB of JSON text) |
 | A transform that makes an object contain itself (`$ ~> |$|{'self': $}|`) | A circular object, which fails when serialized | `U1001` |
+| Several items of an array constructor, or values of an object constructor, fail | The items are evaluated concurrently; the error raised first in the asynchronous schedule wins, which need not be the first item's | The items are evaluated in order; the first failing item's error is reported |
+| A group-by (`{...}`) over an empty array in the input | Adds an `undefined` item to that array of the input, which the rest of the expression sees (`($g := items{'k': 1}; $count(items))` gives 1 when `items` is `[]`; jlens gives 0) | The input is never changed |
+| A JavaScript exception inside jsonata-js (`Cannot read properties of undefined`, `comp is not a function`) | Thrown without an error code | A coded error, or a result |
 | Error `position` and `token` inside function calls | Overwritten with the call site | Filled in only when the inner error has none, so it points at the real cause |
 | Invalid regular expression | JavaScript `SyntaxError` without a code | `S0302` with the engine message in `message` |
 | A function as the final result | The function object | `None`, like `JSON.stringify` |

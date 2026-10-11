@@ -5,7 +5,9 @@
 //   node differential.mjs <cases.json> <outcomes.json>
 //
 // An outcome is {"value": <JSON>}, {"undefined": true} or {"error": <code>}. Functions are
-// dropped as `JSON.stringify` drops them, as jlens does when it converts a result to JSON.
+// dropped as `JSON.stringify` drops them, as jlens does when it converts a result to JSON. An
+// outcome also has "mutated": true when the evaluation changed its input document (a group-by
+// on an empty array adds an item to it), which the rest of the expression may see.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import jsonata from "jsonata";
@@ -26,16 +28,19 @@ const dropFunctions = (_key, value) =>
 const outcomes = [];
 for (const { expr, input } of cases) {
   let outcome;
+  // A fresh copy for each case: jsonata-js may modify its input (`@` does).
+  const data = input === null ? undefined : structuredClone(inputs[input]);
   try {
     const compiled = jsonata(expr, { timeout, stack: depth });
-    // A fresh copy for each case: jsonata-js may modify its input (`@` does).
-    const data = input === null ? undefined : structuredClone(inputs[input]);
     const result = await compiled.evaluate(data, structuredClone(bindings));
     const text = JSON.stringify(result, dropFunctions);
     outcome = text === undefined ? { undefined: true } : { value: JSON.parse(text) };
   } catch (err) {
     // An error without a code is a JavaScript exception inside jsonata-js.
     outcome = { error: err?.code ?? `js: ${err?.message ?? err}` };
+  }
+  if (input !== null && JSON.stringify(data) !== JSON.stringify(inputs[input])) {
+    outcome.mutated = true;
   }
   outcomes.push(outcome);
 }

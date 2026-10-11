@@ -30,6 +30,10 @@ All notable changes are recorded here. The format follows
 - `*` and `**` over an array nested in itself many times fail with `U1001` beyond
   `Options::max_array_length`, instead of aborting the process when memory runs out.
 
+- Found by differential testing against jsonata-js: `$power(1, x)` and `$power(-1, x)` fail
+  with `D3061` when `x` is missing, as `Math.pow` gives NaN there. `$substringBefore` and
+  `$substringAfter` without `chars` search for the text "undefined", as jsonata-js does.
+
 ## [0.4.0]
 
 Catching mistakes before they run: `jlens check` finds unknown functions, wrong arguments
