@@ -1,6 +1,8 @@
 //! The server: the message loop, the open documents and the requests.
 
+use std::any::Any;
 use std::collections::HashMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 
 use jlens_schema::{CompletionKind, LanguageService};
@@ -62,6 +64,10 @@ struct Server<'c> {
 
 /// Runs the server on `connection` until the client asks it to exit: answers `initialize`, then
 /// handles requests and notifications.
+///
+/// A request that panics is answered with an `InternalError`, and a notification that panics is
+/// logged: the server keeps running. The panic is printed to the standard error, which clients
+/// show in their log.
 pub fn run(connection: &Connection) -> Result<(), Error> {
     let (id, params) = connection.initialize_start()?;
     let params: InitializeParams = serde_json::from_value(params)?;
@@ -112,14 +118,42 @@ pub fn run(connection: &Connection) -> Result<(), Error> {
                 if connection.handle_shutdown(&request)? {
                     return Ok(());
                 }
-                let response = server.request(request);
+                let (id, method) = (request.id.clone(), request.method.clone());
+                // A panic leaves the server's state usable: the documents hold the text of the
+                // last change, and the services are only read.
+                let response = catch_unwind(AssertUnwindSafe(|| server.request(request)))
+                    .unwrap_or_else(|panic| {
+                        Response::new_err(
+                            id,
+                            ErrorCode::InternalError as i32,
+                            format!("jlens: {method} failed: {}", panic_message(&*panic)),
+                        )
+                    });
                 connection.sender.send(response.into())?;
             }
-            Message::Notification(notification) => server.notification(notification)?,
+            Message::Notification(notification) => {
+                let method = notification.method.clone();
+                match catch_unwind(AssertUnwindSafe(|| server.notification(notification))) {
+                    Ok(result) => result?,
+                    Err(panic) => server.send_notification::<LogMessage>(LogMessageParams {
+                        typ: MessageType::ERROR,
+                        message: format!("jlens: {method} failed: {}", panic_message(&*panic)),
+                    })?,
+                }
+            }
             Message::Response(_) => {}
         }
     }
     Ok(())
+}
+
+/// The message a panic was raised with.
+fn panic_message(panic: &(dyn Any + Send)) -> &str {
+    panic
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("a panic without a message")
 }
 
 /// UTF-8 when the client offers it, UTF-16 (the protocol's default) otherwise.
@@ -397,6 +431,8 @@ impl Server<'_> {
                 };
                 self.reload()
             }
+            #[cfg(test)]
+            tests::PANIC => panic!("a test panic"),
             _ => Ok(()),
         }
     }
@@ -430,6 +466,8 @@ impl Server<'_> {
                 .map_err(|e| e.to_string())
                 .and_then(|(_, p)| self.signature_help(p))
                 .and_then(to_value),
+            #[cfg(test)]
+            tests::PANIC => panic!("a test panic"),
             method => {
                 return Response::new_err(
                     id,
@@ -562,4 +600,68 @@ fn markdown(value: String) -> MarkupContent {
 
 fn to_value<T: serde::Serialize>(value: T) -> Result<Value, String> {
     serde_json::to_value(value).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The method of the request and the notification that panic, in tests only.
+    pub(super) const PANIC: &str = "jlens/testPanic";
+
+    #[test]
+    fn a_panic_is_answered_and_the_server_keeps_running() {
+        let (server, client) = Connection::memory();
+        let handle = std::thread::spawn(move || run(&server));
+        let mut next = 0;
+        let logged = std::cell::Cell::new(false);
+        let mut request = |method: &str, params: Value| {
+            next += 1;
+            let request = Request::new(RequestId::from(next), method.into(), params);
+            client.sender.send(request.into()).unwrap();
+            loop {
+                match client.receiver.recv().unwrap() {
+                    Message::Response(response) => return response,
+                    Message::Notification(n) if n.method == LogMessage::METHOD => {
+                        assert!(n.params["message"].as_str().unwrap().contains(PANIC));
+                        logged.set(true);
+                    }
+                    _ => {}
+                }
+            }
+        };
+        let notify = |method: &str, params: Value| {
+            let notification = Notification::new(method.into(), params);
+            client.sender.send(notification.into()).unwrap();
+        };
+
+        request("initialize", serde_json::json!({"capabilities": {}}));
+        notify("initialized", serde_json::json!({}));
+        let error = request(PANIC, Value::Null).response_result.unwrap_err();
+        assert_eq!(error.code, ErrorCode::InternalError as i32);
+        assert!(error.message.contains("a test panic"), "{}", error.message);
+
+        // After a notification that panics too, the server still answers.
+        notify(PANIC, Value::Null);
+        let uri = "file:///panic.jsonata";
+        notify(
+            DidOpenTextDocument::METHOD,
+            serde_json::json!({
+                "textDocument": {"uri": uri, "languageId": "jsonata", "version": 1, "text": "$sum"},
+            }),
+        );
+        let hover = request(
+            HoverRequest::METHOD,
+            serde_json::json!({
+                "textDocument": {"uri": uri},
+                "position": {"line": 0, "character": 2},
+            }),
+        );
+        assert!(hover.response_result.unwrap()["contents"].is_object());
+        assert!(logged.get(), "the panicking notification is logged");
+
+        request("shutdown", Value::Null);
+        notify("exit", Value::Null);
+        handle.join().unwrap().unwrap();
+    }
 }

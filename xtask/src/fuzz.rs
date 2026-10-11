@@ -1,5 +1,5 @@
 //! `cargo xtask fuzz-seed`: seeds the corpora of the fuzz targets (`fuzz/`) with the cases of
-//! the JSONata suite.
+//! the JSONata suite, and with a few regular expressions and pictures.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -7,12 +7,55 @@ use std::fs;
 use anyhow::{Context, Result};
 use serde_json::Value as JsonValue;
 
-/// Writes the expressions of the suite to `fuzz/corpus/parse` and `fuzz/corpus/parse_recover`,
-/// and each expression followed by a NUL byte and its input document to `fuzz/corpus/evaluate`
-/// (the input format of that target).
+/// Regular expressions, as the `regex` target reads them: flag bits (`i` is 1, `m` 2, `s` 4,
+/// `u` 8, `v` 16), then the pattern and the text, separated by a NUL byte.
+const REGEXES: &[(u8, &str, &str)] = &[
+    (0, r"a(b|c)*d", "xabcbd abd"),
+    (1, r"^(?<word>\w+)\s\k<word>$", "Hello hello"),
+    (2, r"^\d+$", "12\n34\nx"),
+    (4, r"a.b", "a\nb"),
+    (8, r"\p{L}+|\u{1D11E}", "héllo 𝄞"),
+    (16, r"[\p{L}--[a-z]]", "aBc"),
+    (0, r"(?<=\$)\d+(?:\.\d\d)?|(?!x)[^\s]", "$12.50 x"),
+    (0, r"^(a+)+$", "aaaaaaaaaaaaaaaaaaaaaaaaa!"),
+    (9, r"(?:)", "𝄞é"),
+    (0, r"[\b]\B\cJ\x41\0", "\u{8}\nA\0"),
+];
+
+/// Pictures, as the `pictures` target reads them: a picture, then a NUL byte and the text to
+/// parse or a time zone.
+const PICTURES: &[(&str, &str)] = &[
+    ("#,##0.00", ""),
+    ("#,##0.00;(#,##0.00)", ""),
+    ("0.000e0", ""),
+    ("00%", ","),
+    ("###\u{2030}", ""),
+    ("#", "1234"),
+    ("w", "one thousand, two hundred and thirty-four"),
+    ("I", "MCCXXXIV"),
+    ("A", "AB"),
+    ("#0;o", "12th"),
+    ("[Y0001]-[M01]-[D01]", "2018-10-21"),
+    (
+        "[Y0001]-[M01]-[D01]T[H01]:[m01]:[s01].[f001][Z01:01t]",
+        "+0100",
+    ),
+    ("[FNn], [D1o] [MNn] [Y] [h]:[m01] [PN] [z]", "-0500"),
+    ("[Dwo] [M,3-3] [Y,2] [X0001]-W[W01]-[F1] [x] [E] [C]", ""),
+    ("[H01]:[m01]:[s01]", "13:05:00"),
+    ("[D1] [MNn] [Y0001]", "21 October 2018"),
+    ("[Y]-[d]", "2018-294"),
+    ("[[[D]]]", ""),
+];
+
+/// Writes the expressions of the suite to `fuzz/corpus/parse` and `fuzz/corpus/parse_recover`;
+/// each expression followed by a NUL byte and its input document to `fuzz/corpus/evaluate`; each
+/// expression after its length, as the offset, to `fuzz/corpus/language_service` (the input
+/// formats of those targets); and the regular expressions and pictures above to theirs.
 pub fn seed() -> Result<()> {
     let mut expressions = BTreeSet::new();
     let mut evaluations = BTreeSet::new();
+    let mut services = BTreeSet::new();
     for case in suite_cases()? {
         let Some(expr) = case.get("expr").and_then(JsonValue::as_str) else {
             continue;
@@ -24,10 +67,35 @@ pub fn seed() -> Result<()> {
             evaluation.extend(serde_json::to_vec(data)?);
         }
         evaluations.insert(evaluation);
+        // Completion and hover at the end of the expression, where an editor's cursor is.
+        let mut service = u16::try_from(expr.len())
+            .unwrap_or(0)
+            .to_le_bytes()
+            .to_vec();
+        service.extend(expr.as_bytes());
+        services.insert(service);
     }
     write("parse", &expressions)?;
     write("parse_recover", &expressions)?;
-    write("evaluate", &evaluations)
+    write("evaluate", &evaluations)?;
+    write("language_service", &services)?;
+    let regexes = REGEXES.iter().map(|(flags, pattern, text)| {
+        let mut input = vec![*flags];
+        input.extend(pattern.as_bytes());
+        input.push(0);
+        input.extend(text.as_bytes());
+        input
+    });
+    write("regex", &regexes.collect())?;
+    let pictures = PICTURES.iter().map(|(picture, text)| {
+        let mut input = picture.as_bytes().to_vec();
+        if !text.is_empty() {
+            input.push(0);
+            input.extend(text.as_bytes());
+        }
+        input
+    });
+    write("pictures", &pictures.collect())
 }
 
 fn suite_cases() -> Result<Vec<JsonValue>> {

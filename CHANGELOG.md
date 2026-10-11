@@ -6,6 +6,11 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `jlens lsp` keeps running when a bug makes a request panic: it answers that request with an
+  `InternalError`, and logs a notification that panics, instead of stopping.
+
 ## [0.7.0]
 
 Closer to the JSONata documentation: jlens stops reproducing three jsonata-js behaviours that

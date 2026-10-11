@@ -1,8 +1,8 @@
 name: Fuzz
 
-# Coverage-guided fuzzing of the parser and the evaluator (cargo-fuzz, libFuzzer; see "Fuzzing"
-# in docs/src/architecture/conformance.md). Each target starts from the expressions of the
-# JSONata suite and from the corpus of its last run. A crash fails the run and uploads the input
+# Coverage-guided fuzzing of the parser, the evaluator, regular expressions, pictures and the
+# language service (cargo-fuzz, libFuzzer; see "Fuzzing" in docs/src/architecture/conformance.md).
+# Each target starts from the seeds of `cargo xtask fuzz-seed` and from the corpus of its last run. A crash fails the run and uploads the input
 # that caused it: reproduce it on Linux with
 # `cargo +nightly fuzz run <target> --sanitizer none --debug-assertions <file>`.
 
@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [parse, parse_recover, evaluate]
+        target: [parse, parse_recover, evaluate, regex, pictures, language_service]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -47,7 +47,7 @@ jobs:
           path: fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: fuzz-corpus-${{ matrix.target }}-
-      - name: Seed the corpus with the JSONata suite
+      - name: Seed the corpus
         run: cargo xtask fuzz-seed
       - name: Fuzz
         env:

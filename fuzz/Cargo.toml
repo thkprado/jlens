@@ -13,6 +13,9 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 jlens-core = { path = "../crates/jlens-core" }
+jlens-schema = { path = "../crates/jlens-schema" }
+# As jlens-core depends on it.
+regress = { package = "jlens-regress", path = "../crates/jlens-regress", default-features = false, features = ["std", "prohibit-unsafe"] }
 serde_json = "1"
 
 # A workspace of its own, so that the main workspace does not claim this crate.
@@ -36,6 +39,27 @@ bench = false
 [[bin]]
 name = "evaluate"
 path = "fuzz_targets/evaluate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "regex"
+path = "fuzz_targets/regex.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pictures"
+path = "fuzz_targets/pictures.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "language_service"
+path = "fuzz_targets/language_service.rs"
 test = false
 doc = false
 bench = false

@@ -75,6 +75,9 @@ random inputs rarely reach. The targets live in `fuzz/`, a crate outside the wor
 | `parse` | An expression | Strict parsing never panics |
 | `parse_recover` | An expression | Recovering parsing never panics; diagnostic spans stay inside the source |
 | `evaluate` | An expression, optionally followed by a NUL byte and a JSON input document | Compiling, then evaluating with and without input, against a `Document` and audited, never panics |
+| `regex` | A byte of flags, then a pattern and a text separated by a NUL byte | Compiling the pattern with `jlens-regress` and finding every match never panic; groups lie on character boundaries of the text |
+| `pictures` | A picture, optionally followed by a NUL byte and a second string | `$formatNumber`, `$formatInteger`, `$parseInteger`, `$fromMillis` and `$toMillis` never panic on the picture, the text they parse or the time zone |
+| `language_service` | Two bytes of offset, then a text | Diagnostics, completion, hover and signature help never panic, at any offset; their ranges lie inside the text |
 
 Evaluations run with a timeout, a depth limit, size caps, and a fixed clock and seed. Each
 target runs on a thread with a 1 MB stack, the size of the main thread's stack on Windows, so
@@ -82,9 +85,10 @@ that recursion that does not grow the stack overflows on Linux too. The build ha
 assertions, so an arithmetic overflow is a crash.
 
 The `Fuzz` workflow runs every target for ten minutes each week, or for as long as asked when
-started by hand. Each target starts from the expressions and input documents of the JSONata
-suite (`cargo xtask fuzz-seed` writes them to `fuzz/corpus/`) and from the corpus its last run
-kept. A crash fails the run, and the input that caused it is uploaded with the run.
+started by hand. Each target starts from seeds that `cargo xtask fuzz-seed` writes to
+`fuzz/corpus/`: the expressions and input documents of the JSONata suite, and a few regular
+expressions and pictures. It also starts from the corpus its last run kept. A crash fails the
+run, and the input that caused it is uploaded with the run.
 
 cargo-fuzz needs nightly Rust and Linux or macOS. To reproduce a crash, on Linux:
 

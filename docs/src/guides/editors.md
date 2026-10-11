@@ -112,3 +112,11 @@ same service to CodeMirror and Monaco.
 The server counts positions in UTF-16 code units, the protocol's default, or in bytes when the
 client offers UTF-8 (`general.positionEncodings`). Documents are synchronized incrementally.
 Positions past the end of a line or of the document are clamped to it, as the protocol requires.
+
+## Errors
+
+A bug in jlens that panics while the server handles a request does not stop the server: the
+request is answered with an `InternalError`, and a panic while it handles a notification (such
+as checking a document after a change) is logged with `window/logMessage`. The panic itself is
+printed on the standard error, which editors keep in the server's log. Please report it, with
+the text of the document.
