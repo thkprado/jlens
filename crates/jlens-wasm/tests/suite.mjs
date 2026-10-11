@@ -108,6 +108,11 @@ export const cases = [
     if (!env.virtualTime) {
       const loop = new j.Expression("($f := function($n){ $f($n + 1) }; $f(0))");
       throws(() => loop.evaluate(undefined, null, { timeout: 20 }), (e) => equal(e.code, "D1012"));
+      // A catastrophic backtrack stops inside the match (ADR 0009); unbounded, it runs for minutes.
+      const backtrack = new j.Expression("$contains($, /^(a+)+$/)");
+      const started = Date.now();
+      throws(() => backtrack.evaluate("a".repeat(30) + "!", null, { timeout: 50 }), (e) => equal(e.code, "D1012"));
+      ok(Date.now() - started < 2000, "the match stops near the timeout");
     }
     const deep = new j.Expression("($f := function($n){ $n = 0 ? 0 : 1 + $f($n - 1) }; $f(100))");
     throws(() => deep.evaluate(undefined, null, { maxDepth: 100 }), (e) => equal(e.code, "D1011"));
