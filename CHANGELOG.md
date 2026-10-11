@@ -17,7 +17,8 @@ All notable changes are recorded here. The format follows
   are declared, about references to variables that are not (`W0204`).
 - `jlens check` reads the `jlens.json` of the current directory, or the file given with
   `--config`: files get the schema, variables and host functions that the language server gives
-  them. `--schema` replaces the configured schema. The `config` module of `jlens-lsp` is public.
+  them. `--schema` replaces the configured schema, and `--path` gives an expression of the
+  argument the configuration of a file path. The `config` module of `jlens-lsp` is public.
 
 ## [0.3.0]
 

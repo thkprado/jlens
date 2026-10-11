@@ -1,0 +1,13 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&inline, None)"
+---
+exit: 0
+--- stdout
+--- stderr
+warning[W0202]: Unknown function $rate
+ --> <expr>:1:1
+  |
+1 | $rate('toy') > $minimun
+  | ^^^^^
+<expr>: 0 error(s), 1 warning(s)

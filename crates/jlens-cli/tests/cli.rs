@@ -351,6 +351,22 @@ fn check_config() {
             "fixtures/workspace/rules/discount.jsonata"
         ]
     );
+    // An expression of the argument gets the configuration of the path it is given.
+    let inline = [
+        "check",
+        "--config",
+        WORKSPACE_CONFIG,
+        "$rate('toy') > $minimun",
+    ];
+    snapshot!("check_config_inline", &inline);
+    snapshot!(
+        "check_config_path",
+        &[
+            &inline[..],
+            &["--path", "fixtures/workspace/rules/new.jsonata"]
+        ]
+        .concat()
+    );
     snapshot!(
         "check_config_missing",
         &["check", "--config", "missing.json", "a"]

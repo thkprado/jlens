@@ -220,8 +220,15 @@ are declared, references to undeclared ones get `W0204`. By default, `check` rea
 `jlens.json` of the current directory, if there is one; `--config` names another file, whose
 patterns and paths are relative to its folder.
 
-The configuration applies to files given with `-f`, by their path: an expression given as an
-argument matches no pattern. `--schema` replaces the schema that the configuration gives a
+The configuration applies to files given with `-f`, by their path. An expression given as an
+argument matches no pattern, unless `--path` gives it the path of a file it would be saved as,
+which need not exist; that suits checking an expression before writing it:
+
+```sh
+jlens check --path rules/discount.jsonata '$rate(type) * unitPrice'
+```
+
+`--schema` replaces the schema that the configuration gives a
 file, and keeps its variables and functions. A configuration that cannot be read, or whose
 schema cannot be, ends with exit code 2.
 

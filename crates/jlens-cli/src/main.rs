@@ -102,6 +102,10 @@ struct CheckArgs {
     /// language server [default: the `jlens.json` of the current directory, if there is one].
     #[arg(long, value_name = "FILE")]
     config: Option<PathBuf>,
+    /// Give the expression of the argument the configuration of this file, as if it were its
+    /// contents. The file need not exist.
+    #[arg(long, value_name = "FILE", requires = "expr")]
+    path: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -197,7 +201,7 @@ fn check(args: CheckArgs) -> Result<ExitCode> {
     let keys: Vec<Option<usize>> = sources
         .iter()
         .map(|(_, file)| {
-            let path = absolute(&cwd, file.as_deref()?);
+            let path = absolute(&cwd, file.as_deref().or(args.path.as_deref())?);
             config::find(&entries, &path).map(|(i, _)| i)
         })
         .collect();

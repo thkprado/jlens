@@ -1,0 +1,13 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[&inline[..],\n&[\"--path\", \"fixtures/workspace/rules/new.jsonata\"]].concat(), None)"
+---
+exit: 0
+--- stdout
+--- stderr
+warning[W0204]: Variable $minimun is not declared; did you mean `$minimum`?
+ --> <expr>:1:16
+  |
+1 | $rate('toy') > $minimun
+  |                ^^^^^^^^
+<expr>: 0 error(s), 1 warning(s)
