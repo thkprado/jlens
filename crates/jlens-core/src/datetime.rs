@@ -981,7 +981,9 @@ fn analyse_datetime_picture(picture: &str) -> Result<Vec<Part>> {
                         def.n = max as i64;
                         format.mandatory_digits = max;
                     } else {
-                        let w = format.mandatory_digits + format.optional_digits;
+                        let w = format
+                            .mandatory_digits
+                            .saturating_add(format.optional_digits);
                         if w >= 2 {
                             def.n = w as i64;
                         }
@@ -1015,11 +1017,13 @@ fn apply_case(s: &str, case: Option<Case>) -> String {
     }
 }
 
-/// `$fromMillis` / `$now`: formats a timestamp.
+/// `$fromMillis` / `$now`: formats a timestamp. Fails with `U1001` when a width modifier
+/// (`[Y,1000000000]`) asks for more than `max_len` digits.
 pub(crate) fn from_millis(
     millis: f64,
     picture: Option<&str>,
     timezone: Option<&str>,
+    max_len: usize,
 ) -> Result<String> {
     let (mut offset_hours, mut offset_minutes) = (0.0, 0.0);
     if let Some(tz) = timezone {
@@ -1038,6 +1042,12 @@ pub(crate) fn from_millis(
         match part {
             Part::Literal(s) => out.push_str(s),
             Part::Marker(m) => {
+                if m.integer_format
+                    .as_ref()
+                    .is_some_and(|f| f.mandatory_digits > max_len)
+                {
+                    return Err(crate::value::string_too_long(max_len));
+                }
                 out.push_str(&format_component(&date, m, offset_hours, offset_minutes)?)
             }
         }
@@ -1454,11 +1464,17 @@ mod tests {
     #[test]
     fn formats_and_parses_timestamps() {
         assert_eq!(
-            from_millis(1_514_764_800_000.0, None, None).unwrap(),
+            from_millis(1_514_764_800_000.0, None, None, usize::MAX).unwrap(),
             "2018-01-01T00:00:00.000Z"
         );
         assert_eq!(
-            from_millis(1_521_801_216_617.0, Some("[D1o] [MNn] [Y]"), None).unwrap(),
+            from_millis(
+                1_521_801_216_617.0,
+                Some("[D1o] [MNn] [Y]"),
+                None,
+                usize::MAX
+            )
+            .unwrap(),
             "23rd March 2018"
         );
         assert_eq!(

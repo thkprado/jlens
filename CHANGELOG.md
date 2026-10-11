@@ -12,7 +12,8 @@ All notable changes are recorded here. The format follows
   `InternalError`, and logs a notification that panics, instead of stopping.
 - Panics found by fuzzing: a date/time picture marker that starts with a comma
   (`$fromMillis(0, '[,2]')`) or gives fractional seconds a name presentation
-  (`$fromMillis(0, '[fn]')`, now `D3133`), `$parseInteger` with a picture whose digits are not
+  (`$fromMillis(0, '[fn]')`, now `D3133`) or a width beyond the string size limit
+  (`'[Y,99999999999]'`, now `U1001`), `$parseInteger` with a picture whose digits are not
   ASCII on text with other characters (`$parseInteger('12', '##０')`), and `$formatNumber`
   rounding a very large number to many decimals (`$formatNumber(1e300, '#.000…')`).
 - Stack overflows found by fuzzing: recovering from hundreds of unclosed brackets

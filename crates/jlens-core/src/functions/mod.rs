@@ -226,12 +226,12 @@ natives! {
 
     // Date/time
     "now" "<s?s?:s>" ["picture", "timezone"] 2 DateTime "The evaluation's timestamp as an ISO 8601 string, or formatted with a picture" => |ev, a, _| {
-        crate::datetime::from_millis(ev.timestamp(), text(&a, 0).as_deref(), text(&a, 1).as_deref()).map(Value::string)
+        crate::datetime::from_millis(ev.timestamp(), text(&a, 0).as_deref(), text(&a, 1).as_deref(), ev.max_string_length()).map(Value::string)
     };
     "millis" "<:n>" [] 0 DateTime "The evaluation's timestamp in milliseconds since the epoch" => |ev, _, _| Ok(Value::Number(ev.timestamp()));
-    "fromMillis" "<n-s?s?:s>" ["millis", "picture", "timezone"] 3 DateTime "Formats milliseconds since the epoch as a timestamp string" => |_, a, _| match num(&a, 0) {
+    "fromMillis" "<n-s?s?:s>" ["millis", "picture", "timezone"] 3 DateTime "Formats milliseconds since the epoch as a timestamp string" => |ev, a, _| match num(&a, 0) {
         None => Ok(Value::Undefined),
-        Some(ms) => crate::datetime::from_millis(ms, text(&a, 1).as_deref(), text(&a, 2).as_deref()).map(Value::string),
+        Some(ms) => crate::datetime::from_millis(ms, text(&a, 1).as_deref(), text(&a, 2).as_deref(), ev.max_string_length()).map(Value::string),
     };
     "toMillis" "<s-s?:n>" ["timestamp", "picture"] 2 DateTime "Parses a timestamp string into milliseconds since the epoch" => |ev, a, _| match text(&a, 0) {
         None => Ok(Value::Undefined),

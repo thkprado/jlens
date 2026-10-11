@@ -383,6 +383,19 @@ fn fuzz_crashes_stay_fixed() {
             Ok(json!("1e+300.00000000000000000000")),
         ),
         ("$round(1e300, 20)", Ok(json!(1e300))),
+        // Width modifiers beyond the string limit.
+        ("$fromMillis(0, '[Y,5555555555555555555553]')", Err("U1001")),
+        (
+            "$fromMillis(0, '[D0,66666666666666666666666666661]')",
+            Err("U1001"),
+        ),
+        ("$fromMillis(0, '[Y01,99999999999999999999]')", Err("U1001")),
+        ("$fromMillis(0, '[Y,3-4]')", Ok(json!("1970"))),
+        // Parsing does not pad: a huge width only fails to match, as in jsonata-js.
+        (
+            "$toMillis('197001', '[Y,99999999999999999999][M01]')",
+            Ok(json!(null)),
+        ),
     ];
     for (source, expected) in cases {
         let result = Expression::compile(source).unwrap().evaluate_with(

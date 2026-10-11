@@ -62,7 +62,7 @@ impl AuditCollector {
                 engine: concat!("jlens-core ", env!("CARGO_PKG_VERSION")).into(),
                 expression_hash: fnv1a(&self.source),
                 input_hash: self.input_hash,
-                timestamp: crate::datetime::from_millis(self.timestamp, None, None)
+                timestamp: crate::datetime::from_millis(self.timestamp, None, None, usize::MAX)
                     .unwrap_or_default(),
                 duration_ms: self
                     .started
