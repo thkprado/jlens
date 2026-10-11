@@ -13,6 +13,13 @@ Linux (x86-64 and ARM64, static), macOS (Intel and Apple silicon) and Windows (x
 cargo binstall jlens-cli
 ```
 
+From 0.6.0 on, each archive has a build attestation: a signed statement that the release
+workflow of this repository built it, from which commit. Check one with the GitHub CLI:
+
+```sh
+gh attestation verify jlens-0.6.0-x86_64-unknown-linux-musl.tar.gz --repo thkprado/jlens
+```
+
 Elsewhere, build it from source with Rust 1.88 or later:
 
 ```sh
@@ -50,6 +57,11 @@ The WebAssembly package is the npm package `jlens-wasm`, an ES module:
 ```sh
 npm install jlens-wasm
 ```
+
+From 0.6.0 on, the package is published with
+[provenance](https://docs.npmjs.com/generating-provenance-statements): its page on npmjs.com
+links it to the commit and the workflow run that built it, and `npm audit signatures` checks it
+in a project that depends on it.
 
 To build it from a checkout instead, you need:
 - the `wasm32-unknown-unknown` Rust target;

@@ -3,9 +3,12 @@ name: Release
 # When a version tag (v0.1.0, ...) is pushed, builds the jlens binaries (binaries.yml), then
 # publishes the crates to crates.io and the WebAssembly package to npm, then drafts the GitHub
 # release from CHANGELOG.md with the binaries attached. Nothing is published unless every binary
-# builds. Needs the repository secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN.
+# builds. The npm package is published with provenance and the binary archives get build
+# attestations, both signed through Sigstore with the run's OIDC token. Needs the repository
+# secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN.
 # Run by hand (workflow_dispatch) with an existing tag, it publishes nothing: it builds the
-# binaries of that tag and drafts its release, for a release whose draft failed after publishing.
+# binaries of that tag, attests them and drafts its release, for a release whose draft failed
+# after publishing.
 # See CONTRIBUTING.md for the release checklist.
 
 on:
@@ -69,6 +72,10 @@ jobs:
     needs: binaries
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # id-token signs the provenance statement of the package.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -84,7 +91,7 @@ jobs:
           cargo install wasm-bindgen-cli --locked --version "$version"
       - name: Build and test the package
         run: cargo xtask wasm-test --require-browser
-      - run: npm publish --access public
+      - run: npm publish --provenance --access public
         working-directory: crates/jlens-wasm/pkg
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -95,8 +102,12 @@ jobs:
     # crates and npm are skipped when the workflow is run by hand.
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
+    # contents creates the release; the others sign and store the attestations.
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -109,6 +120,11 @@ jobs:
           merge-multiple: true
       - run: sha256sum * > SHA256SUMS
         working-directory: dist
+      # A build provenance attestation for each archive listed in SHA256SUMS, stored with the
+      # repository (gh attestation verify).
+      - uses: actions/attest@v4
+        with:
+          subject-checksums: dist/SHA256SUMS
       # A draft, published by hand after review (CONTRIBUTING.md).
       - run: >-
           gh release create "$TAG" --draft --verify-tag

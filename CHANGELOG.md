@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Released packages prove where they were built. The npm package `jlens-wasm` is published
+  with provenance, and each binary archive of a GitHub release has a build attestation
+  (`gh attestation verify <archive> --repo thkprado/jlens`); see the installation page.
+
 ### Fixed
 
 - A regular expression that backtracks catastrophically, such as `/^(a+)+$/` on a long run of
