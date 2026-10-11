@@ -29,6 +29,11 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- `Expression::evaluate` and the other entry points that take `serde_json` input read it
+  lazily, one level at a time, converting only the objects and arrays the expression reaches
+  ([ADR 0010](docs/src/adr/0010-lazy-input.md)). A path into the benchmark document takes 1.9 µs
+  instead of 115 µs; expressions that read every item cost about as much as before. Variables
+  given in `Bindings` are read the same way. `evaluate_document` is unchanged.
 - Converting an input document is about 20% faster, natively and in WebAssembly: the objects of
   a document share their keys instead of allocating each. `$each`, `$sift`, `$keys` and
   transforms no longer copy keys either.

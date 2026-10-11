@@ -6,7 +6,7 @@
 //! Objects are shared and mutable (`Rc<RefCell<…>>`) because the transform operator updates the
 //! objects that its pattern selects in place.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, Ref, RefCell, RefMut};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -48,6 +48,18 @@ impl Keys {
         }
         key
     }
+
+    /// A table shared by the lazy values of one evaluation (ADR 0010).
+    pub(crate) fn shared() -> Rc<RefCell<Keys>> {
+        Rc::default()
+    }
+}
+
+/// The part of the input that a lazy array or object stands for, not read yet (ADR 0010). The
+/// first access to the array's items or the object's map reads one level of it.
+struct Pending<'a> {
+    json: &'a JsonValue,
+    keys: Rc<RefCell<Keys>>,
 }
 
 /// A JSONata value.
@@ -60,7 +72,7 @@ pub(crate) enum Value<'a> {
     Number(f64),
     String(Rc<str>),
     Array(Rc<Array<'a>>),
-    Object(Rc<RefCell<Map<'a>>>),
+    Object(Rc<Object<'a>>),
     Function(Rc<Function<'a>>),
 }
 
@@ -72,11 +84,58 @@ pub(crate) const TUPLE_STREAM: u8 = 16;
 
 /// An array, with the flags jsonata-js attaches to its arrays.
 pub(crate) struct Array<'a> {
-    pub items: Vec<Value<'a>>,
+    /// The items of an array built by the evaluation, or of a document; empty when the array
+    /// is lazy.
+    items: Vec<Value<'a>>,
     flags: Cell<u8>,
+    /// The items of an array of the input, read on first access. They are kept apart so that
+    /// the other arrays read a plain field.
+    lazy: Option<Box<LazyItems<'a>>>,
+}
+
+struct LazyItems<'a> {
+    pending: Pending<'a>,
+    items: OnceCell<Vec<Value<'a>>>,
+}
+
+impl<'a> LazyItems<'a> {
+    /// The items, read from the input on the first call.
+    #[inline(never)]
+    fn read(&self) -> &Vec<Value<'a>> {
+        self.items.get_or_init(|| match &self.pending {
+            Pending {
+                json: JsonValue::Array(items),
+                keys,
+            } => items.iter().map(|v| Value::lazy(v, keys)).collect(),
+            _ => Vec::new(),
+        })
+    }
 }
 
 impl<'a> Array<'a> {
+    /// The items, read from the input first if the array is lazy.
+    #[inline]
+    pub fn items(&self) -> &Vec<Value<'a>> {
+        match &self.lazy {
+            None => &self.items,
+            Some(lazy) => lazy.read(),
+        }
+    }
+
+    /// The input this array stands for, when it has not been read.
+    fn unread(&self) -> Option<&'a JsonValue> {
+        match &self.lazy {
+            Some(lazy) if lazy.items.get().is_none() => Some(lazy.pending.json),
+            _ => None,
+        }
+    }
+
+    /// Whether the array has not been read from the input yet. Such an array holds only values
+    /// of the input.
+    pub fn is_unread(&self) -> bool {
+        self.unread().is_some()
+    }
+
     pub fn has(&self, flag: u8) -> bool {
         self.flags.get() & flag != 0
     }
@@ -94,7 +153,75 @@ impl<'a> Array<'a> {
     }
 
     pub fn len(&self) -> usize {
-        self.items.len()
+        match self.unread() {
+            Some(JsonValue::Array(items)) => items.len(),
+            _ => self.items().len(),
+        }
+    }
+}
+
+/// An object. It is shared and mutable because the transform operator updates in place the
+/// objects that its pattern selects.
+pub(crate) struct Object<'a> {
+    /// The fields; empty until a lazy object is read.
+    map: RefCell<Map<'a>>,
+    /// The input a lazy object stands for. It is a plain field, so that the other objects
+    /// cost one test of it.
+    pending: Option<Pending<'a>>,
+    read: Cell<bool>,
+}
+
+impl<'a> Object<'a> {
+    #[inline]
+    fn cell(&self) -> &RefCell<Map<'a>> {
+        if let Some(pending) = &self.pending
+            && !self.read.get()
+        {
+            self.read(pending);
+        }
+        &self.map
+    }
+
+    /// Reads the fields of a lazy object into its map, which nothing borrows yet: every
+    /// borrow goes through `cell`.
+    #[cold]
+    #[inline(never)]
+    fn read(&self, pending: &Pending<'a>) {
+        self.read.set(true);
+        if let (JsonValue::Object(fields), Ok(mut map)) = (pending.json, self.map.try_borrow_mut())
+        {
+            *map = Map::with_capacity_and_hasher(fields.len(), Default::default());
+            let mut shared = pending.keys.borrow_mut();
+            for (k, v) in fields {
+                map.insert(shared.get(k), Value::lazy(v, &pending.keys));
+            }
+        }
+    }
+
+    /// The fields, read from the input first if the object is lazy.
+    #[inline]
+    pub fn borrow(&self) -> Ref<'_, Map<'a>> {
+        self.cell().borrow()
+    }
+
+    /// The fields, mutably, read from the input first if the object is lazy.
+    #[inline]
+    pub fn borrow_mut(&self) -> RefMut<'_, Map<'a>> {
+        self.cell().borrow_mut()
+    }
+
+    /// The input this object stands for, when it has not been read.
+    fn unread(&self) -> Option<&'a JsonValue> {
+        match &self.pending {
+            Some(p) if !self.read.get() => Some(p.json),
+            _ => None,
+        }
+    }
+
+    /// Whether the object has not been read from the input yet. Such an object holds only
+    /// values of the input.
+    pub fn is_unread(&self) -> bool {
+        self.unread().is_some()
     }
 }
 
@@ -167,6 +294,7 @@ impl<'a> Value<'a> {
         Value::Array(Rc::new(Array {
             items,
             flags: Cell::new(flags),
+            lazy: None,
         }))
     }
 
@@ -176,7 +304,11 @@ impl<'a> Value<'a> {
     }
 
     pub fn object(map: Map<'a>) -> Value<'a> {
-        Value::Object(Rc::new(RefCell::new(map)))
+        Value::Object(Rc::new(Object {
+            map: RefCell::new(map),
+            pending: None,
+            read: Cell::new(true),
+        }))
     }
 
     pub fn function(f: Function<'a>) -> Value<'a> {
@@ -211,7 +343,7 @@ impl<'a> Value<'a> {
     /// `createSequence(value)` in jsonata-js).
     pub fn items_or_self(&self) -> Vec<Value<'a>> {
         match self {
-            Value::Array(a) => a.items.clone(),
+            Value::Array(a) => a.items().clone(),
             other => vec![other.clone()],
         }
     }
@@ -260,7 +392,7 @@ impl<'a> Value<'a> {
     pub fn is_array_of_numbers(&self) -> Result<bool> {
         match self {
             Value::Array(a) => {
-                for item in &a.items {
+                for item in a.items() {
                     if !item.is_numeric()? {
                         return Ok(false);
                     }
@@ -274,7 +406,7 @@ impl<'a> Value<'a> {
     /// jsonata-js `isArrayOfStrings`.
     pub fn is_array_of_strings(&self) -> bool {
         match self {
-            Value::Array(a) => a.items.iter().all(|i| matches!(i, Value::String(_))),
+            Value::Array(a) => a.items().iter().all(|i| matches!(i, Value::String(_))),
             _ => false,
         }
     }
@@ -298,8 +430,8 @@ impl<'a> Value<'a> {
         match (self, other) {
             (Value::Array(a), Value::Array(b)) => {
                 Rc::ptr_eq(a, b)
-                    || (a.items.len() == b.items.len()
-                        && a.items.iter().zip(&b.items).all(|(x, y)| x.deep_eq(y)))
+                    || (a.items().len() == b.items().len()
+                        && a.items().iter().zip(b.items()).all(|(x, y)| x.deep_eq(y)))
             }
             (Value::Object(a), Value::Object(b)) => {
                 if Rc::ptr_eq(a, b) {
@@ -342,9 +474,54 @@ impl<'a> Value<'a> {
         }
     }
 
+    /// A value over input JSON that reads it one level at a time, on first access (ADR 0010):
+    /// an array or object is converted only when the evaluation reads it. `keys` is shared by
+    /// the lazy values of one evaluation.
+    pub fn lazy(json: &'a JsonValue, keys: &Rc<RefCell<Keys>>) -> Value<'a> {
+        match json {
+            JsonValue::Array(items) if !items.is_empty() => Value::Array(Rc::new(Array {
+                items: Vec::new(),
+                flags: Cell::new(0),
+                lazy: Some(Box::new(LazyItems {
+                    pending: Pending {
+                        json,
+                        keys: keys.clone(),
+                    },
+                    items: OnceCell::new(),
+                })),
+            })),
+            JsonValue::Object(fields) if !fields.is_empty() => Value::Object(Rc::new(Object {
+                map: RefCell::new(Map::default()),
+                pending: Some(Pending {
+                    json,
+                    keys: keys.clone(),
+                }),
+                read: Cell::new(false),
+            })),
+            JsonValue::Null => Value::Null,
+            JsonValue::Bool(b) => Value::Bool(*b),
+            JsonValue::Number(n) => Value::Number(n.as_f64().unwrap_or(f64::NAN)),
+            JsonValue::String(s) => Value::string(s.as_str()),
+            JsonValue::Array(_) => Value::array(Vec::new(), 0),
+            JsonValue::Object(_) => Value::object(Map::default()),
+        }
+    }
+
+    /// The input an array or object stands for, when it has not been read.
+    fn unread(&self) -> Option<&'a JsonValue> {
+        match self {
+            Value::Array(a) => a.unread(),
+            Value::Object(o) => o.unread(),
+            _ => None,
+        }
+    }
+
     /// Converts a result into JSON, following `JSON.stringify`: undefined and functions are
     /// dropped from objects and become `null` in arrays; a top-level one yields `None`.
     pub fn to_json(&self) -> Option<JsonValue> {
+        if let Some(json) = self.unread() {
+            return Some(copy_json(json));
+        }
         Some(match self {
             Value::Undefined | Value::Function(_) => return None,
             Value::Null => JsonValue::Null,
@@ -352,7 +529,7 @@ impl<'a> Value<'a> {
             Value::Number(n) => json_number(*n),
             Value::String(s) => JsonValue::String(s.to_string()),
             Value::Array(a) => JsonValue::Array(
-                a.items
+                a.items()
                     .iter()
                     .map(|v| v.to_json().unwrap_or(JsonValue::Null))
                     .collect(),
@@ -394,6 +571,9 @@ impl<'a> Value<'a> {
     /// budget runs out. Escaped characters count as one byte, and numbers about as many bytes as
     /// JavaScript prints.
     pub(crate) fn json_fits(&self, budget: &mut usize) -> bool {
+        if let Some(json) = self.unread() {
+            return json_text_fits(json, budget);
+        }
         match self {
             Value::Undefined | Value::Function(_) => true,
             Value::Null => spend(budget, 4),
@@ -402,8 +582,8 @@ impl<'a> Value<'a> {
             Value::String(s) => spend(budget, s.len() + 2),
             Value::Array(a) => {
                 // The brackets and the commas; an undefined item or a function becomes `null`.
-                spend(budget, 1 + a.items.len().max(1))
-                    && a.items.iter().all(|v| match v {
+                spend(budget, 1 + a.items().len().max(1))
+                    && a.items().iter().all(|v| match v {
                         Value::Undefined | Value::Function(_) => spend(budget, 4),
                         v => v.json_fits(budget),
                     })
@@ -418,6 +598,41 @@ impl<'a> Value<'a> {
                         v => spend(budget, k.len() + 4) && v.json_fits(budget),
                     })
             }
+        }
+    }
+}
+
+/// A copy of input JSON with its numbers as [`Value::to_json`] writes them: what converting it
+/// to a value and back gives, without building the value.
+fn copy_json(json: &JsonValue) -> JsonValue {
+    match json {
+        JsonValue::Number(n) => json_number(n.as_f64().unwrap_or(f64::NAN)),
+        JsonValue::Array(items) => JsonValue::Array(items.iter().map(copy_json).collect()),
+        JsonValue::Object(fields) => JsonValue::Object(
+            fields
+                .iter()
+                .map(|(k, v)| (k.clone(), copy_json(v)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// [`Value::json_fits`] for input JSON.
+fn json_text_fits(json: &JsonValue, budget: &mut usize) -> bool {
+    match json {
+        JsonValue::Null => spend(budget, 4),
+        JsonValue::Bool(b) => spend(budget, if *b { 4 } else { 5 }),
+        JsonValue::Number(n) => spend(budget, number_len(n.as_f64().unwrap_or(f64::NAN))),
+        JsonValue::String(s) => spend(budget, s.len() + 2),
+        JsonValue::Array(items) => {
+            spend(budget, 1 + items.len().max(1)) && items.iter().all(|v| json_text_fits(v, budget))
+        }
+        JsonValue::Object(fields) => {
+            spend(budget, if fields.is_empty() { 2 } else { 1 })
+                && fields
+                    .iter()
+                    .all(|(k, v)| spend(budget, k.len() + 4) && json_text_fits(v, budget))
         }
     }
 }
@@ -547,7 +762,7 @@ pub(crate) fn write_json_string(out: &mut String, s: &str) {
 pub(crate) fn stringify<'a>(value: &Value<'a>, pretty: bool, limit: usize) -> Result<String> {
     let mut out = String::new();
     let value = match value {
-        Value::Array(a) if a.has(OUTER_WRAPPER) && !a.items.is_empty() => &a.items[0],
+        Value::Array(a) if a.has(OUTER_WRAPPER) && !a.items().is_empty() => &a.items()[0],
         v => v,
     };
     write_json(&mut out, value, pretty, 0, limit)?;
@@ -590,12 +805,12 @@ fn write_json<'a>(
         Value::String(s) => write_json_string(out, s),
         Value::Function(_) => out.push_str("\"\""),
         Value::Array(a) => {
-            if a.items.is_empty() {
+            if a.items().is_empty() {
                 out.push_str("[]");
                 return Ok(());
             }
             out.push('[');
-            for (i, item) in a.items.iter().enumerate() {
+            for (i, item) in a.items().iter().enumerate() {
                 if i > 0 {
                     out.push(',');
                 }

@@ -262,11 +262,11 @@ impl Signature {
                                 array_ok = false;
                             } else if let (Value::Array(a), Some(want)) =
                                 (&arg, subtype.chars().next())
-                                && let Some(first) = a.items.first()
+                                && let Some(first) = a.items().first()
                             {
                                 let item_type = first.signature_symbol();
                                 array_ok = item_type == want
-                                    && a.items.iter().all(|v| v.signature_symbol() == item_type);
+                                    && a.items().iter().all(|v| v.signature_symbol() == item_type);
                             }
                         }
                         if !array_ok {

@@ -90,6 +90,24 @@ evaluations.
    code is a new `U1004`, whose message carries the source's message; the WebAssembly package
    throws the original `TypeError` instead.
 
+## Implementation notes
+
+- Step 2 (lazy levels with the `Json` source) measured how the pending source is stored, because
+  every array and object of an evaluation pays for the test, lazy or not:
+  - An array keeps its items in a plain field. A lazy array keeps its source and its read items
+    in a separate boxed part, so the other arrays test one plain field. A `OnceCell` around the
+    items made `evaluate_document` up to 10% slower on group-by, since every access read
+    through the cell.
+  - An object keeps its `RefCell` map, and a lazy one fills it in place on first access; its
+    source is a plain field and a flag. The accessors are named `borrow()` and `borrow_mut()`,
+    like the `RefCell` they replace.
+  - Scalars are converted directly when a level is read.
+- On the benchmark document, step 2 measured: `evaluate` path 1.9 µs (115 µs before);
+  `evaluate_document` within ±3% of step 1; `evaluate` cases that read every item 0–4% slower
+  than step 1, interleaving conversion with evaluation. Same-build runs on the maintainer's
+  machine sometimes differ by 25–55% on a few `evaluate_document` cases, so a case that moves
+  must be measured again before it is trusted.
+
 ## Alternatives not taken
 
 - **A borrowed variant, `Value::Json(&'a serde_json::Value)`.** Every place that matches on

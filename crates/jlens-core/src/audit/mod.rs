@@ -423,15 +423,15 @@ pub(crate) fn capture(v: &Value<'_>, limits: &CaptureLimits, depth: usize) -> Op
         }
         Value::Array(a) => {
             let mut items: Vec<JsonValue> = a
-                .items
+                .items()
                 .iter()
                 .take(limits.max_items)
                 .map(|i| capture(i, limits, depth + 1).unwrap_or(JsonValue::Null))
                 .collect();
-            if a.items.len() > limits.max_items {
+            if a.items().len() > limits.max_items {
                 items.push(JsonValue::String(format!(
                     "… {} more",
-                    a.items.len() - limits.max_items
+                    a.items().len() - limits.max_items
                 )));
             }
             JsonValue::Array(items)

@@ -120,7 +120,7 @@ impl HostFunction {
         let json: Vec<Option<JsonValue>> = args.iter().map(Value::to_json).collect();
         let input = match input {
             // The input array, wrapped so that it counts as a single context value.
-            Value::Array(a) if a.has(OUTER_WRAPPER) && a.len() == 1 => &a.items[0],
+            Value::Array(a) if a.has(OUTER_WRAPPER) && a.len() == 1 => &a.items()[0],
             v => v,
         };
         let call = HostCall {

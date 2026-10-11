@@ -165,9 +165,15 @@ impl Expression {
         bindings: &Bindings,
         options: &Options,
     ) -> Result<Option<JsonValue>> {
+        let keys = value::Keys::shared();
         eval::evaluate(
             &self.ast,
-            json_input(input),
+            input.map_or(value::Value::Undefined, |json| {
+                value::Value::lazy(json, &keys)
+            }),
+            bindings
+                .iter()
+                .map(|(name, json)| (name, value::Value::lazy(json, &keys))),
             bindings,
             limits(options),
             None,
@@ -186,6 +192,9 @@ impl Expression {
         eval::evaluate(
             &self.ast,
             document.value().clone(),
+            bindings
+                .iter()
+                .map(|(name, json)| (name, value::Value::from_json(json))),
             bindings,
             limits(options),
             None,
@@ -202,9 +211,15 @@ impl Expression {
         options: &Options,
         tracer: &mut dyn audit::Tracer,
     ) -> Result<Option<JsonValue>> {
+        let keys = value::Keys::shared();
         eval::evaluate(
             &self.ast,
-            json_input(input),
+            input.map_or(value::Value::Undefined, |json| {
+                value::Value::lazy(json, &keys)
+            }),
+            bindings
+                .iter()
+                .map(|(name, json)| (name, value::Value::lazy(json, &keys))),
             bindings,
             limits(options),
             Some(tracer),
@@ -238,10 +253,6 @@ impl Expression {
         let result = self.evaluate_traced(input, bindings, options, &mut collector);
         (result, collector.finish())
     }
-}
-
-fn json_input(input: Option<&JsonValue>) -> value::Value<'_> {
-    input.map_or(value::Value::Undefined, value::Value::from_json)
 }
 
 fn limits(options: &Options) -> eval::Limits {

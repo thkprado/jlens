@@ -131,7 +131,7 @@ natives! {
     "min" "<a<n>:n>" ["array"] 1 Aggregation "Smallest number in an array" => |_, a, _| extreme(&arg(&a, 0), f64::min);
     "average" "<a<n>:n>" ["array"] 1 Aggregation "Mean of an array of numbers" => |_, a, _| {
         let items = arg(&a, 0);
-        let Some(arr) = items.as_array().filter(|a| !a.items.is_empty()) else {
+        let Some(arr) = items.as_array().filter(|a| !a.items().is_empty()) else {
             return Ok(Value::Undefined);
         };
         let total = sum(&items)?.as_number().unwrap_or(0.0);
@@ -279,12 +279,12 @@ pub(crate) fn native_value<'a>(name: &str) -> Option<Value<'a>> {
 pub(crate) fn boolean<'a>(v: &Value<'a>) -> Result<Option<bool>> {
     Ok(Some(match v {
         Value::Undefined => return Ok(None),
-        Value::Array(a) => match a.items.len() {
+        Value::Array(a) => match a.items().len() {
             0 => false,
-            1 => return boolean(&a.items[0]),
+            1 => return boolean(&a.items()[0]),
             _ => {
                 let mut any = false;
-                for item in &a.items {
+                for item in a.items() {
                     if boolean(item)? == Some(true) {
                         any = true;
                     }
@@ -305,10 +305,10 @@ pub(crate) fn lookup<'a>(input: &Value<'a>, key: &str) -> Value<'a> {
     match input {
         Value::Array(a) => {
             let mut out = Vec::new();
-            for item in &a.items {
+            for item in a.items() {
                 match lookup(item, key) {
                     Value::Undefined => {}
-                    Value::Array(inner) => out.extend(inner.items.iter().cloned()),
+                    Value::Array(inner) => out.extend(inner.items().iter().cloned()),
                     other => out.push(other),
                 }
             }
@@ -329,7 +329,7 @@ pub(crate) fn append<'a>(a: Value<'a>, b: Value<'a>) -> Value<'a> {
     }
     let mut items = a.items_or_self();
     match &b {
-        Value::Array(arr) => items.extend(arr.items.iter().cloned()),
+        Value::Array(arr) => items.extend(arr.items().iter().cloned()),
         other => items.push(other.clone()),
     }
     Value::array(items, 0)
@@ -353,14 +353,14 @@ fn sum<'a>(items: &Value<'a>) -> Result<Value<'a>> {
         return Ok(Value::Undefined);
     };
     Ok(Value::Number(
-        a.items.iter().filter_map(Value::as_number).sum(),
+        a.items().iter().filter_map(Value::as_number).sum(),
     ))
 }
 
 fn extreme<'a>(items: &Value<'a>, pick: fn(f64, f64) -> f64) -> Result<Value<'a>> {
     match items {
-        Value::Array(a) if !a.items.is_empty() => Ok(Value::Number(
-            a.items
+        Value::Array(a) if !a.items().is_empty() => Ok(Value::Number(
+            a.items()
                 .iter()
                 .filter_map(Value::as_number)
                 .reduce(pick)

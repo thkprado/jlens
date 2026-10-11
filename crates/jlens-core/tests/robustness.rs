@@ -261,6 +261,52 @@ proptest! {
             }
         }
     }
+
+    /// `evaluate` reads its input and bindings lazily, `evaluate_document` converts them first
+    /// (ADR 0010): the results are the same.
+    #[test]
+    fn lazy_input_agrees_with_a_document(source in expression()) {
+        if let Ok(expr) = Expression::compile(&source) {
+            let options = Options::new()
+                .timeout(Duration::from_millis(50))
+                .max_depth(300)
+                .now(0)
+                .seed(1);
+            let mut input = input();
+            input["n"] = json!([2.0, -0.0, 1e300, 18446744073709551615u64, {"o": [[]], "e": {}}]);
+            let bindings = bindings().var("o", input.clone());
+            let lazy = expr.evaluate_with(Some(&input), &bindings, &options);
+            let document = expr.evaluate_document(&Document::new(&input), &bindings, &options);
+            let timed_out = |r: &Result<Option<serde_json::Value>, Error>| {
+                r.as_ref().is_err_and(|e| e.code() == "D1012")
+            };
+            if !timed_out(&lazy) && !timed_out(&document) {
+                prop_assert_eq!(format!("{lazy:?}"), format!("{document:?}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn unread_input_is_returned_as_converted() {
+    let input = json!({"n": [2.0, -0.0, 1e300, 18446744073709551615u64], "o": {"a": [1.5]}});
+    let document = Document::new(&input);
+    for source in ["n", "o", "$", "$$.o", "[o]", "{'x': n}"] {
+        let expr = Expression::compile(source).unwrap();
+        let options = Options::default();
+        assert_eq!(
+            expr.evaluate_with(Some(&input), &Bindings::new(), &options)
+                .unwrap(),
+            expr.evaluate_document(&document, &Bindings::new(), &options)
+                .unwrap(),
+            "{source}"
+        );
+    }
+    // A result larger than the size limit fails before it is copied.
+    let options = Options::new().max_result_size(10);
+    let expr = Expression::compile("o").unwrap();
+    let error = expr.evaluate_with(Some(&input), &Bindings::new(), &options);
+    assert_eq!(error.unwrap_err().code(), "U1001");
 }
 
 /// Patterns that backtrack exponentially on a run of a's that ends in a character they cannot

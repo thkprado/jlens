@@ -272,7 +272,7 @@ pub(super) fn match_<'a>(
 /// Expands `$0`, `$1`, ... and `$$` in a replacement string (jsonata-js `replace`).
 fn substitute<'a>(replacement: &str, matched: &Value<'a>) -> String {
     let group_count = match field(matched, "groups") {
-        Value::Array(g) => g.items.len(),
+        Value::Array(g) => g.items().len(),
         _ => 0,
     };
     let whole = field(matched, "match");
@@ -321,7 +321,7 @@ fn substitute<'a>(replacement: &str, matched: &Value<'a>) -> String {
                             && i >= 1
                             && let Value::String(sub) = field(matched, "groups")
                                 .as_array()
-                                .and_then(|g| g.items.get(i - 1).cloned())
+                                .and_then(|g| g.items().get(i - 1).cloned())
                                 .unwrap_or_default()
                         {
                             out.push_str(&sub);

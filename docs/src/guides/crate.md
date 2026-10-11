@@ -128,9 +128,11 @@ returns.
 
 ## Many expressions, one document
 
-Each `evaluate` call converts its input document into jlens's internal representation. For a
-document of a few dozen kilobytes, that costs more than a typical rule. To evaluate several
-rules against the same document, convert it once into a
+Each `evaluate` call converts the parts of its input document that the expression reads into
+jlens's internal representation, one level at a time: a path costs the width of the objects it
+crosses. An expression that reads most of a document of a few dozen kilobytes (a filter over
+every item, say) spends more on that conversion than on the rule. To evaluate several rules
+against the same document, convert it once into a
 [`Document`](https://docs.rs/jlens-core/latest/jlens_core/struct.Document.html):
 
 ```rust,ignore

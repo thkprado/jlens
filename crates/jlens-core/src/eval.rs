@@ -20,7 +20,8 @@ use crate::functions::{self, Call, boolean};
 use crate::regex::Regex;
 use crate::signature::Signature;
 use crate::value::{
-    self, CONS, Function, KEEP_SINGLETON, Lambda, Map, OUTER_WRAPPER, SEQUENCE, TUPLE_STREAM, Value,
+    self, CONS, Function, KEEP_SINGLETON, Lambda, Map, OUTER_WRAPPER, Object, SEQUENCE,
+    TUPLE_STREAM, Value,
 };
 
 /// A scope of variable bindings.
@@ -184,9 +185,10 @@ fn transform_signature() -> &'static Signature {
 }
 
 /// Evaluates a parsed expression. This is the entry point used by `Expression::evaluate_with`.
-pub(crate) fn evaluate<'a>(
+pub(crate) fn evaluate<'a, 'v>(
     ast: &Ast,
     input: Value<'a>,
+    variables: impl Iterator<Item = (&'v str, Value<'a>)>,
     bindings: &crate::Bindings,
     limits: Limits,
     tracer: Option<&mut dyn Tracer>,
@@ -218,8 +220,8 @@ pub(crate) fn evaluate<'a>(
         None => (since_epoch().as_nanos() as u64) | 1,
     };
     let env = Frame::new(None);
-    for (name, value) in bindings.iter() {
-        ev.bind(&env, name, Value::from_json(value));
+    for (name, value) in variables {
+        ev.bind(&env, name, value);
     }
     for (name, function) in bindings.functions() {
         ev.bind(
@@ -383,7 +385,7 @@ impl<'a> Evaluator<'_, 'a> {
     fn check_size(&self, v: Value<'a>) -> Result<Value<'a>> {
         match &v {
             Value::String(s) => self.check_string(s.len())?,
-            Value::Array(a) => self.check_array(a.items.len())?,
+            Value::Array(a) => self.check_array(a.items().len())?,
             _ => {}
         }
         Ok(v)
@@ -542,7 +544,7 @@ impl<'a> Evaluator<'_, 'a> {
                 if name.is_empty() {
                     match input {
                         Value::Array(a) if a.has(OUTER_WRAPPER) => {
-                            a.items.first().cloned().unwrap_or_default()
+                            a.items().first().cloned().unwrap_or_default()
                         }
                         other => other.clone(),
                     }
@@ -592,10 +594,10 @@ impl<'a> Evaluator<'_, 'a> {
             if expr.attrs.keep_array {
                 a.set(KEEP_SINGLETON);
             }
-            if a.items.is_empty() {
+            if a.items().is_empty() {
                 result = Value::Undefined;
-            } else if a.items.len() == 1 && !a.has(KEEP_SINGLETON) {
-                result = a.items[0].clone();
+            } else if a.items().len() == 1 && !a.has(KEEP_SINGLETON) {
+                result = a.items()[0].clone();
             }
         }
 
@@ -641,7 +643,7 @@ impl<'a> Evaluator<'_, 'a> {
             }
             if !is_tuple
                 && (result_seq.is_undefined()
-                    || result_seq.as_array().is_some_and(|a| a.items.is_empty()))
+                    || result_seq.as_array().is_some_and(|a| a.items().is_empty()))
             {
                 break;
             }
@@ -660,7 +662,7 @@ impl<'a> Evaluator<'_, 'a> {
             } else {
                 let items = bindings
                     .as_array()
-                    .map(|a| a.items.iter().map(|t| tuple_get(t, "@")).collect())
+                    .map(|a| a.items().iter().map(|t| tuple_get(t, "@")).collect())
                     .unwrap_or_default();
                 result_seq = Value::sequence(items);
             }
@@ -703,7 +705,7 @@ impl<'a> Evaluator<'_, 'a> {
         }
         let items: Vec<Value<'a>> = input
             .as_array()
-            .map(|a| a.items.clone())
+            .map(|a| a.items().clone())
             .unwrap_or_default();
         let mut results = Vec::with_capacity(items.len());
         for item in &items {
@@ -725,8 +727,8 @@ impl<'a> Evaluator<'_, 'a> {
         for res in results {
             match &res {
                 Value::Array(a) if !a.has(CONS) => {
-                    self.check_array(out.len() + a.items.len())?;
-                    out.extend(a.items.iter().cloned());
+                    self.check_array(out.len() + a.items().len())?;
+                    out.extend(a.items().iter().cloned());
                 }
                 _ => {
                     self.check_array(out.len() + 1)?;
@@ -744,7 +746,7 @@ impl<'a> Evaluator<'_, 'a> {
                 Stage::Filter { expr, .. } => result = self.filter(expr, result, env)?,
                 Stage::Index { var, .. } => {
                     if let Value::Array(a) = &result {
-                        for (ee, tuple) in a.items.iter().enumerate() {
+                        for (ee, tuple) in a.items().iter().enumerate() {
                             if let Value::Object(o) = tuple {
                                 o.borrow_mut()
                                     .insert(var.as_str().into(), Value::Number(ee as f64));
@@ -793,7 +795,7 @@ impl<'a> Evaluator<'_, 'a> {
             None => input
                 .as_array()
                 .map(|a| {
-                    a.items
+                    a.items()
                         .iter()
                         .map(|item| {
                             let mut t = Map::default();
@@ -814,7 +816,7 @@ impl<'a> Evaluator<'_, 'a> {
                 continue;
             }
             let (items, res_is_tuple) = match &res {
-                Value::Array(a) => (a.items.clone(), a.is_tuple_stream()),
+                Value::Array(a) => (a.items().clone(), a.is_tuple_stream()),
                 other => (vec![other.clone()], false),
             };
             self.check_array(out.len() + items.len())?;
@@ -1027,8 +1029,8 @@ impl<'a> Evaluator<'_, 'a> {
             } else {
                 match &value {
                     Value::Array(a) => {
-                        self.check_array(out.len() + a.items.len())?;
-                        out.extend(a.items.iter().cloned());
+                        self.check_array(out.len() + a.items().len())?;
+                        out.extend(a.items().iter().cloned());
                     }
                     other => {
                         self.check_array(out.len() + 1)?;
@@ -1121,7 +1123,7 @@ impl<'a> Evaluator<'_, 'a> {
         let Value::Array(arr) = input else {
             return Ok(input.clone());
         };
-        if arr.items.len() <= 1 {
+        if arr.items().len() <= 1 {
             return Ok(input.clone());
         }
         let is_tuple = arr.is_tuple_stream();
@@ -1174,7 +1176,7 @@ impl<'a> Evaluator<'_, 'a> {
             }
             Ok(comp == 1)
         };
-        let sorted = functions::merge_sort(arr.items.clone(), &mut swap)?;
+        let sorted = functions::merge_sort(arr.items().clone(), &mut swap)?;
         Ok(Value::array(sorted, 0))
     }
 
@@ -1676,7 +1678,7 @@ fn array_too_long(limit: usize) -> Error {
 /// `*`, whose result holds at most `max` items.
 fn wildcard<'a>(input: &Value<'a>, max: usize) -> Result<Value<'a>> {
     let input = match input {
-        Value::Array(a) if a.has(OUTER_WRAPPER) && !a.items.is_empty() => &a.items[0],
+        Value::Array(a) if a.has(OUTER_WRAPPER) && !a.items().is_empty() => &a.items()[0],
         other => other,
     };
     // jsonata-js appends array values with `$append`, which turns the result into a plain
@@ -1687,7 +1689,7 @@ fn wildcard<'a>(input: &Value<'a>, max: usize) -> Result<Value<'a>> {
     // items of an array.
     let values: Vec<Value<'a>> = match input {
         Value::Object(o) => o.borrow().values().cloned().collect(),
-        Value::Array(a) => a.items.clone(),
+        Value::Array(a) => a.items().clone(),
         _ => Vec::new(),
     };
     {
@@ -1708,7 +1710,7 @@ fn wildcard<'a>(input: &Value<'a>, max: usize) -> Result<Value<'a>> {
 /// itself flattens to far more items than it holds.
 fn flatten<'a>(v: &Value<'a>, out: &mut Vec<Value<'a>>, max: usize) -> Result<()> {
     match v {
-        Value::Array(a) => a.items.iter().try_for_each(|i| flatten(i, out, max)),
+        Value::Array(a) => a.items().iter().try_for_each(|i| flatten(i, out, max)),
         other => push_within(out, other.clone(), max),
     }
 }
@@ -1738,7 +1740,7 @@ fn descendants<'a>(input: &Value<'a>, max: usize) -> Result<Value<'a>> {
 fn recurse_descendants<'a>(input: &Value<'a>, out: &mut Vec<Value<'a>>, max: usize) -> Result<()> {
     match input {
         Value::Array(a) => a
-            .items
+            .items()
             .iter()
             .try_for_each(|i| recurse_descendants(i, out, max)),
         Value::Object(o) => {
@@ -1756,8 +1758,8 @@ fn reduce_tuple_stream<'a>(stream: &Value<'a>) -> Map<'a> {
     let Value::Array(a) = stream else {
         return tuple_map(stream);
     };
-    let mut result = a.items.first().map(tuple_map).unwrap_or_default();
-    for tuple in a.items.iter().skip(1) {
+    let mut result = a.items().first().map(tuple_map).unwrap_or_default();
+    for tuple in a.items().iter().skip(1) {
         for (k, v) in tuple_map(tuple) {
             let entry = result.entry(k).or_default();
             let existing = std::mem::take(entry);
@@ -1769,17 +1771,21 @@ fn reduce_tuple_stream<'a>(stream: &Value<'a>) -> Map<'a> {
 
 /// Whether `object` can be reached from `value` (or is `value`). Shared substructures are
 /// visited once, so this is linear in the size of `value`.
-fn reaches<'a>(value: &Value<'a>, object: &Rc<RefCell<Map<'a>>>) -> bool {
+fn reaches<'a>(value: &Value<'a>, object: &Rc<Object<'a>>) -> bool {
     let mut seen: std::collections::HashSet<*const ()> = std::collections::HashSet::new();
     let mut stack = vec![value.clone()];
     while let Some(v) = stack.pop() {
         match &v {
             Value::Object(o) if Rc::ptr_eq(o, object) => return true,
+            // An array or object not read yet holds only values of the input, none of which
+            // exists before its parent is read.
+            Value::Object(o) if o.is_unread() => {}
+            Value::Array(a) if a.is_unread() => {}
             Value::Object(o) if seen.insert(Rc::as_ptr(o) as *const ()) => {
                 stack.extend(o.borrow().values().cloned());
             }
             Value::Array(a) if seen.insert(Rc::as_ptr(a) as *const ()) => {
-                stack.extend(a.items.iter().cloned());
+                stack.extend(a.items().iter().cloned());
             }
             _ => {}
         }

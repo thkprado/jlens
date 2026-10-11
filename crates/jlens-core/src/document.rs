@@ -10,10 +10,12 @@ use crate::value::{Keys, Map, Value};
 
 /// A JSON document in jlens's internal representation.
 ///
-/// Every `evaluate` call converts its input document from `serde_json::Value`. For a large
-/// document this can cost more than the evaluation itself. To evaluate several expressions (a
-/// set of rules, say) or the same one several times against one document, convert it once
-/// into a `Document` and use [`Expression::evaluate_document`](crate::Expression::evaluate_document).
+/// Every `evaluate` call converts the parts of its input document that the expression reads
+/// from `serde_json::Value`, one level at a time. An expression that reads most of a large
+/// document can spend more on that than on the evaluation itself. To evaluate several
+/// expressions (a set of rules, say) or the same one several times against one document,
+/// convert it once into a `Document` and use
+/// [`Expression::evaluate_document`](crate::Expression::evaluate_document).
 ///
 /// ```
 /// use jlens_core::{Bindings, Document, Expression, Options};

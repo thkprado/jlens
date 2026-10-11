@@ -88,7 +88,7 @@ pub(super) fn zip<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_,
                 a.iter()
                     .map(|v| {
                         v.as_array()
-                            .map(|arr| arr.items[i].clone())
+                            .map(|arr| arr.items()[i].clone())
                             .unwrap_or_default()
                     })
                     .collect(),
@@ -170,7 +170,7 @@ fn keys_of<'a>(v: &Value<'a>, out: &mut Vec<Rc<str>>) {
     match v {
         Value::Array(a) => {
             let mut merged = Vec::new();
-            for item in &a.items {
+            for item in a.items() {
                 keys_of(item, &mut merged);
             }
             for k in merged {
@@ -206,7 +206,7 @@ fn spread_value<'a>(v: &Value<'a>) -> Value<'a> {
     match v {
         Value::Array(arr) => {
             let mut result = Value::sequence(vec![]);
-            for item in &arr.items {
+            for item in arr.items() {
                 result = append(result, spread_value(item));
             }
             result
@@ -257,9 +257,10 @@ pub(super) fn reverse<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call
     let arr = arg(&a, 0);
     match &arr {
         Value::Undefined => Ok(Value::Undefined),
-        Value::Array(items) if items.len() > 1 => {
-            Ok(Value::array(items.items.iter().rev().cloned().collect(), 0))
-        }
+        Value::Array(items) if items.len() > 1 => Ok(Value::array(
+            items.items().iter().rev().cloned().collect(),
+            0,
+        )),
         _ => Ok(arr),
     }
 }
@@ -278,7 +279,7 @@ pub(super) fn sort<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'
         if !numbers && !arr.is_array_of_strings() {
             return Err(Error::new("D3070").with("index", 1));
         }
-        merge_sort(items.items.clone(), &mut |x, y| {
+        merge_sort(items.items().clone(), &mut |x, y| {
             Ok(match (x, y) {
                 (Value::Number(x), Value::Number(y)) => x > y,
                 (Value::String(x), Value::String(y)) => value::js_string_cmp(x, y).is_gt(),
@@ -286,7 +287,7 @@ pub(super) fn sort<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'
             })
         })?
     } else {
-        merge_sort(items.items.clone(), &mut |x, y| {
+        merge_sort(items.items().clone(), &mut |x, y| {
             let res = call(ev, &comparator, vec![x.clone(), y.clone()], c)?;
             Ok(js_truthy(&res))
         })?
@@ -318,7 +319,7 @@ pub(super) fn shuffle<'a>(
     }
     // The 'inside-out' variant of the Fisher-Yates shuffle, as in jsonata-js.
     let mut result: Vec<Value<'a>> = Vec::with_capacity(items.len());
-    for (i, item) in items.items.iter().enumerate() {
+    for (i, item) in items.items().iter().enumerate() {
         let j = (ev.random() * (i + 1) as f64).floor() as usize;
         if j == i {
             result.push(item.clone());
@@ -344,7 +345,7 @@ pub(super) fn distinct<'a>(
         return Ok(arr.clone());
     }
     let mut out: Vec<Value<'a>> = Vec::new();
-    for v in &items.items {
+    for v in items.items() {
         if !out.iter().any(|seen| v.deep_eq(seen)) {
             out.push(v.clone());
         }
