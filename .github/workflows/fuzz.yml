@@ -55,8 +55,10 @@ jobs:
           SECONDS_EACH: ${{ inputs.seconds || '600' }}
         # No sanitizer: jlens forbids `unsafe`, and AddressSanitizer reports false positives
         # when stacker switches stacks. Debug assertions turn arithmetic overflows into panics.
+        # The prebuilt cargo-fuzz is a musl build, which would build for its own target.
         run: >-
           cargo +nightly fuzz run "$TARGET" --sanitizer none --debug-assertions
+          --target x86_64-unknown-linux-gnu
           -- -max_total_time="$SECONDS_EACH" -timeout=10
       - uses: actions/cache/save@v6
         if: always()
