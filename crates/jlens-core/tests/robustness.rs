@@ -320,6 +320,31 @@ fn catastrophic_regexes_stop_within_the_timeout() {
 
 /// Inputs that made the fuzz targets (`fuzz/`) panic, with what they give now: a result, or an
 /// error code.
+/// Inputs on which the fuzz targets that parse overflowed their 1 MB stack.
+#[test]
+fn fuzz_parse_crashes_stay_fixed() {
+    let sources = [
+        // Recovery wrapped every unclosed level in an error node that cloned the levels inside.
+        "(".repeat(600),
+        "[".repeat(600),
+        format!("{}1;", "$f(".repeat(600)),
+        // Chains of operators built trees deeper than the nesting limit.
+        format!("1{}", "+1".repeat(10_000)),
+    ];
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(move || {
+            for source in &sources {
+                let ast = jlens_core::parse_recover(source);
+                assert!(ast.has_errors(), "{}", &source[..20]);
+                let _ = jlens_core::parse(source);
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
 #[test]
 fn fuzz_crashes_stay_fixed() {
     let cases: &[(&str, Result<serde_json::Value, &str>)] = &[

@@ -514,6 +514,24 @@ fn deep_nesting_is_an_error_not_a_crash() {
 }
 
 #[test]
+fn long_operator_chains_count_towards_the_nesting_limit() {
+    // Each operator of a chain adds a level to the tree, which is walked and dropped recursively.
+    let chain = |step: &str, n: usize| format!("1{}", step.repeat(n));
+    let ok = jlens_core::Expression::compile(&chain("+1", 998)).unwrap();
+    assert_eq!(
+        ok.evaluate(None, &jlens_core::Bindings::new()).unwrap(),
+        Some(999.into())
+    );
+    for step in ["+1", " and 1", ".a", "[0]", "~>$f"] {
+        let source = chain(step, 5000);
+        let err = jlens_core::Expression::compile(&source).unwrap_err();
+        assert_eq!(err.code(), "U1001", "{step}");
+        let ast = jlens_core::parse_recover(&source);
+        assert_eq!(ast.diagnostics[0].code, "U1001", "{step}");
+    }
+}
+
+#[test]
 fn recovery_moves_past_lexer_errors() {
     // Found by the property tests: an out-of-range number made recovery loop forever.
     for source in [

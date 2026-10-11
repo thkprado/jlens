@@ -13,11 +13,17 @@ All notable changes are recorded here. The format follows
 - Panics found by fuzzing: a date/time picture marker that starts with a comma
   (`$fromMillis(0, '[,2]')`), and `$parseInteger` with a picture whose digits are not ASCII on
   text with other characters (`$parseInteger('12', '##０')`).
+- Stack overflows found by fuzzing: recovering from hundreds of unclosed brackets
+  (`parse_recover("((((…")`) copied the tree once per level, and a chain of thousands of
+  operators (`1 + 1 + … + 1`) built a tree deep enough to overflow the stack when dropped.
 
 ### Changed
 
 - `$fromMillis` fails with `D3132` for a picture marker whose component is unknown, also when it
   has a presentation (`'[Qx]'`), where it wrote nothing; jsonata-js writes "undefined".
+- The nesting limit (1,000 levels, `U1001`) also counts the operators of a chain: a chain of
+  more than 1,000 terms, such as `1 + 1 + … + 1`, is rejected. jsonata-js accepts about 2,000
+  before its stack overflows.
 
 ## [0.7.0]
 

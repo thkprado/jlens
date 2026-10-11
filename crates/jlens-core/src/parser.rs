@@ -218,8 +218,9 @@ fn is_unknown_operator(op: &str) -> bool {
 
 type PResult<T> = Result<T>;
 
-/// Maximum nesting of subexpressions. Deeper expressions fail with `U1001` instead of exhausting
-/// the stack in the passes that walk the tree.
+/// Maximum depth of the syntax tree: nested subexpressions plus the operands of operator chains
+/// such as `1 + 2 + 3`. Deeper expressions fail with `U1001` instead of exhausting the stack in
+/// the passes that walk, clone or drop the tree.
 pub(crate) const MAX_NESTING: usize = 1000;
 
 pub(crate) struct Parser<'a> {
@@ -228,7 +229,8 @@ pub(crate) struct Parser<'a> {
     node: Sym,
     prev_end: usize,
     recover: bool,
-    /// Nesting of `expression` calls, bounded by [`MAX_NESTING`].
+    /// Depth of the tree being built (nested `expression` calls and the operators applied in
+    /// each), bounded by [`MAX_NESTING`].
     depth: usize,
     pub errors: Vec<Error>,
     pub warnings: Vec<Diagnostic>,
@@ -380,6 +382,16 @@ impl<'a> Parser<'a> {
 
     /// Pratt's algorithm.
     fn expression(&mut self, rbp: u8) -> PResult<Raw> {
+        let depth = self.depth;
+        self.deeper()?;
+        let result = crate::stack::grow(|| self.expression_inner(rbp));
+        // Also undoes the levels added by the operators of this expression.
+        self.depth = depth;
+        result
+    }
+
+    /// Adds a level to the tree being built, failing with `U1001` past [`MAX_NESTING`].
+    fn deeper(&mut self) -> PResult<()> {
         if self.depth >= MAX_NESTING || crate::stack::exhausted() {
             return Err(Error::new("U1001")
                 .with(
@@ -391,9 +403,7 @@ impl<'a> Parser<'a> {
                 .located(self.src, self.node.span, self.node.span.end));
         }
         self.depth += 1;
-        let result = crate::stack::grow(|| self.expression_inner(rbp));
-        self.depth -= 1;
-        result
+        Ok(())
     }
 
     fn expression_inner(&mut self, rbp: u8) -> PResult<Raw> {
@@ -426,7 +436,10 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
+    /// Applies the operator at the current symbol to `left`: one more level of the tree, so that
+    /// a long chain such as `1 + 2 + … + 5000` cannot build a tree deeper than the limit.
     fn led_step(&mut self, left: Raw) -> PResult<Raw> {
+        self.deeper()?;
         let t = self.node.clone();
         self.advance(None, false)?;
         self.led(t, left)
@@ -577,13 +590,14 @@ impl<'a> Parser<'a> {
         let op = t.id();
         let kind = match op {
             "(error)" => {
+                let (span, pos) = (left.span, left.pos);
                 return Ok(Raw::new(
                     RawKind::Error {
                         error: None,
-                        lhs: Some(Box::new(left.clone())),
+                        lhs: Some(Box::new(left)),
                     },
-                    left.span,
-                    left.pos,
+                    span,
+                    pos,
                 ));
             }
             "??" => {

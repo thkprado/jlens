@@ -49,8 +49,8 @@ expressions that users write:
 ```
 
 The default depth limit is 50,000 levels natively; the stack grows as needed. There is no
-default timeout. Expressions nested more than 1,000 levels deep are rejected when compiled
-(`U1001`). A string longer than `Options::max_string_length` (256 MiB), an array longer
+default timeout. Expressions nested more than 1,000 levels deep (counting each operator of a
+chain such as `1 + 2 + 3`) are rejected when compiled (`U1001`). A string longer than `Options::max_string_length` (256 MiB), an array longer
 than `Options::max_array_length` (16,777,216 items) or a result larger than
 `Options::max_result_size` (256 MiB of JSON text) stops the evaluation with `U1001`
 instead of exhausting memory. See [Guardrails](../architecture/evaluator.md#guardrails).

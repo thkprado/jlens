@@ -96,7 +96,7 @@ clears those frames when the evaluation ends.
 | Evaluation depth | `Options::max_depth` | `D1011` | 50,000 native, 1,000 in Wasm |
 | Wall-clock time | `Options::timeout` | `D1012` | none |
 | Cancellation from another thread | `Options::cancel_token` | `U1003` | none |
-| Expression nesting | (fixed) | `U1001` | 1,000 levels, checked by the parser |
+| Expression nesting | (fixed) | `U1001` | 1,000 levels of syntax tree, checked by the parser |
 | Length of a built string | `Options::max_string_length` | `U1001` | 256 MiB (in bytes of UTF-8) |
 | Items of a built array | `Options::max_array_length` | `U1001` | 16,777,216 |
 | Size of the result, and of the arguments of a host function | `Options::max_result_size` | `U1001` | 256 MiB (in bytes of compact JSON) |
@@ -116,8 +116,10 @@ needs limits so that it fails with an error instead of crashing the process.
   (1,000) keeps evaluations well inside it. A larger `maxDepth` can raise a JavaScript
   `RangeError` and break the instance.
 
-The nesting limit bounds every recursive walk of the syntax tree: 1,000 levels is far more
-than any hand-written expression uses.
+The nesting limit bounds every recursive walk of the syntax tree, including the ones that do
+not grow the stack, such as cloning and dropping it. Both nested subexpressions and the operators
+of a chain count: `1 + 2 + 3` is a tree two levels deep, built by a loop rather than by
+recursion. 1,000 levels is far more than any hand-written expression uses.
 
 The size limits stop an expression that doubles a string or an array on each step, or a path
 whose steps multiply the length of a sequence, before it runs out of memory, which would abort
