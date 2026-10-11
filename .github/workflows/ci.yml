@@ -98,3 +98,13 @@ jobs:
           crates/jlens-wasm/tests/types.ts
       - name: Report package size
         run: ls -l crates/jlens-wasm/pkg/*.wasm
+
+  # The release binaries for every target, built as the Release workflow builds them, so that a
+  # target that stops building is found on main and not when a tag is pushed. Not on pull
+  # requests: the macOS runners are slow.
+  binaries:
+    name: Release binaries
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/binaries.yml
+    with:
+      ref: ${{ github.sha }}

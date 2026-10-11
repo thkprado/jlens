@@ -1,0 +1,76 @@
+name: Binaries
+
+# Builds the jlens binary for each platform, as jlens-X.Y.Z-<target>.tar.gz (.zip on Windows)
+# holding a jlens-X.Y.Z-<target> directory. The [package.metadata.binstall] section of
+# crates/jlens-cli/Cargo.toml points cargo binstall at these names.
+# Called by the Release workflow, which uploads the archives and publishes only once every
+# target has built, and by CI on each push to main, so that a target that stops building is
+# found before a release.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "The tag (vX.Y.Z) or commit to build; the archives are named after it"
+        type: string
+        required: true
+      upload:
+        description: "Upload the archives as artifacts of the run"
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  binary:
+    name: binary (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      # Static musl binaries run on any Linux distribution. psm (through stacker) compiles
+      # assembly, which needs the musl C compiler.
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          target=${{ matrix.target }}
+          echo "CC_${target//-/_}=musl-gcc" >> "$GITHUB_ENV"
+      - run: cargo build --release --locked -p jlens-cli --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          name="jlens-${REF#v}-${{ matrix.target }}"
+          mkdir "$name"
+          cp LICENSE crates/jlens-cli/README.md "$name/"
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp target/${{ matrix.target }}/release/jlens.exe "$name/"
+            7z a "$name.zip" "$name"
+          else
+            cp target/${{ matrix.target }}/release/jlens "$name/"
+            tar czf "$name.tar.gz" "$name"
+          fi
+      - uses: actions/upload-artifact@v7
+        if: inputs.upload
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            jlens-*.tar.gz
+            jlens-*.zip
+          if-no-files-found: error

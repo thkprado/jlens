@@ -1,11 +1,11 @@
 name: Release
 
-# Publishes the crates to crates.io and the WebAssembly package to npm when a version tag
-# (v0.1.0, ...) is pushed, builds the jlens binaries, then drafts the GitHub release from
-# CHANGELOG.md with the binaries attached. Needs the repository secrets CARGO_REGISTRY_TOKEN and
-# NPM_TOKEN.
+# When a version tag (v0.1.0, ...) is pushed, builds the jlens binaries (binaries.yml), then
+# publishes the crates to crates.io and the WebAssembly package to npm, then drafts the GitHub
+# release from CHANGELOG.md with the binaries attached. Nothing is published unless every binary
+# builds. Needs the repository secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN.
 # Run by hand (workflow_dispatch) with an existing tag, it publishes nothing: it builds the
-# binaries of that tag and drafts its release, for a release whose binaries failed.
+# binaries of that tag and drafts its release, for a release whose draft failed after publishing.
 # See CONTRIBUTING.md for the release checklist.
 
 on:
@@ -22,8 +22,17 @@ env:
   TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
+  # Every binary builds before anything is published: a target that fails stops the release
+  # while it can still be tagged again.
+  binaries:
+    uses: ./.github/workflows/binaries.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+      upload: true
+
   crates:
     name: crates.io
+    needs: binaries
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
@@ -50,6 +59,7 @@ jobs:
 
   npm:
     name: npm
+    needs: binaries
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
@@ -71,58 +81,6 @@ jobs:
         working-directory: crates/jlens-wasm/pkg
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  # The jlens binary for each platform, as jlens-X.Y.Z-<target>.tar.gz (.zip on Windows) holding
-  # a jlens-X.Y.Z-<target> directory. The [package.metadata.binstall] section of
-  # crates/jlens-cli/Cargo.toml points cargo binstall at these names.
-  binaries:
-    name: binary (${{ matrix.target }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
-          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
-          - { target: x86_64-apple-darwin, os: macos-latest }
-          - { target: aarch64-apple-darwin, os: macos-latest }
-          - { target: x86_64-pc-windows-msvc, os: windows-latest }
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.TAG }}
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      # Static musl binaries run on any Linux distribution. psm (through stacker) compiles
-      # assembly, which needs the musl C compiler.
-      - if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-          target=${{ matrix.target }}
-          echo "CC_${target//-/_}=musl-gcc" >> "$GITHUB_ENV"
-      - run: cargo build --release --locked -p jlens-cli --target ${{ matrix.target }}
-      - name: Package
-        shell: bash
-        run: |
-          name="jlens-${TAG#v}-${{ matrix.target }}"
-          mkdir "$name"
-          cp LICENSE crates/jlens-cli/README.md "$name/"
-          if [ "$RUNNER_OS" = Windows ]; then
-            cp target/${{ matrix.target }}/release/jlens.exe "$name/"
-            7z a "$name.zip" "$name"
-          else
-            cp target/${{ matrix.target }}/release/jlens "$name/"
-            tar czf "$name.tar.gz" "$name"
-          fi
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.target }}
-          path: |
-            jlens-*.tar.gz
-            jlens-*.zip
-          if-no-files-found: error
 
   github:
     name: GitHub release (draft)

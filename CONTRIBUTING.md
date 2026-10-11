@@ -68,11 +68,12 @@ cargo xtask serve                              # serve the repository, for examp
    (cd crates/jlens-wasm/pkg && npm pack --dry-run)
    ```
 
-4. Commit, tag `vX.Y.Z`, and push the tag. The `Release` workflow publishes `jlens-core`,
-   `jlens-schema`, `jlens-lsp` and `jlens-cli` to crates.io, in that order, and `jlens-wasm` to npm,
-   builds the `jlens` binaries for Linux, macOS and Windows, then drafts the GitHub release with the
-   notes of the version, the binary archives and their `SHA256SUMS`. It needs the repository
-   secrets `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`.
+4. Commit, tag `vX.Y.Z`, and push the tag. The `Release` workflow first builds the `jlens`
+   binaries for Linux, macOS and Windows (CI builds them on each push to `main` too), then
+   publishes `jlens-core`, `jlens-schema`, `jlens-lsp` and `jlens-cli` to crates.io, in that
+   order, and `jlens-wasm` to npm, then drafts the GitHub release with the notes of the version,
+   the binary archives and their `SHA256SUMS`. It needs the repository secrets
+   `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`.
 
    To publish by hand instead: `cargo publish -p jlens-core`, then `-p jlens-schema`, then
    `-p jlens-lsp`, then `-p jlens-cli`; then `npm publish --access public` in `crates/jlens-wasm/pkg` after
@@ -80,9 +81,12 @@ cargo xtask serve                              # serve the repository, for examp
    `cargo xtask release-notes X.Y.Z > notes.md` and
    `gh release create vX.Y.Z --draft --verify-tag --title "jlens X.Y.Z" --notes-file notes.md`.
 
-   If a binary fails after the packages are published, fix the workflow on `main` and run it by
-   hand for the tag: `gh workflow run release.yml -f tag=vX.Y.Z`. That run publishes nothing; it
-   builds the binaries of the tag and drafts the release.
+   If a binary fails, nothing has been published: fix the cause on `main`, then move the tag to
+   the fixed commit (`git tag -f vX.Y.Z`, `git push -f origin vX.Y.Z`); re-run the failed jobs
+   instead when only a runner failed. If the draft release fails after the packages are
+   published, fix the workflow on `main` and run it by hand for the tag:
+   `gh workflow run release.yml -f tag=vX.Y.Z`. That run publishes nothing; it builds the
+   binaries of the tag and drafts the release.
 5. Review the draft on the Releases page, edit it if needed, and publish it. `cargo binstall`
    finds the binaries once the release is published.
 
