@@ -9,6 +9,7 @@ mod functions;
 mod output;
 mod report;
 mod schema;
+mod test;
 
 use std::collections::HashMap;
 use std::fs;
@@ -41,6 +42,8 @@ enum Command {
     Eval(eval::EvalArgs),
     /// Check an expression for syntax errors, annotation problems and unknown fields.
     Check(CheckArgs),
+    /// Run files of test cases: inputs, bindings and the expected result or error code.
+    Test(test::TestArgs),
     /// List the built-in functions, or describe one.
     Functions(functions::FunctionsArgs),
     /// List the error and warning codes, or describe one.
@@ -151,6 +154,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
     match cli.command {
         Command::Eval(args) => eval::run(args),
         Command::Check(args) => check(args),
+        Command::Test(args) => test::run(args),
         Command::Functions(args) => functions::run(args),
         Command::Errors(args) => errors::run(args),
         Command::Schema(cmd) => schema::run(cmd),

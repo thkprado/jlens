@@ -374,6 +374,35 @@ fn check_config() {
 }
 
 #[test]
+fn test() {
+    snapshot!(
+        "test_pass",
+        &[
+            "test",
+            "fixtures/cli/test/shipping.json",
+            "fixtures/cli/test/clock.json"
+        ]
+    );
+    snapshot!(
+        "test_failures",
+        &["test", "fixtures/cli/test/discount.json"]
+    );
+    snapshot!(
+        "test_json",
+        &["test", "--json", "fixtures/cli/test/discount.json"]
+    );
+    snapshot!(
+        "test_invalid",
+        &[
+            "test",
+            "--json",
+            "fixtures/cli/test/shipping.json",
+            "fixtures/cli/test/invalid/two-expectations.json"
+        ]
+    );
+}
+
+#[test]
 fn functions() {
     snapshot!("functions_list", &["functions"]);
     snapshot!("functions_one", &["functions", "formatNumber"]);

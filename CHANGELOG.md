@@ -19,6 +19,10 @@ All notable changes are recorded here. The format follows
   `--config`: files get the schema, variables and host functions that the language server gives
   them. `--schema` replaces the configured schema, and `--path` gives an expression of the
   argument the configuration of a file path. The `config` module of `jlens-lsp` is public.
+- `jlens test` runs files of test cases: an expression, and for each case an input, bindings
+  and the expected result, undefined result or error code. It reports the failures as text, or
+  with `--json` as one JSON object whose expected and actual outcomes have the shape of the
+  `eval --json` envelope. A case file may fix `now` and `seed`.
 
 ## [0.3.0]
 

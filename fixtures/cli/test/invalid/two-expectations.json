@@ -1,0 +1,4 @@
+{
+  "expr": "1 + 1",
+  "cases": [{"result": 2}, {"result": 2, "error": "T2001"}]
+}

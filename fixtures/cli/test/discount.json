@@ -1,0 +1,18 @@
+{
+  "expr": "$sum(items.price) * (1 - $discount)",
+  "bindings": {"discount": 0.1},
+  "cases": [
+    {"name": "ten percent off", "input": {"items": [{"price": 10}, {"price": 30}]}, "result": 36},
+    {
+      "name": "the case's bindings win",
+      "input": {"items": [{"price": 10}, {"price": 30}]},
+      "bindings": {"discount": 0},
+      "result": 40
+    },
+    {"name": "no items", "input": {}, "undefined": true},
+    {"input": {"items": [{"price": 100}]}, "result": 100},
+    {"name": "text prices", "input": {"items": [{"price": "10"}]}, "error": "T2001"},
+    {"name": "no input", "undefined": true},
+    {"name": "a discount of null", "input": {"items": []}, "bindings": {"discount": null}, "result": 0}
+  ]
+}

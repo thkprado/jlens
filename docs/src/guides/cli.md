@@ -8,6 +8,8 @@ jlens eval      <EXPR> | -f FILE  [-i INPUT | --no-input] [--ndjson] [--filter]
                 [--now TIME] [--seed N]
                 [--explain | --audit json|text] [--audit-level decisions|full] [--trace-log FILE]
 jlens check     <EXPR> | -f FILE...  [--json] [--deny-warnings] [--schema SCHEMA]
+                [--config FILE] [--path FILE]
+jlens test      FILE...  [--json] [--timeout MS]
 jlens functions [NAME] [--json]
 jlens errors    [CODE] [--json]
 jlens schema infer    SAMPLES...  [--each] [--overrides FILE] [-o SCHEMA]
@@ -18,16 +20,16 @@ jlens ast       <EXPR> | -f FILE  [--tokens | --raw] [--recover]
 Every command takes the expression either as an argument or from a file with `-f`. Prefer `-f`
 for anything longer than a one-liner. Shells interpret `$`, `"` and `*` differently, and Windows
 shells (`cmd.exe`, PowerShell) in particular make quoting expressions awkward. Glob patterns in
-`jlens check -f` and `jlens schema infer` are expanded by `jlens` itself, so they work in every
-shell.
+`jlens check -f`, `jlens test` and `jlens schema infer` are expanded by `jlens` itself, so they
+work in every shell.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | Success. `check` may still have printed warnings (unless `--deny-warnings`) |
-| `1` | The expression has errors: a syntax error, an evaluation error, or (with `--ndjson`) at least one line that failed |
-| `2` | Usage or I/O problem: unreadable file, invalid JSON input, bad arguments, a terminal on standard input |
+| `1` | The expression has errors: a syntax error, an evaluation error, or (with `--ndjson`) at least one line that failed; `test`: at least one case failed |
+| `2` | Usage or I/O problem: unreadable file, invalid JSON input, an invalid case file, bad arguments, a terminal on standard input |
 
 Writing to a closed pipe, as in `jlens functions | head`, ends quietly with code 0.
 
@@ -50,6 +52,8 @@ Writing to a closed pipe, as in `jlens functions | head`, ends quietly with code
 - **Use `eval --json`** to get every outcome, errors included, as one line of JSON on standard
   output (see [below](#machine-output---json)), and `check --json` for the diagnostics of
   every file as one JSON array.
+- **Test the expressions you write** with `jlens test` and a file of cases, and read the
+  failures from `test --json` (see [below](#jlens-test)).
 - **Fix the clock and the seed** with `--now` and `--seed` when a result depends on `$now()`,
   `$millis()`, `$random()` or `$shuffle()`, so that the same command prints the same bytes when
   it is run again.
@@ -236,6 +240,64 @@ To validate a directory of rules in CI, warnings included:
 
 ```sh
 jlens check --deny-warnings -f 'rules/*.jsonata'
+```
+
+## `jlens test`
+
+Runs files of test cases. A case file is a JSON object that gives one expression, inline with
+`expr` or as the path of a file with `file` (relative to the case file), and the `cases` it is
+evaluated with:
+
+```json
+{
+  "file": "../rules/discount.jsonata",
+  "bindings": {"discount": 0.1},
+  "cases": [
+    {"name": "ten percent off", "input": {"items": [{"price": 10}, {"price": 30}]}, "result": 36},
+    {"name": "no items", "input": {}, "undefined": true},
+    {"name": "text prices", "input": {"items": [{"price": "10"}]}, "error": "T0412"}
+  ]
+}
+```
+
+Each case has an optional `name`, the `input` document (absent for none; `null` is a
+document), its own `bindings`, which are added to those of the file and win over them, and
+exactly one expectation:
+
+| Key | The case passes when |
+|---|---|
+| `"result": VALUE` | the result equals `VALUE`. Numbers compare by value (`1` equals `1.0`), and the keys of objects in any order |
+| `"undefined": true` | the result is undefined |
+| `"error": "CODE"` | the evaluation, or the compilation, fails with this error code. Messages are not compared |
+
+The file may also fix the clock with `now` (milliseconds or an ISO 8601 timestamp, as
+`eval --now`) and the random numbers with `seed`. Unknown keys are errors, so that a misspelt
+expectation does not pass unnoticed.
+
+`jlens test` takes several files, and glob patterns such as `tests/*.json`. It reports each
+failed case, with what was expected and what the expression gave, then a summary per file. Had
+the third case above expected `T2001`:
+
+```text
+$ jlens test tests/discount.json
+FAIL tests/discount.json case 3: text prices
+  expected: error T2001
+  actual:   error T0412: Argument 1 of function "sum" must be an array of "numbers"
+tests/discount.json: 2 passed, 1 failed
+```
+
+A failed case makes the exit code 1. A case file that cannot be read, or is invalid, ends with
+exit code 2 before any case runs. `--timeout` stops each evaluation after a number of
+milliseconds (error `D1012`).
+
+With `--json`, the outcome is one compact JSON object on standard output, with the number of
+cases that `passed` and `failed`, and the `failures`. Each failure has the `file`, the 1-based
+`case` number, the `name` if there is one, and what was `expected` and what is `actual`, both in
+the shape of the [`eval --json` envelope](#machine-output---json):
+
+```text
+$ jlens test --json tests/discount.json
+{"passed":2,"failed":1,"failures":[{"file":"tests/discount.json","case":3,"name":"text prices","expected":{"ok":false,"error":{"code":"T2001"}},"actual":{"ok":false,"error":{"code":"T0412","message":"Argument 1 of function \"sum\" must be an array of \"numbers\"","position":5,"line":1,"column":1}}}]}
 ```
 
 ## `jlens functions`

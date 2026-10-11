@@ -292,7 +292,7 @@ fn invalid_input(err: &serde_json::Error) -> jlens_core::Error {
 }
 
 /// Parses `--now`: milliseconds since the epoch, or an ISO 8601 timestamp.
-fn parse_now(text: &str) -> std::result::Result<i64, String> {
+pub fn parse_now(text: &str) -> std::result::Result<i64, String> {
     if let Ok(millis) = text.parse() {
         return Ok(millis);
     }

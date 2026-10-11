@@ -1,0 +1,17 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"test\", \"fixtures/cli/test/discount.json\"], None)"
+---
+exit: 1
+--- stdout
+--- stderr
+FAIL fixtures/cli/test/discount.json case 4
+  expected: 100
+  actual:   90
+FAIL fixtures/cli/test/discount.json case 5: text prices
+  expected: error T2001
+  actual:   error T0412: Argument 1 of function "sum" must be an array of "numbers"
+FAIL fixtures/cli/test/discount.json case 7: a discount of null
+  expected: 0
+  actual:   error T2002: The right side of the "-" operator must evaluate to a number
+fixtures/cli/test/discount.json: 4 passed, 3 failed

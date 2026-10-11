@@ -15,6 +15,7 @@ $ jlens eval --ndjson --filter -i orders.ndjson 'total > 1000'     # grep for JS
 $ jlens eval -f rule.jsonata -i order.json --explain               # why this result?
 $ jlens schema infer samples/*.json -o order.schema.json           # learn the structure
 $ jlens check --schema order.schema.json -f rule.jsonata           # catch misspelt fields
+$ jlens test tests/*.json                                          # run the rules' cases
 $ jlens functions formatNumber                                     # built-in reference
 ```
 
@@ -22,6 +23,7 @@ $ jlens functions formatNumber                                     # built-in re
 |---|---|
 | `jlens eval` | Evaluate against a document, a stream of documents (`--ndjson`), or nothing; filter, explain or audit |
 | `jlens check` | Report syntax errors and unknown fields, for editors and CI (`--json`) |
+| `jlens test` | Run files of cases (input, bindings, expected result or error code) |
 | `jlens schema infer` / `complete` | Infer a JSON Schema from samples; list completions |
 | `jlens functions` | Describe the built-in functions |
 | `jlens ast` | Show the tokens or the syntax tree |

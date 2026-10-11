@@ -1,0 +1,10 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"test\", \"fixtures/cli/test/shipping.json\",\n\"fixtures/cli/test/clock.json\"], None)"
+---
+exit: 0
+--- stdout
+--- stderr
+fixtures/cli/test/shipping.json: 3 passed, 0 failed
+fixtures/cli/test/clock.json: 1 passed, 0 failed
+2 file(s): 4 passed, 0 failed

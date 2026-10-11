@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"test\", \"--json\", \"fixtures/cli/test/shipping.json\",\n\"fixtures/cli/test/invalid/two-expectations.json\"], None)"
+---
+exit: 2
+--- stdout
+--- stderr
+error: fixtures/cli/test/invalid/two-expectations.json: case 2: give exactly one of result, "undefined": true or error

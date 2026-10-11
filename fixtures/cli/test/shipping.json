@@ -1,0 +1,32 @@
+{
+  "file": "../../shipping-rule.jsonata",
+  "cases": [
+    {
+      "name": "big electronics orders ship free",
+      "input": {
+        "customer": {"login": "alice.walker99"},
+        "items": [
+          {"color": "blue", "type": "apparel", "unitPrice": 10000, "quantity": 2, "tax": 1500},
+          {"color": "black", "type": "electronic", "unitPrice": 37000, "quantity": 1, "tax": 4000}
+        ]
+      },
+      "result": {"action": "FREE_SHIPPING", "code": "OK_200"}
+    },
+    {
+      "name": "blocked customers pay the fee",
+      "input": {
+        "customer": {"login": "mallory.cheat1"},
+        "items": [{"type": "electronic", "unitPrice": 60000, "quantity": 1, "tax": 4000}]
+      },
+      "result": {"action": "REGULAR_FEE", "code": "SHIP_FEE_402", "delivery": "SLOW"}
+    },
+    {
+      "name": "quantities must be numbers",
+      "input": {
+        "customer": {"login": "alice.walker99"},
+        "items": [{"unitPrice": 60000, "quantity": "1"}]
+      },
+      "error": "T2002"
+    }
+  ]
+}
