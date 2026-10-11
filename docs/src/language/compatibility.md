@@ -57,7 +57,8 @@ extensions live in comments or in the host API, not in the language syntax.
 | `$split(s, "")` | Splits into UTF-16 code units | Splits into characters (astral characters stay whole) |
 | `$base64encode` | Takes the low byte of each UTF-16 code unit | The same; text outside Latin-1 does not round-trip, as in jsonata-js |
 | `$random`, `$shuffle` | `Math.random` | A per-evaluation xorshift generator seeded from the clock |
-| Regular expressions | JavaScript `RegExp` | `regress` (ECMAScript syntax and semantics). Match positions are UTF-16 offsets |
+| Regular expressions | JavaScript `RegExp` | `jlens-regress`, a fork of `regress` 0.10.5 (ECMAScript syntax and semantics). Match positions are UTF-16 offsets |
+| A regular expression that backtracks catastrophically, such as `/^(a+)+$/` on a long run of `a` followed by `!` | Runs until the match ends, which can take years, and blocks the thread | The same without limits. With `Options::timeout` or a cancellation token, the match stops with `D1012` or `U1003`, like any other step ([ADR 0009](../adr/0009-bounded-regex.md)) |
 
 The suite runner's own guard raises `U1001` for its `timelimit`/`depth` cases; jlens enforces
 the same limits through `Options` and reports `D1011`/`D1012`, which the conformance harness

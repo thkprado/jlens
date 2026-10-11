@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A regular expression that backtracks catastrophically, such as `/^(a+)+$/` on a long run of
+  `a` followed by `!`, now stops within the evaluation's timeout (`D1012`) or when its
+  cancellation token is cancelled (`U1003`). Before, a single match could outlast the timeout by
+  minutes or more, in Rust, in the CLI and in WebAssembly. Matches run on `jlens-regress`, a
+  fork of `regress` 0.10.5 whose backtracker polls the limits (ADR 0009); without a timeout or a
+  token, nothing changes.
+
 ## [0.5.0]
 
 Guardrails for untrusted expressions and checked compatibility: a cap on the size of a result,

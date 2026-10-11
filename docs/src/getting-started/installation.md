@@ -37,7 +37,8 @@ jlens-schema = "0.5"   # optional: schema inference and the language service
 serde_json = "1"
 ```
 
-`jlens-core` depends on `serde_json`, `indexmap`, `regress` and a few small crates. The
+`jlens-core` depends on `serde_json`, `indexmap`, `jlens-regress` (a fork of `regress`) and a
+few small crates. The
 optional `tracing` feature adds [`tracing`](https://docs.rs/tracing) spans for evaluations; see
 the [audit guide](../guides/audit.md). The [crate guide](../guides/crate.md) shows how to use
 the API.

@@ -21,7 +21,7 @@ input JSON ──► Value / Document ──────────────
 
 | Crate | Contents | Depends on |
 |---|---|---|
-| `jlens-core` | Lexer, parser, syntax tree, evaluator, function library, errors, audit subsystem | serde_json, indexmap, regress, ryu-js |
+| `jlens-core` | Lexer, parser, syntax tree, evaluator, function library, errors, audit subsystem | serde_json, indexmap, jlens-regress (a fork of regress), ryu-js |
 | `jlens-schema` | Structural metadata (`Schema`), inference, JSON Schema import and export, static typing of expressions, the language service | jlens-core |
 | `jlens-cli` | The `jlens` command: `eval`, `check`, `functions`, `schema`, `ast` | jlens-core, jlens-schema, clap |
 | `jlens-wasm` | WebAssembly bindings: `Expression`, `Document`, `LanguageService`, … with TypeScript declarations | jlens-core, jlens-schema, wasm-bindgen |

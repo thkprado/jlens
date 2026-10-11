@@ -1113,13 +1113,19 @@ fn format_component(
 }
 
 /// `$toMillis`: parses an ISO 8601 timestamp, or one described by a picture string. `now` is the
-/// evaluation's timestamp, used to fill in unspecified leading components.
-pub(crate) fn to_millis(timestamp: &str, picture: Option<&str>, now: f64) -> Result<Option<f64>> {
+/// evaluation's timestamp, used to fill in unspecified leading components. `find` runs the
+/// regex built from the picture, within the evaluation's limits (`Evaluator::find_regex`).
+pub(crate) fn to_millis(
+    timestamp: &str,
+    picture: Option<&str>,
+    now: f64,
+    find: impl FnOnce(&regress::Regex, &str) -> Result<Option<regress::Match>>,
+) -> Result<Option<f64>> {
     match picture {
         None => parse_iso8601(timestamp)
             .map(Some)
             .ok_or_else(|| Error::new("D3110").with("value", timestamp)),
-        Some(picture) => parse_datetime(timestamp, picture, now),
+        Some(picture) => parse_datetime(timestamp, picture, now, find),
     }
 }
 
@@ -1167,7 +1173,12 @@ fn escape_regex(s: &str) -> String {
     out
 }
 
-fn parse_datetime(timestamp: &str, picture: &str, now: f64) -> Result<Option<f64>> {
+fn parse_datetime(
+    timestamp: &str,
+    picture: &str,
+    now: f64,
+    find: impl FnOnce(&regress::Regex, &str) -> Result<Option<regress::Match>>,
+) -> Result<Option<f64>> {
     let spec = analyse_datetime_picture(picture)?;
     let mut regex = String::from("^");
     let mut parsers: Vec<Option<(char, Parser)>> = Vec::new();
@@ -1273,7 +1284,7 @@ fn parse_datetime(timestamp: &str, picture: &str, now: f64) -> Result<Option<f64
     regex.push('$');
     let matcher = regress::Regex::with_flags(&regex, "i")
         .map_err(|e| Error::new("D3136").with("message", e.to_string()))?;
-    let Some(info) = matcher.find(timestamp) else {
+    let Some(info) = find(&matcher, timestamp)? else {
         return Ok(None);
     };
 
@@ -1427,7 +1438,10 @@ mod tests {
         );
         assert_eq!(parse_iso8601("2018"), Some(1_514_764_800_000.0));
         assert_eq!(
-            to_millis("23rd March 2018", Some("[D1o] [MNn] [Y]"), 0.0).unwrap(),
+            to_millis("23rd March 2018", Some("[D1o] [MNn] [Y]"), 0.0, |re, s| Ok(
+                re.find(s)
+            ))
+            .unwrap(),
             Some(1_521_763_200_000.0)
         );
     }

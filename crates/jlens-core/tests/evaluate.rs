@@ -128,6 +128,33 @@ fn guardrails_stop_runaway_evaluations() {
 }
 
 #[test]
+fn guardrails_stop_catastrophic_regexes() {
+    // Without a limit this match would backtrack for years (ADR 0009).
+    let source = format!("$contains('{}!', /^(a+)+$/)", "a".repeat(40));
+    let expr = Expression::compile(&source).unwrap();
+
+    let options = Options::new().timeout(Duration::from_millis(50));
+    let started = std::time::Instant::now();
+    let err = expr
+        .evaluate_with(None, &Bindings::new(), &options)
+        .unwrap_err();
+    assert_eq!(err.code(), "D1012");
+    assert!(started.elapsed() < Duration::from_secs(2));
+
+    let token = jlens_core::CancelToken::new();
+    let options = Options::new().cancel_token(token.clone());
+    let canceller = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(50));
+        token.cancel();
+    });
+    let err = expr
+        .evaluate_with(None, &Bindings::new(), &options)
+        .unwrap_err();
+    assert_eq!(err.code(), "U1003");
+    canceller.join().unwrap();
+}
+
+#[test]
 fn size_caps_stop_huge_values() {
     let code = |source: &str, options: &Options| {
         Expression::compile(source)

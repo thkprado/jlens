@@ -261,3 +261,44 @@ proptest! {
         }
     }
 }
+
+/// Patterns that backtrack exponentially on a run of a's that ends in a character they cannot
+/// match, as in ADR 0009.
+fn catastrophic_regex() -> impl Strategy<Value = String> {
+    let body = prop::sample::select(&["a+", "a|a", "aa|a", "a|aa", "a?a", "(a+)+", "a+a+"][..]);
+    let outer = prop::sample::select(&["+", "*"][..]);
+    let flags = prop::sample::select(&["", "i", "m"][..]);
+    let call = prop::sample::select(
+        &[
+            "$contains($s, R)",
+            "$match($s, R)",
+            "$replace($s, R, 'x')",
+            "$split($s, R)",
+            "R($s)",
+        ][..],
+    );
+    (body, outer, flags, call, 30usize..45).prop_map(|(body, outer, flags, call, n)| {
+        let regex = format!("/^({body}){outer}$/{flags}");
+        format!(
+            "($s := '{}!'; {})",
+            "a".repeat(n),
+            call.replace('R', &regex)
+        )
+    })
+}
+
+proptest! {
+    // Each case runs until its timeout, so a few dozen cases are enough.
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    #[test]
+    fn catastrophic_regexes_stop_within_the_timeout(source in catastrophic_regex()) {
+        let expr = Expression::compile(&source).unwrap();
+        let options = Options::new().timeout(Duration::from_millis(20));
+        let started = std::time::Instant::now();
+        let result = expr.evaluate_with(None, &Bindings::new(), &options);
+        let code = result.err().map(|e| e.code().to_string());
+        prop_assert_eq!(code.as_deref(), Some("D1012"), "{}", source);
+        prop_assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+    }
+}

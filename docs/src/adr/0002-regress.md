@@ -22,6 +22,7 @@ syntax and semantics in pure Rust, and it compiles to `wasm32-unknown-unknown`.
 - We get regex behaviour that matches jsonata-js closely, including in the browser build.
 - `regress` is a backtracking engine, so a pathological pattern can take exponential time. The
   evaluation timeout guards against this (see `Options::timeout`), and the guides will warn about
-  untrusted patterns.
+  untrusted patterns. (It did not: a match ran as one evaluation step.
+  [ADR 0009](0009-bounded-regex.md) makes the timeout reach inside a match.)
 - Positions reported by `$match` must be converted from UTF-8 byte offsets to the UTF-16 code
   unit indices that JavaScript reports. That conversion is covered by dedicated tests.

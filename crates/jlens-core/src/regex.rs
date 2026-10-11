@@ -3,10 +3,12 @@
 //! A regex literal evaluates to a function. Applied to a string it returns a match object
 //! `{match, start, end, groups, next}` (or undefined), where `start`/`end` are UTF-16 offsets
 //! and `next()` continues the global search, exactly like the closure jsonata-js creates.
+//! Matches run through the evaluator, so its timeout and cancellation token stop them (ADR 0009).
 
 use std::rc::Rc;
 
 use crate::error::{Error, Result};
+use crate::eval::Evaluator;
 use crate::value::{Function, Map, Value};
 
 /// A compiled regular expression literal.
@@ -50,12 +52,12 @@ pub(crate) fn byte_offset(text: &str, utf16: usize) -> usize {
 }
 
 /// Finds the first match at or after byte offset `from`.
-pub(crate) fn exec(re: &Rc<Regex>, text: &Rc<str>, from: usize) -> Value {
+pub(crate) fn exec(ev: &Evaluator, re: &Rc<Regex>, text: &Rc<str>, from: usize) -> Result<Value> {
     if from > text.len() {
-        return Value::Undefined;
+        return Ok(Value::Undefined);
     }
-    let Some(m) = re.re.find_from(text, from).next() else {
-        return Value::Undefined;
+    let Some(m) = ev.find_regex(&re.re, text, from)? else {
+        return Ok(Value::Undefined);
     };
     let range = m.range();
     let groups: Vec<Value> = m
@@ -82,16 +84,16 @@ pub(crate) fn exec(re: &Rc<Regex>, text: &Rc<str>, from: usize) -> Value {
             last: range.end,
         }),
     );
-    Value::object(obj)
+    Ok(Value::object(obj))
 }
 
 /// The `next()` of a match object: the following match, or undefined at the end. A regex that
 /// matches the empty string would never progress, so that raises D1004.
-pub(crate) fn next(re: &Rc<Regex>, text: &Rc<str>, last: usize) -> Result<Value> {
+pub(crate) fn next(ev: &Evaluator, re: &Rc<Regex>, text: &Rc<str>, last: usize) -> Result<Value> {
     if last >= text.len() {
         return Ok(Value::Undefined);
     }
-    let result = exec(re, text, last);
+    let result = exec(ev, re, text, last)?;
     if let Value::Object(o) = &result
         && o.borrow().get("match").and_then(Value::as_str) == Some("")
     {

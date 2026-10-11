@@ -301,6 +301,11 @@ impl Evaluator<'_> {
         if self.depth > self.limits.max_depth {
             return Err(Error::new("D1011").with("value", self.limits.max_depth));
         }
+        self.time_limits()
+    }
+
+    /// Fails with `D1012` once the timeout has passed, or `U1003` once the token is cancelled.
+    fn time_limits(&self) -> Result<()> {
         if let Some(timeout) = self.limits.timeout
             && self.started.elapsed() > timeout
         {
@@ -312,6 +317,29 @@ impl Evaluator<'_> {
             return Err(Error::new("U1003"));
         }
         Ok(())
+    }
+
+    /// Finds the first match of `re` at or after byte offset `from`. With a timeout or a
+    /// cancellation token, the backtracker polls them and the match fails as an evaluation step
+    /// would (ADR 0009); without either, it runs the unchecked code path.
+    pub(crate) fn find_regex(
+        &self,
+        re: &regress::Regex,
+        text: &str,
+        from: usize,
+    ) -> Result<Option<regress::Match>> {
+        if self.limits.timeout.is_none() && self.limits.cancel_token.is_none() {
+            return Ok(re.find_from(text, from).next());
+        }
+        let mut stopped = None;
+        let found = re.find_from_interruptible(text, from, || {
+            stopped = self.time_limits().err();
+            stopped.is_some()
+        });
+        match found {
+            Ok(m) => Ok(m),
+            Err(regress::Interrupted) => Err(stopped.unwrap_or_else(|| Error::new("U1003"))),
+        }
     }
 
     /// Fails with `U1001` when a string of `len` bytes would exceed the size limit.
@@ -1267,9 +1295,9 @@ impl Evaluator<'_> {
                     }
                     _ => 0,
                 };
-                Ok(crate::regex::exec(re, &text, from))
+                crate::regex::exec(self, re, &text, from)
             }
-            Function::RegexNext { re, text, last } => crate::regex::next(re, text, *last),
+            Function::RegexNext { re, text, last } => crate::regex::next(self, re, text, *last),
         }
     }
 

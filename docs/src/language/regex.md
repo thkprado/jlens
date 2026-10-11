@@ -16,6 +16,12 @@ character classes, quantifiers (greedy and lazy), groups, backreferences, lookah
 lookbehind, and Unicode escapes. jlens uses the [regress](../adr/0002-regress.md) engine,
 which follows the ECMAScript specification. An invalid pattern fails with `S0302`.
 
+Like JavaScript's, the engine backtracks, so some patterns take exponential time on inputs they
+almost match: `/^(a+)+$/` on thirty `a` followed by `!` tries half a billion ways to split the
+run. When the evaluation has a timeout or a cancellation token, a match stops with `D1012` or
+`U1003` like any other step ([ADR 0009](../adr/0009-bounded-regex.md)). Set a timeout when
+the expressions come from users.
+
 ## Functions that take a regular expression
 
 - [`$contains`](functions/string.md#contains) tests whether a string matches.

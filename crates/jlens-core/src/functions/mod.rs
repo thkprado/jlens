@@ -235,7 +235,7 @@ natives! {
     };
     "toMillis" "<s-s?:n>" ["timestamp", "picture"] 2 DateTime "Parses a timestamp string into milliseconds since the epoch" => |ev, a, _| match text(&a, 0) {
         None => Ok(Value::Undefined),
-        Some(ts) => crate::datetime::to_millis(&ts, text(&a, 1).as_deref(), ev.timestamp())
+        Some(ts) => crate::datetime::to_millis(&ts, text(&a, 1).as_deref(), ev.timestamp(), |re, s| ev.find_regex(re, s, 0))
             .map(|v| v.map_or(Value::Undefined, Value::Number)),
     };
 }

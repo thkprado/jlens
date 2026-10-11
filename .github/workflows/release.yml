@@ -48,6 +48,9 @@ jobs:
           test "v$version" = "$TAG"
       - run: cargo test --workspace
       # In dependency order; cargo waits for each crate to appear in the index.
+      - run: cargo publish -p jlens-regress
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - run: cargo publish -p jlens-core
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

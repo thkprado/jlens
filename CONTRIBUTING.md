@@ -60,8 +60,9 @@ cargo xtask differential                       # generated expressions, jlens ag
 
 ## Releasing
 
-1. Update the version in `[workspace.package]` and in the `jlens-core`, `jlens-schema` and
-   `jlens-lsp` entries of `[workspace.dependencies]` (`Cargo.toml`).
+1. Update the version in `[workspace.package]` and in the `jlens-core`, `jlens-schema`,
+   `jlens-lsp` and `regress` (`jlens-regress`) entries of `[workspace.dependencies]`
+   (`Cargo.toml`).
 2. Move the `Unreleased` entries of `CHANGELOG.md` under the new version, and open the section
    with a sentence that sums up the release. The section becomes the GitHub release notes;
    preview them with `cargo xtask release-notes X.Y.Z`.
@@ -75,14 +76,14 @@ cargo xtask differential                       # generated expressions, jlens ag
 
 4. Commit, tag `vX.Y.Z`, and push the tag. The `Release` workflow first builds the `jlens`
    binaries for Linux, macOS and Windows (CI builds them on each push to `main` too), then
-   publishes `jlens-core`, `jlens-schema`, `jlens-lsp` and `jlens-cli` to crates.io, in that
-   order, and `jlens-wasm` to npm, then drafts the GitHub release with the notes of the version,
+   publishes `jlens-regress`, `jlens-core`, `jlens-schema`, `jlens-lsp` and `jlens-cli` to
+   crates.io, in that order, and `jlens-wasm` to npm, then drafts the GitHub release with the notes of the version,
    the binary archives and their `SHA256SUMS`. It needs the repository secrets
    `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`.
 
-   To publish by hand instead: `cargo publish -p jlens-core`, then `-p jlens-schema`, then
-   `-p jlens-lsp`, then `-p jlens-cli`; then `npm publish --access public` in `crates/jlens-wasm/pkg` after
-   `cargo xtask wasm`; then
+   To publish by hand instead: `cargo publish -p jlens-regress`, then `-p jlens-core`, then
+   `-p jlens-schema`, then `-p jlens-lsp`, then `-p jlens-cli`; then
+   `npm publish --access public` in `crates/jlens-wasm/pkg` after `cargo xtask wasm`; then
    `cargo xtask release-notes X.Y.Z > notes.md` and
    `gh release create vX.Y.Z --draft --verify-tag --title "jlens X.Y.Z" --notes-file notes.md`.
 
