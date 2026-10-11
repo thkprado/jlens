@@ -90,6 +90,23 @@ fn results_are_values_of_the_expression() {
 }
 
 #[test]
+fn fallbacks_call_their_left_side_once() {
+    // jsonata-js evaluates the left side of `?:` and `??` twice: once to test it, once for the
+    // result. jlens keeps the value it tested.
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&calls);
+    let b = Bindings::new().function(
+        "next",
+        HostFunction::new(0, move |_, _| {
+            Ok(Some(json!(counter.fetch_add(1, Ordering::SeqCst) + 1)))
+        }),
+    );
+    assert_eq!(eval("$next() ?: 0", None, &b), Some(json!(1)));
+    assert_eq!(eval("$next() ?? 0", None, &b), Some(json!(2)));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
 fn signatures_check_and_complete_the_arguments() {
     let tax = HostFunction::with_signature("<n-n?:n>", |args, _| {
         let rate = args[1].as_ref().and_then(Value::as_f64).unwrap_or(0.25);

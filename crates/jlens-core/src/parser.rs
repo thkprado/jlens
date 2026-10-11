@@ -600,35 +600,14 @@ impl<'a> Parser<'a> {
                     pos,
                 ));
             }
-            "??" => {
-                let otherwise = self.expression(0)?;
-                let exists = Raw::new(
-                    RawKind::Function {
-                        procedure: Box::new(Raw::new(
-                            RawKind::Variable {
-                                value: "exists".into(),
-                            },
-                            left.span,
-                            left.pos,
-                        )),
-                        args: vec![left.clone()],
-                        partial: false,
-                    },
-                    left.span,
-                    left.pos,
-                );
-                RawKind::Condition {
-                    condition: Box::new(exists),
-                    then: Box::new(left),
-                    otherwise: Some(Box::new(otherwise)),
-                }
-            }
-            "?:" => {
-                let otherwise = self.expression(0)?;
-                RawKind::Condition {
-                    condition: Box::new(left.clone()),
-                    then: Box::new(left),
-                    otherwise: Some(Box::new(otherwise)),
+            "??" | "?:" => {
+                // The right side extends as far as possible, like jsonata-js. The left side is
+                // not copied into a condition, as jsonata-js does: nesting would double the tree.
+                let rhs = self.expression(0)?;
+                RawKind::Binary {
+                    op,
+                    lhs: Box::new(left),
+                    rhs: Box::new(rhs),
                 }
             }
             "(" => return self.call(t, left),

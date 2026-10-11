@@ -12,7 +12,7 @@
 //!
 //! In recover mode errors become [`NodeKind::Error`] nodes and diagnostics instead of aborting.
 
-use crate::ast::{BinaryOp, LambdaDef, Slot, TransformDef};
+use crate::ast::{BinaryOp, FallbackOp, LambdaDef, Slot, TransformDef};
 use crate::ast::{Group, Node, NodeKind, SlotId, SortTerm, Span, Stage};
 use crate::error::{Error, Result};
 use crate::lexer::Lit;
@@ -122,6 +122,20 @@ impl<'a> Processor<'a> {
                     let rhs = self.process_boxed(*rhs)?;
                     let seeking = ancestry(&rhs);
                     let mut node = Node::new(NodeKind::Bind { lhs, rhs }, span, pos);
+                    node.attrs.seeking_parent = seeking;
+                    node
+                }
+                "??" | "?:" => {
+                    let op = if op == "??" {
+                        FallbackOp::Coalesce
+                    } else {
+                        FallbackOp::Default
+                    };
+                    let lhs = self.process_boxed(*lhs)?;
+                    let rhs = self.process_boxed(*rhs)?;
+                    let mut seeking = ancestry(&lhs);
+                    seeking.extend(ancestry(&rhs));
+                    let mut node = Node::new(NodeKind::Fallback { op, lhs, rhs }, span, pos);
                     node.attrs.seeking_parent = seeking;
                     node
                 }
@@ -731,6 +745,11 @@ fn tail_call_optimize(mut expr: Node) -> Node {
                 let inner = std::mem::replace(e.as_mut(), placeholder());
                 **e = tail_call_optimize(inner);
             }
+            expr
+        }
+        NodeKind::Fallback { rhs, .. } => {
+            let inner = std::mem::replace(rhs.as_mut(), placeholder());
+            **rhs = tail_call_optimize(inner);
             expr
         }
         NodeKind::Block { exprs } => {

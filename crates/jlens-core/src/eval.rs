@@ -13,7 +13,7 @@ use std::sync::{Arc, OnceLock};
 use indexmap::IndexMap;
 use web_time::{Duration, Instant};
 
-use crate::ast::{Ast, BinaryOp, Node, NodeKind, SortTerm, Stage, TransformDef};
+use crate::ast::{Ast, BinaryOp, FallbackOp, Node, NodeKind, SortTerm, Stage, TransformDef};
 use crate::audit::{Branch, EvalInfo, Outcome, Tracer, ValueRef};
 use crate::error::{Error, Result};
 use crate::functions::{self, Call, boolean};
@@ -464,6 +464,23 @@ impl Evaluator<'_> {
                     self.eval(e, input, env)?
                 } else {
                     Value::Undefined
+                }
+            }
+            NodeKind::Fallback { op, lhs, rhs } => {
+                let value = self.eval(lhs, input, env)?;
+                let keep = match op {
+                    FallbackOp::Default => {
+                        boolean(&value).map_err(|e| e.at(expr.span, expr.position))? == Some(true)
+                    }
+                    FallbackOp::Coalesce => !value.is_undefined(),
+                };
+                if let Some(t) = self.tracer.as_deref_mut() {
+                    t.branch(expr, if keep { Branch::Then } else { Branch::Else });
+                }
+                if keep {
+                    value
+                } else {
+                    self.eval(rhs, input, env)?
                 }
             }
             NodeKind::Block { exprs } => {

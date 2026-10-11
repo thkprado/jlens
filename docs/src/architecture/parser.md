@@ -70,8 +70,10 @@ expression(rbp):
 ```
 
 A few constructs are desugared while parsing:
-- `x ?? y` becomes `$exists(x) ? x : y`;
-- `x ?: y` becomes `x ? x : y`;
+- `x ?? y` and `x ?: y` become a fallback node (`NodeKind::Fallback`) that evaluates `x` once,
+  then keeps its value if it exists (`??`) or is true as a Boolean (`?:`). jsonata-js desugars
+  them into the conditions `$exists(x) ? x : y` and `x ? x : y`, with a copy of `x`: nesting
+  them doubles the tree at each level;
 - `function($a){...}` is recognised as a lambda when the callee of a call is the name
   `function` or `λ`.
 

@@ -190,7 +190,7 @@ pub enum NodeKind {
         /// The variable under which the ancestor is bound (the slot's final label).
         label: String,
     },
-    /// `cond ? then : else`, also produced by `?:` and `??`.
+    /// `cond ? then : else`.
     Condition {
         /// The condition.
         condition: Box<Node>,
@@ -199,6 +199,16 @@ pub enum NodeKind {
         /// Evaluated otherwise.
         #[serde(rename = "else", skip_serializing_if = "Option::is_none")]
         otherwise: Option<Box<Node>>,
+    },
+    /// `lhs ?: rhs` and `lhs ?? rhs`: the value of `lhs` when it is true as a Boolean (`?:`) or
+    /// exists (`??`), else the value of `rhs`. `lhs` is evaluated once.
+    Fallback {
+        /// The operator.
+        op: FallbackOp,
+        /// The value, kept if it passes the test.
+        lhs: Box<Node>,
+        /// The fallback, evaluated when the value does not pass the test.
+        rhs: Box<Node>,
     },
     /// `(e1; e2; ...)`.
     Block {
@@ -380,6 +390,27 @@ impl BinaryOp {
     }
 }
 
+/// The operators of [`NodeKind::Fallback`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum FallbackOp {
+    /// `?:`: keep the value when it is true as a Boolean.
+    #[serde(rename = "?:")]
+    Default,
+    /// `??`: keep the value when it exists.
+    #[serde(rename = "??")]
+    Coalesce,
+}
+
+impl FallbackOp {
+    /// The operator as written in source.
+    pub fn symbol(self) -> &'static str {
+        match self {
+            FallbackOp::Default => "?:",
+            FallbackOp::Coalesce => "??",
+        }
+    }
+}
+
 /// Attributes that `processAST` attaches to steps and other nodes.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -505,7 +536,7 @@ impl Node {
             NodeKind::Wildcard => "wildcard",
             NodeKind::Descendant => "descendant",
             NodeKind::Parent { .. } => "parent",
-            NodeKind::Condition { .. } => "condition",
+            NodeKind::Condition { .. } | NodeKind::Fallback { .. } => "condition",
             NodeKind::Block { .. } => "block",
             NodeKind::Bind { .. } => "bind",
             NodeKind::Apply { .. } => "apply",
@@ -542,6 +573,7 @@ impl Node {
         match &self.kind {
             NodeKind::Path { steps, .. } => steps.iter().for_each(&mut f),
             NodeKind::Binary { lhs, rhs, .. }
+            | NodeKind::Fallback { lhs, rhs, .. }
             | NodeKind::Bind { lhs, rhs }
             | NodeKind::Apply { lhs, rhs } => {
                 f(lhs);
@@ -597,6 +629,7 @@ impl Node {
         match &mut self.kind {
             NodeKind::Path { steps, .. } => steps.iter_mut().for_each(&mut *f),
             NodeKind::Binary { lhs, rhs, .. }
+            | NodeKind::Fallback { lhs, rhs, .. }
             | NodeKind::Bind { lhs, rhs }
             | NodeKind::Apply { lhs, rhs } => {
                 f(lhs);

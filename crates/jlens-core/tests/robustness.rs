@@ -346,6 +346,21 @@ fn fuzz_parse_crashes_stay_fixed() {
 }
 
 #[test]
+fn nested_fallbacks_stay_linear() {
+    // `?:` and `??` used to copy their left side into a condition, doubling the tree at each
+    // level: 22 levels made 29 million nodes.
+    for op in ["?:", "??"] {
+        let source = format!("{}a{}", "(".repeat(200), format!(" {op} 1)").repeat(200));
+        let compiled = Expression::compile(&source).unwrap();
+        let mut nodes = 0;
+        compiled.ast().root.walk(&mut |_| nodes += 1);
+        assert!(nodes < 1_000, "{op}: {nodes} nodes");
+        let result = compiled.evaluate(Some(&json!({"a": 2})), &Bindings::new());
+        assert_eq!(result.unwrap(), Some(json!(2)));
+    }
+}
+
+#[test]
 fn fuzz_crashes_stay_fixed() {
     let cases: &[(&str, Result<serde_json::Value, &str>)] = &[
         // A picture marker that starts with a comma: an unknown component.

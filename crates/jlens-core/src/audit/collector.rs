@@ -109,7 +109,7 @@ fn is_decision(node: &Node) -> bool {
                 | BinaryOp::And
                 | BinaryOp::Or
         ),
-        NodeKind::Condition { .. } | NodeKind::Bind { .. } => true,
+        NodeKind::Condition { .. } | NodeKind::Fallback { .. } | NodeKind::Bind { .. } => true,
         _ => false,
     }
 }

@@ -54,6 +54,9 @@ fn outline(n: &Node) -> String {
             ),
             None => format!("({} ? {})", outline(condition), outline(then)),
         },
+        NodeKind::Fallback { op, lhs, rhs } => {
+            format!("({} {} {})", outline(lhs), op.symbol(), outline(rhs))
+        }
         NodeKind::Block { exprs } => format!("({})", join(exprs, "; ")),
         NodeKind::Bind { lhs, rhs } => format!("({} := {})", outline(lhs), outline(rhs)),
         NodeKind::Apply { lhs, rhs } => format!("({} ~> {})", outline(lhs), outline(rhs)),
@@ -162,8 +165,9 @@ fn paths_predicates_and_constructors() {
         ("Order@$o.Product#$i", "path(Order@$o, Product#$i)"),
         ("Order[0]#$i", "path(Order[0]#$i)"),
         ("x ? 1 : 2", "(path(x) ? 1 : 2)"),
-        ("x ?: 2", "(path(x) ? path(x) : 2)"),
-        ("x ?? 2", "($exists(path(x)) ? path(x) : 2)"),
+        ("x ?: 2", "(path(x) ?: 2)"),
+        ("x ?? 2", "(path(x) ?? 2)"),
+        ("x ?? y ?: 2", "(path(x) ?? (path(y) ?: 2))"),
         ("($a := 1; $a ~> $string)", "(($a := 1); ($a ~> $string))"),
         ("$f(?, 2)", "partial $f(?, 2)"),
         (

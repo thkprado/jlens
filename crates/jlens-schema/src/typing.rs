@@ -398,6 +398,10 @@ impl<'s> Walker<'s, '_> {
                     None => t,
                 }
             }
+            NodeKind::Fallback { lhs, rhs, .. } => {
+                let t = self.walk(lhs, ctx, scope);
+                t.union(self.walk(rhs, ctx, scope))
+            }
             NodeKind::Block { exprs } => {
                 let mark = scope.len();
                 let mut last = Ty::unknown();

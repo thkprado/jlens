@@ -16,6 +16,9 @@ All notable changes are recorded here. The format follows
 - Stack overflows found by fuzzing: recovering from hundreds of unclosed brackets
   (`parse_recover("((((…")`) copied the tree once per level, and a chain of thousands of
   operators (`1 + 1 + … + 1`) built a tree deep enough to overflow the stack when dropped.
+- Nested `??` and `?:` no longer make the syntax tree grow exponentially: each copied its left
+  side into a condition, so 22 levels of `((a ?: 1) ?: 1)…` built 29 million nodes. They now
+  evaluate their left side once (jsonata-js evaluates it twice).
 
 ### Changed
 
@@ -24,6 +27,8 @@ All notable changes are recorded here. The format follows
 - The nesting limit (1,000 levels, `U1001`) also counts the operators of a chain: a chain of
   more than 1,000 terms, such as `1 + 1 + … + 1`, is rejected. jsonata-js accepts about 2,000
   before its stack overflows.
+- `jlens-core`: `??` and `?:` parse to the new `NodeKind::Fallback` (with `FallbackOp`) instead
+  of a `NodeKind::Condition`.
 
 ## [0.7.0]
 
