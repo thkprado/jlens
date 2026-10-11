@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0]
+
+Catching mistakes before they run: `jlens check` finds unknown functions, wrong arguments
+and undeclared variables with the configuration the editors use, `jlens test` runs test cases,
+and each release has prebuilt binaries.
+
 ### Added
 
 - `jlens check` and the language service warn about calls of unknown functions (`W0202`, with a
@@ -152,7 +158,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/thkprado/jlens/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/thkprado/jlens/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/thkprado/jlens/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/thkprado/jlens/compare/v0.1.0...v0.1.1
