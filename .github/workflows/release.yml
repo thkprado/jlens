@@ -1,8 +1,9 @@
 name: Release
 
 # Publishes the crates to crates.io and the WebAssembly package to npm when a version tag
-# (v0.1.0, ...) is pushed, then drafts the GitHub release from CHANGELOG.md. Needs the
-# repository secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN.
+# (v0.1.0, ...) is pushed, builds the jlens binaries, then drafts the GitHub release from
+# CHANGELOG.md with the binaries attached. Needs the repository secrets CARGO_REGISTRY_TOKEN and
+# NPM_TOKEN.
 # See CONTRIBUTING.md for the release checklist.
 
 on:
@@ -61,9 +62,51 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+  # The jlens binary for each platform, as jlens-X.Y.Z-<target>.tar.gz (.zip on Windows) holding
+  # a jlens-X.Y.Z-<target> directory. The [package.metadata.binstall] section of
+  # crates/jlens-cli/Cargo.toml points cargo binstall at these names.
+  binaries:
+    name: binary (${{ matrix.target }})
+    strategy:
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      # Static musl binaries run on any Linux distribution; jlens has no C dependencies.
+      - run: cargo build --release --locked -p jlens-cli --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          name="jlens-${GITHUB_REF_NAME#v}-${{ matrix.target }}"
+          mkdir "$name"
+          cp LICENSE crates/jlens-cli/README.md "$name/"
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp target/${{ matrix.target }}/release/jlens.exe "$name/"
+            7z a "$name.zip" "$name"
+          else
+            cp target/${{ matrix.target }}/release/jlens "$name/"
+            tar czf "$name.tar.gz" "$name"
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            jlens-*.tar.gz
+            jlens-*.zip
+          if-no-files-found: error
+
   github:
     name: GitHub release (draft)
-    needs: [crates, npm]
+    needs: [crates, npm, binaries]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -71,9 +114,15 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo xtask release-notes "$GITHUB_REF_NAME" > notes.md
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - run: sha256sum * > SHA256SUMS
+        working-directory: dist
       # A draft, published by hand after review (CONTRIBUTING.md).
       - run: >-
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag
-          --title "jlens ${GITHUB_REF_NAME#v}" --notes-file notes.md
+          --title "jlens ${GITHUB_REF_NAME#v}" --notes-file notes.md dist/*
         env:
           GH_TOKEN: ${{ github.token }}

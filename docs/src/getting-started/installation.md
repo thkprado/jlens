@@ -4,7 +4,16 @@ jlens comes in three forms that share one engine. Install the ones you need.
 
 ## Command line
 
-The `jlens` binary is built from source with Rust 1.88 or later:
+Each [GitHub release](https://github.com/thkprado/jlens/releases) has the `jlens` binary for
+Linux (x86-64 and ARM64, static), macOS (Intel and Apple silicon) and Windows (x86-64), with a
+`SHA256SUMS` file. Download the archive for your platform and put `jlens` on your `PATH`, or let
+[`cargo binstall`](https://github.com/cargo-bins/cargo-binstall) do it:
+
+```sh
+cargo binstall jlens-cli
+```
+
+Elsewhere, build it from source with Rust 1.88 or later:
 
 ```sh
 cargo install jlens-cli                          # from crates.io
@@ -23,8 +32,8 @@ The [CLI guide](../guides/cli.md) describes every command.
 
 ```toml
 [dependencies]
-jlens-core = "0.2"     # the language: parsing, evaluation, functions, auditing
-jlens-schema = "0.2"   # optional: schema inference and the language service
+jlens-core = "0.3"     # the language: parsing, evaluation, functions, auditing
+jlens-schema = "0.3"   # optional: schema inference and the language service
 serde_json = "1"
 ```
 

@@ -4,7 +4,8 @@
 command line. Part of [jlens](https://github.com/thkprado/jlens).
 
 ```sh
-cargo install jlens-cli
+cargo binstall jlens-cli     # a prebuilt binary, from the GitHub release
+cargo install jlens-cli      # or build it from source
 ```
 
 ```text

@@ -36,7 +36,7 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 ## Quick start
 
 ```sh
-cargo install jlens-cli                 # or: cargo install --path crates/jlens-cli
+cargo binstall jlens-cli                # or: cargo install --path crates/jlens-cli
 
 jlens eval -f fixtures/shipping-rule.jsonata -i fixtures/online-store-order.json --explain
 jlens eval --ndjson --filter -i fixtures/orders.ndjson '$sum(items.(unitPrice * quantity)) > 50000'

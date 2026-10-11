@@ -23,6 +23,9 @@ All notable changes are recorded here. The format follows
   and the expected result, undefined result or error code. It reports the failures as text, or
   with `--json` as one JSON object whose expected and actual outcomes have the shape of the
   `eval --json` envelope. A case file may fix `now` and `seed`.
+- Each GitHub release has prebuilt `jlens` binaries for Linux (x86-64 and ARM64, static musl
+  builds), macOS (Intel and Apple silicon) and Windows (x86-64), with a `SHA256SUMS` file;
+  `cargo binstall jlens-cli` installs them.
 
 ## [0.3.0]
 

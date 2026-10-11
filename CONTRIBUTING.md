@@ -70,15 +70,17 @@ cargo xtask serve                              # serve the repository, for examp
 
 4. Commit, tag `vX.Y.Z`, and push the tag. The `Release` workflow publishes `jlens-core`,
    `jlens-schema`, `jlens-lsp` and `jlens-cli` to crates.io, in that order, and `jlens-wasm` to npm,
-   then drafts the GitHub release with the notes of the version. It needs the repository secrets
-   `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`.
+   builds the `jlens` binaries for Linux, macOS and Windows, then drafts the GitHub release with the
+   notes of the version, the binary archives and their `SHA256SUMS`. It needs the repository
+   secrets `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`.
 
    To publish by hand instead: `cargo publish -p jlens-core`, then `-p jlens-schema`, then
    `-p jlens-lsp`, then `-p jlens-cli`; then `npm publish --access public` in `crates/jlens-wasm/pkg` after
    `cargo xtask wasm`; then
    `cargo xtask release-notes X.Y.Z > notes.md` and
    `gh release create vX.Y.Z --draft --verify-tag --title "jlens X.Y.Z" --notes-file notes.md`.
-5. Review the draft on the Releases page, edit it if needed, and publish it.
+5. Review the draft on the Releases page, edit it if needed, and publish it. `cargo binstall`
+   finds the binaries once the release is published.
 
 ## License
 

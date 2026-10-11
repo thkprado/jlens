@@ -17,6 +17,17 @@ include = ["src/**/*", "README.md", "LICENSE"]
 name = "jlens"
 path = "src/main.rs"
 
+# `cargo binstall jlens-cli` downloads the binary that the Release workflow attaches to the
+# GitHub release of the version.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/jlens-{ version }-{ target }.tar.gz"
+bin-dir = "jlens-{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/jlens-{ version }-{ target }.zip"
+pkg-fmt = "zip"
+
 [dependencies]
 jlens-core.workspace = true
 jlens-schema.workspace = true
