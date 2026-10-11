@@ -89,6 +89,16 @@ machinery as `$map(items, function($i){ $i.`.
   are checked after the walk, because a function may call a name bound after it, or itself.
   Calls of unknown names get `W0202`, and calls whose argument count the signature rejects get
   `W0203`: parameters marked `?` or `-` are optional, and `+` accepts any number.
+- The call events carry the type of each argument. Literals and operators have a JSON type
+  (`Ty::literal`), schema fields have theirs, and anything else is unknown. `Ty::symbols` turns
+  a fully known type into signature symbols, keeping the items of arrays apart, and the
+  signature is matched as jsonata-js matches it (greedy, with backtracking), except that an
+  argument whose type is unknown matches any parameter. A path may yield a single item of an
+  array, so an array also matches what its items match. When no match exists, `W0205` names the
+  argument jsonata-js would report in `T0410` or `T0412`. Undefined is left out: a field that is
+  absent passes any signature, but one that is present cannot.
+- When variables are declared, the declarations are taken to be complete, and references to
+  names that are neither declared, bound anywhere in the expression, nor functions get `W0204`.
 - **Hover** keeps the innermost field or variable event whose span contains the offset, and
   renders its type and documentation as Markdown.
 - **Signature help** scans backwards from the cursor for the unmatched `(` of a call, ignoring

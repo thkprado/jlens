@@ -12,6 +12,9 @@ All notable changes are recorded here. The format follows
   "did you mean" suggestion) and about calls with a number of arguments the function's
   signature does not accept (`W0203`). Host functions declared to the service, or in
   `jlens.json`, are known.
+- They also warn about arguments whose known type the function's signature does not accept
+  (`W0205`, as in `$length(1234)` or `$sum(items.name)` with string names), and, when variables
+  are declared, about references to variables that are not (`W0204`).
 
 ## [0.3.0]
 

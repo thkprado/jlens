@@ -10,7 +10,7 @@ use jlens_core::{Diagnostic, Severity, parse_recover};
 use serde::{Deserialize, Serialize};
 
 use crate::shape::{Field, Schema, Shape};
-use crate::typing::{Event, Scope, Ty, Walker};
+use crate::typing::{Event, Scope, Symbols, Ty, Walker};
 
 /// The identifier substituted for the word under the cursor before parsing.
 const PLACEHOLDER: &str = "__jlens_cursor__";
@@ -134,6 +134,17 @@ struct FunctionView {
     signature: String,
     params: Vec<String>,
     summary: String,
+}
+
+/// A call found by the walk, checked once every binding is known.
+struct CallSite {
+    /// The span of the `$name`.
+    span: Span,
+    name: String,
+    /// The number of arguments, the value applied with `~>` included.
+    count: usize,
+    /// The span and the types of each argument; `None` for a partial application.
+    args: Option<Vec<(Span, Option<Symbols>)>>,
 }
 
 /// Completion, diagnostics, hover and signature help for expressions over a schema.
@@ -570,14 +581,17 @@ impl LanguageService {
             .collect()
     }
 
-    /// Syntax errors, annotation warnings, references to fields the schema does not have, and
-    /// calls of unknown functions or with the wrong number of arguments.
+    /// Syntax errors, annotation warnings, references to fields the schema does not have,
+    /// calls of unknown functions, with the wrong number of arguments or with arguments of
+    /// types the signature does not accept, and, when variables are declared, references to
+    /// variables that are not.
     pub fn diagnostics(&self, text: &str) -> Vec<Diagnostic> {
         let ast = parse_recover(text);
         let mut out = ast.diagnostics.clone();
-        // Calls are checked after the walk: a name bound later can be called by a function
-        // defined earlier, or by itself.
-        let mut calls: Vec<(Span, String, usize)> = Vec::new();
+        // Calls and variables are checked after the walk: a name bound later can be used by a
+        // function defined earlier, or by itself.
+        let mut calls: Vec<CallSite> = Vec::new();
+        let mut variables: Vec<(Span, String)> = Vec::new();
         let mut bound: Vec<String> = Vec::new();
         let mut visit = |event: Event<'_, '_>| match event {
             Event::Field {
@@ -597,26 +611,41 @@ impl LanguageService {
                     &[("token", name), ("hint", &did_you_mean(name, &known, ""))],
                 ));
             }
-            Event::Call { node, name, args } => calls.push((node.span, name.to_owned(), args)),
+            Event::Call {
+                node,
+                name,
+                args,
+                types,
+            } => calls.push(CallSite {
+                span: node.span,
+                name: name.to_owned(),
+                count: args,
+                args: types.map(|t| t.iter().map(|(s, ty)| (*s, ty.symbols())).collect()),
+            }),
+            Event::Variable { node, name, .. } => variables.push((node.span, name.to_owned())),
             Event::Bind { name } => bound.push(name.to_owned()),
-            _ => {}
+            Event::Field { .. } => {}
         };
         self.walk(&ast.root, &mut visit);
         out.extend(self.call_diagnostics(&calls, &bound));
+        out.extend(self.variable_diagnostics(&variables, &calls, &bound));
         out.sort_by_key(|d| d.span.start);
         out
     }
 
     /// `W0202` for calls of functions that are neither built in, declared, nor bound in the
-    /// expression, and `W0203` for calls with a number of arguments their signature rejects.
-    fn call_diagnostics(
-        &self,
-        calls: &[(Span, String, usize)],
-        bound: &[String],
-    ) -> Vec<Diagnostic> {
+    /// expression, `W0203` for calls with a number of arguments their signature rejects, and
+    /// `W0205` for arguments whose known types their signature rejects.
+    fn call_diagnostics(&self, calls: &[CallSite], bound: &[String]) -> Vec<Diagnostic> {
         let functions = self.functions();
         let mut out = Vec::new();
-        for (span, name, count) in calls {
+        for CallSite {
+            span,
+            name,
+            count,
+            args,
+        } in calls
+        {
             if name.is_empty()
                 || name == "$"
                 || bound.contains(name)
@@ -658,9 +687,62 @@ impl LanguageService {
                         ("count", &count.to_string()),
                     ],
                 ));
+                continue;
+            }
+            if let (Some(args), Ok(signature)) = (args, Signature::parse(&function.signature))
+                && let Some(index) = mismatch(&signature, args)
+                && let (arg_span, Some(symbols)) = &args[index]
+            {
+                out.push(Diagnostic::new(
+                    Severity::Warning,
+                    "W0205",
+                    *arg_span,
+                    &[
+                        ("index", &(index + 1).to_string()),
+                        ("token", name),
+                        ("type", &describe(symbols)),
+                        ("signature", &function.signature),
+                    ],
+                ));
             }
         }
         out
+    }
+
+    /// `W0204` for references to variables that are neither declared, bound in the expression,
+    /// nor functions. Only when variables are declared: the declarations are then taken to be
+    /// complete.
+    fn variable_diagnostics(
+        &self,
+        references: &[(Span, String)],
+        calls: &[CallSite],
+        bound: &[String],
+    ) -> Vec<Diagnostic> {
+        if self.variables.is_empty() {
+            return Vec::new();
+        }
+        let functions = self.functions();
+        let mut known: Vec<&str> = self.variables.iter().map(|(n, _)| n.as_str()).collect();
+        known.extend(bound.iter().map(String::as_str));
+        references
+            .iter()
+            .filter(|(span, name)| {
+                !name.is_empty()
+                    && name != "$"
+                    && !known.contains(&name.as_str())
+                    && functions.iter().all(|f| f.name != *name)
+                    // A call of an unknown name already has `W0202`.
+                    && calls.iter().all(|c| c.span != *span)
+            })
+            .map(|(span, name)| {
+                Diagnostic::new(
+                    Severity::Warning,
+                    "W0204",
+                    *span,
+                    &[("token", name), ("hint", &did_you_mean(name, &known, "$"))],
+                )
+            })
+            .collect()
     }
 
     /// Information about the field, variable or function at `offset`.
@@ -773,6 +855,132 @@ fn arity(signature: &str) -> Option<(usize, Option<usize>)> {
     let min = params.iter().filter(|p| !p.pattern.ends_with('?')).count();
     let variadic = params.iter().any(|p| p.pattern.ends_with('+'));
     Some((min, (!variadic).then_some(params.len())))
+}
+
+/// One parameter of a signature: the symbols it accepts, how many arguments it takes, and the
+/// type its array items must have.
+struct Piece<'p> {
+    set: &'p str,
+    min: usize,
+    max: usize,
+    items: Option<char>,
+}
+
+impl Piece<'_> {
+    /// Whether an argument of these types may be accepted (unknown types always may).
+    fn accepts(&self, arg: Option<&Symbols>) -> bool {
+        let Some(arg) = arg else {
+            return true;
+        };
+        // A path yields the items of an array, and a single item stands alone.
+        let mut values = arg.values.chars().chain(arg.items.chars());
+        let mut items = arg
+            .items
+            .chars()
+            .chain(arg.values.chars().filter(|c| *c != 'a'));
+        values.any(|c| self.set.contains(c))
+            && self.items.is_none_or(|want| items.any(|c| c == want))
+    }
+}
+
+/// The index of the first argument whose known types `signature` cannot accept, as jsonata-js
+/// finds it when it reports `T0410` or `T0412`, or `None`.
+fn mismatch(signature: &Signature, args: &[(Span, Option<Symbols>)]) -> Option<usize> {
+    let pieces: Vec<Piece> = signature
+        .params
+        .iter()
+        .map(|p| {
+            let (set, quantifier) = match p.pattern.strip_prefix('[') {
+                Some(rest) => rest.split_once(']').unwrap_or((rest, "")),
+                None => p.pattern.split_at(p.pattern.len().min(1)),
+            };
+            let (min, max) = match quantifier {
+                q if q.contains('+') => (1, usize::MAX),
+                q if q.contains('?') => (0, 1),
+                _ => (1, 1),
+            };
+            let items = match (p.array, p.subtype.as_deref().and_then(|s| s.chars().next())) {
+                (true, Some(c)) if "snblo".contains(c) => Some(c),
+                _ => None,
+            };
+            Piece {
+                set,
+                min,
+                max,
+                items,
+            }
+        })
+        .collect();
+    let args: Vec<Option<&Symbols>> = args.iter().map(|(_, s)| s.as_ref()).collect();
+    if match_pieces(&pieces, &args, 0, true).is_some() {
+        return None;
+    }
+    // The end of the longest run of parameters that match from the start.
+    let mut good_to = 0;
+    for index in 0..pieces.len() {
+        match match_pieces(&pieces[..=index], &args, 0, false) {
+            Some(end) => good_to = end,
+            None => break,
+        }
+    }
+    args.get(good_to).copied().flatten().map(|_| good_to)
+}
+
+/// Greedy backtracking match of `pieces` against `args` from `pos`, as jsonata-js matches its
+/// signature regular expression; returns where the match ends.
+fn match_pieces(
+    pieces: &[Piece],
+    args: &[Option<&Symbols>],
+    pos: usize,
+    anchored: bool,
+) -> Option<usize> {
+    let Some((p, rest)) = pieces.split_first() else {
+        return (!anchored || pos == args.len()).then_some(pos);
+    };
+    let mut n = 0;
+    while n < p.max && pos + n < args.len() && p.accepts(args[pos + n]) {
+        n += 1;
+    }
+    loop {
+        if n < p.min {
+            return None;
+        }
+        if let Some(end) = match_pieces(rest, args, pos + n, anchored) {
+            return Some(end);
+        }
+        if n == 0 {
+            return None;
+        }
+        n -= 1;
+    }
+}
+
+/// `a string`, `an array of numbers or strings`, `a number or null`...
+fn describe(symbols: &Symbols) -> String {
+    let plural = |c| match c {
+        's' => "strings",
+        'n' => "numbers",
+        'b' => "booleans",
+        'l' => "nulls",
+        'o' => "objects",
+        _ => "arrays",
+    };
+    let parts: Vec<String> = symbols
+        .values
+        .chars()
+        .map(|c| match c {
+            's' => "a string".to_owned(),
+            'n' => "a number".to_owned(),
+            'b' => "a boolean".to_owned(),
+            'l' => "null".to_owned(),
+            'o' => "an object".to_owned(),
+            _ => {
+                let items: Vec<&str> = symbols.items.chars().map(plural).collect();
+                format!("an array of {}", items.join(" or "))
+            }
+        })
+        .collect();
+    parts.join(" or ")
 }
 
 /// `; did you mean `{prefix}{candidate}`?` for the closest candidate, or nothing.

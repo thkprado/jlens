@@ -6,7 +6,9 @@
 //! types are sets of schema shapes; `partial` marks that something unknown contributed, in
 //! which case no "missing field" warnings are produced.
 
-use jlens_core::ast::{LambdaDef, Node, NodeKind, Stage};
+use std::sync::LazyLock;
+
+use jlens_core::ast::{BinaryOp, LambdaDef, Node, NodeKind, Span, Stage};
 
 use crate::shape::{Field, JsonType, Shape};
 
@@ -29,6 +31,26 @@ impl<'s> Ty<'s> {
     /// A known value without fields (number, string, boolean...).
     pub fn scalar() -> Self {
         Ty::default()
+    }
+
+    /// A value of one JSON type without fields: a literal, the result of an operator.
+    pub fn literal(ty: JsonType) -> Self {
+        static SHAPES: LazyLock<[Shape; 4]> = LazyLock::new(|| {
+            [
+                JsonType::Null,
+                JsonType::Boolean,
+                JsonType::Number,
+                JsonType::String,
+            ]
+            .map(|t| Shape {
+                types: vec![t],
+                ..Shape::default()
+            })
+        });
+        match SHAPES.iter().find(|s| s.types[0] == ty) {
+            Some(shape) => Ty::of(shape),
+            None => Ty::scalar(),
+        }
     }
 
     pub fn of(shape: &'s Shape) -> Self {
@@ -111,6 +133,42 @@ impl<'s> Ty<'s> {
         !elements.partial && elements.shapes.iter().any(|s| s.is_object())
     }
 
+    /// The signature symbols of the values this type may have, and of the items of its arrays;
+    /// `None` when the type is not fully known. Undefined (`m`) is left out.
+    pub fn symbols(&self) -> Option<Symbols> {
+        fn symbol(t: JsonType) -> char {
+            match t {
+                JsonType::Null => 'l',
+                JsonType::Boolean => 'b',
+                JsonType::Integer | JsonType::Number => 'n',
+                JsonType::String => 's',
+                JsonType::Array => 'a',
+                JsonType::Object => 'o',
+            }
+        }
+        fn add(set: &mut String, c: char) {
+            if !set.contains(c) {
+                set.push(c);
+            }
+        }
+        if self.partial || self.shapes.is_empty() {
+            return None;
+        }
+        let mut out = Symbols::default();
+        for shape in &self.shapes {
+            for &t in &shape.types {
+                add(&mut out.values, symbol(t));
+                if t == JsonType::Array {
+                    let items = shape.items.as_deref().filter(|i| !i.types.is_empty())?;
+                    for &i in &items.types {
+                        add(&mut out.items, symbol(i));
+                    }
+                }
+            }
+        }
+        Some(out)
+    }
+
     fn all_field_values(&self) -> Ty<'s> {
         let mut out = Ty {
             shapes: Vec::new(),
@@ -147,6 +205,15 @@ impl<'s> Ty<'s> {
     }
 }
 
+/// Signature symbols (`s`, `n`, `a`...), see [`Ty::symbols`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Symbols {
+    /// The types of the value.
+    pub values: String,
+    /// The types of the items of its arrays.
+    pub items: String,
+}
+
 /// Variables in scope, innermost last.
 pub(crate) type Scope<'s> = Vec<(String, Ty<'s>)>;
 
@@ -173,6 +240,8 @@ pub(crate) enum Event<'a, 's> {
         name: &'a str,
         /// The number of arguments, the value applied with `~>` included.
         args: usize,
+        /// The span and type of each argument; `None` for a partial application.
+        types: Option<&'a [(Span, Ty<'s>)]>,
     },
     /// A variable bound by `:=`, a function parameter, `@$name` or `#$name`.
     Bind { name: &'a str },
@@ -285,14 +354,23 @@ impl<'s> Walker<'s, '_> {
                 });
                 ty
             }
-            NodeKind::Binary { lhs, rhs, .. } => {
+            NodeKind::Binary { op, lhs, rhs } => {
                 self.walk(lhs, ctx, scope);
                 self.walk(rhs, ctx, scope);
-                Ty::scalar()
+                match op {
+                    BinaryOp::Add
+                    | BinaryOp::Sub
+                    | BinaryOp::Mul
+                    | BinaryOp::Div
+                    | BinaryOp::Mod => Ty::literal(JsonType::Number),
+                    BinaryOp::Concat => Ty::literal(JsonType::String),
+                    BinaryOp::Range => Ty::scalar(),
+                    _ => Ty::literal(JsonType::Boolean),
+                }
             }
             NodeKind::Negate { expr } => {
                 self.walk(expr, ctx, scope);
-                Ty::scalar()
+                Ty::literal(JsonType::Number)
             }
             NodeKind::Array { items } => {
                 let mut ty = Ty::scalar();
@@ -345,6 +423,7 @@ impl<'s> Walker<'s, '_> {
                         node: procedure,
                         name,
                         args: args.len(),
+                        types: None,
                     });
                 }
                 for a in args {
@@ -356,7 +435,7 @@ impl<'s> Walker<'s, '_> {
                 let value = self.walk(lhs, ctx, scope);
                 match &rhs.kind {
                     NodeKind::Function { procedure, args } => {
-                        self.call(procedure, args, Some(value), ctx, scope)
+                        self.call(procedure, args, Some((lhs.span, value)), ctx, scope)
                     }
                     _ => {
                         self.walk(rhs, ctx, scope);
@@ -382,11 +461,11 @@ impl<'s> Walker<'s, '_> {
                 }
                 ctx.clone()
             }
-            NodeKind::String { .. }
-            | NodeKind::Number { .. }
-            | NodeKind::Bool { .. }
-            | NodeKind::Null
-            | NodeKind::Regex { .. } => Ty::scalar(),
+            NodeKind::String { .. } => Ty::literal(JsonType::String),
+            NodeKind::Number { .. } => Ty::literal(JsonType::Number),
+            NodeKind::Bool { .. } => Ty::literal(JsonType::Boolean),
+            NodeKind::Null => Ty::literal(JsonType::Null),
+            NodeKind::Regex { .. } => Ty::scalar(),
             NodeKind::Parent { .. } | NodeKind::Placeholder | NodeKind::Error { .. } => {
                 Ty::unknown()
             }
@@ -455,7 +534,7 @@ impl<'s> Walker<'s, '_> {
         &mut self,
         procedure: &Node,
         args: &[Node],
-        applied: Option<Ty<'s>>,
+        applied: Option<(Span, Ty<'s>)>,
         ctx: &Ty<'s>,
         scope: &mut Scope<'s>,
     ) -> Ty<'s> {
@@ -464,18 +543,11 @@ impl<'s> Walker<'s, '_> {
             NodeKind::Variable { name } => Some(name.as_str()),
             _ => None,
         };
-        if let Some(name) = name {
-            (self.visit)(Event::Call {
-                node: procedure,
-                name,
-                args: args.len() + usize::from(applied.is_some()),
-            });
-        }
-        let mut types: Vec<Ty<'s>> = applied.into_iter().collect();
+        let mut typed: Vec<(Span, Ty<'s>)> = applied.into_iter().collect();
         for arg in args {
-            let first = types.first().cloned().unwrap_or_else(Ty::unknown);
+            let first = typed.first().map_or_else(Ty::unknown, |(_, t)| t.clone());
             match &arg.kind {
-                NodeKind::Lambda(def) if types.len() == 1 => {
+                NodeKind::Lambda(def) if typed.len() == 1 => {
                     // Type the parameters of callbacks from the array they iterate over.
                     let elements = first.elements();
                     let hints = match name {
@@ -485,11 +557,20 @@ impl<'s> Walker<'s, '_> {
                         _ => Vec::new(),
                     };
                     self.lambda(def, &hints, ctx, scope);
-                    types.push(Ty::unknown());
+                    typed.push((arg.span, Ty::unknown()));
                 }
-                _ => types.push(self.walk(arg, ctx, scope)),
+                _ => typed.push((arg.span, self.walk(arg, ctx, scope))),
             }
         }
+        if let Some(name) = name {
+            (self.visit)(Event::Call {
+                node: procedure,
+                name,
+                args: typed.len(),
+                types: Some(&typed),
+            });
+        }
+        let types: Vec<Ty<'s>> = typed.into_iter().map(|(_, t)| t).collect();
         let builtin = name.is_some_and(|n| {
             jlens_core::function_catalog().iter().any(|f| f.name == n)
                 && !scope.iter().any(|(v, _)| v == n)

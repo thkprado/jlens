@@ -241,7 +241,7 @@ fn check() {
     );
     snapshot!(
         "check_function_warnings",
-        &["check", "$summ(price) + $count()"]
+        &["check", "$summ(price) + $count() + $length(1234)"]
     );
     snapshot!(
         "check_annotation_warning",

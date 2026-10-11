@@ -170,7 +170,14 @@ Completion works on incomplete expressions too, such as `$count(items[` or
   warnings for calls with too few or too many arguments for the function's signature. These need
   no schema. A function is known when it is built in, declared with
   `LanguageService::with_function` (or in `jlens.json`), or bound anywhere in the expression; a
-  variable declared with `with_variable` may hold a function, so its calls are not checked.
+  variable declared with `with_variable` may hold a function, so its calls are not checked;
+- `W0205` warnings for arguments whose type the function's signature cannot accept, such as
+  `$sum(items.name)` when `name` is a string. Only types that are known count: literals, the
+  results of operators, and fields of the schema. A field that is absent passes any signature;
+  the warning means that the call fails whenever the field is present;
+- `W0204` warnings for variables that are not declared, with a suggestion, when at least one
+  variable is declared with `with_variable` (or in `jlens.json`): the declarations are then
+  taken to be complete. Names bound in the expression, and functions, are known.
 
 Missing fields are reported only where the context is fully known. Nothing is reported after a
 user-defined function, an object constructor or `$lookup`, so the warnings do not produce false

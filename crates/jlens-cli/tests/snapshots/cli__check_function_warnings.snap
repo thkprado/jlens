@@ -1,6 +1,6 @@
 ---
 source: crates/jlens-cli/tests/cli.rs
-expression: "jlens(&[\"check\", \"$summ(price) + $count()\"], None)"
+expression: "jlens(&[\"check\", \"$summ(price) + $count() + $length(1234)\"], None)"
 ---
 exit: 0
 --- stdout
@@ -8,11 +8,16 @@ exit: 0
 warning[W0202]: Unknown function $summ; did you mean `$sum`?
  --> <expr>:1:1
   |
-1 | $summ(price) + $count()
+1 | $summ(price) + $count() + $length(1234)
   | ^^^^^
 warning[W0203]: Function $count takes 1 argument but is given 0
  --> <expr>:1:16
   |
-1 | $summ(price) + $count()
+1 | $summ(price) + $count() + $length(1234)
   |                ^^^^^^
-<expr>: 0 error(s), 2 warning(s)
+warning[W0205]: Argument 1 of $length is a number, which does not match the signature <s-:n>
+ --> <expr>:1:35
+  |
+1 | $summ(price) + $count() + $length(1234)
+  |                                   ^^^^
+<expr>: 0 error(s), 3 warning(s)

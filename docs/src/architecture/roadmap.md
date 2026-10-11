@@ -62,7 +62,7 @@ tests them and explains their results before they ship.
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
 | 1 | `check` warns about unknown functions, with a suggestion (`$summ` → `$sum`), and about calls with the wrong number of arguments | Language-service and CLI tests; no warning on host functions declared in `jlens.json` | **done** |
-| 2 | `check` warns about undeclared variables, when declarations are given, and about argument types that cannot match a signature, when the types are known | Table-driven tests without false positives on the conformance suite's expressions | planned |
+| 2 | `check` warns about undeclared variables, when declarations are given, and about argument types that cannot match a signature, when the types are known | Table-driven tests without false positives on the conformance suite's expressions | **done** |
 | 3 | `check --config jlens.json`, and the `jlens.json` of the current directory by default: the CLI and the editors see the same schema, variables and functions | CLI tests sharing a fixture with the language server tests | planned |
 | 4 | `jlens test`: runs a file of cases (input, bindings, expected result or error code) and reports the failures, as text or as `--json` | Snapshot tests; guide page | planned |
 | 5 | Prebuilt binaries for Linux, macOS and Windows attached to each release, installable with `cargo binstall` | A release with the binaries | planned |

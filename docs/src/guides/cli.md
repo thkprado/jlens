@@ -180,8 +180,10 @@ These options apply to a single document; they cannot be combined with `--ndjson
 Parses the expression with error recovery and reports every problem it finds. It warns about
 calls of functions that are neither built in nor bound in the expression (`W0202`, with a
 suggestion such as `$summ` → `$sum`), and about calls with a number of arguments the function's
-signature does not accept (`W0203`). With `--schema`, it also reports field names that the
-schema does not have (see the [schema guide](schema.md)). Each problem is shown in context:
+signature does not accept (`W0203`) or an argument whose type it does not accept (`W0205`, as
+in `$length(1234)`). With `--schema`, it also reports field names that the schema does not have
+(see the [schema guide](schema.md)), and checks the types of fields passed to functions. Each
+problem is shown in context:
 
 ```text
 $ jlens check 'Account.Order[0;].Product'

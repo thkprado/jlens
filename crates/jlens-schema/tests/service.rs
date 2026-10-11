@@ -283,6 +283,164 @@ fn diagnostics_report_unknown_functions_and_argument_counts() {
     assert_eq!((d.span.start, d.span.end), (4, 9));
 }
 
+fn assert_diagnostics(svc: &LanguageService, cases: &[(&str, &[(&str, &str)])]) {
+    for (text, expected) in cases {
+        let got: Vec<(String, String)> = svc
+            .diagnostics(text)
+            .into_iter()
+            .map(|d| (d.code, d.message))
+            .collect();
+        let expected: Vec<(String, String)> = expected
+            .iter()
+            .map(|(c, m)| ((*c).into(), (*m).into()))
+            .collect();
+        assert_eq!(got, expected, "{text}");
+    }
+}
+
+#[test]
+fn diagnostics_report_undeclared_variables_when_variables_are_declared() {
+    use jlens_schema::FunctionDecl;
+    let svc = LanguageService::new(None)
+        .with_variable("limit", None)
+        .with_variable("region", None)
+        .with_function(FunctionDecl::new("rate", ""));
+    assert_diagnostics(
+        &svc,
+        &[
+            ("$limit + $count($region)", &[]),
+            (
+                "$limt",
+                &[(
+                    "W0204",
+                    "Variable $limt is not declared; did you mean `$limit`?",
+                )],
+            ),
+            ("$other", &[("W0204", "Variable $other is not declared")]),
+            // Names bound anywhere in the expression, the context, the input and functions.
+            ("($f := function($n) { $n + $m }; $m := 1; $f(2))", &[]),
+            ("items@$i#$p.($i + $p)", &[]),
+            ("$ + $$.a", &[]),
+            ("$map([1], $string) ~> $rate", &[]),
+            // A call of an unknown name gets `W0202` alone.
+            ("$other()", &[("W0202", "Unknown function $other")]),
+        ],
+    );
+    let d = &svc.diagnostics("1 + $other")[0];
+    assert_eq!((d.span.start, d.span.end), (4, 10));
+
+    // Without declarations, variables are not checked: the bindings are not known.
+    let undeclared = LanguageService::new(None);
+    assert!(undeclared.diagnostics("$other").is_empty());
+}
+
+#[test]
+fn diagnostics_report_argument_types_the_signature_rejects() {
+    use jlens_schema::FunctionDecl;
+    let schema = Schema::infer(&[
+        json!({
+            "name": "Ann",
+            "age": 30,
+            "tags": ["a", "b"],
+            "scores": [1, 2],
+            "items": [{"price": 1.5, "label": "x"}],
+            "mixed": "1",
+        }),
+        json!({"mixed": 2}),
+    ]);
+    let svc = LanguageService::new(Some(schema))
+        .with_variable("limit", Some(Schema::infer(&[json!(5)]).root))
+        .with_variable("anything", None)
+        .with_function(FunctionDecl::new("rate", "").signature("<sn?:n>"));
+    let message = |index: usize, function: &str, ty: &str, signature: &str| {
+        format!(
+            "Argument {index} of ${function} is {ty}, which does not match the signature \
+             {signature}"
+        )
+    };
+    let cases: Vec<(&str, Vec<(&str, String)>)> = vec![
+        // Known types that match, and types that are not known.
+        (
+            "$uppercase(name) & $sum(scores) & $sum(items.price) & $string(age)",
+            vec![],
+        ),
+        ("$join(tags, ', ') & $count(tags) & $length(mixed)", vec![]),
+        (
+            "$uppercase($anything) & $sum({'a': 1}.a) & $abs(1 + 2)",
+            vec![],
+        ),
+        (
+            "$substring(name, 1) & $substring(1) & 'abc' ~> $substring(1)",
+            vec![],
+        ),
+        (
+            "$map(scores, function($v) { $v * 2 }) & $map(scores, $string)",
+            vec![],
+        ),
+        // The context value fills in a missing first argument.
+        ("items.label.$uppercase()", vec![]),
+        (
+            "$uppercase(age)",
+            vec![("W0205", message(1, "uppercase", "a number", "<s-:s>"))],
+        ),
+        (
+            "$sum(tags)",
+            vec![(
+                "W0205",
+                message(1, "sum", "an array of strings", "<a<n>:n>"),
+            )],
+        ),
+        (
+            "$sum(items.label)",
+            vec![("W0205", message(1, "sum", "a string", "<a<n>:n>"))],
+        ),
+        (
+            "$substring(name, 'x')",
+            vec![("W0205", message(2, "substring", "a string", "<s-nn?:s>"))],
+        ),
+        (
+            "$length($limit)",
+            vec![("W0205", message(1, "length", "a number", "<s-:n>"))],
+        ),
+        (
+            "$map(scores, 5)",
+            vec![("W0205", message(2, "map", "a number", "<af>"))],
+        ),
+        (
+            "$not(true) and $uppercase(1 = 1)",
+            vec![("W0205", message(1, "uppercase", "a boolean", "<s-:s>"))],
+        ),
+        (
+            "age ~> $join()",
+            vec![("W0205", message(1, "join", "a number", "<a<s>s?:s>"))],
+        ),
+        // Declared functions are checked against their signature.
+        ("$rate(name, age)", vec![]),
+        (
+            "$rate(age)",
+            vec![("W0205", message(1, "rate", "a number", "<sn?:n>"))],
+        ),
+        // Partial applications and functions bound in the expression are not checked.
+        ("$uppercase(?)(1)", vec![]),
+        ("($length := function($x) { $x }; $length(1))", vec![]),
+    ];
+    for (text, expected) in &cases {
+        let got: Vec<(String, String)> = svc
+            .diagnostics(text)
+            .into_iter()
+            .map(|d| (d.code, d.message))
+            .collect();
+        let expected: Vec<(String, String)> = expected
+            .iter()
+            .map(|(c, m)| ((*c).into(), m.clone()))
+            .collect();
+        assert_eq!(got, expected, "{text}");
+    }
+    // The warning points at the argument.
+    let d = &svc.diagnostics("$uppercase(age)")[0];
+    assert_eq!((d.span.start, d.span.end), (11, 14));
+}
+
 #[test]
 fn hover_and_signature_help() {
     let svc = service();
