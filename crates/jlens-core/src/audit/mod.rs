@@ -42,7 +42,7 @@ use serde_json::Value as JsonValue;
 
 use crate::ast::{Node, NodeId, Span};
 use crate::error::Error;
-use crate::value::Value;
+use crate::value::{Inspect, Value};
 
 /// Receives evaluation events. Every method has an empty default implementation.
 ///
@@ -107,7 +107,7 @@ pub struct EvalInfo<'a> {
 
 /// A read-only view of a run-time value.
 #[derive(Clone, Copy)]
-pub struct ValueRef<'a>(pub(crate) &'a Value);
+pub struct ValueRef<'a>(pub(crate) &'a dyn Inspect);
 
 impl ValueRef<'_> {
     /// The value as JSON (`None` for undefined and functions).
@@ -117,34 +117,31 @@ impl ValueRef<'_> {
 
     /// The value as JSON, truncated according to `limits`.
     pub fn capture(&self, limits: &CaptureLimits) -> Option<JsonValue> {
-        capture(self.0, limits, 0)
+        self.0.capture(limits)
     }
 
     /// Whether the value is undefined.
     pub fn is_undefined(&self) -> bool {
-        self.0.is_undefined()
+        self.0.signature_symbol() == 'm'
     }
 
     /// The value if it is a boolean.
     pub fn as_bool(&self) -> Option<bool> {
-        match self.0 {
-            Value::Bool(b) => Some(*b),
-            _ => None,
-        }
+        self.0.as_bool()
     }
 
     /// The JSONata type name (`string`, `number`, `boolean`, `null`, `array`, `object`,
     /// `function`, or `undefined`).
     pub fn type_name(&self) -> &'static str {
-        match self.0 {
-            Value::Undefined => "undefined",
-            Value::Null => "null",
-            Value::Bool(_) => "boolean",
-            Value::Number(_) => "number",
-            Value::String(_) => "string",
-            Value::Array(_) => "array",
-            Value::Object(_) => "object",
-            Value::Function(_) => "function",
+        match self.0.signature_symbol() {
+            'm' => "undefined",
+            'l' => "null",
+            'b' => "boolean",
+            'n' => "number",
+            's' => "string",
+            'a' => "array",
+            'o' => "object",
+            _ => "function",
         }
     }
 }
@@ -407,7 +404,7 @@ pub struct FilterAudit {
 
 /// Captures a value as JSON within `limits`. Truncated arrays end with a `"… N more"` string,
 /// truncated objects with a `"…": "N more"` field, and strings with `…`.
-fn capture(v: &Value, limits: &CaptureLimits, depth: usize) -> Option<JsonValue> {
+pub(crate) fn capture(v: &Value<'_>, limits: &CaptureLimits, depth: usize) -> Option<JsonValue> {
     Some(match v {
         Value::Undefined => return None,
         Value::Function(_) => JsonValue::String("<function>".into()),

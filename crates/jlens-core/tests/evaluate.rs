@@ -442,3 +442,13 @@ fn missing_arguments_behave_as_in_javascript() {
         assert_eq!(err.code(), "D3061", "{source}");
     }
 }
+
+#[test]
+fn a_builtin_is_one_value_per_evaluation() {
+    assert_eq!(eval("$sum = $sum", json!(null)), Some(json!(true)));
+    assert_eq!(
+        eval("($f := $sum; (function() { $f = $sum })())", json!(null)),
+        Some(json!(true))
+    );
+    assert_eq!(eval("$sum = $count", json!(null)), Some(json!(false)));
+}

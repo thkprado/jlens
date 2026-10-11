@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::eval::Evaluator;
 use crate::value::{Map, Value};
 
-type R = Result<Value>;
+type R<'a> = Result<Value<'a>>;
 
 /// `String.prototype.slice` over characters, with JavaScript's handling of negative and
 /// fractional positions.
@@ -48,7 +48,11 @@ fn utf16_len(s: &str) -> usize {
     s.encode_utf16().count()
 }
 
-pub(super) fn substring(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn substring<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -74,7 +78,11 @@ pub(super) fn substring(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     }))
 }
 
-pub(super) fn substring_before(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn substring_before<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -88,7 +96,11 @@ pub(super) fn substring_before(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R 
     })
 }
 
-pub(super) fn substring_after(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn substring_after<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -101,22 +113,30 @@ pub(super) fn substring_after(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     })
 }
 
-pub(super) fn lowercase(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn lowercase<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     Ok(text(&a, 0).map_or(Value::Undefined, |s| Value::string(s.to_lowercase())))
 }
 
-pub(super) fn uppercase(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn uppercase<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     Ok(text(&a, 0).map_or(Value::Undefined, |s| Value::string(s.to_uppercase())))
 }
 
-pub(super) fn length(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn length<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     Ok(text(&a, 0).map_or(
         Value::Undefined,
         |s| Value::Number(s.chars().count() as f64),
     ))
 }
 
-pub(super) fn trim(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn trim<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -138,7 +158,7 @@ pub(super) fn trim(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     Ok(Value::string(out))
 }
 
-pub(super) fn pad(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn pad<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -163,7 +183,12 @@ pub(super) fn pad(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
 
 /// Applies a matcher (a regex or a user function) to a string, checking the structure it
 /// returns (jsonata-js `evaluateMatcher`).
-fn evaluate_matcher(ev: &mut Evaluator, matcher: &Value, s: Value, call: &Call) -> R {
+fn evaluate_matcher<'a>(
+    ev: &mut Evaluator<'_, 'a>,
+    matcher: &Value<'a>,
+    s: Value<'a>,
+    call: &Call<'_, 'a>,
+) -> R<'a> {
     let result = ev.apply(matcher, vec![s], &Value::Null, call.env)?;
     if let Value::Undefined = result {
         return Ok(result);
@@ -183,18 +208,22 @@ fn evaluate_matcher(ev: &mut Evaluator, matcher: &Value, s: Value, call: &Call) 
     Ok(result)
 }
 
-fn field(v: &Value, key: &str) -> Value {
+fn field<'a>(v: &Value<'a>, key: &str) -> Value<'a> {
     match v {
         Value::Object(o) => o.borrow().get(key).cloned().unwrap_or_default(),
         _ => Value::Undefined,
     }
 }
 
-fn field_usize(v: &Value, key: &str) -> usize {
+fn field_usize<'a>(v: &Value<'a>, key: &str) -> usize {
     field(v, key).as_number().unwrap_or(0.0).max(0.0) as usize
 }
 
-pub(super) fn contains(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
+pub(super) fn contains<'a>(
+    ev: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    call: &Call<'_, 'a>,
+) -> R<'a> {
     let (Some(s), token) = (text(&a, 0), arg(&a, 1)) else {
         return Ok(Value::Undefined);
     };
@@ -207,14 +236,18 @@ pub(super) fn contains(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
     })
 }
 
-fn check_limit(a: &[Value], i: usize, code: &str, index: usize) -> Result<Option<f64>> {
+fn check_limit<'a>(a: &[Value<'a>], i: usize, code: &str, index: usize) -> Result<Option<f64>> {
     match num(a, i) {
         Some(l) if l < 0.0 => Err(Error::new(code).with("value", l).with("index", index)),
         other => Ok(other),
     }
 }
 
-pub(super) fn match_(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
+pub(super) fn match_<'a>(
+    ev: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    call: &Call<'_, 'a>,
+) -> R<'a> {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -237,7 +270,7 @@ pub(super) fn match_(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
 }
 
 /// Expands `$0`, `$1`, ... and `$$` in a replacement string (jsonata-js `replace`).
-fn substitute(replacement: &str, matched: &Value) -> String {
+fn substitute<'a>(replacement: &str, matched: &Value<'a>) -> String {
     let group_count = match field(matched, "groups") {
         Value::Array(g) => g.items.len(),
         _ => 0,
@@ -306,7 +339,11 @@ fn substitute(replacement: &str, matched: &Value) -> String {
     out
 }
 
-pub(super) fn replace(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
+pub(super) fn replace<'a>(
+    ev: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    call: &Call<'_, 'a>,
+) -> R<'a> {
     let (Some(s), pattern) = (text(&a, 0), arg(&a, 1)) else {
         return Ok(Value::Undefined);
     };
@@ -372,7 +409,11 @@ pub(super) fn replace(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
     Ok(Value::string(result))
 }
 
-pub(super) fn split(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
+pub(super) fn split<'a>(
+    ev: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    call: &Call<'_, 'a>,
+) -> R<'a> {
     let (Some(s), separator) = (text(&a, 0), arg(&a, 1)) else {
         return Ok(Value::Undefined);
     };
@@ -380,10 +421,10 @@ pub(super) fn split(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
         return Ok(Value::Undefined);
     }
     let limit = check_limit(&a, 2, "D3020", 3)?;
-    let mut out: Vec<Value> = Vec::new();
+    let mut out: Vec<Value<'a>> = Vec::new();
     if limit.is_none_or(|l| l > 0.0) {
         if let Value::String(sep) = &separator {
-            let parts: Vec<Value> = if sep.is_empty() {
+            let parts: Vec<Value<'a>> = if sep.is_empty() {
                 s.chars().map(|c| Value::string(c.to_string())).collect()
             } else {
                 s.split(sep.as_ref()).map(Value::string).collect()
@@ -414,7 +455,7 @@ pub(super) fn split(ev: &mut Evaluator, a: Vec<Value>, call: &Call) -> R {
     Ok(Value::array(out, 0))
 }
 
-pub(super) fn join(ev: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn join<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let strs = arg(&a, 0);
     if strs.is_undefined() {
         return Ok(Value::Undefined);
@@ -437,7 +478,11 @@ pub(super) fn join(ev: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-pub(super) fn base64encode(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn base64encode<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -461,7 +506,11 @@ pub(super) fn base64encode(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     Ok(Value::string(out))
 }
 
-pub(super) fn base64decode(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn base64decode<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -574,17 +623,29 @@ fn url_error(name: &str, s: &str) -> Error {
         .with("functionName", name)
 }
 
-pub(super) fn encode_url_component(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn encode_url_component<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     Ok(text(&a, 0).map_or(Value::Undefined, |s| Value::string(encode(&s, ""))))
 }
 
-pub(super) fn encode_url(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn encode_url<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     Ok(text(&a, 0).map_or(Value::Undefined, |s| {
         Value::string(encode(&s, URI_RESERVED))
     }))
 }
 
-pub(super) fn decode_url_component(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn decode_url_component<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -593,7 +654,11 @@ pub(super) fn decode_url_component(_: &mut Evaluator, a: Vec<Value>, _: &Call) -
         .ok_or_else(|| url_error("decodeUrlComponent", &s))
 }
 
-pub(super) fn decode_url(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn decode_url<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };

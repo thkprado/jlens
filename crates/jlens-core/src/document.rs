@@ -32,7 +32,7 @@ use crate::value::{Keys, Map, Value};
 ///
 /// A `Document` is not `Send`. Convert it on the thread that evaluates against it.
 pub struct Document {
-    value: Value,
+    value: Value<'static>,
 }
 
 impl Document {
@@ -57,7 +57,7 @@ impl Document {
         self.value.to_json().unwrap_or(JsonValue::Null)
     }
 
-    pub(crate) fn value(&self) -> &Value {
+    pub(crate) fn value(&self) -> &Value<'static> {
         &self.value
     }
 }
@@ -74,7 +74,7 @@ impl From<&JsonValue> for Document {
     }
 }
 
-impl<'de> Deserialize<'de> for Value {
+impl<'de> Deserialize<'de> for Value<'static> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         ValueSeed(&mut Keys::default()).deserialize(deserializer)
     }
@@ -84,49 +84,52 @@ impl<'de> Deserialize<'de> for Value {
 struct ValueSeed<'k>(&'k mut Keys);
 
 impl<'de> DeserializeSeed<'de> for ValueSeed<'_> {
-    type Value = Value;
+    type Value = Value<'static>;
 
-    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
+    fn deserialize<D: Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Value<'static>, D::Error> {
         deserializer.deserialize_any(self)
     }
 }
 
 impl<'de> Visitor<'de> for ValueSeed<'_> {
-    type Value = Value;
+    type Value = Value<'static>;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a JSON value")
     }
 
-    fn visit_bool<E>(self, b: bool) -> Result<Value, E> {
+    fn visit_bool<E>(self, b: bool) -> Result<Value<'static>, E> {
         Ok(Value::Bool(b))
     }
 
-    fn visit_i64<E>(self, n: i64) -> Result<Value, E> {
+    fn visit_i64<E>(self, n: i64) -> Result<Value<'static>, E> {
         Ok(Value::Number(n as f64))
     }
 
-    fn visit_u64<E>(self, n: u64) -> Result<Value, E> {
+    fn visit_u64<E>(self, n: u64) -> Result<Value<'static>, E> {
         Ok(Value::Number(n as f64))
     }
 
-    fn visit_f64<E>(self, n: f64) -> Result<Value, E> {
+    fn visit_f64<E>(self, n: f64) -> Result<Value<'static>, E> {
         Ok(Value::Number(n))
     }
 
-    fn visit_str<E>(self, s: &str) -> Result<Value, E> {
+    fn visit_str<E>(self, s: &str) -> Result<Value<'static>, E> {
         Ok(Value::string(s))
     }
 
-    fn visit_unit<E>(self) -> Result<Value, E> {
+    fn visit_unit<E>(self) -> Result<Value<'static>, E> {
         Ok(Value::Null)
     }
 
-    fn visit_none<E>(self) -> Result<Value, E> {
+    fn visit_none<E>(self) -> Result<Value<'static>, E> {
         Ok(Value::Null)
     }
 
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value<'static>, A::Error> {
         let mut items = Vec::with_capacity(seq.size_hint().unwrap_or(0));
         while let Some(item) = seq.next_element_seed(ValueSeed(self.0))? {
             items.push(item);
@@ -134,7 +137,7 @@ impl<'de> Visitor<'de> for ValueSeed<'_> {
         Ok(Value::array(items, 0))
     }
 
-    fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Value, A::Error> {
+    fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Value<'static>, A::Error> {
         let mut map =
             Map::with_capacity_and_hasher(access.size_hint().unwrap_or(0), Default::default());
         // A repeated key keeps its first position and takes the last value, as in `JSON.parse`.

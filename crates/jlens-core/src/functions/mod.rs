@@ -10,8 +10,6 @@ mod collections;
 mod numeric;
 mod strings;
 
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use serde::Serialize;
@@ -22,14 +20,15 @@ use crate::signature::Signature;
 use crate::value::{self, Function, Value};
 
 /// The context of a call to a built-in function.
-pub(crate) struct Call<'a> {
+pub(crate) struct Call<'c, 'a> {
     /// The context value of the call (the input of the function call expression).
-    pub input: &'a Value,
+    pub input: &'c Value<'a>,
     /// The environment of the call.
-    pub env: &'a Env,
+    pub env: &'c Env<'a>,
 }
 
-pub(crate) type NativeImpl = fn(&mut Evaluator<'_>, Vec<Value>, &Call) -> Result<Value>;
+pub(crate) type NativeImpl =
+    for<'a> fn(&mut Evaluator<'_, 'a>, Vec<Value<'a>>, &Call<'_, 'a>) -> Result<Value<'a>>;
 
 /// Groups of built-in functions, as in the JSONata documentation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -85,15 +84,15 @@ pub struct FunctionInfo {
     pub summary: &'static str,
 }
 
-pub(crate) fn arg(args: &[Value], i: usize) -> Value {
+pub(crate) fn arg<'a>(args: &[Value<'a>], i: usize) -> Value<'a> {
     args.get(i).cloned().unwrap_or_default()
 }
 
-pub(crate) fn num(args: &[Value], i: usize) -> Option<f64> {
+pub(crate) fn num<'a>(args: &[Value<'a>], i: usize) -> Option<f64> {
     args.get(i).and_then(Value::as_number)
 }
 
-pub(crate) fn text(args: &[Value], i: usize) -> Option<std::rc::Rc<str>> {
+pub(crate) fn text<'a>(args: &[Value<'a>], i: usize) -> Option<std::rc::Rc<str>> {
     match args.get(i) {
         Some(Value::String(s)) => Some(s.clone()),
         _ => None,
@@ -268,28 +267,16 @@ pub fn catalog() -> Vec<FunctionInfo> {
         .collect()
 }
 
-thread_local! {
-    /// One function value per built-in, so that `$sum = $sum` holds as it does in jsonata-js.
-    static VALUES: RefCell<HashMap<&'static str, Value>> = RefCell::new(HashMap::new());
-}
-
-/// The value bound to a built-in function name, if there is one.
-pub(crate) fn native_value(name: &str) -> Option<Value> {
-    let native = native(name)?;
-    Some(VALUES.with(|values| {
-        values
-            .borrow_mut()
-            .entry(native.name)
-            .or_insert_with(|| Value::function(Function::Native(native)))
-            .clone()
-    }))
+/// A new value for a built-in function name, if there is one.
+pub(crate) fn native_value<'a>(name: &str) -> Option<Value<'a>> {
+    native(name).map(|native| Value::function(Function::Native(native)))
 }
 
 // ---------------------------------------------------------------------------------------------
 // Helpers shared with the evaluator.
 
 /// The effective boolean value (`$boolean`); `None` for undefined.
-pub(crate) fn boolean(v: &Value) -> Result<Option<bool>> {
+pub(crate) fn boolean<'a>(v: &Value<'a>) -> Result<Option<bool>> {
     Ok(Some(match v {
         Value::Undefined => return Ok(None),
         Value::Array(a) => match a.items.len() {
@@ -314,7 +301,7 @@ pub(crate) fn boolean(v: &Value) -> Result<Option<bool>> {
 }
 
 /// Looks up a field in an object, or in each object of an array (flattening one level).
-pub(crate) fn lookup(input: &Value, key: &str) -> Value {
+pub(crate) fn lookup<'a>(input: &Value<'a>, key: &str) -> Value<'a> {
     match input {
         Value::Array(a) => {
             let mut out = Vec::new();
@@ -333,7 +320,7 @@ pub(crate) fn lookup(input: &Value, key: &str) -> Value {
 }
 
 /// `$append`: concatenates, treating non-arrays as single items. The result is a plain array.
-pub(crate) fn append(a: Value, b: Value) -> Value {
+pub(crate) fn append<'a>(a: Value<'a>, b: Value<'a>) -> Value<'a> {
     if a.is_undefined() {
         return b;
     }
@@ -349,7 +336,7 @@ pub(crate) fn append(a: Value, b: Value) -> Value {
 }
 
 /// `$string`: `None` for undefined.
-pub(crate) fn to_string(v: &Value, pretty: bool, limit: usize) -> Result<Option<String>> {
+pub(crate) fn to_string<'a>(v: &Value<'a>, pretty: bool, limit: usize) -> Result<Option<String>> {
     Ok(Some(match v {
         Value::Undefined => return Ok(None),
         Value::String(s) => s.to_string(),
@@ -361,7 +348,7 @@ pub(crate) fn to_string(v: &Value, pretty: bool, limit: usize) -> Result<Option<
     }))
 }
 
-fn sum(items: &Value) -> Result<Value> {
+fn sum<'a>(items: &Value<'a>) -> Result<Value<'a>> {
     let Value::Array(a) = items else {
         return Ok(Value::Undefined);
     };
@@ -370,7 +357,7 @@ fn sum(items: &Value) -> Result<Value> {
     ))
 }
 
-fn extreme(items: &Value, pick: fn(f64, f64) -> f64) -> Result<Value> {
+fn extreme<'a>(items: &Value<'a>, pick: fn(f64, f64) -> f64) -> Result<Value<'a>> {
     match items {
         Value::Array(a) if !a.items.is_empty() => Ok(Value::Number(
             a.items
@@ -385,7 +372,7 @@ fn extreme(items: &Value, pick: fn(f64, f64) -> f64) -> Result<Value> {
 
 /// `$clone`: a deep copy made the way jsonata-js does it, by serializing and parsing. The text
 /// is limited to `limit` bytes, like a string.
-pub(crate) fn clone(v: &Value, limit: usize) -> Result<Value> {
+pub(crate) fn clone<'a>(v: &Value<'a>, limit: usize) -> Result<Value<'a>> {
     let Some(text) = to_string(v, false, limit)? else {
         return Ok(Value::Undefined);
     };
@@ -395,10 +382,10 @@ pub(crate) fn clone(v: &Value, limit: usize) -> Result<Value> {
 }
 
 /// The stable merge sort of jsonata-js: `swap(a, b)` returns true when `b` must come first.
-pub(crate) fn merge_sort(
-    items: Vec<Value>,
-    swap: &mut dyn FnMut(&Value, &Value) -> Result<bool>,
-) -> Result<Vec<Value>> {
+pub(crate) fn merge_sort<'a>(
+    items: Vec<Value<'a>>,
+    swap: &mut dyn FnMut(&Value<'a>, &Value<'a>) -> Result<bool>,
+) -> Result<Vec<Value<'a>>> {
     if items.len() <= 1 {
         return Ok(items);
     }
@@ -424,7 +411,12 @@ pub(crate) fn merge_sort(
 
 /// The arguments passed to the function argument of `$map`, `$filter`, `$each`, ...: the value,
 /// then the index (or key) and the whole collection if the function declares them.
-pub(crate) fn hof_args(func: &Value, a1: Value, a2: Value, a3: Value) -> Vec<Value> {
+pub(crate) fn hof_args<'a>(
+    func: &Value<'a>,
+    a1: Value<'a>,
+    a2: Value<'a>,
+    a3: Value<'a>,
+) -> Vec<Value<'a>> {
     let arity = match func {
         Value::Function(f) => f.arity(),
         _ => 1,

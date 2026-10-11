@@ -240,7 +240,7 @@ impl Expression {
     }
 }
 
-fn json_input(input: Option<&JsonValue>) -> value::Value {
+fn json_input(input: Option<&JsonValue>) -> value::Value<'_> {
     input.map_or(value::Value::Undefined, value::Value::from_json)
 }
 

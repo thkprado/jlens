@@ -24,16 +24,16 @@ use crate::value::{
 };
 
 /// A scope of variable bindings.
-pub(crate) struct Frame {
-    vars: RefCell<HashMap<String, Value, foldhash::fast::RandomState>>,
-    parent: Option<Env>,
+pub(crate) struct Frame<'a> {
+    vars: RefCell<HashMap<String, Value<'a>, foldhash::fast::RandomState>>,
+    parent: Option<Env<'a>>,
 }
 
 /// A shared reference to a [`Frame`].
-pub(crate) type Env = Rc<Frame>;
+pub(crate) type Env<'a> = Rc<Frame<'a>>;
 
-impl Frame {
-    fn new(parent: Option<&Env>) -> Env {
+impl<'a> Frame<'a> {
+    fn new(parent: Option<&Env<'a>>) -> Env<'a> {
         Rc::new(Frame {
             vars: RefCell::new(HashMap::default()),
             parent: parent.cloned(),
@@ -41,7 +41,7 @@ impl Frame {
     }
 
     /// Looks a variable up in this frame and its ancestors, then among the built-ins.
-    pub fn lookup(&self, name: &str) -> Value {
+    pub fn lookup(&self, name: &str) -> Value<'a> {
         let mut frame = self;
         loop {
             if let Some(v) = frame.vars.borrow().get(name) {
@@ -49,9 +49,23 @@ impl Frame {
             }
             match &frame.parent {
                 Some(p) => frame = p,
-                None => return functions::native_value(name).unwrap_or_default(),
+                None => return frame.builtin(name),
             }
         }
+    }
+
+    /// The value of a built-in function, kept in the root frame once it is looked up so that
+    /// `$sum = $sum` holds as it does in jsonata-js. Values never outlive their evaluation, so
+    /// each evaluation has its own.
+    #[inline(never)]
+    fn builtin(&self, name: &str) -> Value<'a> {
+        let value = functions::native_value(name).unwrap_or_default();
+        if !value.is_undefined() {
+            self.vars
+                .borrow_mut()
+                .insert(name.to_owned(), value.clone());
+        }
+        value
     }
 }
 
@@ -88,13 +102,13 @@ pub(crate) const DEFAULT_MAX_ARRAY_LENGTH: usize = 1 << 24;
 pub(crate) const DEFAULT_MAX_RESULT_SIZE: usize = 1 << 28;
 
 /// The state of one evaluation.
-pub(crate) struct Evaluator<'t> {
+pub(crate) struct Evaluator<'t, 'a> {
     depth: usize,
     limits: Limits,
     started: Instant,
     /// Frames that may be part of reference cycles (a frame binding a closure that captures
     /// it). Their bindings are cleared when the evaluation ends so the memory is reclaimed.
-    cyclic: Vec<Weak<Frame>>,
+    cyclic: Vec<Weak<Frame<'a>>>,
     regexes: HashMap<(String, String), Rc<Regex>>,
     /// Milliseconds since the epoch, fixed for the whole evaluation (`$now`, `$millis`).
     timestamp: f64,
@@ -104,7 +118,7 @@ pub(crate) struct Evaluator<'t> {
     tracer: Option<&'t mut dyn Tracer>,
 }
 
-impl Drop for Evaluator<'_> {
+impl Drop for Evaluator<'_, '_> {
     fn drop(&mut self) {
         for frame in self.cyclic.drain(..) {
             if let Some(frame) = frame.upgrade() {
@@ -120,11 +134,11 @@ fn err_at(code: &str, node: &Node) -> Error {
 
 /// Adds the value as the `value` detail of an error (omitted for undefined, like jsonata-js).
 trait WithValue {
-    fn with_value(self, key: &str, v: &Value) -> Self;
+    fn with_value(self, key: &str, v: &Value<'_>) -> Self;
 }
 
 impl WithValue for Error {
-    fn with_value(self, key: &str, v: &Value) -> Self {
+    fn with_value(self, key: &str, v: &Value<'_>) -> Self {
         match v.to_json_detail() {
             Some(json) => self.with(key, json),
             None => self,
@@ -132,7 +146,7 @@ impl WithValue for Error {
     }
 }
 
-fn js_truthy(v: &Value) -> bool {
+fn js_truthy<'a>(v: &Value<'a>) -> bool {
     match v {
         Value::Undefined | Value::Null => false,
         Value::Bool(b) => *b,
@@ -142,14 +156,14 @@ fn js_truthy(v: &Value) -> bool {
     }
 }
 
-fn tuple_get(tuple: &Value, key: &str) -> Value {
+fn tuple_get<'a>(tuple: &Value<'a>, key: &str) -> Value<'a> {
     match tuple {
         Value::Object(o) => o.borrow().get(key).cloned().unwrap_or_default(),
         _ => Value::Undefined,
     }
 }
 
-fn tuple_map(tuple: &Value) -> Map {
+fn tuple_map<'a>(tuple: &Value<'a>) -> Map<'a> {
     match tuple {
         Value::Object(o) => o.borrow().clone(),
         _ => Map::default(),
@@ -170,9 +184,9 @@ fn transform_signature() -> &'static Signature {
 }
 
 /// Evaluates a parsed expression. This is the entry point used by `Expression::evaluate_with`.
-pub(crate) fn evaluate(
+pub(crate) fn evaluate<'a>(
     ast: &Ast,
-    input: Value,
+    input: Value<'a>,
     bindings: &crate::Bindings,
     limits: Limits,
     tracer: Option<&mut dyn Tracer>,
@@ -255,7 +269,7 @@ fn splitmix64(seed: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-impl Evaluator<'_> {
+impl<'a> Evaluator<'_, 'a> {
     /// The evaluation timestamp in milliseconds since the epoch.
     pub(crate) fn timestamp(&self) -> f64 {
         self.timestamp
@@ -272,7 +286,7 @@ impl Evaluator<'_> {
         (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64
     }
 
-    pub(crate) fn bind(&mut self, env: &Env, name: &str, value: Value) {
+    pub(crate) fn bind(&mut self, env: &Env<'a>, name: &str, value: Value<'a>) {
         if matches!(
             value,
             Value::Function(_) | Value::Array(_) | Value::Object(_)
@@ -282,12 +296,12 @@ impl Evaluator<'_> {
         env.vars.borrow_mut().insert(name.to_owned(), value);
     }
 
-    fn child(&mut self, parent: &Env) -> Env {
+    fn child(&mut self, parent: &Env<'a>) -> Env<'a> {
         Frame::new(Some(parent))
     }
 
     /// A frame binding every field of a tuple (`createFrameFromTuple`).
-    fn frame_from_tuple(&mut self, env: &Env, tuple: &Value) -> Env {
+    fn frame_from_tuple(&mut self, env: &Env<'a>, tuple: &Value<'a>) -> Env<'a> {
         let frame = self.child(env);
         if let Value::Object(o) = tuple {
             for (k, v) in o.borrow().iter() {
@@ -366,7 +380,7 @@ impl Evaluator<'_> {
     }
 
     /// Checks the size of a value returned by a built-in or host function.
-    fn check_size(&self, v: Value) -> Result<Value> {
+    fn check_size(&self, v: Value<'a>) -> Result<Value<'a>> {
         match &v {
             Value::String(s) => self.check_string(s.len())?,
             Value::Array(a) => self.check_array(a.items.len())?,
@@ -377,7 +391,12 @@ impl Evaluator<'_> {
 
     /// Evaluates `expr` against `input` (jsonata-js `evaluate`).
     #[inline]
-    pub(crate) fn eval(&mut self, expr: &Node, input: &Value, env: &Env) -> Result<Value> {
+    pub(crate) fn eval(
+        &mut self,
+        expr: &Node,
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         if self.tracer.is_some() {
             return self.eval_traced(expr, input, env);
         }
@@ -386,7 +405,7 @@ impl Evaluator<'_> {
 
     /// Evaluates with stack growth on native targets, and a stack check on WebAssembly.
     #[inline]
-    fn eval_grow(&mut self, expr: &Node, input: &Value, env: &Env) -> Result<Value> {
+    fn eval_grow(&mut self, expr: &Node, input: &Value<'a>, env: &Env<'a>) -> Result<Value<'a>> {
         if crate::stack::exhausted() {
             return Err(Error::new("D1011").with("value", self.depth));
         }
@@ -396,7 +415,7 @@ impl Evaluator<'_> {
     /// [`Self::eval`] with `enter`/`exit` events, kept out of the untraced hot path.
     #[cold]
     #[inline(never)]
-    fn eval_traced(&mut self, expr: &Node, input: &Value, env: &Env) -> Result<Value> {
+    fn eval_traced(&mut self, expr: &Node, input: &Value<'a>, env: &Env<'a>) -> Result<Value<'a>> {
         if let Some(t) = self.tracer.as_deref_mut() {
             t.enter(expr, ValueRef(input));
         }
@@ -410,7 +429,7 @@ impl Evaluator<'_> {
         result
     }
 
-    fn eval_inner(&mut self, expr: &Node, input: &Value, env: &Env) -> Result<Value> {
+    fn eval_inner(&mut self, expr: &Node, input: &Value<'a>, env: &Env<'a>) -> Result<Value<'a>> {
         self.depth += 1;
         self.guardrails()?;
 
@@ -592,9 +611,9 @@ impl Evaluator<'_> {
         expr: &Node,
         steps: &[Node],
         keep_singleton_array: bool,
-        input: &Value,
-        env: &Env,
-    ) -> Result<Value> {
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         // A path starting with a variable is absolute; otherwise an input array is iterated.
         let mut input_seq =
             if input.is_array() && !matches!(steps[0].kind, NodeKind::Variable { .. }) {
@@ -605,7 +624,7 @@ impl Evaluator<'_> {
 
         let mut result_seq = Value::Undefined;
         let mut is_tuple = false;
-        let mut tuple_bindings: Option<Value> = None;
+        let mut tuple_bindings: Option<Value<'a>> = None;
         let last = steps.len() - 1;
 
         for (ii, step) in steps.iter().enumerate() {
@@ -671,12 +690,18 @@ impl Evaluator<'_> {
         Ok(result_seq)
     }
 
-    fn step(&mut self, step: &Node, input: &Value, env: &Env, last: bool) -> Result<Value> {
+    fn step(
+        &mut self,
+        step: &Node,
+        input: &Value<'a>,
+        env: &Env<'a>,
+        last: bool,
+    ) -> Result<Value<'a>> {
         if let NodeKind::Sort { terms } = &step.kind {
             let sorted = self.sort(step, terms, input, env)?;
             return self.stages(&step.attrs.stages, sorted, env);
         }
-        let items: Vec<Value> = input
+        let items: Vec<Value<'a>> = input
             .as_array()
             .map(|a| a.items.clone())
             .unwrap_or_default();
@@ -712,7 +737,7 @@ impl Evaluator<'_> {
         Ok(Value::sequence(out))
     }
 
-    fn stages(&mut self, stages: &[Stage], input: Value, env: &Env) -> Result<Value> {
+    fn stages(&mut self, stages: &[Stage], input: Value<'a>, env: &Env<'a>) -> Result<Value<'a>> {
         let mut result = input;
         for stage in stages {
             match stage {
@@ -735,10 +760,10 @@ impl Evaluator<'_> {
     fn tuple_step(
         &mut self,
         step: &Node,
-        input: &Value,
-        tuple_bindings: Option<&Value>,
-        env: &Env,
-    ) -> Result<Value> {
+        input: &Value<'a>,
+        tuple_bindings: Option<&Value<'a>>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         if let NodeKind::Sort { terms } = &step.kind {
             let result = match tuple_bindings {
                 Some(bindings) => self.sort(step, terms, bindings, env)?,
@@ -763,7 +788,7 @@ impl Evaluator<'_> {
             return self.stages(&step.attrs.stages, result, env);
         }
 
-        let bindings: Vec<Value> = match tuple_bindings {
+        let bindings: Vec<Value<'a>> = match tuple_bindings {
             Some(b) => b.items_or_self(),
             None => input
                 .as_array()
@@ -823,7 +848,7 @@ impl Evaluator<'_> {
     }
 
     /// Applies a predicate to a sequence (jsonata-js `evaluateFilter`).
-    fn filter(&mut self, predicate: &Node, input: Value, env: &Env) -> Result<Value> {
+    fn filter(&mut self, predicate: &Node, input: Value<'a>, env: &Env<'a>) -> Result<Value<'a>> {
         let is_tuple = input.has_flag(TUPLE_STREAM);
         let flags = SEQUENCE | if is_tuple { TUPLE_STREAM } else { 0 };
         let items = input.items_or_self();
@@ -863,10 +888,10 @@ impl Evaluator<'_> {
     fn filter_items(
         &mut self,
         predicate: &Node,
-        items: &[Value],
+        items: &[Value<'a>],
         is_tuple: bool,
-        env: &Env,
-        results: &mut Vec<Value>,
+        env: &Env<'a>,
+        results: &mut Vec<Value<'a>>,
     ) -> Result<()> {
         let len = items.len() as f64;
         for (index, item) in items.iter().enumerate() {
@@ -909,9 +934,9 @@ impl Evaluator<'_> {
         op: BinaryOp,
         lhs_node: &Node,
         rhs_node: &Node,
-        input: &Value,
-        env: &Env,
-    ) -> Result<Value> {
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         let locate = |e: Error| {
             e.at_if_missing(expr.span, expr.position)
                 .with_token_if_missing(op.symbol())
@@ -987,9 +1012,9 @@ impl Evaluator<'_> {
         &mut self,
         expr: &Node,
         items: &[Node],
-        input: &Value,
-        env: &Env,
-    ) -> Result<Value> {
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         let mut out = Vec::new();
         for item in items {
             let value = self.eval(item, input, env)?;
@@ -1023,9 +1048,9 @@ impl Evaluator<'_> {
         &mut self,
         pairs: &[(Node, Node)],
         expr: &Node,
-        input: Value,
-        env: &Env,
-    ) -> Result<Value> {
+        input: Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         let reduce = input.has_flag(TUPLE_STREAM);
         let mut items = input.items_or_self();
         if items.is_empty() && !reduce {
@@ -1034,7 +1059,7 @@ impl Evaluator<'_> {
         }
 
         // key -> (data, index of the key/value pair that produced it)
-        let mut groups: IndexMap<Rc<str>, (Value, usize)> = IndexMap::new();
+        let mut groups: IndexMap<Rc<str>, (Value<'a>, usize)> = IndexMap::new();
         for item in &items {
             let frame = if reduce {
                 self.frame_from_tuple(env, item)
@@ -1086,7 +1111,13 @@ impl Evaluator<'_> {
     }
 
     /// Order-by (jsonata-js `evaluateSortExpression`).
-    fn sort(&mut self, expr: &Node, terms: &[SortTerm], input: &Value, env: &Env) -> Result<Value> {
+    fn sort(
+        &mut self,
+        expr: &Node,
+        terms: &[SortTerm],
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         let Value::Array(arr) = input else {
             return Ok(input.clone());
         };
@@ -1094,13 +1125,13 @@ impl Evaluator<'_> {
             return Ok(input.clone());
         }
         let is_tuple = arr.is_tuple_stream();
-        let mut swap = |a: &Value, b: &Value| -> Result<bool> {
+        let mut swap = |a: &Value<'a>, b: &Value<'a>| -> Result<bool> {
             let mut comp = 0;
             for term in terms {
                 if comp != 0 {
                     break;
                 }
-                let key = |ev: &mut Self, v: &Value| -> Result<Value> {
+                let key = |ev: &mut Self, v: &Value<'a>| -> Result<Value<'a>> {
                     if is_tuple {
                         let frame = ev.frame_from_tuple(env, v);
                         ev.eval(&term.expr, &tuple_get(v, "@"), &frame)
@@ -1118,7 +1149,7 @@ impl Evaluator<'_> {
                     comp = -1;
                     continue;
                 }
-                let comparable = |v: &Value| matches!(v, Value::String(_) | Value::Number(_));
+                let comparable = |v: &Value<'a>| matches!(v, Value::String(_) | Value::Number(_));
                 if !comparable(&aa) || !comparable(&bb) {
                     let bad = if comparable(&aa) { &bb } else { &aa };
                     return Err(err_at("T2008", expr).with_value("value", bad));
@@ -1156,10 +1187,10 @@ impl Evaluator<'_> {
         expr: &Node,
         procedure: &Node,
         args: &[Node],
-        input: &Value,
-        env: &Env,
-        apply_to: Option<Value>,
-    ) -> Result<Value> {
+        input: &Value<'a>,
+        env: &Env<'a>,
+        apply_to: Option<Value<'a>>,
+    ) -> Result<Value<'a>> {
         let proc = self.eval(procedure, input, env)?;
         let name = procedure_name(procedure);
         if proc.is_undefined()
@@ -1188,11 +1219,11 @@ impl Evaluator<'_> {
     /// Applies a function, running tail-call thunks in a loop (the trampoline).
     pub(crate) fn apply(
         &mut self,
-        proc: &Value,
-        args: Vec<Value>,
-        input: &Value,
-        env: &Env,
-    ) -> Result<Value> {
+        proc: &Value<'a>,
+        args: Vec<Value<'a>>,
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         let mut result = self.apply_inner(proc, args, input, env)?;
         loop {
             let thunk = match &result {
@@ -1225,11 +1256,11 @@ impl Evaluator<'_> {
 
     fn apply_inner(
         &mut self,
-        proc: &Value,
-        args: Vec<Value>,
-        input: &Value,
-        env: &Env,
-    ) -> Result<Value> {
+        proc: &Value<'a>,
+        args: Vec<Value<'a>>,
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         let Value::Function(f) = proc else {
             return Err(Error::new("T1006"));
         };
@@ -1262,7 +1293,7 @@ impl Evaluator<'_> {
                 args: bound,
             } => {
                 let mut supplied = args.into_iter();
-                let full: Vec<Value> = bound
+                let full: Vec<Value<'a>> = bound
                     .iter()
                     .map(|b| match b {
                         Some(v) => v.clone(),
@@ -1321,7 +1352,7 @@ impl Evaluator<'_> {
         }
     }
 
-    fn apply_lambda(&mut self, lambda: &Lambda, args: Vec<Value>) -> Result<Value> {
+    fn apply_lambda(&mut self, lambda: &Lambda<'a>, args: Vec<Value<'a>>) -> Result<Value<'a>> {
         let frame = self.child(&lambda.env);
         let mut args = args.into_iter();
         for param in lambda.params() {
@@ -1339,9 +1370,9 @@ impl Evaluator<'_> {
         expr: &Node,
         procedure: &Node,
         args: &[Node],
-        input: &Value,
-        env: &Env,
-    ) -> Result<Value> {
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         let mut evaluated = Vec::with_capacity(args.len());
         for a in args {
             evaluated.push(if matches!(a.kind, NodeKind::Placeholder) {
@@ -1428,9 +1459,9 @@ impl Evaluator<'_> {
         expr: &Node,
         lhs: &Node,
         rhs: &Node,
-        input: &Value,
-        env: &Env,
-    ) -> Result<Value> {
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         let value = self.eval(lhs, input, env)?;
         if let NodeKind::Function { procedure, args } = &rhs.kind {
             return self.call(rhs, procedure, args, input, env, Some(value));
@@ -1449,7 +1480,12 @@ impl Evaluator<'_> {
     }
 
     /// Applies a transform expression to a value (jsonata-js `evaluateTransformExpression`).
-    fn transform(&mut self, def: &Arc<TransformDef>, obj: Value, env: &Env) -> Result<Value> {
+    fn transform(
+        &mut self,
+        def: &Arc<TransformDef>,
+        obj: Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         if obj.is_undefined() {
             return Ok(Value::Undefined);
         }
@@ -1468,7 +1504,7 @@ impl Evaluator<'_> {
                 let Value::Object(update) = &update else {
                     return Err(err_at("T2011", &def.update).with_value("value", &update));
                 };
-                let entries: Vec<(Rc<str>, Value)> = update
+                let entries: Vec<(Rc<str>, Value<'a>)> = update
                     .borrow()
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
@@ -1513,7 +1549,7 @@ impl Evaluator<'_> {
     }
 }
 
-impl Lambda {
+impl<'a> Lambda<'a> {
     pub(crate) fn params(&self) -> &[String] {
         match &self.params {
             Some(p) => p,
@@ -1544,7 +1580,7 @@ fn first_step_name(procedure: &Node) -> Option<&str> {
     }
 }
 
-fn numeric(lhs: &Value, rhs: &Value, op: BinaryOp) -> Result<Value> {
+fn numeric<'a>(lhs: &Value<'a>, rhs: &Value<'a>, op: BinaryOp) -> Result<Value<'a>> {
     if !lhs.is_undefined() && !lhs.is_numeric()? {
         return Err(Error::new("T2001").with_value("value", lhs));
     }
@@ -1563,9 +1599,9 @@ fn numeric(lhs: &Value, rhs: &Value, op: BinaryOp) -> Result<Value> {
     }))
 }
 
-fn comparison(lhs: &Value, rhs: &Value, op: BinaryOp) -> Result<Value> {
+fn comparison<'a>(lhs: &Value<'a>, rhs: &Value<'a>, op: BinaryOp) -> Result<Value<'a>> {
     let comparable =
-        |v: &Value| matches!(v, Value::Undefined | Value::String(_) | Value::Number(_));
+        |v: &Value<'a>| matches!(v, Value::Undefined | Value::String(_) | Value::Number(_));
     if !comparable(lhs) || !comparable(rhs) {
         let bad = if matches!(lhs, Value::String(_) | Value::Number(_)) {
             rhs
@@ -1602,11 +1638,11 @@ fn comparison(lhs: &Value, rhs: &Value, op: BinaryOp) -> Result<Value> {
     Ok(Value::Bool(result))
 }
 
-fn is_integer(v: &Value) -> bool {
+fn is_integer<'a>(v: &Value<'a>) -> bool {
     matches!(v, Value::Number(n) if n.is_finite() && n.fract() == 0.0)
 }
 
-fn range(lhs: &Value, rhs: &Value) -> Result<Value> {
+fn range<'a>(lhs: &Value<'a>, rhs: &Value<'a>) -> Result<Value<'a>> {
     if !lhs.is_undefined() && !is_integer(lhs) {
         return Err(Error::new("T2003").with_value("value", lhs));
     }
@@ -1638,7 +1674,7 @@ fn array_too_long(limit: usize) -> Error {
 }
 
 /// `*`, whose result holds at most `max` items.
-fn wildcard(input: &Value, max: usize) -> Result<Value> {
+fn wildcard<'a>(input: &Value<'a>, max: usize) -> Result<Value<'a>> {
     let input = match input {
         Value::Array(a) if a.has(OUTER_WRAPPER) && !a.items.is_empty() => &a.items[0],
         other => other,
@@ -1649,7 +1685,7 @@ fn wildcard(input: &Value, max: usize) -> Result<Value> {
     let mut plain = false;
     // In JavaScript an array is an object whose keys are its indices, so `*` also yields the
     // items of an array.
-    let values: Vec<Value> = match input {
+    let values: Vec<Value<'a>> = match input {
         Value::Object(o) => o.borrow().values().cloned().collect(),
         Value::Array(a) => a.items.clone(),
         _ => Vec::new(),
@@ -1670,14 +1706,14 @@ fn wildcard(input: &Value, max: usize) -> Result<Value> {
 
 /// Appends the items of nested arrays to `out`, failing beyond `max` items: an array nested in
 /// itself flattens to far more items than it holds.
-fn flatten(v: &Value, out: &mut Vec<Value>, max: usize) -> Result<()> {
+fn flatten<'a>(v: &Value<'a>, out: &mut Vec<Value<'a>>, max: usize) -> Result<()> {
     match v {
         Value::Array(a) => a.items.iter().try_for_each(|i| flatten(i, out, max)),
         other => push_within(out, other.clone(), max),
     }
 }
 
-fn push_within(out: &mut Vec<Value>, v: Value, max: usize) -> Result<()> {
+fn push_within<'a>(out: &mut Vec<Value<'a>>, v: Value<'a>, max: usize) -> Result<()> {
     if out.len() >= max {
         return Err(array_too_long(max));
     }
@@ -1686,7 +1722,7 @@ fn push_within(out: &mut Vec<Value>, v: Value, max: usize) -> Result<()> {
 }
 
 /// `**`, whose result holds at most `max` items.
-fn descendants(input: &Value, max: usize) -> Result<Value> {
+fn descendants<'a>(input: &Value<'a>, max: usize) -> Result<Value<'a>> {
     if input.is_undefined() {
         return Ok(Value::Undefined);
     }
@@ -1699,7 +1735,7 @@ fn descendants(input: &Value, max: usize) -> Result<Value> {
     })
 }
 
-fn recurse_descendants(input: &Value, out: &mut Vec<Value>, max: usize) -> Result<()> {
+fn recurse_descendants<'a>(input: &Value<'a>, out: &mut Vec<Value<'a>>, max: usize) -> Result<()> {
     match input {
         Value::Array(a) => a
             .items
@@ -1716,7 +1752,7 @@ fn recurse_descendants(input: &Value, out: &mut Vec<Value>, max: usize) -> Resul
 }
 
 /// Merges a sequence of tuples into one, appending the values of each field.
-fn reduce_tuple_stream(stream: &Value) -> Map {
+fn reduce_tuple_stream<'a>(stream: &Value<'a>) -> Map<'a> {
     let Value::Array(a) = stream else {
         return tuple_map(stream);
     };
@@ -1733,7 +1769,7 @@ fn reduce_tuple_stream(stream: &Value) -> Map {
 
 /// Whether `object` can be reached from `value` (or is `value`). Shared substructures are
 /// visited once, so this is linear in the size of `value`.
-fn reaches(value: &Value, object: &Rc<RefCell<Map>>) -> bool {
+fn reaches<'a>(value: &Value<'a>, object: &Rc<RefCell<Map<'a>>>) -> bool {
     let mut seen: std::collections::HashSet<*const ()> = std::collections::HashSet::new();
     let mut stack = vec![value.clone()];
     while let Some(v) = stack.pop() {

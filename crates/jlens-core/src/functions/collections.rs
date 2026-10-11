@@ -7,13 +7,18 @@ use crate::error::{Error, Result};
 use crate::eval::Evaluator;
 use crate::value::{self, Map, SEQUENCE, Value};
 
-type R = Result<Value>;
+type R<'a> = Result<Value<'a>>;
 
-fn call(ev: &mut Evaluator, func: &Value, args: Vec<Value>, c: &Call) -> R {
+fn call<'a>(
+    ev: &mut Evaluator<'_, 'a>,
+    func: &Value<'a>,
+    args: Vec<Value<'a>>,
+    c: &Call<'_, 'a>,
+) -> R<'a> {
     ev.apply(func, args, &Value::Null, c.env)
 }
 
-pub(super) fn map(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
+pub(super) fn map<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'_, 'a>) -> R<'a> {
     let arr = arg(&a, 0);
     if arr.is_undefined() {
         return Ok(Value::Undefined);
@@ -31,7 +36,7 @@ pub(super) fn map(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
     Ok(Value::sequence(out))
 }
 
-pub(super) fn filter(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
+pub(super) fn filter<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'_, 'a>) -> R<'a> {
     let arr = arg(&a, 0);
     if arr.is_undefined() {
         return Ok(Value::Undefined);
@@ -47,13 +52,13 @@ pub(super) fn filter(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
     Ok(Value::sequence(out))
 }
 
-pub(super) fn single(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
+pub(super) fn single<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'_, 'a>) -> R<'a> {
     let arr = arg(&a, 0);
     if arr.is_undefined() {
         return Ok(Value::Undefined);
     }
     let func = arg(&a, 1);
-    let mut found: Option<Value> = None;
+    let mut found: Option<Value<'a>> = None;
     for (i, item) in arr.items_or_self().iter().enumerate() {
         let positive = if func.is_undefined() {
             true
@@ -71,7 +76,7 @@ pub(super) fn single(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
     found.ok_or_else(|| Error::new("D3139"))
 }
 
-pub(super) fn zip(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn zip<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let length = a
         .iter()
         .map(|v| v.as_array().map_or(0, |arr| arr.len()))
@@ -94,7 +99,7 @@ pub(super) fn zip(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     Ok(Value::array(tuples, 0))
 }
 
-pub(super) fn reduce(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
+pub(super) fn reduce<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'_, 'a>) -> R<'a> {
     let sequence = arg(&a, 0);
     if sequence.is_undefined() {
         return Ok(Value::Undefined);
@@ -128,7 +133,7 @@ pub(super) fn reduce(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
     Ok(result)
 }
 
-pub(super) fn sift(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
+pub(super) fn sift<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'_, 'a>) -> R<'a> {
     let obj = arg(&a, 0);
     let func = arg(&a, 1);
     let mut out = Map::default();
@@ -150,7 +155,7 @@ pub(super) fn sift(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
     })
 }
 
-fn entries(v: &Value) -> Vec<(Rc<str>, Value)> {
+fn entries<'a>(v: &Value<'a>) -> Vec<(Rc<str>, Value<'a>)> {
     match v {
         Value::Object(o) => o
             .borrow()
@@ -161,7 +166,7 @@ fn entries(v: &Value) -> Vec<(Rc<str>, Value)> {
     }
 }
 
-fn keys_of(v: &Value, out: &mut Vec<Rc<str>>) {
+fn keys_of<'a>(v: &Value<'a>, out: &mut Vec<Rc<str>>) {
     match v {
         Value::Array(a) => {
             let mut merged = Vec::new();
@@ -185,7 +190,7 @@ fn keys_of(v: &Value, out: &mut Vec<Rc<str>>) {
     }
 }
 
-pub(super) fn keys(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn keys<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let mut out = Vec::new();
     keys_of(&arg(&a, 0), &mut out);
     Ok(Value::sequence(
@@ -193,11 +198,11 @@ pub(super) fn keys(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     ))
 }
 
-pub(super) fn spread(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn spread<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     Ok(spread_value(&arg(&a, 0)))
 }
 
-fn spread_value(v: &Value) -> Value {
+fn spread_value<'a>(v: &Value<'a>) -> Value<'a> {
     match v {
         Value::Array(arr) => {
             let mut result = Value::sequence(vec![]);
@@ -220,7 +225,7 @@ fn spread_value(v: &Value) -> Value {
     }
 }
 
-pub(super) fn merge(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn merge<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let arr = arg(&a, 0);
     if arr.is_undefined() {
         return Ok(Value::Undefined);
@@ -234,7 +239,7 @@ pub(super) fn merge(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     Ok(Value::object(out))
 }
 
-pub(super) fn each(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
+pub(super) fn each<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'_, 'a>) -> R<'a> {
     let obj = arg(&a, 0);
     let func = arg(&a, 1);
     let mut out = Vec::new();
@@ -248,7 +253,7 @@ pub(super) fn each(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
     Ok(Value::sequence(out))
 }
 
-pub(super) fn reverse(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn reverse<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let arr = arg(&a, 0);
     match &arr {
         Value::Undefined => Ok(Value::Undefined),
@@ -259,7 +264,7 @@ pub(super) fn reverse(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     }
 }
 
-pub(super) fn sort(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
+pub(super) fn sort<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'_, 'a>) -> R<'a> {
     let arr = arg(&a, 0);
     let Value::Array(items) = &arr else {
         return Ok(arr);
@@ -289,7 +294,7 @@ pub(super) fn sort(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
     Ok(Value::array(sorted, 0))
 }
 
-fn js_truthy(v: &Value) -> bool {
+fn js_truthy<'a>(v: &Value<'a>) -> bool {
     match v {
         Value::Undefined | Value::Null => false,
         Value::Bool(b) => *b,
@@ -299,7 +304,11 @@ fn js_truthy(v: &Value) -> bool {
     }
 }
 
-pub(super) fn shuffle(ev: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn shuffle<'a>(
+    ev: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     let arr = arg(&a, 0);
     let Value::Array(items) = &arr else {
         return Ok(arr);
@@ -308,7 +317,7 @@ pub(super) fn shuffle(ev: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
         return Ok(arr.clone());
     }
     // The 'inside-out' variant of the Fisher-Yates shuffle, as in jsonata-js.
-    let mut result: Vec<Value> = Vec::with_capacity(items.len());
+    let mut result: Vec<Value<'a>> = Vec::with_capacity(items.len());
     for (i, item) in items.items.iter().enumerate() {
         let j = (ev.random() * (i + 1) as f64).floor() as usize;
         if j == i {
@@ -322,7 +331,11 @@ pub(super) fn shuffle(ev: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     Ok(Value::array(result, 0))
 }
 
-pub(super) fn distinct(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn distinct<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     let arr = arg(&a, 0);
     let Value::Array(items) = &arr else {
         return Ok(arr);
@@ -330,7 +343,7 @@ pub(super) fn distinct(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     if items.len() <= 1 {
         return Ok(arr.clone());
     }
-    let mut out: Vec<Value> = Vec::new();
+    let mut out: Vec<Value<'a>> = Vec::new();
     for v in &items.items {
         if !out.iter().any(|seen| v.deep_eq(seen)) {
             out.push(v.clone());
@@ -342,7 +355,7 @@ pub(super) fn distinct(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     ))
 }
 
-pub(super) fn error(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn error<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let message = text(&a, 0).filter(|m| !m.is_empty()).map_or_else(
         || "$error() function evaluated".to_owned(),
         |m| m.to_string(),
@@ -350,7 +363,7 @@ pub(super) fn error(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     Err(Error::new("D3137").with("message", message))
 }
 
-pub(super) fn assert(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn assert<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     if !matches!(arg(&a, 0), Value::Bool(true)) {
         let message = text(&a, 1).filter(|m| !m.is_empty()).map_or_else(
             || "$assert() statement failed".to_owned(),
@@ -361,7 +374,7 @@ pub(super) fn assert(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     Ok(Value::Undefined)
 }
 
-pub(super) fn type_(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn type_<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let v = arg(&a, 0);
     Ok(match &v {
         Value::Undefined => Value::Undefined,
@@ -375,7 +388,7 @@ pub(super) fn type_(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     })
 }
 
-pub(super) fn eval(ev: &mut Evaluator, a: Vec<Value>, c: &Call) -> R {
+pub(super) fn eval<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'_, 'a>) -> R<'a> {
     let Some(source) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };

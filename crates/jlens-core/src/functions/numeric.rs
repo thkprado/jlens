@@ -5,9 +5,9 @@ use crate::error::{Error, Result};
 use crate::eval::Evaluator;
 use crate::value::{Value, js_number};
 
-type R = Result<Value>;
+type R<'a> = Result<Value<'a>>;
 
-pub(super) fn number(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn number<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     Ok(match arg(&a, 0) {
         Value::Undefined => Value::Undefined,
         Value::Number(n) => Value::Number(n),
@@ -145,7 +145,7 @@ pub(crate) fn round(arg: f64, precision: f64) -> f64 {
     if value == 0.0 { 0.0 } else { value }
 }
 
-pub(super) fn sqrt(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn sqrt<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let Some(v) = num(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -155,7 +155,7 @@ pub(super) fn sqrt(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     Ok(Value::Number(v.sqrt()))
 }
 
-pub(super) fn power(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn power<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let Some(base) = num(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -175,7 +175,11 @@ pub(super) fn power(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
     Ok(Value::Number(result))
 }
 
-pub(super) fn format_base(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn format_base<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     let Some(value) = num(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -300,7 +304,11 @@ fn regular(indexes: &[usize]) -> usize {
     factor
 }
 
-pub(super) fn format_number(_: &mut Evaluator, a: Vec<Value>, _: &Call) -> R {
+pub(super) fn format_number<'a>(
+    _: &mut Evaluator<'_, 'a>,
+    a: Vec<Value<'a>>,
+    _: &Call<'_, 'a>,
+) -> R<'a> {
     let Some(value) = num(&a, 0) else {
         return Ok(Value::Undefined);
     };

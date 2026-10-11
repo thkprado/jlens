@@ -8,7 +8,7 @@ use serde_json::Value as JsonValue;
 
 use crate::error::{Error, Result};
 use crate::signature::Signature;
-use crate::value::{OUTER_WRAPPER, Value};
+use crate::value::{Inspect, OUTER_WRAPPER, Value};
 
 type Implementation =
     dyn Fn(&[Option<JsonValue>], &HostCall<'_>) -> Result<Option<JsonValue>> + Send + Sync;
@@ -99,7 +99,12 @@ impl HostFunction {
 
     /// Calls the function with evaluated arguments, converting them to JSON and the result back.
     /// The arguments together, and the context value, are limited to `limit` bytes of JSON.
-    pub(crate) fn call(&self, args: &[Value], input: &Value, limit: usize) -> Result<Value> {
+    pub(crate) fn call<'a>(
+        &self,
+        args: &[Value<'a>],
+        input: &Value<'a>,
+        limit: usize,
+    ) -> Result<Value<'a>> {
         let too_large = || {
             Error::new("U1001").with(
                 "message",
@@ -113,6 +118,11 @@ impl HostFunction {
             return Err(too_large());
         }
         let json: Vec<Option<JsonValue>> = args.iter().map(Value::to_json).collect();
+        let input = match input {
+            // The input array, wrapped so that it counts as a single context value.
+            Value::Array(a) if a.has(OUTER_WRAPPER) && a.len() == 1 => &a.items[0],
+            v => v,
+        };
         let call = HostCall {
             input,
             limit,
@@ -140,7 +150,7 @@ impl fmt::Debug for HostFunction {
 
 /// The context of a call to a [`HostFunction`].
 pub struct HostCall<'a> {
-    input: &'a Value,
+    input: &'a dyn Inspect,
     limit: usize,
     /// Set when the context value was too large to convert; the call then fails with `U1001`.
     too_large: Cell<bool>,
@@ -155,12 +165,7 @@ impl HostCall<'_> {
     /// (`Options::max_result_size`) is `None`, and the evaluation then fails with `U1001`,
     /// whatever the function returns.
     pub fn input(&self) -> Option<JsonValue> {
-        let input = match self.input {
-            // The input array, wrapped so that it counts as a single context value.
-            Value::Array(a) if a.has(OUTER_WRAPPER) && a.len() == 1 => &a.items[0],
-            v => v,
-        };
-        input.to_json_within(self.limit).unwrap_or_else(|_| {
+        self.input.to_json_within(self.limit).unwrap_or_else(|_| {
             self.too_large.set(true);
             None
         })

@@ -52,7 +52,12 @@ pub(crate) fn byte_offset(text: &str, utf16: usize) -> usize {
 }
 
 /// Finds the first match at or after byte offset `from`.
-pub(crate) fn exec(ev: &Evaluator, re: &Rc<Regex>, text: &Rc<str>, from: usize) -> Result<Value> {
+pub(crate) fn exec<'a>(
+    ev: &Evaluator<'_, 'a>,
+    re: &Rc<Regex>,
+    text: &Rc<str>,
+    from: usize,
+) -> Result<Value<'a>> {
     if from > text.len() {
         return Ok(Value::Undefined);
     }
@@ -60,7 +65,7 @@ pub(crate) fn exec(ev: &Evaluator, re: &Rc<Regex>, text: &Rc<str>, from: usize) 
         return Ok(Value::Undefined);
     };
     let range = m.range();
-    let groups: Vec<Value> = m
+    let groups: Vec<Value<'a>> = m
         .captures
         .iter()
         .map(|g| match g {
@@ -89,7 +94,12 @@ pub(crate) fn exec(ev: &Evaluator, re: &Rc<Regex>, text: &Rc<str>, from: usize) 
 
 /// The `next()` of a match object: the following match, or undefined at the end. A regex that
 /// matches the empty string would never progress, so that raises D1004.
-pub(crate) fn next(ev: &Evaluator, re: &Rc<Regex>, text: &Rc<str>, last: usize) -> Result<Value> {
+pub(crate) fn next<'a>(
+    ev: &Evaluator<'_, 'a>,
+    re: &Rc<Regex>,
+    text: &Rc<str>,
+    last: usize,
+) -> Result<Value<'a>> {
     if last >= text.len() {
         return Ok(Value::Undefined);
     }

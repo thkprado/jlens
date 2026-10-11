@@ -25,7 +25,7 @@ use crate::regex::Regex;
 
 /// The fields of an object, in insertion order. Keys are shared: the objects of a converted
 /// document that have the same key point to one string (see [`Keys`]).
-pub(crate) type Map = IndexMap<Rc<str>, Value, foldhash::fast::RandomState>;
+pub(crate) type Map<'a> = IndexMap<Rc<str>, Value<'a>, foldhash::fast::RandomState>;
 
 /// The keys met while converting one document, so that objects with the same keys (the items
 /// of an array, typically) share them instead of allocating each.
@@ -52,16 +52,16 @@ impl Keys {
 
 /// A JSONata value.
 #[derive(Clone, Default)]
-pub(crate) enum Value {
+pub(crate) enum Value<'a> {
     #[default]
     Undefined,
     Null,
     Bool(bool),
     Number(f64),
     String(Rc<str>),
-    Array(Rc<Array>),
-    Object(Rc<RefCell<Map>>),
-    Function(Rc<Function>),
+    Array(Rc<Array<'a>>),
+    Object(Rc<RefCell<Map<'a>>>),
+    Function(Rc<Function<'a>>),
 }
 
 pub(crate) const SEQUENCE: u8 = 1;
@@ -71,12 +71,12 @@ pub(crate) const CONS: u8 = 8;
 pub(crate) const TUPLE_STREAM: u8 = 16;
 
 /// An array, with the flags jsonata-js attaches to its arrays.
-pub(crate) struct Array {
-    pub items: Vec<Value>,
+pub(crate) struct Array<'a> {
+    pub items: Vec<Value<'a>>,
     flags: Cell<u8>,
 }
 
-impl Array {
+impl<'a> Array<'a> {
     pub fn has(&self, flag: u8) -> bool {
         self.flags.get() & flag != 0
     }
@@ -99,9 +99,9 @@ impl Array {
 }
 
 /// A function value.
-pub(crate) enum Function {
+pub(crate) enum Function<'a> {
     /// A JSONata `function(...)`, or a tail-call thunk.
-    Lambda(Lambda),
+    Lambda(Lambda<'a>),
     /// A built-in function.
     Native(&'static Native),
     /// A function of the host application.
@@ -109,13 +109,13 @@ pub(crate) enum Function {
     /// A built-in or host function with some arguments supplied (`$f(?, 2)`); `None` marks a
     /// `?`.
     Partial {
-        target: Rc<Function>,
-        args: Vec<Option<Value>>,
+        target: Rc<Function<'a>>,
+        args: Vec<Option<Value<'a>>>,
     },
     /// The function produced by a transform expression.
     Transform {
         def: Arc<TransformDef>,
-        env: Env,
+        env: Env<'a>,
         span: Span,
         position: usize,
     },
@@ -129,17 +129,17 @@ pub(crate) enum Function {
     },
 }
 
-pub(crate) struct Lambda {
+pub(crate) struct Lambda<'a> {
     pub def: Arc<LambdaDef>,
     /// The parameters still to be supplied, when fewer than `def.params` (partial application).
     pub params: Option<Rc<[String]>>,
     /// Whether arguments are checked against `def.signature`; partial applications are not.
     pub validate: bool,
-    pub input: Value,
-    pub env: Env,
+    pub input: Value<'a>,
+    pub env: Env<'a>,
 }
 
-impl Function {
+impl<'a> Function<'a> {
     /// Number of parameters, used by higher-order functions to decide which arguments to pass.
     pub fn arity(&self) -> usize {
         match self {
@@ -158,12 +158,12 @@ impl Function {
     }
 }
 
-impl Value {
-    pub fn string(s: impl Into<Rc<str>>) -> Value {
+impl<'a> Value<'a> {
+    pub fn string(s: impl Into<Rc<str>>) -> Value<'a> {
         Value::String(s.into())
     }
 
-    pub fn array(items: Vec<Value>, flags: u8) -> Value {
+    pub fn array(items: Vec<Value<'a>>, flags: u8) -> Value<'a> {
         Value::Array(Rc::new(Array {
             items,
             flags: Cell::new(flags),
@@ -171,15 +171,15 @@ impl Value {
     }
 
     /// A new sequence (jsonata-js `createSequence`).
-    pub fn sequence(items: Vec<Value>) -> Value {
+    pub fn sequence(items: Vec<Value<'a>>) -> Value<'a> {
         Value::array(items, SEQUENCE)
     }
 
-    pub fn object(map: Map) -> Value {
+    pub fn object(map: Map<'a>) -> Value<'a> {
         Value::Object(Rc::new(RefCell::new(map)))
     }
 
-    pub fn function(f: Function) -> Value {
+    pub fn function(f: Function<'a>) -> Value<'a> {
         Value::Function(Rc::new(f))
     }
 
@@ -195,7 +195,7 @@ impl Value {
         matches!(self, Value::Function(_))
     }
 
-    pub fn as_array(&self) -> Option<&Rc<Array>> {
+    pub fn as_array(&self) -> Option<&Rc<Array<'a>>> {
         match self {
             Value::Array(a) => Some(a),
             _ => None,
@@ -209,7 +209,7 @@ impl Value {
 
     /// The items of an array, or the value itself as a single item (`undefined` included, like
     /// `createSequence(value)` in jsonata-js).
-    pub fn items_or_self(&self) -> Vec<Value> {
+    pub fn items_or_self(&self) -> Vec<Value<'a>> {
         match self {
             Value::Array(a) => a.items.clone(),
             other => vec![other.clone()],
@@ -280,7 +280,7 @@ impl Value {
     }
 
     /// Strict equality (`===`) as used by the `in` operator.
-    pub fn strict_eq(&self, other: &Value) -> bool {
+    pub fn strict_eq(&self, other: &Value<'a>) -> bool {
         match (self, other) {
             (Value::Undefined, Value::Undefined) | (Value::Null, Value::Null) => true,
             (Value::Bool(a), Value::Bool(b)) => a == b,
@@ -294,7 +294,7 @@ impl Value {
     }
 
     /// Deep equality (jsonata-js `isDeepEqual`), used by `=` and `!=`.
-    pub fn deep_eq(&self, other: &Value) -> bool {
+    pub fn deep_eq(&self, other: &Value<'a>) -> bool {
         match (self, other) {
             (Value::Array(a), Value::Array(b)) => {
                 Rc::ptr_eq(a, b)
@@ -315,11 +315,11 @@ impl Value {
     }
 
     /// Converts input JSON into a value.
-    pub fn from_json(json: &JsonValue) -> Value {
+    pub fn from_json(json: &JsonValue) -> Value<'a> {
         Value::from_json_with(json, &mut Keys::default())
     }
 
-    fn from_json_with(json: &JsonValue, keys: &mut Keys) -> Value {
+    fn from_json_with(json: &JsonValue, keys: &mut Keys) -> Value<'a> {
         match json {
             JsonValue::Null => Value::Null,
             JsonValue::Bool(b) => Value::Bool(*b),
@@ -422,6 +422,42 @@ impl Value {
     }
 }
 
+/// A value of any evaluation behind a trait object, whatever the lifetime of its input. Public
+/// types that show a value (`audit::ValueRef`, `HostCall`) hold one, so that they keep a single
+/// lifetime (ADR 0010).
+pub(crate) trait Inspect: std::fmt::Debug {
+    fn to_json(&self) -> Option<JsonValue>;
+    fn to_json_within(&self, limit: usize) -> std::result::Result<Option<JsonValue>, TooLarge>;
+    fn capture(&self, limits: &crate::audit::CaptureLimits) -> Option<JsonValue>;
+    fn as_bool(&self) -> Option<bool>;
+    fn signature_symbol(&self) -> char;
+}
+
+impl Inspect for Value<'_> {
+    fn to_json(&self) -> Option<JsonValue> {
+        Value::to_json(self)
+    }
+
+    fn to_json_within(&self, limit: usize) -> std::result::Result<Option<JsonValue>, TooLarge> {
+        Value::to_json_within(self, limit)
+    }
+
+    fn capture(&self, limits: &crate::audit::CaptureLimits) -> Option<JsonValue> {
+        crate::audit::capture(self, limits, 0)
+    }
+
+    fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    fn signature_symbol(&self) -> char {
+        Value::signature_symbol(self)
+    }
+}
+
 /// Takes `bytes` from `budget`; false when there are not enough left.
 fn spend(budget: &mut usize, bytes: usize) -> bool {
     match budget.checked_sub(bytes) {
@@ -508,7 +544,7 @@ pub(crate) fn write_json_string(out: &mut String, s: &str) {
 
 /// `JSON.stringify` with the replacer jsonata-js uses in `$string`: numbers are rounded to 15
 /// significant digits, infinite numbers raise D1001, functions become `""`.
-pub(crate) fn stringify(value: &Value, pretty: bool, limit: usize) -> Result<String> {
+pub(crate) fn stringify<'a>(value: &Value<'a>, pretty: bool, limit: usize) -> Result<String> {
     let mut out = String::new();
     let value = match value {
         Value::Array(a) if a.has(OUTER_WRAPPER) && !a.items.is_empty() => &a.items[0],
@@ -528,9 +564,9 @@ pub(crate) fn string_too_long(limit: usize) -> Error {
 
 /// Writes the JSON text of a value, failing as soon as the text is longer than `limit` bytes:
 /// a value that appears many times could otherwise make a text far too long to hold.
-fn write_json(
+fn write_json<'a>(
     out: &mut String,
-    value: &Value,
+    value: &Value<'a>,
     pretty: bool,
     depth: usize,
     limit: usize,
@@ -601,7 +637,7 @@ fn write_json(
     Ok(())
 }
 
-impl std::fmt::Debug for Value {
+impl std::fmt::Debug for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Undefined => f.write_str("undefined"),

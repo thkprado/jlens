@@ -203,7 +203,11 @@ fn array_type_name(subtype: &str) -> &'static str {
 impl Signature {
     /// Checks `args` against the signature and returns them adjusted: missing context
     /// arguments are filled in and single values are wrapped where an array is expected.
-    pub(crate) fn validate(&self, args: Vec<Value>, context: &Value) -> Result<Vec<Value>> {
+    pub(crate) fn validate<'a>(
+        &self,
+        args: Vec<Value<'a>>,
+        context: &Value<'a>,
+    ) -> Result<Vec<Value<'a>>> {
         let symbols: Vec<char> = args.iter().map(Value::signature_symbol).collect();
         let pieces: Vec<Piece> = self.params.iter().map(|p| piece(&p.pattern)).collect();
         let mut spans = vec![(0, 0); pieces.len()];
