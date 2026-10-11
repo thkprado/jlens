@@ -52,6 +52,17 @@ cargo xtask wasm-test                             # after touching jlens-wasm or
   - Deliberate differences must be documented in `docs/src/language/compatibility.md`.
   - If a difference affects the suite, it must also be recorded in
     `tests/conformance/overrides.json`, with a `reason`.
+- **Weigh compatibility against precision, correctness and performance.** They are goals of
+  the project too. Before copying a jsonata-js behaviour, ask what it costs:
+  - Copying favours compatibility when the cost stays in unusual input or error paths, and users
+    may rely on getting the same answer from both engines.
+  - Diverging favours jlens when copying would lose precision (an exact result replaced by
+    JavaScript's rounding), give a result that is wrong by the JSONata documentation or exposes
+    a JavaScript internal (a leaked flag), or slow down a common path. Measure with `benches/`
+    when a change touches one.
+  - Record the decision and its reason in `compatibility.md`, both when jlens differs and when
+    it reproduces a jsonata-js bug on purpose. A divergence the differential tests can meet
+    also needs a narrow rule in `xtask/src/differential.rs`.
 - **The conformance baseline only grows.** A case in `tests/conformance/baseline.txt` that starts
   failing is a regression. After fixing cases, run `cargo xtask conformance --update-baseline`.
 - **Errors use JSONata codes** (`S0xxx`, `T`, `D`), defined in `error.rs`.

@@ -49,6 +49,12 @@ cargo xtask differential                       # generated expressions, jlens ag
   explained in `docs/src/language/compatibility.md`, and, if it affects the suite, recorded in
   `tests/conformance/overrides.json` with a reason. The baseline in
   `tests/conformance/baseline.txt` may only grow.
+- **Compatibility is weighed against precision, correctness and performance.** Copying a
+  jsonata-js behaviour is right when its cost stays in unusual input or error paths. When it
+  would lose precision, give a result that is wrong by the JSONata documentation or exposes a
+  JavaScript internal, or slow down a common path (measure with `benches/`), jlens may differ
+  on purpose. Either way the compatibility page records the decision and its reason, including
+  the jsonata-js bugs jlens reproduces.
 - **Errors have codes.** New errors reuse the JSONata codes, or `U1001` with a message for
   limits; warnings use `W` codes (`crates/jlens-core/src/error.rs`).
 - **Documentation is part of the change.** Examples in the book use `jsonata-example` blocks,
