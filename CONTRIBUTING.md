@@ -23,6 +23,8 @@ cargo xtask gen-docs --check                   # generated pages are up to date
 cargo xtask doc-check                          # the book's examples run, its links resolve
 cargo xtask wasm-test                          # the browser package, in Node.js and a browser
 cargo semver-checks -p jlens-core -p jlens-schema  # the API against the last release on crates.io
+cargo +1.88 check --workspace --all-targets    # the minimum Rust version
+cargo deny check                               # advisories, licenses and sources of dependencies
 ```
 
 The last check fails on a breaking change while `Cargo.toml` still carries the version of the
@@ -52,6 +54,8 @@ cargo xtask serve                              # serve the repository, for examp
   which `cargo xtask doc-check` runs. Rust snippets in the crate guide come from
   `crates/jlens-core/tests/guide.rs`. Significant design decisions get a record in `docs/adr/`.
 - **Commits** describe why, not only what.
+- **Vulnerabilities** are reported privately, as [SECURITY.md](SECURITY.md) describes, not in
+  public issues.
 
 ## Releasing
 

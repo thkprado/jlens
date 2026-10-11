@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A security policy, `SECURITY.md`: vulnerabilities are reported privately through GitHub.
+  CI now checks the minimum Rust version (1.88) and, with `cargo-deny`, the advisories and
+  licenses of the dependencies.
+
 ## [0.4.0]
 
 Catching mistakes before they run: `jlens check` finds unknown functions, wrong arguments

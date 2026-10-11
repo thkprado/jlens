@@ -71,6 +71,25 @@ jobs:
         with:
           package: jlens-core, jlens-schema
 
+  msrv:
+    name: Minimum Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+      # The rust-version of Cargo.toml. `+1.88` overrides rust-toolchain.toml, which selects
+      # stable.
+      - run: cargo +1.88 check --workspace --all-targets
+
+  deny:
+    name: Dependencies (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Advisories, licenses, bans and sources, as deny.toml configures them.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
   wasm:
     name: Wasm (browser ESM)
     runs-on: ubuntu-latest
