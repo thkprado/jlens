@@ -6,6 +6,7 @@ use std::{env, fs};
 
 use anyhow::{Context, Result, bail};
 
+mod differential;
 mod docs;
 mod release;
 mod wasm;
@@ -18,6 +19,9 @@ commands:
   update-suite <jsonata-js checkout> replace tests/jsonata-suite with <checkout>/test/test-suite
   gen-docs [--check]                regenerate the generated pages of the book (errors, functions)
   doc-check                         run the examples of the book and check its links
+  differential [--cases N] [--seed S]
+                                    run N generated expressions (1000) in jlens and jsonata-js
+                                    and report where they differ (needs benches/compare installed)
   wasm [--dev]                      build the browser package in crates/jlens-wasm/pkg
   wasm-test [--require-browser] [--example]
                                     build the package and test it in Node.js and a headless browser
@@ -31,6 +35,7 @@ fn main() -> Result<()> {
         Some("conformance") => conformance(args.iter().any(|a| a == "--update-baseline")),
         Some("gen-docs") => gen_docs(args.iter().any(|a| a == "--check")),
         Some("doc-check") => docs::check(),
+        Some("differential") => differential::run(&args[1..]),
         Some("wasm") => wasm::build(args.iter().any(|a| a == "--dev")),
         Some("wasm-test") => wasm::test(
             args.iter().any(|a| a == "--require-browser"),

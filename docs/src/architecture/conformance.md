@@ -63,3 +63,25 @@ The property tests found two bugs:
   overflowed the stack when converted to JSON. It now fails with `U1001`.
 
 Both have regression tests.
+
+## Differential testing
+
+The suite covers the cases its authors thought of. Differential testing covers others: it
+generates expressions and runs them in jlens and in jsonata-js 2.2.2, which must agree on the
+result or, when the expression fails, on the error code.
+
+```sh
+(cd benches/compare && npm install)
+cargo xtask differential                     # 1,000 cases, from a seed it prints
+cargo xtask differential --cases 10000 --seed 42
+```
+
+The expressions come from a grammar like that of the property tests, without the functions that
+read the clock or draw random numbers. Each case runs against one of a few input documents, or
+none. The command writes the cases to `target/differential/cases.json`.
+`benches/compare/differential.mjs` runs them in jsonata-js. The command then compares each
+outcome with that of jlens. Results are compared as JSON, with numbers compared as values and
+the keys of an object in order. Both engines run with a timeout and a depth limit, and a case
+that reaches either limit is skipped. The divergences are printed and written to
+`target/differential/divergences.json`. The command fails when there are any. A seed
+reproduces a run.

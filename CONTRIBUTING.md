@@ -40,6 +40,7 @@ cargo bench -p jlens-core                      # criterion benchmarks
 PROPTEST_CASES=100000 cargo test -p jlens-core --test robustness
 cargo xtask serve                              # serve the repository, for examples/web-editor
 (cd benches/compare && npm install && node compare.mjs && node doc-examples.mjs)
+cargo xtask differential                       # generated expressions, jlens against jsonata-js
 ```
 
 ## Guidelines
