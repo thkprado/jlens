@@ -477,20 +477,7 @@ fn format_integer_with(value: f64, format: &IntegerFormat) -> Result<String> {
                     *d = char::from_u32(*d as u32 + format.zero_code - 0x30).unwrap_or(*d);
                 }
             }
-            if format.regular {
-                let sep = &format.separators[0];
-                let n = (digits.len() - 1) / sep.position;
-                for ii in (1..=n).rev() {
-                    let pos = digits.len() - ii * sep.position;
-                    digits.insert(pos, sep.character);
-                }
-            } else {
-                for sep in format.separators.iter().rev() {
-                    let pos = digits.len().saturating_sub(sep.position);
-                    digits.insert(pos, sep.character);
-                }
-            }
-            let mut s: String = digits.into_iter().collect();
+            let mut s: String = group_digits(&digits, format).into_iter().collect();
             if format.ordinal {
                 let chars: Vec<char> = s.chars().collect();
                 let last = chars.last().copied();
@@ -524,6 +511,48 @@ pub(crate) fn format_integer(value: f64, picture: &str, max_len: usize) -> Resul
         return Err(crate::value::string_too_long(max_len));
     }
     format_integer_with(value.floor(), &format)
+}
+
+/// Inserts the grouping separators of `format` into `digits`, in one pass: a width modifier can
+/// ask for millions of digits, which inserting each separator in place made quadratic.
+fn group_digits(digits: &[char], format: &IntegerFormat) -> Vec<char> {
+    let n = digits.len();
+    if format.regular {
+        // A separator before each group of `position` digits, counted from the right.
+        let sep = &format.separators[0];
+        let mut out = Vec::with_capacity(n + n / sep.position);
+        for (i, &d) in digits.iter().enumerate() {
+            if i > 0 && (n - i).is_multiple_of(sep.position) {
+                out.push(sep.character);
+            }
+            out.push(d);
+        }
+        return out;
+    }
+    // jsonata-js inserts the separators from the leftmost, each where `position` characters
+    // follow it. Those with more positions than digits pile up in front; the others end up with
+    // exactly `position` digits on their right.
+    let mut front = Vec::new();
+    let mut anchored = Vec::new();
+    for sep in format.separators.iter().rev() {
+        if sep.position > n {
+            let at = (n + front.len()).saturating_sub(sep.position);
+            front.insert(at, sep.character);
+        } else {
+            anchored.push(sep);
+        }
+    }
+    let mut out = Vec::with_capacity(front.len() + n + anchored.len());
+    out.extend(front);
+    let mut anchored = anchored.into_iter().peekable();
+    for (i, &d) in digits.iter().enumerate() {
+        while let Some(sep) = anchored.next_if(|s| s.position == n - i) {
+            out.push(sep.character);
+        }
+        out.push(d);
+    }
+    out.extend(anchored.map(|s| s.character));
+    out
 }
 
 type Parser = Box<dyn Fn(&str) -> f64>;
@@ -1418,6 +1447,59 @@ fn parse_datetime(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The separators inserted one by one, as jsonata-js does.
+    fn group_by_inserting(digits: &[char], format: &IntegerFormat) -> Vec<char> {
+        let mut digits = digits.to_vec();
+        if format.regular {
+            let sep = &format.separators[0];
+            let n = (digits.len() - 1) / sep.position;
+            for ii in (1..=n).rev() {
+                let pos = digits.len() - ii * sep.position;
+                digits.insert(pos, sep.character);
+            }
+        } else {
+            for sep in format.separators.iter().rev() {
+                let pos = digits.len().saturating_sub(sep.position);
+                digits.insert(pos, sep.character);
+            }
+        }
+        digits
+    }
+
+    #[test]
+    fn grouping_in_one_pass_matches_inserting() {
+        let pictures = [
+            "0",
+            "#,##0",
+            "0,000",
+            "#.##0",
+            "0;0",
+            "0a0b0",
+            "a0",
+            "0a",
+            "ab0",
+            "0ab",
+            "a,b,0",
+            "0,0,0",
+            "#,#00,0",
+            "00,,00",
+            "w,x,y,z,0",
+            "#,##,##0",
+            "0a00b000c",
+        ];
+        for picture in pictures {
+            let format = analyse_integer_picture(picture).unwrap();
+            for len in 1..12 {
+                let digits: Vec<char> = "123456789012".chars().take(len).collect();
+                assert_eq!(
+                    group_digits(&digits, &format),
+                    group_by_inserting(&digits, &format),
+                    "{picture} on {len} digits"
+                );
+            }
+        }
+    }
 
     #[test]
     fn integers_in_words_roman_and_letters() {

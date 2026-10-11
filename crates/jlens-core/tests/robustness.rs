@@ -391,6 +391,11 @@ fn fuzz_crashes_stay_fixed() {
         ),
         ("$fromMillis(0, '[Y01,99999999999999999999]')", Err("U1001")),
         ("$fromMillis(0, '[Y,3-4]')", Ok(json!("1970"))),
+        // A long width with a separator took quadratic time.
+        (
+            "$length($fromMillis(0, '[DU0,1020449:]'))",
+            Ok(json!(2040897)),
+        ),
         // Parsing does not pad: a huge width only fails to match, as in jsonata-js.
         (
             "$toMillis('197001', '[Y,99999999999999999999][M01]')",

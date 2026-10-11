@@ -16,6 +16,8 @@ All notable changes are recorded here. The format follows
   (`'[Y,99999999999]'`, now `U1001`), `$parseInteger` with a picture whose digits are not
   ASCII on text with other characters (`$parseInteger('12', '##０')`), and `$formatNumber`
   rounding a very large number to many decimals (`$formatNumber(1e300, '#.000…')`).
+- A long width with a grouping separator (`$fromMillis(0, '[D0:0,1000000]')`) took quadratic
+  time: separators are now inserted in one pass. Found by fuzzing.
 - Stack overflows found by fuzzing: recovering from hundreds of unclosed brackets
   (`parse_recover("((((…")`) copied the tree once per level, and a chain of thousands of
   operators (`1 + 1 + … + 1`) built a tree deep enough to overflow the stack when dropped.
