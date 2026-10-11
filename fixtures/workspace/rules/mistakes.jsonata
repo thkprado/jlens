@@ -1,0 +1,1 @@
+$sum(items.(quantity * unitprice)) > $minimun and $rates("toy") > 0

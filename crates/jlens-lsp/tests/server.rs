@@ -56,8 +56,9 @@ fn order_schema() -> String {
 }
 
 impl Client {
-    /// Starts a server and initializes it with these client capabilities and options.
-    fn start(folder: Option<&Folder>, capabilities: Value, options: Value) -> (Client, Value) {
+    /// Starts a server on this workspace folder and initializes it with these client
+    /// capabilities and options.
+    fn start(folder: Option<&Path>, capabilities: Value, options: Value) -> (Client, Value) {
         let (server, connection) = Connection::memory();
         let handle = std::thread::spawn(move || jlens_lsp::run(&server));
         let mut client = Client {
@@ -67,7 +68,7 @@ impl Client {
             notifications: Vec::new(),
         };
         let folders = match folder {
-            Some(f) => json!([{"uri": uri(&f.0), "name": "work"}]),
+            Some(f) => json!([{"uri": uri(f), "name": "work"}]),
             None => Value::Null,
         };
         let result = client.request(
@@ -212,7 +213,7 @@ fn diagnostics_follow_the_document() {
         "jlens.json",
         r#"{"rules/**/*.jsonata": {"schema": "schemas/order.json"}}"#,
     );
-    let (mut client, _) = Client::start(Some(&folder), json!({}), Value::Null);
+    let (mut client, _) = Client::start(Some(&folder.0), json!({}), Value::Null);
 
     let rule = folder.uri("rules/a.jsonata");
     client.open(&rule, "'é' & customer.Login");
@@ -263,7 +264,7 @@ fn completion_hover_and_signature_help() {
             "functions": [{"name": "shipping", "signature": "<ns:n>", "params": ["weight", "region"], "summary": "Shipping cost"}]
         }}"#,
     );
-    let (mut client, _) = Client::start(Some(&folder), json!({}), Value::Null);
+    let (mut client, _) = Client::start(Some(&folder.0), json!({}), Value::Null);
     let rule = folder.uri("rule.jsonata");
     client.open(&rule, "(\n  '𝄞' & items[type = 'x'].unit\n)");
     client.diagnostics(&rule);
@@ -372,7 +373,7 @@ fn the_configuration_is_reloaded_when_it_changes() {
     let folder = Folder::new("reload");
     folder.write("order.json", &order_schema());
     let (mut client, _) = Client::start(
-        Some(&folder),
+        Some(&folder.0),
         json!({"workspace": {"didChangeWatchedFiles": {"dynamicRegistration": true}}}),
         Value::Null,
     );
@@ -418,13 +419,35 @@ fn initialization_options_configure_files_too() {
     folder.write("jlens.json", r#"{"*.jsonata": {}}"#);
     let options =
         json!({"special/*.jsonata": {"schema": "order.json", "variables": {"$limit": null}}});
-    let (mut client, _) = Client::start(Some(&folder), json!({}), options);
+    let (mut client, _) = Client::start(Some(&folder.0), json!({}), options);
     let rule = folder.uri("special/rule.jsonata");
     client.open(&rule, "customer.Login > $limit");
     let codes: Vec<String> = client.diagnostics(&rule).into_iter().map(|d| d.0).collect();
     assert_eq!(codes, ["W0201"], "the options come before jlens.json");
     let completion = client.at("textDocument/completion", &rule, 0, 23);
     assert!(labels(&completion).contains(&"$limit"));
+    client.shutdown();
+}
+
+/// `fixtures/workspace` is checked by the CLI tests of `jlens check` too: both find the same
+/// problems through its `jlens.json`.
+#[test]
+fn the_workspace_fixture_is_checked_as_by_the_cli() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .unwrap()
+        .join("fixtures/workspace");
+    let (mut client, _) = Client::start(Some(&root), json!({}), Value::Null);
+    let mut codes = |name: &str| {
+        let path = root.join("rules").join(name);
+        let uri = uri(&path);
+        client.open(&uri, &std::fs::read_to_string(&path).unwrap());
+        let codes: Vec<String> = client.diagnostics(&uri).into_iter().map(|d| d.0).collect();
+        codes
+    };
+    assert!(codes("discount.jsonata").is_empty());
+    assert_eq!(codes("mistakes.jsonata"), ["W0201", "W0204", "W0202"]);
     client.shutdown();
 }
 

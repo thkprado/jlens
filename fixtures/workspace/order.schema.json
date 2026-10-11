@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "customer": {
+      "type": "object",
+      "properties": {
+        "login": {"type": "string"},
+        "name": {"type": "string"}
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {"type": "string"},
+          "type": {"type": "string"},
+          "unitPrice": {"type": "number"},
+          "quantity": {"type": "integer"}
+        }
+      }
+    }
+  }
+}

@@ -18,10 +18,11 @@
 //! }
 //! ```
 //!
-//! The `jlens lsp` command of `jlens-cli` runs [`run_stdio`]. Embedders can run [`run`] on
+//! The [`config`] module reads these files; `jlens check` uses it too. The `jlens lsp` command of
+//! `jlens-cli` runs [`run_stdio`]. Embedders can run [`run`] on
 //! another [`lsp_server::Connection`], such as an in-memory one.
 
-mod config;
+pub mod config;
 mod server;
 mod text;
 mod uri;

@@ -1,0 +1,9 @@
+{
+  "rules/*.jsonata": {
+    "schema": "order.schema.json",
+    "variables": {"minimum": {"type": "number"}},
+    "functions": [
+      {"name": "rate", "signature": "<s:n>", "summary": "The discount rate of a product type"}
+    ]
+  }
+}

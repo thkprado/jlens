@@ -6,7 +6,14 @@ use assert_cmd::Command;
 
 /// Runs `jlens` from the workspace root and renders the outcome for a snapshot.
 fn jlens(args: &[&str], stdin: Option<&str>) -> String {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    jlens_in(".", args, stdin)
+}
+
+/// Runs `jlens` from `dir`, relative to the workspace root.
+fn jlens_in(dir: &str, args: &[&str], stdin: Option<&str>) -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(dir);
     let mut cmd = Command::cargo_bin("jlens").unwrap();
     cmd.current_dir(&root).args(args);
     match stdin {
@@ -28,6 +35,10 @@ fn jlens(args: &[&str], stdin: Option<&str>) -> String {
             // Glob matches use the platform's separator (escaped in JSON).
             .replace(r"fixtures\\cli\\check\\", "fixtures/cli/check/")
             .replace(r"fixtures\cli\check\", "fixtures/cli/check/")
+            .replace(r"fixtures\workspace\\", "fixtures/workspace/")
+            .replace(r"fixtures\workspace\", "fixtures/workspace/")
+            .replace(r"rules\\", "rules/")
+            .replace(r"rules\", "rules/")
     };
     format!(
         "exit: {}\n--- stdout\n{}--- stderr\n{}",
@@ -300,6 +311,49 @@ fn check_files() {
             "fixtures/cli/check/ok.jsonata",
             "missing.jsonata"
         ]
+    );
+}
+
+/// `fixtures/workspace` is checked by the language server tests too.
+const WORKSPACE_CONFIG: &str = "fixtures/workspace/jlens.json";
+
+#[test]
+fn check_config() {
+    snapshot!(
+        "check_config",
+        &[
+            "check",
+            "--config",
+            WORKSPACE_CONFIG,
+            "-f",
+            "fixtures/workspace/rules/*.jsonata"
+        ]
+    );
+    // The `jlens.json` of the current directory applies by default.
+    insta::assert_snapshot!(
+        "check_config_default",
+        jlens_in(
+            "fixtures/workspace",
+            &["check", "--json", "-f", "rules/*.jsonata"],
+            None
+        )
+    );
+    // `--schema` replaces the schema; the variables and functions stay declared.
+    snapshot!(
+        "check_config_schema",
+        &[
+            "check",
+            "--config",
+            WORKSPACE_CONFIG,
+            "--schema",
+            CHECK_SCHEMA,
+            "-f",
+            "fixtures/workspace/rules/discount.jsonata"
+        ]
+    );
+    snapshot!(
+        "check_config_missing",
+        &["check", "--config", "missing.json", "a"]
     );
 }
 

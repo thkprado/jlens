@@ -1,0 +1,25 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"check\", \"--config\", WORKSPACE_CONFIG, \"-f\",\n\"fixtures/workspace/rules/*.jsonata\"], None)"
+---
+exit: 0
+--- stdout
+--- stderr
+fixtures/workspace/rules/discount.jsonata: ok
+warning[W0201]: Field "unitprice" is not in the schema; did you mean `unitPrice`?
+ --> fixtures/workspace/rules/mistakes.jsonata:1:24
+  |
+1 | $sum(items.(quantity * unitprice)) > $minimun and $rates("toy") > 0
+  |                        ^^^^^^^^^
+warning[W0204]: Variable $minimun is not declared; did you mean `$minimum`?
+ --> fixtures/workspace/rules/mistakes.jsonata:1:38
+  |
+1 | $sum(items.(quantity * unitprice)) > $minimun and $rates("toy") > 0
+  |                                      ^^^^^^^^
+warning[W0202]: Unknown function $rates; did you mean `$rate`?
+ --> fixtures/workspace/rules/mistakes.jsonata:1:51
+  |
+1 | $sum(items.(quantity * unitprice)) > $minimun and $rates("toy") > 0
+  |                                                   ^^^^^^
+fixtures/workspace/rules/mistakes.jsonata: 0 error(s), 3 warning(s)
+2 file(s): 0 error(s), 3 warning(s)

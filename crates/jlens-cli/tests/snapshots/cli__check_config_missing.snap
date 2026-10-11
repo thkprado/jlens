@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"check\", \"--config\", \"missing.json\", \"a\"], None)"
+---
+exit: 2
+--- stdout
+--- stderr
+error: reading missing.json: <file not found> (os error 2)

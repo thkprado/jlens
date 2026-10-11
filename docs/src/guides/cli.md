@@ -210,13 +210,25 @@ $ jlens check --json 'a +'
 [{"line":1,"column":4,"severity":"error","code":"S0207","message":"Unexpected end of expression","span":{"start":3,"end":3}}]
 ```
 
-The host functions an application provides are not known to `check` yet, so their calls get
-`W0202`. The [language server](editors.md) knows the ones declared in `jlens.json`.
+### Configuration: `jlens.json`
+
+`check` reads the same [`jlens.json`](editors.md#configuration-jlensjson) as the language
+server, so that the command line and the editors report the same problems. It maps file
+patterns to a schema, the variables and the host functions the expressions are evaluated with:
+calls of declared host functions are checked like those of built-in ones, and, once variables
+are declared, references to undeclared ones get `W0204`. By default, `check` reads the
+`jlens.json` of the current directory, if there is one; `--config` names another file, whose
+patterns and paths are relative to its folder.
+
+The configuration applies to files given with `-f`, by their path: an expression given as an
+argument matches no pattern. `--schema` replaces the schema that the configuration gives a
+file, and keeps its variables and functions. A configuration that cannot be read, or whose
+schema cannot be, ends with exit code 2.
 
 To validate a directory of rules in CI, warnings included:
 
 ```sh
-jlens check --deny-warnings --schema order.schema.json -f 'rules/*.jsonata'
+jlens check --deny-warnings -f 'rules/*.jsonata'
 ```
 
 ## `jlens functions`

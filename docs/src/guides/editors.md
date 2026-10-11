@@ -55,6 +55,9 @@ reported as a message, and its files are checked without settings.
 The client can also pass the same object as `initializationOptions`, relative to the first
 workspace folder. Its patterns come before those of `jlens.json`.
 
+[`jlens check`](cli.md#configuration-jlensjson) reads the same file, so that CI reports what the
+editor shows.
+
 ## Neovim
 
 With Neovim 0.11 or later, in `init.lua`:

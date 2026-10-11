@@ -10,13 +10,16 @@ mod output;
 mod report;
 mod schema;
 
+use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use jlens_core::{Diagnostic, Severity};
+use jlens_lsp::config;
+use jlens_schema::LanguageService;
 use serde_json::Value;
 
 /// Evaluate, check and explain JSONata expressions.
@@ -92,8 +95,13 @@ struct CheckArgs {
     #[arg(long)]
     deny_warnings: bool,
     /// Also report fields that this schema (JSON Schema, e.g. from `jlens schema infer`) lacks.
+    /// It replaces the schema that the configuration gives a file.
     #[arg(long, value_name = "FILE")]
     schema: Option<PathBuf>,
+    /// The configuration that gives files a schema, variables and host functions, as for the
+    /// language server [default: the `jlens.json` of the current directory, if there is one].
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -170,16 +178,55 @@ fn check(args: CheckArgs) -> Result<ExitCode> {
             .map(|file| {
                 let source = fs::read_to_string(&file)
                     .with_context(|| format!("reading {}", file.display()))?;
-                Ok((source, Some(file.display().to_string())))
+                Ok((source, Some(file)))
             })
             .collect::<Result<Vec<_>>>()?,
     };
     let schema = args.schema.as_ref().map(schema::load).transpose()?;
-    let service = jlens_schema::LanguageService::new(schema);
+    let cwd = std::env::current_dir().context("reading the current directory")?;
+    let entries = match &args.config {
+        Some(path) => {
+            let root = absolute(&cwd, path);
+            let root = root.parent().unwrap_or(&cwd);
+            config::parse(&read_json(path)?, root)
+                .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?
+        }
+        None => config::load(&cwd).map_err(anyhow::Error::msg)?,
+    };
+    // The entry of each file (none for an inline expression), and one service per entry.
+    let keys: Vec<Option<usize>> = sources
+        .iter()
+        .map(|(_, file)| {
+            let path = absolute(&cwd, file.as_deref()?);
+            config::find(&entries, &path).map(|(i, _)| i)
+        })
+        .collect();
+    let mut services: HashMap<Option<usize>, LanguageService> = HashMap::new();
+    for &key in &keys {
+        if services.contains_key(&key) {
+            continue;
+        }
+        let (service, problems) = match (key, &schema) {
+            (Some(i), Some(schema)) => entries[i]
+                .settings
+                .declare(LanguageService::new(Some(schema.clone()))),
+            (Some(i), None) => entries[i].service(),
+            (None, schema) => (LanguageService::new(schema.clone()), Vec::new()),
+        };
+        if !problems.is_empty() {
+            let name = args
+                .config
+                .as_deref()
+                .unwrap_or(Path::new(config::FILE_NAME));
+            anyhow::bail!("{}: {}", name.display(), problems.join("; "));
+        }
+        services.insert(key, service);
+    }
     let (mut errors, mut warnings) = (0, 0);
     let mut json = Vec::new();
-    for (source, file) in &sources {
-        let diagnostics = service.diagnostics(source);
+    for ((source, file), key) in sources.iter().zip(&keys) {
+        let file = file.as_ref().map(|f| f.display().to_string());
+        let diagnostics = services[key].diagnostics(source);
         let file_errors = diagnostics
             .iter()
             .filter(|d| d.severity == Severity::Error)
@@ -216,6 +263,22 @@ fn check(args: CheckArgs) -> Result<ExitCode> {
     } else {
         ExitCode::SUCCESS
     })
+}
+
+/// `path` made absolute against `cwd`, without `.` and `..` components, so that the paths of
+/// files and of the configuration compare.
+fn absolute(cwd: &Path, path: &Path) -> PathBuf {
+    let mut absolute = PathBuf::new();
+    for component in cwd.join(path).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                absolute.pop();
+            }
+            component => absolute.push(component),
+        }
+    }
+    absolute
 }
 
 /// A diagnostic as `check --json` prints it: `file` (absent for an inline expression), `line`

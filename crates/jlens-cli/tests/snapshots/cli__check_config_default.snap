@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens_in(\"fixtures/workspace\", &[\"check\", \"--json\", \"-f\", \"rules/*.jsonata\"],\nNone)"
+---
+exit: 0
+--- stdout
+[{"file":"rules/mistakes.jsonata","line":1,"column":24,"severity":"warning","code":"W0201","message":"Field \"unitprice\" is not in the schema; did you mean `unitPrice`?","span":{"start":23,"end":32}},{"file":"rules/mistakes.jsonata","line":1,"column":38,"severity":"warning","code":"W0204","message":"Variable $minimun is not declared; did you mean `$minimum`?","span":{"start":37,"end":45}},{"file":"rules/mistakes.jsonata","line":1,"column":51,"severity":"warning","code":"W0202","message":"Unknown function $rates; did you mean `$rate`?","span":{"start":50,"end":56}}]
+--- stderr

@@ -1,5 +1,6 @@
 //! The `jlens.json` configuration: which schema, variables and host functions apply to which
-//! expression files.
+//! expression files. `jlens check` reads it too, so that the command line and the editors check
+//! files alike.
 
 use std::path::{Path, PathBuf};
 
@@ -28,7 +29,9 @@ pub struct Settings {
 pub struct Entry {
     /// The folder that the pattern and the schema path are relative to.
     pub root: PathBuf,
+    /// The pattern of the paths, relative to `root`, that the settings apply to.
     pub pattern: Pattern,
+    /// What applies to the matching files.
     pub settings: Settings,
 }
 
@@ -52,9 +55,18 @@ impl Entry {
     /// The language service of these settings. Problems (a missing schema, an invalid variable
     /// schema) are returned alongside, and leave the corresponding part out.
     pub fn service(&self) -> (LanguageService, Vec<String>) {
+        self.settings.service(&self.root)
+    }
+}
+
+impl Settings {
+    /// The language service of these settings, whose schema path is relative to `root`.
+    /// Problems (a missing schema, an invalid variable schema) are returned alongside, and leave
+    /// the corresponding part out.
+    pub fn service(&self, root: &Path) -> (LanguageService, Vec<String>) {
         let mut problems = Vec::new();
-        let schema = self.settings.schema.as_ref().and_then(|path| {
-            let path = self.root.join(path);
+        let schema = self.schema.as_ref().and_then(|path| {
+            let path = root.join(path);
             let loaded = std::fs::read_to_string(&path)
                 .map_err(|e| e.to_string())
                 .and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
@@ -63,8 +75,16 @@ impl Entry {
                 .map_err(|e| problems.push(format!("schema {}: {e}", path.display())))
                 .ok()
         });
-        let mut service = LanguageService::new(schema);
-        for (name, doc) in &self.settings.variables {
+        let (service, more) = self.declare(LanguageService::new(schema));
+        problems.extend(more);
+        (service, problems)
+    }
+
+    /// Declares the variables and host functions of these settings to `service`, whatever its
+    /// schema. Problems (an invalid variable schema) are returned alongside.
+    pub fn declare(&self, mut service: LanguageService) -> (LanguageService, Vec<String>) {
+        let mut problems = Vec::new();
+        for (name, doc) in &self.variables {
             let name = name.trim_start_matches('$');
             let shape = match doc {
                 Value::Null => None,
@@ -78,7 +98,7 @@ impl Entry {
             };
             service = service.with_variable(name, shape);
         }
-        for decl in &self.settings.functions {
+        for decl in &self.functions {
             let mut decl = decl.clone();
             decl.name = decl.name.trim_start_matches('$').to_owned();
             service = service.with_function(decl);
@@ -117,7 +137,7 @@ pub fn load(root: &Path) -> Result<Vec<Entry>, String> {
     parse(&value, root).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// The first entry whose pattern matches `path`.
+/// The first entry whose pattern matches `path`, with its index.
 pub fn find<'e>(entries: &'e [Entry], path: &Path) -> Option<(usize, &'e Entry)> {
     entries.iter().enumerate().find(|(_, e)| e.matches(path))
 }

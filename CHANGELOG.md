@@ -15,6 +15,9 @@ All notable changes are recorded here. The format follows
 - They also warn about arguments whose known type the function's signature does not accept
   (`W0205`, as in `$length(1234)` or `$sum(items.name)` with string names), and, when variables
   are declared, about references to variables that are not (`W0204`).
+- `jlens check` reads the `jlens.json` of the current directory, or the file given with
+  `--config`: files get the schema, variables and host functions that the language server gives
+  them. `--schema` replaces the configured schema. The `config` module of `jlens-lsp` is public.
 
 ## [0.3.0]
 
