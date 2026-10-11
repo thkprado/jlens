@@ -77,7 +77,10 @@ cargo xtask differential --cases 10000 --seed 42
 ```
 
 The expressions come from a grammar like that of the property tests, without the functions that
-read the clock or draw random numbers. Each case runs against one of a few input documents, or
+read the clock or draw random numbers. The grammar also calls the functions that were hardest to
+port with meaningful arguments: regular expression literals for `$match`, `$replace`, `$split`,
+`$contains` and `~>`, valid pictures for `$formatNumber`, `$formatInteger` and `$fromMillis`,
+round trips through `$parseInteger`, `$toMillis` and the decoders. Each case runs against one of a few input documents, or
 none. The command writes the cases to `target/differential/cases.json`.
 `benches/compare/differential.mjs` runs them in jsonata-js. The command then compares each
 outcome with that of jlens. Results are compared as JSON, with numbers compared as values and
@@ -86,11 +89,15 @@ that reaches either limit is skipped. The divergences are printed and written to
 `target/differential/divergences.json`. The command fails when there are any. A seed
 reproduces a run.
 
-Three kinds of disagreement are known differences of jsonata-js, listed in the
+Four kinds of disagreement are known differences of jsonata-js, listed in the
 [compatibility notes](../language/compatibility.md). They are not divergences; the command
 counts them apart:
 
 - **jsonata-js crashed**: it threw a JavaScript exception, which has no error code to compare.
+- **jsonata-js hung**: the case ran for ten times the timeout, or ran out of memory, in a
+  synchronous loop that the jsonata-js timeout cannot interrupt (`$match('abc', /b/) ?? 1`).
+  The runner evaluates the cases in a worker thread, stops it, and goes on with the next case
+  in a new one.
 - **Concurrent errors**: both engines failed with different codes, and the expression has an
   array constructor with several items or an object constructor. jsonata-js evaluates those
   parts concurrently, so when two of them fail it reports whichever fails first in its

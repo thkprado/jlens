@@ -49,6 +49,7 @@ extensions live in comments or in the host API, not in the language syntax.
 | Several items of an array constructor, or values of an object constructor, fail | The items are evaluated concurrently; the error raised first in the asynchronous schedule wins, which need not be the first item's | The items are evaluated in order; the first failing item's error is reported |
 | A group-by (`{...}`) over an empty array in the input | Adds an `undefined` item to that array of the input, which the rest of the expression sees (`($g := items{'k': 1}; $count(items))` gives 1 when `items` is `[]`; jlens gives 0) | The input is never changed |
 | A JavaScript exception inside jsonata-js (`Cannot read properties of undefined`, `comp is not a function`) | Thrown without an error code | A coded error, or a result |
+| A regular expression literal on the left of `??` or `?:` (`$match('abc', /b/) ?? 1`) | The parser copies the left side through JSON, which turns the regex into `{}`; `$match` and `$split` then loop until memory runs out, and the timeout cannot stop them | Evaluated as written |
 | Error `position` and `token` inside function calls | Overwritten with the call site | Filled in only when the inner error has none, so it points at the real cause |
 | Invalid regular expression | JavaScript `SyntaxError` without a code | `S0302` with the engine message in `message` |
 | A function as the final result | The function object | `None`, like `JSON.stringify` |

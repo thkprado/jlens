@@ -6,11 +6,11 @@
 //! and writes its outcomes next to them; the divergences are written to
 //! `target/differential/divergences.json`.
 //!
-//! Three kinds of disagreement are not divergences, and are counted apart (see "Differential
+//! Four kinds of disagreement are not divergences, and are counted apart (see "Differential
 //! testing" in `docs/src/architecture/conformance.md`): a JavaScript exception inside jsonata-js,
-//! which has no error code to compare; different error codes from an expression whose array or
-//! object constructors jsonata-js evaluates concurrently; and an evaluation in which jsonata-js
-//! changed its input document.
+//! which has no error code to compare; a case jsonata-js never finished; different error codes
+//! from an expression whose array or object constructors jsonata-js evaluates concurrently; and
+//! an evaluation in which jsonata-js changed its input document.
 
 use std::fs;
 use std::process::Command;
@@ -99,7 +99,8 @@ pub fn run(args: &[String]) -> Result<()> {
     let options = Options::new()
         .timeout(std::time::Duration::from_millis(TIMEOUT_MS))
         .max_depth(MAX_DEPTH);
-    let (mut agreed, mut limits, mut crashed, mut raced, mut mutated) = (0, 0, 0, 0, 0);
+    let (mut agreed, mut limits, mut crashed, mut hung, mut raced, mut mutated) =
+        (0, 0, 0, 0, 0, 0);
     let mut divergences = Vec::new();
     for ((expr, input), expected) in cases.iter().zip(&mut reference) {
         let changed_input = expected
@@ -107,6 +108,10 @@ pub fn run(args: &[String]) -> Result<()> {
             .and_then(|o| o.remove("mutated"))
             .is_some();
         let expected = &*expected;
+        if expected["hung"] == true {
+            hung += 1;
+            continue;
+        }
         let actual = outcome(expr, input.map(|i| &inputs[i]), &bindings, &options);
         if [&actual, expected].iter().any(|o| is_limit(o)) {
             limits += 1;
@@ -142,8 +147,8 @@ pub fn run(args: &[String]) -> Result<()> {
         divergences.len()
     );
     println!(
-        "skipped: {limits} (limits), {crashed} (jsonata-js crashed), {raced} (concurrent \
-         errors), {mutated} (jsonata-js changed its input)"
+        "skipped: {limits} (limits), {crashed} (jsonata-js crashed), {hung} (jsonata-js hung), \
+         {raced} (concurrent errors), {mutated} (jsonata-js changed its input)"
     );
     if !divergences.is_empty() {
         let path = dir.join("divergences.json");
@@ -272,7 +277,80 @@ const FUNCTIONS: &[&str] = &[
     "$sqrt", "$append", "$spread", "$merge", "$lookup", "$substring", "$substringBefore",
     "$substringAfter", "$split", "$join", "$contains", "$replace", "$formatNumber",
     "$formatBase", "$formatInteger", "$parseInteger", "$fromMillis", "$toMillis", "$zip",
-    "$single", "$base64encode", "$encodeUrlComponent", "$assert", "$error",
+    "$single", "$base64encode", "$encodeUrlComponent", "$assert", "$error", "$match",
+    "$base64decode", "$encodeUrl", "$decodeUrl", "$decodeUrlComponent",
+];
+
+/// Strings for the functions that read text: matched by the patterns below, or decoded.
+#[rustfmt::skip]
+const TEXTS: &[&str] = &[
+    "s", "'banana'", "'Hello World'", "'a1 b22 c333'", "'aabbcc'", "'tic-tac-toe'",
+    r"'line1\nline2'", "''", "'%E2%82%AC%20x'", "'%zz'", "'aGVsbG8='", "'4pyTIOKCrA=='", "'x y'",
+];
+
+/// Regular expression literals, none of them catastrophic. `/x?/` matches the empty string,
+/// which `$replace` and `$split` treat apart.
+#[rustfmt::skip]
+const REGEXES: &[&str] = &[
+    "/l+/", "/o/i", "/[aeiou]/", r"/(\w)(\w)/", r"/\d+/", "/^h/im", r"/\s/", r"/(.)\1/",
+    "/[^a-z ]/", "/b(an)*a/", "/x?/", "/𝄞/", "/e|o/", r"/\bt/", "/a.c/", "/^line/m",
+];
+
+/// Replacements for `$replace`: group references, a literal `$`, a group that does not exist.
+#[rustfmt::skip]
+const REPLACEMENTS: &[&str] = &[
+    "'$0'", "'<$1>'", "'$$'", "'$2$1'", "'x'", "''", "'$9'", "'$12'",
+    "function($m){ $uppercase($m.match) }", "function($m){ $m.groups[0] }",
+    "function($m){ $string($m.index) }",
+];
+
+#[rustfmt::skip]
+const NUMBERS: &[&str] = &[
+    "0", "7", "21", "-42", "3.7", "1999", "1234.5678", "-0.5", "0.000123", "12345678", "1e21",
+];
+
+#[rustfmt::skip]
+const NUMBER_PICTURES: &[&str] = &[
+    "'#,##0.00'", "'0.###'", "'0.0e0'", "'#,##0.0#;(#,##0.0#)'", "'00%'", "'#‰'", "'#,###'",
+    "'000.000'", "'#0.0##'", "'#,##,##0'", "'#'", "'.00'",
+];
+
+#[rustfmt::skip]
+const INTEGER_PICTURES: &[&str] = &[
+    "'0'", "'000'", "'#,##0'", "'w'", "'W'", "'Ww'", "'I'", "'i'", "'a'", "'A'", "'1;o'",
+    "'w;o'", "'#0'", "'01'",
+];
+
+/// Milliseconds since the epoch: the epoch, a leap day, before 1970, the last year 9999 moment.
+#[rustfmt::skip]
+const MILLIS: &[&str] = &[
+    "0", "1700000000000", "951782400000", "-86400000", "1e12", "253402300799999", "1234",
+];
+
+#[rustfmt::skip]
+const DATE_PICTURES: &[&str] = &[
+    "'[Y0001]-[M01]-[D01]'", "'[H01]:[m01]:[s01].[f001]'", "'[FNn], [D1o] [MNn] [Y]'",
+    "'[Y,2]-[M,2]'", "'[h]:[m01] [P]'", "'[Z01:01]'", "'[z]'", "'[d] [F1] [W] [w]'",
+    "'[X0001]-W[W01]-[F1]'", "'[MNn,3-3] [Dwo] [YI]'", "'[D01]/[M01]/[Y0001] [H01]:[m01]'",
+    "'[Y0001][M01][D01]'",
+];
+
+/// The pictures above that give the date: `$toMillis` takes the parts a picture leaves out from
+/// the clock.
+#[rustfmt::skip]
+const FULL_DATE_PICTURES: &[&str] = &[
+    "'[Y0001]-[M01]-[D01]'", "'[FNn], [D1o] [MNn] [Y]'", "'[Y,2]-[M,2]'",
+    "'[X0001]-W[W01]-[F1]'", "'[MNn,3-3] [Dwo] [YI]'", "'[D01]/[M01]/[Y0001] [H01]:[m01]'",
+    "'[Y0001][M01][D01]'",
+];
+
+#[rustfmt::skip]
+const TIMEZONES: &[&str] = &["'+0530'", "'-0800'", "'0000'", "'+01:00'"];
+
+#[rustfmt::skip]
+const DATES: &[&str] = &[
+    "'2024-02-29'", "'2024-02-29T12:34:56Z'", "'2024-02-29T12:34:56.789+05:30'", "'1999'",
+    "'2024-13-01'", "'not a date'",
 ];
 
 /// An expression from a small grammar, at most `depth` levels deep.
@@ -290,7 +368,7 @@ fn expression(rng: &mut Rng, depth: u32) -> String {
         0 => rng.pick(STEPS).to_owned(),
         _ => format!("({})", e(rng)),
     };
-    match rng.below(18) {
+    match rng.below(21) {
         0..=2 => {
             let l = e(rng);
             let op = rng.pick(OPERATORS);
@@ -309,15 +387,119 @@ fn expression(rng: &mut Rng, depth: u32) -> String {
         11 => format!("($f := function($y){{ {} }}; $f({}))", e(rng), e(rng)),
         12 => format!("{}^({})", e(rng), e(rng)),
         13 => format!("{}{{{}: {}}}", e(rng), e(rng), e(rng)),
-        14 => match rng.below(4) {
+        14 => match rng.below(6) {
             0 => format!("$map({}, function($e){{ {} }})", e(rng), e(rng)),
             1 => format!("$filter({}, function($e){{ {} }})", e(rng), e(rng)),
             2 => format!("$reduce({}, function($l, $r){{ {} }})", e(rng), e(rng)),
-            _ => format!("$sort({}, function($l, $r){{ {} }})", e(rng), e(rng)),
+            3 => format!("$sort({}, function($l, $r){{ {} }})", e(rng), e(rng)),
+            // An object's values and keys: a body that reads them, or any expression.
+            f => {
+                let f = if f == 4 { "$sift" } else { "$each" };
+                let body = match rng.below(5) {
+                    0 => "$v".to_owned(),
+                    1 => "$k".to_owned(),
+                    2 => "$k & '=' & $string($v)".to_owned(),
+                    3 => "$type($v) = 'number'".to_owned(),
+                    _ => e(rng),
+                };
+                format!("{f}({}, function($v, $k){{ {body} }})", e(rng))
+            }
         },
         15 => format!("items#$i[$i < 2].{}", step(rng)),
         16 => format!("items@$o.{}", step(rng)),
-        _ => format!("{} ~> |items|{{'p': {}}}|", e(rng), e(rng)),
+        17 => format!("{} ~> |items|{{'p': {}}}|", e(rng), e(rng)),
+        18 => regex_call(rng, depth),
+        19 => picture_call(rng, depth),
+        _ => codec_call(rng, depth),
+    }
+}
+
+/// One of the given strings, or now and then any expression.
+fn either(rng: &mut Rng, items: &[&'static str], depth: u32) -> String {
+    if rng.below(5) == 0 {
+        expression(rng, depth - 1)
+    } else {
+        rng.pick(items).to_owned()
+    }
+}
+
+/// A function that takes a regular expression, applied to a text.
+fn regex_call(rng: &mut Rng, depth: u32) -> String {
+    let text = either(rng, TEXTS, depth);
+    let regex = rng.pick(REGEXES);
+    let limit = |rng: &mut Rng| match rng.below(3) {
+        0 => String::new(),
+        _ => format!(", {}", either(rng, &["0", "1", "2", "-1"], depth)),
+    };
+    match rng.below(6) {
+        0 => format!("$match({text}, {regex}{})", limit(rng)),
+        1 => {
+            let replacement = either(rng, REPLACEMENTS, depth);
+            format!("$replace({text}, {regex}, {replacement}{})", limit(rng))
+        }
+        2 => format!("$split({text}, {regex}{})", limit(rng)),
+        3 => format!("$contains({text}, {regex})"),
+        // A regex is a function: applied, it gives the first match.
+        4 => format!("({text} ~> {regex})"),
+        _ => format!("$filter($split({text}, ' '), function($e){{ $contains($e, {regex}) }})"),
+    }
+}
+
+/// A formatting function with a valid picture, or a parser given what its formatter wrote.
+fn picture_call(rng: &mut Rng, depth: u32) -> String {
+    match rng.below(7) {
+        0 => {
+            let number = either(rng, NUMBERS, depth);
+            let picture = rng.pick(NUMBER_PICTURES);
+            let options = match rng.below(4) {
+                0 => ", {'decimal-separator': ',', 'grouping-separator': '.'}",
+                1 => ", {'percent': 'pc', 'zero-digit': '٠'}",
+                _ => "",
+            };
+            format!("$formatNumber({number}, {picture}{options})")
+        }
+        1 => {
+            let number = either(rng, NUMBERS, depth);
+            format!("$formatInteger({number}, {})", rng.pick(INTEGER_PICTURES))
+        }
+        2 => {
+            let number = either(rng, NUMBERS, depth);
+            let picture = rng.pick(INTEGER_PICTURES);
+            format!("$parseInteger($formatInteger({number}, {picture}), {picture})")
+        }
+        3 | 4 => {
+            let millis = either(rng, MILLIS, depth);
+            let picture = rng.pick(DATE_PICTURES);
+            let timezone = match rng.below(3) {
+                0 => format!(", {}", rng.pick(TIMEZONES)),
+                _ => String::new(),
+            };
+            format!("$fromMillis({millis}, {picture}{timezone})")
+        }
+        5 => {
+            let millis = either(rng, MILLIS, depth);
+            let picture = rng.pick(FULL_DATE_PICTURES);
+            format!("$toMillis($fromMillis({millis}, {picture}), {picture})")
+        }
+        _ => match rng.below(2) {
+            0 => format!("$toMillis({})", either(rng, DATES, depth)),
+            _ => format!("$fromMillis({})", either(rng, MILLIS, depth)),
+        },
+    }
+}
+
+/// A decoder, given a text or what its encoder wrote.
+fn codec_call(rng: &mut Rng, depth: u32) -> String {
+    let (encode, decode) = match rng.below(3) {
+        0 => ("$base64encode", "$base64decode"),
+        1 => ("$encodeUrl", "$decodeUrl"),
+        _ => ("$encodeUrlComponent", "$decodeUrlComponent"),
+    };
+    let text = either(rng, TEXTS, depth);
+    match rng.below(3) {
+        0 => format!("{decode}({encode}({text}))"),
+        1 => format!("{decode}({text})"),
+        _ => format!("{encode}({text})"),
     }
 }
 
