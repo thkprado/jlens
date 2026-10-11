@@ -1,5 +1,7 @@
 //! What the fuzz targets share: a small stack, the limits of an evaluation and its bindings.
 
+use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use jlens_core::{Bindings, Error, HostFunction, Options};
@@ -9,6 +11,17 @@ use serde_json::json;
 /// Windows. Linux gives the main thread 8 MB, which would hide recursion that does not go
 /// through `jlens_core::stack::grow`.
 const STACK: usize = 1024 * 1024;
+
+/// Writes the input about to run to the file that `JLENS_FUZZ_LAST_INPUT` names, if set. A stack
+/// overflow on the target's thread kills the process before libFuzzer can write the input that
+/// caused it, so the Fuzz workflow keeps this file instead.
+pub fn record(data: &[u8]) {
+    static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+    let path = PATH.get_or_init(|| std::env::var_os("JLENS_FUZZ_LAST_INPUT").map(PathBuf::from));
+    if let Some(path) = path {
+        let _ = std::fs::write(path, data);
+    }
+}
 
 /// Runs `f` on a thread with a 1 MB stack. A panic on that thread is a crash of the target.
 pub fn on_small_stack<R: Send>(f: impl FnOnce() -> R + Send) -> R {

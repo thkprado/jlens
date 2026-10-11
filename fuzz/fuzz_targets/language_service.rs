@@ -10,6 +10,7 @@ use jlens_schema::{FunctionDecl, LanguageService, Schema};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
+    jlens_fuzz::record(data);
     let Some((offset, text)) = data.split_first_chunk::<2>() else {
         return;
     };

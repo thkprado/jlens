@@ -12,6 +12,7 @@ use libfuzzer_sys::fuzz_target;
 const POLLS: u32 = 1000;
 
 fuzz_target!(|data: &[u8]| {
+    jlens_fuzz::record(data);
     let Some((&bits, rest)) = data.split_first() else {
         return;
     };

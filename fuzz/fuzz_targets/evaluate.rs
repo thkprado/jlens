@@ -10,6 +10,7 @@ use jlens_core::{Document, Expression};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
+    jlens_fuzz::record(data);
     let (source, input) = match data.iter().position(|&b| b == 0) {
         Some(nul) => (&data[..nul], serde_json::from_slice(&data[nul + 1..]).ok()),
         None => (data, None),

@@ -26,6 +26,7 @@ const CALLS: &[&str] = &[
 ];
 
 fuzz_target!(|data: &[u8]| {
+    jlens_fuzz::record(data);
     let (picture, text) = match data.iter().position(|&b| b == 0) {
         Some(nul) => (&data[..nul], &data[nul + 1..]),
         None => (data, &[][..]),

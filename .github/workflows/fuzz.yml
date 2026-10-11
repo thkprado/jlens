@@ -52,11 +52,14 @@ jobs:
       - name: Fuzz
         env:
           TARGET: ${{ matrix.target }}
+          # Each input is written there before it runs (see `record` in fuzz/src/lib.rs).
+          JLENS_FUZZ_LAST_INPUT: ${{ github.workspace }}/fuzz/artifacts/${{ matrix.target }}/last-input
           SECONDS_EACH: ${{ inputs.seconds || '600' }}
         # No sanitizer: jlens forbids `unsafe`, and AddressSanitizer reports false positives
         # when stacker switches stacks. Debug assertions turn arithmetic overflows into panics.
         # The prebuilt cargo-fuzz is a musl build, which would build for its own target.
         run: >-
+          mkdir -p "fuzz/artifacts/$TARGET" &&
           cargo +nightly fuzz run "$TARGET" --sanitizer none --debug-assertions
           --target x86_64-unknown-linux-gnu
           -- -max_total_time="$SECONDS_EACH" -timeout=10
@@ -65,8 +68,8 @@ jobs:
         with:
           path: fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
-      # A stack overflow kills the process before libFuzzer writes the input, so the corpus goes
-      # along: the input is among its files.
+      # A stack overflow kills the process before libFuzzer writes the input: `last-input` holds
+      # it then. The corpus goes along, to reproduce a crash that needs a run's history.
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

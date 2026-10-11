@@ -5,6 +5,7 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|source: &str| {
+    jlens_fuzz::record(source.as_bytes());
     jlens_fuzz::on_small_stack(|| {
         let ast = jlens_core::parse_recover(source);
         for d in &ast.diagnostics {
