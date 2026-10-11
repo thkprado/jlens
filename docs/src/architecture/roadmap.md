@@ -25,7 +25,7 @@ The [changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md) lists 
 | 0.1.0 | The first release: the engine, audits, schemas and the language service, the CLI and the WebAssembly package |
 | 0.1.1 | Examples, fixtures and the web editor use an online store order |
 | 0.2.0 | Host functions in Rust and WebAssembly ([ADR 0006](../adr/0006-host-functions.md)), and their declarations in the language service; the web editor's example selector |
-| Unreleased | The language server `jlens lsp` and `jlens.json` ([ADR 0007](../adr/0007-language-server.md), [editors guide](../guides/editors.md)) |
+| 0.3.0 | The language server `jlens lsp` and `jlens.json` ([ADR 0007](../adr/0007-language-server.md), [editors guide](../guides/editors.md)); the CLI's machine contract ([ADR 0008](../adr/0008-cli-machine-contract.md)): `eval --json`, `--now` and `--seed`, `check` over several files, `jlens errors`; cancellation and size caps in `jlens-core` |
 
 ## Priorities
 

@@ -25,6 +25,7 @@ What sets jlens apart from other JSONata implementations:
 - **Conformance first.** The engine is checked against the official JSONata test suite (2.2.2)
   on every change; see [Conformance testing](architecture/conformance.md).
 
-> **Status:** jlens 0.2 implements all of JSONata 2.2 (1,688 of the 1,690 official test cases,
+> **Status:** jlens 0.3 implements all of JSONata 2.2 (1,688 of the 1,690 official test cases,
 > with the other two documented), host functions, evaluation audits, schema-driven editor
-> support, the command line and the browser package. See the [roadmap](architecture/roadmap.md).
+> support with a language server, a command line for scripts and agents, and the browser
+> package. See the [roadmap](architecture/roadmap.md).
