@@ -48,6 +48,7 @@ extensions live in comments or in the host API, not in the language syntax.
 | A transform that makes an object contain itself (`$ ~> |$|{'self': $}|`) | A circular object, which fails when serialized | `U1001` |
 | Several items of an array constructor, or values of an object constructor, fail | The items are evaluated concurrently; the error raised first in the asynchronous schedule wins, which need not be the first item's | The items are evaluated in order; the first failing item's error is reported |
 | A group-by (`{...}`) over an empty array in the input | Adds an `undefined` item to that array of the input, which the rest of the expression sees (`($g := items{'k': 1}; $count(items))` gives 1 when `items` is `[]`; jlens gives 0) | The input is never changed |
+| A wildcard over an array of sequences (`$map([1, 2], function($e){ items.$ }).*`) | Adds a `true` item after the items of each sequence: an internal flag of the sequence, which its wildcard enumerates | The items only |
 | A JavaScript exception inside jsonata-js (`Cannot read properties of undefined`, `comp is not a function`) | Thrown without an error code | A coded error, or a result |
 | A regular expression literal on the left of `??` or `?:` (`$match('abc', /b/) ?? 1`) | The parser copies the left side through JSON, which turns the regex into `{}`; `$match` and `$split` then loop until memory runs out, and the timeout cannot stop them | Evaluated as written |
 | Error `position` and `token` inside function calls | Overwritten with the call site | Filled in only when the inner error has none, so it points at the real cause |
@@ -60,7 +61,7 @@ extensions live in comments or in the host API, not in the language syntax.
 | `$formatNumber` with irregular grouping (`'#,##,##0'`) on a number with fewer digits than a grouping position | Separators at the start or in the wrong place: `$formatNumber(1234, '#,##,##0')` is "12,34," | The same |
 | `$base64encode` | Takes the low byte of each UTF-16 code unit | The same; text outside Latin-1 does not round-trip, as in jsonata-js |
 | `$random`, `$shuffle` | `Math.random` | A per-evaluation xorshift generator seeded from the clock |
-| Regular expressions | JavaScript `RegExp` | `jlens-regress`, a fork of `regress` 0.12.0 (ECMAScript syntax and semantics). Match positions are UTF-16 offsets. A pattern nested more than 256 levels deep is a syntax error (`S0302`) |
+| Regular expressions | JavaScript `RegExp` | `jlens-regress`, a fork of `regress` 0.12.0 (ECMAScript syntax and semantics). Match positions are UTF-16 offsets. A pattern matches characters, not UTF-16 code units: `$match('a𝄞', /[^a]/)` matches `𝄞`, where jsonata-js matches its first half, a lone surrogate. A pattern nested more than 256 levels deep is a syntax error (`S0302`) |
 | A regular expression that backtracks catastrophically, such as `/^(a+)+$/` on a long run of `a` followed by `!` | Runs until the match ends, which can take years, and blocks the thread | The same without limits. With `Options::timeout` or a cancellation token, the match stops with `D1012` or `U1003`, like any other step ([ADR 0009](../adr/0009-bounded-regex.md)) |
 
 The suite runner's own guard raises `U1001` for its `timelimit`/`depth` cases; jlens enforces

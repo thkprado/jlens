@@ -7,7 +7,9 @@
 // An outcome is {"value": <JSON>}, {"undefined": true} or {"error": <code>}. Functions are
 // dropped as `JSON.stringify` drops them, as jlens does when it converts a result to JSON. An
 // outcome also has "mutated": true when the evaluation changed its input document (a group-by
-// on an empty array adds an item to it), which the rest of the expression may see.
+// on an empty array adds an item to it), which the rest of the expression may see. A result with
+// a lone surrogate in a string, half of a character outside the BMP (`$match('𝄞', /[^a]/)`),
+// has the outcome {"split": true}: jlens strings are UTF-8 and cannot hold one.
 //
 // The cases run in a worker thread. A case that never finishes, or runs the worker out of
 // memory, is a synchronous loop inside jsonata-js, which its timeout cannot interrupt
@@ -75,10 +77,15 @@ if (isMainThread) {
   const { inputs, bindings, timeout, depth, cases } = JSON.parse(readFileSync(casesPath, "utf8"));
 
   // jsonata-js lambdas are objects; built-in functions and regexes are JavaScript functions.
-  const dropFunctions = (_key, value) =>
-    typeof value === "function" || value?._jsonata_lambda || value?._jsonata_function
+  let split;
+  const dropFunctions = (key, value) => {
+    if (!key.isWellFormed() || (typeof value === "string" && !value.isWellFormed())) {
+      split = true;
+    }
+    return typeof value === "function" || value?._jsonata_lambda || value?._jsonata_function
       ? undefined
       : value;
+  };
 
   for (const { expr, input } of cases.slice(start)) {
     let outcome;
@@ -87,8 +94,13 @@ if (isMainThread) {
     try {
       const compiled = jsonata(expr, { timeout, stack: depth });
       const result = await compiled.evaluate(data, structuredClone(bindings));
+      split = false;
       const text = JSON.stringify(result, dropFunctions);
-      outcome = text === undefined ? { undefined: true } : { value: JSON.parse(text) };
+      if (split) {
+        outcome = { split: true };
+      } else {
+        outcome = text === undefined ? { undefined: true } : { value: JSON.parse(text) };
+      }
     } catch (err) {
       // An error without a code is a JavaScript exception inside jsonata-js.
       outcome = { error: err?.code ?? `js: ${err?.message ?? err}` };

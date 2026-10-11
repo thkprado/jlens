@@ -6,12 +6,14 @@
 //! and writes its outcomes next to them; the divergences are written to
 //! `target/differential/divergences.json`.
 //!
-//! Five kinds of disagreement are not divergences, and are counted apart (see "Differential
+//! Seven kinds of disagreement are not divergences, and are counted apart (see "Differential
 //! testing" in `docs/src/architecture/conformance.md`): a JavaScript exception inside jsonata-js,
-//! which has no error code to compare; a case jsonata-js never finished; an expression with a
+//! which has no error code to compare; a case jsonata-js never finished; a jsonata-js result
+//! with half of a character, which a jlens string cannot hold; an expression with a
 //! regular expression literal on the left of `??` or `?:`, which the jsonata-js parser mangles;
 //! different error codes from an expression whose array or object constructors jsonata-js
-//! evaluates concurrently; and an evaluation in which jsonata-js changed its input document.
+//! evaluates concurrently; an evaluation in which jsonata-js changed its input document; and a
+//! wildcard that gives jsonata-js's internal flag `sequence` as a `true` item.
 
 use std::fs;
 use std::process::Command;
@@ -100,8 +102,8 @@ pub fn run(args: &[String]) -> Result<()> {
     let options = Options::new()
         .timeout(std::time::Duration::from_millis(TIMEOUT_MS))
         .max_depth(MAX_DEPTH);
-    let (mut agreed, mut limits, mut crashed, mut hung, mut mangled, mut raced, mut mutated) =
-        (0, 0, 0, 0, 0, 0, 0);
+    let (mut agreed, mut limits, mut crashed, mut hung, mut split) = (0, 0, 0, 0, 0);
+    let (mut mangled, mut raced, mut mutated, mut flagged) = (0, 0, 0, 0);
     let mut divergences = Vec::new();
     for ((expr, input), expected) in cases.iter().zip(&mut reference) {
         let changed_input = expected
@@ -111,6 +113,10 @@ pub fn run(args: &[String]) -> Result<()> {
         let expected = &*expected;
         if expected["hung"] == true {
             hung += 1;
+            continue;
+        }
+        if expected["split"] == true {
+            split += 1;
             continue;
         }
         let actual = outcome(expr, input.map(|i| &inputs[i]), &bindings, &options);
@@ -129,6 +135,8 @@ pub fn run(args: &[String]) -> Result<()> {
             raced += 1;
         } else if changed_input {
             mutated += 1;
+        } else if sequence_flag(expr, &actual, expected) {
+            flagged += 1;
         } else {
             divergences.push(json!({
                 "expr": expr,
@@ -151,8 +159,9 @@ pub fn run(args: &[String]) -> Result<()> {
     );
     println!(
         "skipped: {limits} (limits), {crashed} (jsonata-js crashed), {hung} (jsonata-js hung), \
-         {mangled} (regex left of ?? or ?:), {raced} (concurrent errors), \
-         {mutated} (jsonata-js changed its input)"
+         {split} (jsonata-js split a character), {mangled} (regex left of ?? or ?:), \
+         {raced} (concurrent errors), \
+         {mutated} (jsonata-js changed its input), {flagged} (wildcard over a sequence)"
     );
     if !divergences.is_empty() {
         let path = dir.join("divergences.json");
@@ -239,6 +248,32 @@ fn concurrent(expr: &str) -> bool {
             _ => node.attrs.group.is_some(),
         };
     });
+    found
+}
+
+/// Whether jsonata-js's result is jlens's with `true` items added, and `expr` has a wildcard. An
+/// array that jsonata-js builds from a path carries the own property `sequence: true`, and its
+/// wildcard enumerates the properties of an array item, flag included
+/// (`$map([1, 2], function($e){ items.$ }).*`).
+fn sequence_flag(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
+    let (Some(actual), Some(expected)) = (actual["value"].as_array(), expected["value"].as_array())
+    else {
+        return false;
+    };
+    let unflagged: Vec<JsonValue> = expected.iter().filter(|v| **v != true).cloned().collect();
+    if unflagged.len() == expected.len()
+        || !same(&JsonValue::Array(unflagged), &actual.clone().into())
+    {
+        return false;
+    }
+    let Ok(compiled) = Expression::compile(expr) else {
+        return false;
+    };
+    let mut found = false;
+    compiled
+        .ast()
+        .root
+        .walk(&mut |node: &Node| found |= matches!(node.kind, NodeKind::Wildcard));
     found
 }
 

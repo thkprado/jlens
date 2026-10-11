@@ -89,7 +89,7 @@ that reaches either limit is skipped. The divergences are printed and written to
 `target/differential/divergences.json`. The command fails when there are any. A seed
 reproduces a run.
 
-Five kinds of disagreement are known differences of jsonata-js, listed in the
+Seven kinds of disagreement are known differences of jsonata-js, listed in the
 [compatibility notes](../language/compatibility.md). They are not divergences; the command
 counts them apart:
 
@@ -98,6 +98,10 @@ counts them apart:
   synchronous loop that the jsonata-js timeout cannot interrupt (`$match('abc', /b/) ?? 1`).
   The runner evaluates the cases in a worker thread, stops it, and goes on with the next case
   in a new one.
+- **jsonata-js split a character**: a string of the jsonata-js result holds a lone surrogate,
+  half of a character outside the Basic Multilingual Plane, which a jlens string cannot hold. A
+  JavaScript regular expression without the `u` flag matches UTF-16 code units, so
+  `$match('a𝄞', /[^a]/)` matches the first half of `𝄞`; jlens matches the whole character.
 - **Regex left of `??` or `?:`**: the outcomes differ, and the expression has a regular
   expression literal on the left of `??` or `?:`. The jsonata-js parser copies that side through
   JSON, which turns the regex into `{}`, so the expression hangs (counted above) or gives another
@@ -108,6 +112,9 @@ counts them apart:
   asynchronous schedule. jlens reports the first in source order.
 - **jsonata-js changed its input**: the jsonata-js runner saw the input document change during
   the evaluation (a group-by on an empty array adds an item to it), and the outcomes differ.
+- **Wildcard over a sequence**: the expression has a wildcard, and the jsonata-js result is
+  jlens's with `true` items added. An array that jsonata-js builds from a path carries an own
+  property `sequence: true`, which its wildcard enumerates with the items.
 
 The `Differential` workflow runs 20,000 cases from a new seed every week, and on demand with a
 chosen number of cases and seed. When it fails, the cases and outcomes are attached to the run.
