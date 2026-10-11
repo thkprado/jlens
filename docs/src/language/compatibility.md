@@ -1,11 +1,26 @@
 # Compatibility with jsonata-js
 
-jlens targets the behaviour of jsonata-js **2.2.2**, as specified by its official test suite.
-This page lists every known difference. Each difference is either:
-- a documented override in the [conformance suite](../architecture/conformance.md), or
-- an extension that does not change the meaning of valid expressions.
+jlens targets the behaviour of jsonata-js **2.2.2**, as specified by its official test suite. It
+copies that behaviour, quirks included, unless copying would cost precision, correctness or
+performance: a result made inexact by JavaScript's rounding, a result that is wrong by the JSONata
+documentation or exposes a JavaScript internal, or a slower common path. This page records
+both kinds of decision:
+- [Differences](#differences): where jlens behaves otherwise. A difference that affects the
+  [conformance suite](../architecture/conformance.md) is also an override there, with its reason.
+- [Extensions](#extensions): features of jlens alone, which do not change the meaning of valid
+  expressions.
+- [Quirks reproduced on purpose](#quirks-reproduced-on-purpose): jsonata-js behaviour that looks
+  wrong, which jlens copies because its cost stays in unusual input or error paths, where users
+  can expect the same answer from both engines.
 
-## Strings and Unicode
+## Differences
+
+Most differences have one of four causes: Rust strings are UTF-8 where JavaScript's are UTF-16;
+jlens never panics, overflows its stack or exhausts memory on user input, and reports a coded
+error instead; an evaluation never changes its input; and a result never depends on the machine,
+its time zone or JavaScript's internals.
+
+### Strings and Unicode
 
 | Topic | jsonata-js | jlens |
 |---|---|---|
@@ -16,7 +31,7 @@ This page lists every known difference. Each difference is either:
 Two suite cases pass a lone surrogate to `$encodeUrl` / `$encodeUrlComponent` to provoke an
 error. jlens cannot represent that input, so it skips those two cases.
 
-## Parsing
+### Parsing
 
 - **Error recovery** (`parse_recover`) produces the same codes and positions as jsonata-js on
   its recovery tests. It also recovers from lexer errors and post-processing errors, which
@@ -26,17 +41,7 @@ error. jlens cannot represent that input, so it skips those two cases.
 - **Doc-comments** (`/** ... */`) are parsed as [audit annotations](annotations.md). Like any
   comment, they never change how an expression is parsed or evaluated.
 
-## Extensions
-
-These features exist only in jlens. Expressions that use them remain valid JSONata, because the
-extensions live in comments or in the host API, not in the language syntax.
-
-- Audit annotations and the warnings `W0101`–`W0103`.
-- `Ast` node ids and spans, and `parse_recover` diagnostics with severities.
-- Static warnings (`W0201`–`W0205`) and the language service.
-- `Document`, for evaluating many expressions against one converted document.
-
-## Evaluation
+### Evaluation
 
 | Topic | jsonata-js | jlens |
 |---|---|---|
@@ -57,9 +62,6 @@ extensions live in comments or in the host API, not in the language syntax.
 | Very large integers in results | Printed in full up to 1e21 | `serde_json` numbers. Integers above 2^53 become floats (same value, possibly in exponent notation) |
 | `$toMillis` of a date-time without an offset | Local time (per `Date.parse`) | UTC, so results never depend on the machine's time zone |
 | `$split(s, "")` | Splits into UTF-16 code units | Splits into characters (astral characters stay whole) |
-| A regular expression applied to a value that is not a string (`x ~> /re/`) | `RegExp.prototype.exec` converts the value to a string: `undefined` is matched as "undefined", an object of the input as "[object Object]", an array as its items joined by commas. Converting an object built by the expression throws a JavaScript `TypeError` | The same conversion, for every object. A built-in function or a regex given as the value gives undefined, where JavaScript would match its source code |
-| `$formatNumber` with irregular grouping (`'#,##,##0'`) on a number with fewer digits than a grouping position | Separators at the start or in the wrong place: `$formatNumber(1234, '#,##,##0')` is "12,34," | The same |
-| `$base64encode`, `$base64decode` | Take the low byte of each UTF-16 code unit (Node's `Buffer`), so `$base64decode` reads `Ĵ` (U+0134) as the digit `4` | The same; text outside Latin-1 does not round-trip, as in jsonata-js |
 | `$random`, `$shuffle` | `Math.random` | A per-evaluation xorshift generator seeded from the clock |
 | Regular expressions | JavaScript `RegExp` | `jlens-regress`, a fork of `regress` 0.12.0 (ECMAScript syntax and semantics). Match positions are UTF-16 offsets. A pattern matches characters, not UTF-16 code units: `$match('a𝄞', /[^a]/)` matches `𝄞`, where jsonata-js matches its first half, a lone surrogate. A pattern nested more than 256 levels deep is a syntax error (`S0302`) |
 | A regular expression that backtracks catastrophically, such as `/^(a+)+$/` on a long run of `a` followed by `!` | Runs until the match ends, which can take years, and blocks the thread | The same without limits. With `Options::timeout` or a cancellation token, the match stops with `D1012` or `U1003`, like any other step ([ADR 0009](../adr/0009-bounded-regex.md)) |
@@ -80,3 +82,27 @@ functions in the bindings object or `registerFunction` in the WebAssembly packag
 | The context value | `this`: the context value for a function in the bindings, `{environment, input}` for one registered with `registerFunction`. An input array arrives in its wrapper | `HostCall::input`, the context value itself, an input array included. In WebAssembly, `this` is `undefined`: a signature with `-` passes the context value as an argument |
 | A function that returns a promise | The evaluation awaits it | `U1002` |
 | An exception thrown by the function | Rethrown, with the `position` and `token` of the call | Rethrown as is in WebAssembly; `position` and `token` are added when missing |
+
+## Extensions
+
+These features exist only in jlens. Expressions that use them remain valid JSONata, because the
+extensions live in comments or in the host API, not in the language syntax.
+
+- Audit annotations and the warnings `W0101`–`W0103`.
+- `Ast` node ids and spans, and `parse_recover` diagnostics with severities.
+- Static warnings (`W0201`–`W0205`) and the language service.
+- `Document`, for evaluating many expressions against one converted document.
+
+## Quirks reproduced on purpose
+
+Both engines behave as described here. Each row gives the reason for copying it, or what jlens
+will change.
+
+| Topic | jsonata-js and jlens | Decision |
+|---|---|---|
+| A regular expression applied to a value that is not a string (`x ~> /re/`) | `RegExp.prototype.exec` converts the value to a string: `undefined` is matched as "undefined", so `missing ~> /de/` finds `de`; an object of the input becomes "[object Object]", an array its items joined by commas. jlens converts every object this way, where jsonata-js throws a `TypeError` for an object built by the expression; jlens gives undefined for a built-in function or a regex, where jsonata-js matches its source code | To change: a value that is not a string will give undefined. The conversion exposes JavaScript's `String()` |
+| `$formatNumber` with irregular grouping (`'#,##,##0'`) on a number with fewer digits than a grouping position | Separators at the start or in the wrong place: `$formatNumber(1234, '#,##,##0')` is "12,34," | To change: "1,234", as the picture rules give. The result is wrong by the documentation, and Indian grouping of small numbers is ordinary input |
+| `$substringBefore`, `$substringAfter` when `chars` is undefined | Search for the text "undefined": `$substringBefore('a-undefined-b', missing)` is "a-" | To change: the string unchanged. The search exposes JavaScript's `String(undefined)` |
+| `$formatInteger` in letters (`'a'`, `'A'`) of a number above 2^53 | Computed in floating point: `value - 1` rounds to `value`, and the letters follow that rounding | Kept. The number is already a rounded double, so exact arithmetic on it gains no real precision, and letter numbering of such numbers is not ordinary input |
+| `$power(±1, e)` with `e` undefined | `D3061`: JavaScript's `Math.pow` gives NaN for 1^NaN, where IEEE `pow` gives 1 | Kept. Every base fails with `D3061` when the exponent is undefined, ±1 included |
+| `$base64encode`, `$base64decode` | Take the low byte of each UTF-16 code unit (Node's `Buffer`), so `$base64decode` reads `Ĵ` (U+0134) as the digit `4`, and text outside Latin-1 does not round-trip | Kept. Latin-1 text gives the same Base64 in both engines, which data exchanged between them relies on; encoding UTF-8 instead would change the result for any text outside ASCII |

@@ -18,8 +18,10 @@ cargo xtask wasm && cd benches/compare && npm install && node compare.mjs   # ag
 ```
 
 The numbers below were measured on an AMD Ryzen 7 3700X under Windows 11, with Rust 1.99 and
-Node.js 24. They are meant for comparing alternatives on one machine. They are not
-guarantees, and your hardware will give different absolute values.
+Node.js 24, for jlens 0.1.0. They were checked again for 0.6.0, after the compatibility and
+regular expression changes since: every native time was within 3% of the table. They are meant
+for comparing alternatives on one machine. They are not guarantees, and your hardware will give
+different absolute values.
 
 ### Native (criterion)
 
