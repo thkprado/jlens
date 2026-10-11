@@ -287,18 +287,32 @@ fn catastrophic_regex() -> impl Strategy<Value = String> {
     })
 }
 
-proptest! {
-    // Each case runs until its timeout, so a few dozen cases are enough.
-    #![proptest_config(ProptestConfig::with_cases(32))]
-
-    #[test]
-    fn catastrophic_regexes_stop_within_the_timeout(source in catastrophic_regex()) {
-        let expr = Expression::compile(&source).unwrap();
-        let options = Options::new().timeout(Duration::from_millis(20));
-        let started = std::time::Instant::now();
-        let result = expr.evaluate_with(None, &Bindings::new(), &options);
-        let code = result.err().map(|e| e.code().to_string());
-        prop_assert_eq!(code.as_deref(), Some("D1012"), "{}", source);
-        prop_assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+#[test]
+fn catastrophic_regexes_stop_within_the_timeout() {
+    // Each case runs until its timeout, so the number of cases is fixed. The `proptest!` macro
+    // would let `PROPTEST_CASES` raise it, and 100,000 cases would wait more than half an hour
+    // to repeat the few thousand patterns the strategy can generate.
+    let config = ProptestConfig {
+        cases: 32,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    };
+    let result =
+        proptest::test_runner::TestRunner::new(config).run(&catastrophic_regex(), |source| {
+            let expr = Expression::compile(&source).unwrap();
+            let options = Options::new().timeout(Duration::from_millis(20));
+            let started = std::time::Instant::now();
+            let result = expr.evaluate_with(None, &Bindings::new(), &options);
+            let code = result.err().map(|e| e.code().to_string());
+            prop_assert_eq!(code.as_deref(), Some("D1012"), "{}", source);
+            prop_assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "{:?}",
+                started.elapsed()
+            );
+            Ok(())
+        });
+    if let Err(e) = result {
+        panic!("{e}");
     }
 }
