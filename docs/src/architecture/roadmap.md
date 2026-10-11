@@ -79,6 +79,14 @@ tests them and explains their results before they ship.
 | 4 | The WebAssembly package takes every option of `jlens-core` but cancellation (`maxStringLength`, `maxArrayLength`, the size cap of item 3, `now`, `seed`), and `jlens eval` and `jlens test` take the size caps | Tests in the JS suite and the CLI; the guides list the options | **done** |
 | 5 | Differential testing against jsonata-js 2.2.2: generated expressions and inputs run in both engines, which must agree on the result or the error code | A `cargo xtask` command and a scheduled CI job; each divergence fixed, or documented in the compatibility page and the overrides | **done** |
 
+## 0.6: bounded regular expressions, wider differential tests, signed packages
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | A regular expression cannot outlast the limits of an evaluation. Today the timeout and cancellation are checked between evaluation steps, never inside a match, so catastrophic backtracking (`$contains('aaaaaaaaaaaaaaaaaaaaaaaaaa!', /^(a+)+$/)`) runs for minutes, and freezes the page in WebAssembly, whatever the timeout. The design (a linear-time matcher where the pattern allows it, a step budget, or both) is decided first, in an ADR | Property tests; such a match stops with an error code within the timeout, in Rust and in WebAssembly; the compatibility page documents the difference | planned |
+| 2 | The differential tests reach the code that was hardest to port: regular expression literals (`$match`, `$replace`, `$split`, `$contains`, `~>`), valid pictures for `$formatNumber`, `$formatInteger` and `$fromMillis`, and the functions the generator leaves out (`$sift`, `$each`, `$match`, `$base64decode`, `$decodeUrl`, `$decodeUrlComponent`, `$encodeUrl`) | Generator extended; each divergence fixed, or documented in the compatibility page with a reasoned exception | planned |
+| 3 | Released packages prove where they were built: the npm package is published with provenance, and the binary archives carry build attestations | The next release shows provenance on npm and attestations on GitHub; CONTRIBUTING says how to verify them | planned |
+
 ## Later
 
 Not commitments, in order of priority:
