@@ -128,6 +128,11 @@ pub(crate) fn round(arg: f64, precision: f64) -> f64 {
     } else {
         arg
     };
+    if value.is_infinite() && arg.is_finite() {
+        // Shifting overflowed: `arg` is too large to have fractional digits. jsonata-js shifts
+        // back from `Infinity` and gets NaN.
+        return arg;
+    }
     let mut result = js_round(value);
     let diff = result - value;
     if diff.abs() == 0.5 && (result % 2.0).abs() == 1.0 {
@@ -205,7 +210,7 @@ fn to_radix(value: f64, radix: u32) -> String {
 
 /// `Number.prototype.toFixed`: rounds half away from zero on the exact binary value.
 fn to_fixed(x: f64, dp: usize) -> String {
-    if x.abs() >= 1e21 {
+    if !x.is_finite() || x.abs() >= 1e21 {
         return js_number(x);
     }
     let exact = format!("{:.*}", dp + 30, x.abs());
@@ -679,6 +684,7 @@ mod tests {
         assert_eq!(round(-2.5, 0.0), -2.0);
         assert_eq!(round(1.005, 2.0), 1.0);
         assert_eq!(round(12345.0, -2.0), 12300.0);
+        assert_eq!(round(-1e300, 20.0), -1e300);
         assert_eq!(to_fixed(0.5, 0), "1");
         assert_eq!(to_fixed(2.5, 0), "3");
         assert_eq!(to_fixed(1.25, 1), "1.3");

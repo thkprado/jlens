@@ -11,8 +11,10 @@ All notable changes are recorded here. The format follows
 - `jlens lsp` keeps running when a bug makes a request panic: it answers that request with an
   `InternalError`, and logs a notification that panics, instead of stopping.
 - Panics found by fuzzing: a date/time picture marker that starts with a comma
-  (`$fromMillis(0, '[,2]')`), and `$parseInteger` with a picture whose digits are not ASCII on
-  text with other characters (`$parseInteger('12', '##０')`).
+  (`$fromMillis(0, '[,2]')`) or gives fractional seconds a name presentation
+  (`$fromMillis(0, '[fn]')`, now `D3133`), `$parseInteger` with a picture whose digits are not
+  ASCII on text with other characters (`$parseInteger('12', '##０')`), and `$formatNumber`
+  rounding a very large number to many decimals (`$formatNumber(1e300, '#.000…')`).
 - Stack overflows found by fuzzing: recovering from hundreds of unclosed brackets
   (`parse_recover("((((…")`) copied the tree once per level, and a chain of thousands of
   operators (`1 + 1 + … + 1`) built a tree deep enough to overflow the stack when dropped.
@@ -27,6 +29,8 @@ All notable changes are recorded here. The format follows
 - The nesting limit (1,000 levels, `U1001`) also counts the operators of a chain: a chain of
   more than 1,000 terms, such as `1 + 1 + … + 1`, is rejected. jsonata-js accepts about 2,000
   before its stack overflows.
+- `$round` returns a very large number unchanged when rounding it to many decimals overflows
+  (`$round(1e300, 20)` is `1e300`); jsonata-js returns `null`.
 - `jlens-core`: `??` and `?:` parse to the new `NodeKind::Fallback` (with `FallbackOp`) instead
   of a `NodeKind::Condition`.
 

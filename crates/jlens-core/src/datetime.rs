@@ -1076,10 +1076,11 @@ fn format_component(
         return format_integer_with(v, m.integer_format.as_ref().expect("integer format"));
     }
     match m.component {
-        'f' => match value {
-            Component::Number(v) => {
-                format_integer_with(v, m.integer_format.as_ref().expect("integer format"))
-            }
+        'f' => match (value, &m.integer_format) {
+            (Component::Number(v), Some(format)) => format_integer_with(v, format),
+            // A name presentation (`[fn]`) leaves no integer format; jsonata-js then throws a
+            // TypeError.
+            (Component::Number(_), None) => Err(Error::new("D3133").with("value", "f")),
             _ => Ok(String::new()),
         },
         'Z' | 'z' => {

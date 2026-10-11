@@ -372,6 +372,17 @@ fn fuzz_crashes_stay_fixed() {
         ("$parseInteger('１２ [1]３４０', 'map###０')", Ok(json!(12))),
         ("$parseInteger('－１２x', '０')", Ok(json!(-12))),
         ("$parseInteger('12', '##０')", Ok(json!(null))),
+        // A name presentation for fractional seconds.
+        (
+            "$fromMillis(1533038400000, 'Week: [w]xNo[ f n]')",
+            Err("D3133"),
+        ),
+        // Rounding a huge number to many decimals overflowed.
+        (
+            "$formatNumber(1e300, '##4.11111111111111111101')",
+            Ok(json!("1e+300.00000000000000000000")),
+        ),
+        ("$round(1e300, 20)", Ok(json!(1e300))),
     ];
     for (source, expected) in cases {
         let result = Expression::compile(source).unwrap().evaluate_with(
