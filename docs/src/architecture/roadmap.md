@@ -88,6 +88,14 @@ tests them and explains their results before they ship.
 | 2 | The differential tests reach the code that was hardest to port: regular expression literals (`$match`, `$replace`, `$split`, `$contains`, `~>`), valid pictures for `$formatNumber`, `$formatInteger` and `$fromMillis`, and the functions the generator leaves out (`$sift`, `$each`, `$match`, `$base64decode`, `$decodeUrl`, `$decodeUrlComponent`, `$encodeUrl`) | Generator extended; each divergence fixed, or documented in the compatibility page with a reasoned exception | **done** |
 | 3 | Released packages prove where they were built: the npm package is published with provenance, and the binary archives carry build attestations | The next release shows provenance on npm and attestations on GitHub; CONTRIBUTING says how to verify them | **done** |
 
+## 0.8: proven robustness and fast single evaluations
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | Coverage-guided fuzzing backs the promise never to panic. The property tests run a fixed number of cases in CI, and the code keeps invariants with `expect` and `unreachable!` that only a panic would reveal broken: in the language server, a panic on a half-typed expression stops the server; in WebAssembly, it traps and leaves the instance unusable. `cargo-fuzz` targets cover the parser (normal and recover mode), compiling and evaluating under limits, `jlens-regress`, the pictures of `$formatNumber`, `$formatInteger` and `$fromMillis`, date parsing in `$toMillis`, and the language service. `jlens lsp` answers a request that panics with an error and keeps running | A scheduled `Fuzz` workflow, like `Differential`; every crash it found fixed, with a regression test; an LSP test for a panicking request | |
+| 2 | The cost of a single evaluation is measured and cut where the value model allows it. `evaluate` converts the whole input before it reads any of it: on the 24 KB document of the benchmarks, a path takes 153 µs natively and 402 µs in WebAssembly, against 0.9 µs and 2.5 µs with a `Document`, and 2.1 µs in jsonata-js. In WebAssembly the input goes through `JSON.stringify`, `serde_json` and the conversion to values | The performance page shows the time of each step; the steps that can go without changing the value model are gone; no benchmark case is slower | |
+| 3 | Lazy conversion of input documents: an evaluation converts only the parts of its input it reads. This changes the value model ([ADR 0003](../adr/0003-value-model.md)); the design comes first, in an ADR | ADR accepted; with `evaluate`, the path case is within 10× of `evaluate_document`, natively and in WebAssembly; property tests; no other benchmark case more than 3% slower | |
+
 ## Later
 
 Not commitments, in order of priority:
@@ -99,10 +107,6 @@ Not commitments, in order of priority:
   `npx` runs it where no Rust toolchain or prebuilt binary is available.
 - **A VS Code extension** that starts `jlens lsp` for `.jsonata` files, with a TextMate grammar
   for syntax highlighting. The other editors with an LSP client need no extension.
-- **Lazy conversion of input documents**, so that evaluations that read a small part of a large
-  document do not pay for converting all of it. This changes the value model
-  ([ADR 0003](../adr/0003-value-model.md)). `Document` already lets an application convert a
-  document once for many evaluations.
 - **Asynchronous functions**, as in jsonata-js, whose functions may return promises. This needs
   an evaluator that can suspend, and an ADR first. Until then, a host function that returns a
   promise fails with `U1002`.
