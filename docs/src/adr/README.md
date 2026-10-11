@@ -15,3 +15,4 @@ earlier one instead.
 | [0007](0007-language-server.md) | A language server on the language service, configured by `jlens.json` | Accepted |
 | [0008](0008-cli-machine-contract.md) | A machine contract for the CLI: `--json` envelopes, exit codes, stdout for data | Accepted |
 | [0009](0009-bounded-regex.md) | Regular expressions stop within the evaluation's limits, through a fork of `regress` | Accepted |
+| [0010](0010-lazy-input.md) | Input documents converted lazily, one level at a time | Accepted |

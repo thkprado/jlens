@@ -60,3 +60,4 @@
   - [0007 Language server](adr/0007-language-server.md)
   - [0008 CLI machine contract](adr/0008-cli-machine-contract.md)
   - [0009 Bounded regular expressions](adr/0009-bounded-regex.md)
+  - [0010 Lazy input](adr/0010-lazy-input.md)
