@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# Jobs read the repository; a job that needs more asks for it.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings

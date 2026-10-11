@@ -17,6 +17,10 @@ on:
         description: "An existing version tag (vX.Y.Z) whose binaries and draft release to build"
         required: true
 
+# Jobs read the repository; a job that needs more asks for it.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   TAG: ${{ inputs.tag || github.ref_name }}
