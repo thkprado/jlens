@@ -25,6 +25,7 @@ cargo xtask wasm-test                          # the browser package, in Node.js
 cargo semver-checks -p jlens-core -p jlens-schema  # the API against the last release on crates.io
 cargo +1.88 check --workspace --all-targets    # the minimum Rust version
 cargo deny check                               # advisories, licenses and sources of dependencies
+actionlint                                     # the workflows, with shellcheck on their scripts
 ```
 
 The last check fails on a breaking change while `Cargo.toml` still carries the version of the

@@ -102,7 +102,7 @@ tests them and explains their results before they ship.
 
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
-| 1 | CI lints the workflows: `actionlint`, with `shellcheck` for the scripts of `run` steps | A CI job; the workflows pass it | |
+| 1 | CI lints the workflows: `actionlint`, with `shellcheck` for the scripts of `run` steps | A CI job; the workflows pass it | **done** |
 | 2 | `cargo xtask release-notes` writes links that work on the GitHub release page. The changelog links pages relatively (`](docs/src/...)`), which break there; for 0.8.0 they were fixed by hand in the draft | Relative links become absolute at the tag (`blob/vX.Y.Z/...`); a unit test | |
 | 3 | A fuzz input can be replayed without libFuzzer. The targets cannot link on Windows, so a crash is reproduced today with a throwaway program that repeats the target's calls | One command runs a saved input (such as `last-input` from a failed run) through the body of any target, on a 1 MB stack like the fuzzing thread, on any platform; the fuzzing section of the conformance page says how | |
 | 4 | Loops and recursion over floating-point numbers end on NaN and infinity. Fuzzing found two that did not (`number_to_words`, `decimal_to_letters`); the others are found by reading the code rather than waiting for the weekly run | Every loop or recursion whose end depends on an `f64` reviewed; each one that could run forever or overflow the stack fixed, with a regression test | |
