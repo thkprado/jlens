@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The order-by operator (`items^(price)`) evaluates each item's keys once, on first use, instead
+  of evaluating both items' keys at every comparison: the sort + map benchmark takes 842 µs
+  instead of 1.90 ms. Results and errors are unchanged; a key with a side effect, such as one
+  using `$random`, is drawn once per item (see the
+  [compatibility page](docs/src/language/compatibility.md#evaluation)).
+
 ## [0.10.0]
 
 Deep recursions fail with `D1011` instead of overflowing the stack: a recursion through a

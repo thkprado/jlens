@@ -247,6 +247,69 @@ fn quirks_found_by_the_differential_tests_match_jsonata_js() {
 }
 
 #[test]
+fn order_by_evaluates_each_key_once_per_item() {
+    use jlens_core::HostFunction;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&calls);
+    let bindings = Bindings::new().function(
+        "key",
+        HostFunction::new(1, move |args, _| {
+            counted.fetch_add(1, Ordering::Relaxed);
+            Ok(args[0].clone())
+        }),
+    );
+    let run = |expr: &str, input: Value| {
+        calls.store(0, Ordering::Relaxed);
+        let result = Expression::compile(expr)
+            .unwrap()
+            .evaluate(Some(&input), &bindings)
+            .unwrap();
+        (result, calls.load(Ordering::Relaxed))
+    };
+
+    let input = json!([5, 3, 8, 1, 9, 2, 7, 4, 6, 0]);
+    assert_eq!(
+        run("$^($key($))", input),
+        (Some(json!([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])), 10)
+    );
+    // A second term is evaluated only for the items that tie on the first.
+    let input = json!([
+        {"a": 2, "b": "x"}, {"a": 1, "b": "z"}, {"a": 2, "b": "w"}, {"a": 3, "b": "y"}
+    ]);
+    assert_eq!(
+        run("$^($key(a), $key(b)).b", input),
+        (Some(json!(["z", "w", "x", "y"])), 6)
+    );
+    // Tuple streams bind each item's variables for its keys.
+    let input = json!({"items": [{"n": 2}, {"n": 1}, {"n": 3}]});
+    assert_eq!(
+        run("items@$i^($key($i.n)).$i.n", input),
+        (Some(json!([1, 2, 3])), 3)
+    );
+}
+
+#[test]
+fn order_by_raises_the_first_error_jsonata_js_raises() {
+    // The halves of the merge sort are sorted first, so the last two items are compared before
+    // the first one is: these are the codes jsonata-js 2.2.2 raises.
+    for (input, code) in [
+        (json!([{"a": 1}, {"a": "x"}]), "T2007"),
+        (json!([{"a": 1}, {"a": "x"}, {"a": true}]), "T2008"),
+        (json!([{"a": true}, {"a": "x"}, {"a": 1}]), "T2007"),
+        (json!([{"a": "x"}, {"a": 1}, {"a": [1]}]), "T2008"),
+    ] {
+        let err = Expression::compile("$^(a)")
+            .unwrap()
+            .evaluate(Some(&input), &Bindings::new())
+            .unwrap_err();
+        assert_eq!(err.code(), code, "{input}");
+    }
+}
+
+#[test]
 fn size_caps_stop_huge_values() {
     let code = |source: &str, options: &Options| {
         Expression::compile(source)

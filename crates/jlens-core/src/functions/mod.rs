@@ -386,10 +386,10 @@ pub(crate) fn clone<'a>(v: &Value<'a>, limit: usize) -> Result<Value<'a>> {
 }
 
 /// The stable merge sort of jsonata-js: `swap(a, b)` returns true when `b` must come first.
-pub(crate) fn merge_sort<'a>(
-    items: Vec<Value<'a>>,
-    swap: &mut dyn FnMut(&Value<'a>, &Value<'a>) -> Result<bool>,
-) -> Result<Vec<Value<'a>>> {
+pub(crate) fn merge_sort<T: Clone>(
+    items: Vec<T>,
+    swap: &mut dyn FnMut(&T, &T) -> Result<bool>,
+) -> Result<Vec<T>> {
     if items.len() <= 1 {
         return Ok(items);
     }

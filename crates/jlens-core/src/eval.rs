@@ -1149,20 +1149,32 @@ impl<'a> Evaluator<'_, 'a> {
         if arr.items().len() <= 1 {
             return Ok(input.clone());
         }
+        let items = arr.items();
         let is_tuple = arr.is_tuple_stream();
-        let mut swap = |a: &Value<'a>, b: &Value<'a>| -> Result<bool> {
+        // jsonata-js evaluates the keys of both items at every comparison. Each item's key for
+        // each term is kept on first use instead: the keys are still evaluated in the order
+        // jsonata-js first evaluates them, so the first error is the same.
+        let mut keys: Vec<Option<Value<'a>>> = vec![None; items.len() * terms.len()];
+        let mut swap = |&a: &usize, &b: &usize| -> Result<bool> {
             let mut comp = 0;
-            for term in terms {
+            for (t, term) in terms.iter().enumerate() {
                 if comp != 0 {
                     break;
                 }
-                let key = |ev: &mut Self, v: &Value<'a>| -> Result<Value<'a>> {
-                    if is_tuple {
-                        let frame = ev.frame_from_tuple(env, v);
-                        ev.eval(&term.expr, &tuple_get(v, "@"), &frame)
-                    } else {
-                        ev.eval(&term.expr, v, env)
+                let mut key = |ev: &mut Self, i: usize| -> Result<Value<'a>> {
+                    let slot = &mut keys[i * terms.len() + t];
+                    if let Some(k) = slot {
+                        return Ok(k.clone());
                     }
+                    let v = &items[i];
+                    let k = if is_tuple {
+                        let frame = ev.frame_from_tuple(env, v);
+                        ev.eval(&term.expr, &tuple_get(v, "@"), &frame)?
+                    } else {
+                        ev.eval(&term.expr, v, env)?
+                    };
+                    *slot = Some(k.clone());
+                    Ok(k)
                 };
                 let aa = key(self, a)?;
                 let bb = key(self, b)?;
@@ -1199,7 +1211,8 @@ impl<'a> Evaluator<'_, 'a> {
             }
             Ok(comp == 1)
         };
-        let sorted = functions::merge_sort(arr.items().clone(), &mut swap)?;
+        let order = functions::merge_sort((0..items.len()).collect(), &mut swap)?;
+        let sorted = order.into_iter().map(|i| items[i].clone()).collect();
         Ok(Value::array(sorted, 0))
     }
 
