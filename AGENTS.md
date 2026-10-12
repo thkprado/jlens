@@ -21,8 +21,8 @@ in `docs/`.
 | `tests/conformance` | `baseline.txt`, `overrides.json`, `REPORT.md` |
 | `docs/src` | the book; `language/functions.md` and `language/errors.md` are generated |
 | `docs/examples` | sample documents for the book's examples |
-| `xtask/src` | `cargo xtask` commands: conformance, gen-docs, doc-check, differential, fuzz-seed, fuzz-replay, wasm, wasm-test, serve |
-| `benches/` | the benchmark workload; `benches/compare` compares jlens with jsonata-js (npm): speed, the book's examples, and `cargo xtask differential` |
+| `xtask/src` | `cargo xtask` commands: conformance, gen-docs, doc-check, differential, fuzz-seed, fuzz-replay, wasm, wasm-test, serve, ab |
+| `benches/` | the benchmark workload; `cargo xtask ab` compares two revisions; `benches/compare` compares jlens with jsonata-js (npm): speed, the book's examples, and `cargo xtask differential` |
 | `fuzz/` | cargo-fuzz targets (nightly, Linux; outside the workspace), their bodies in `src/targets.rs`; corpora seeded by `cargo xtask fuzz-seed`, run weekly by `.github/workflows/fuzz.yml`; `cargo xtask fuzz-replay` reruns saved inputs on any platform |
 | `examples/web-editor` | the browser demo (CodeMirror 6, no build step) |
 | `fixtures/` | sample inputs used by tests and guides |
@@ -59,7 +59,7 @@ cargo xtask wasm-test                             # after touching jlens-wasm or
     may rely on getting the same answer from both engines.
   - Diverging favours jlens when copying would lose precision (an exact result replaced by
     JavaScript's rounding), give a result that is wrong by the JSONata documentation or exposes
-    a JavaScript internal (a leaked flag), or slow down a common path. Measure with `benches/`
+    a JavaScript internal (a leaked flag), or slow down a common path. Measure with `cargo xtask ab`
     when a change touches one.
   - Record the decision and its reason in `compatibility.md`, both when jlens differs and when
     it reproduces a jsonata-js bug on purpose. A divergence the differential tests can meet

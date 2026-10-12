@@ -118,7 +118,7 @@ Both outcomes close the item.
 
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
-| 1 | A/B benchmarks as a command. Criterion is bimodal on the maintainer's machine, so changes are measured by building one program per variant and running them alternately, by hand | A command (an `xtask` or a script in `benches/`) that builds two revisions and compares them by alternating runs; the performance page says how | |
+| 1 | A/B benchmarks as a command. Criterion is bimodal on the maintainer's machine, so changes are measured by building one program per variant and running them alternately, by hand | A command (an `xtask` or a script in `benches/`) that builds two revisions and compares them by alternating runs; the performance page says how | **done** |
 | 2 | The cost lazy input left on evaluations that read their whole input: `regex` +4%, `filter` +2.8%, `strings` +2.7% when measured, above the 3% that 0.8 allowed | Measured again with the A/B command; the cost removed, or recorded on the performance page with its cause | |
 | 3 | WebAssembly's default `maxDepth` back to 1000. Since lazy input, an audited recursion near 1,000 levels overflows V8's stack while the function is optimized, so the default became 800; the cause of the larger frames was not found | The cause found and the default restored, or the cause (or what was ruled out) recorded in the WebAssembly guide | |
 | 4 | Two crashes of the fuzzing runs, both stack overflows without a message, never reproduced: one while `parse` loaded its corpus, one in `pictures` | The cached corpora and any input saved since (`last-input`) replayed with the replay command; a crash that reproduces fixed, with a regression test; otherwise what was tried recorded in the fuzzing section | |

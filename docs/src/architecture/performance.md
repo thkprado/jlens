@@ -14,8 +14,35 @@ by the comparison with jsonata-js:
 
 ```sh
 cargo bench -p jlens-core                     # criterion, native
+cargo xtask ab main .                         # two revisions against each other, native
 cargo xtask wasm && cd benches/compare && npm install && node compare.mjs   # against jsonata-js
 ```
+
+### Comparing two revisions
+
+To measure a change, compare the revision before it with the revision that makes it. Criterion
+alone can mislead here: on some machines its results are bimodal, so two runs of one build can
+differ by more than the change. `cargo xtask ab` is built for this:
+
+```sh
+cargo xtask ab main .                         # main against the working tree
+cargo xtask ab v0.9.0 HEAD --case regex --case strings --rounds 20
+cargo xtask ab main . --mode document         # evaluate_document instead of evaluate
+```
+
+- It builds one program per revision, against that revision's `jlens-core`, with the release
+  profile. A revision is anything git names (a commit, a tag, a branch), or `.` for the working
+  tree with its uncommitted changes. A commit is built once, in a temporary git worktree, and
+  its program is kept in `target/ab/bin`.
+- It runs the two programs in alternation, ten rounds by default (`--rounds`): A then B, then B
+  then A, so that a drift of the machine reaches both. In each run, a case takes the fastest of
+  five samples of about 10 ms each (`--sample-ms`).
+- It prints, for each case, the median of the rounds for each revision and how much slower B is,
+  then the same for the fastest round. Judge by the median. A whole process is sometimes faster
+  than usual, by up to 10% on the machine below, and one such run sets the fastest time.
+
+Comparing a revision with itself shows the noise. On the machine below, with ten rounds, the
+medians of most cases agree within 1%, and a few cases (`group-by`) within 3%.
 
 The numbers below were measured on an AMD Ryzen 7 3700X under Windows 11, with Rust 1.99 and
 Node.js 24, for jlens 0.8.0. They are meant

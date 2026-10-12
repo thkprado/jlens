@@ -6,6 +6,10 @@ use std::{env, fs};
 
 use anyhow::{Context, Result, bail};
 
+mod ab;
+// Also built on its own by `ab`, against each revision it compares.
+#[allow(dead_code)]
+mod ab_probe;
 mod differential;
 mod docs;
 mod fuzz;
@@ -31,6 +35,9 @@ commands:
                                     build the package and test it in Node.js and a headless browser
   serve                             serve the repository over HTTP (for examples/web-editor)
   release-notes <version>           print the GitHub release notes of <version>, from CHANGELOG.md
+  ab <rev A> <rev B> [--rounds N] [--mode evaluate|document] [--case NAME]... [--sample-ms MS]
+                                    compare the speed of two revisions (`.` is the working tree)
+                                    on benches/cases.json, by running them in alternation
 ";
 
 fn main() -> Result<()> {
@@ -47,6 +54,7 @@ fn main() -> Result<()> {
             args.iter().any(|a| a == "--require-browser"),
             args.iter().any(|a| a == "--example"),
         ),
+        Some("ab") => ab::run(&args[1..]),
         Some("serve") => wasm::serve_forever(),
         Some("release-notes") => match args.get(1) {
             Some(version) => release::print(version),

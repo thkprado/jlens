@@ -38,6 +38,7 @@ Other useful tasks:
 ```sh
 cargo xtask conformance                        # full suite run, writes tests/conformance/REPORT.md
 cargo bench -p jlens-core                      # criterion benchmarks
+cargo xtask ab main .                          # compare the speed of main and the working tree
 PROPTEST_CASES=100000 cargo test -p jlens-core --test robustness
 cargo xtask serve                              # serve the repository, for examples/web-editor
 (cd benches/compare && npm install && node compare.mjs && node doc-examples.mjs)

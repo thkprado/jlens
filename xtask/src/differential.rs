@@ -190,7 +190,7 @@ pub fn run(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn flag(args: &[String], name: &str) -> Result<Option<u64>> {
+pub(crate) fn flag(args: &[String], name: &str) -> Result<Option<u64>> {
     match args.iter().position(|a| a == name) {
         None => Ok(None),
         Some(i) => {
