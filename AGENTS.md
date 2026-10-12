@@ -12,20 +12,13 @@ in `docs/`.
 | Path | What lives there |
 |---|---|
 | `crates/jlens-core/src` | `lexer.rs`, `parser.rs` (Pratt, recover mode), `process.rs` (raw tree → `Ast`), `eval.rs` (interpreter), `value.rs` (value and sequence model), `functions/` (library and catalog), `datetime.rs`, `regex.rs`, `signature.rs`, `error.rs` (codes and messages), `audit/` (tracer, collector, explain), `document.rs`, `input.rs` (the `Source` trait, ADR 0010), `stack.rs` |
-| `crates/jlens-schema/src` | `shape.rs` (Schema, inference, overrides), `jsonschema.rs`, `typing.rs` (typing walker), `service.rs` (LanguageService) |
 | `crates/jlens-regress` | fork of `regress` 0.12.0 with interruptible matches (ADR 0009); keep the diff to upstream small, mark changes `jlens-regress` |
-| `crates/jlens-lsp/src` | the language server: `server.rs` (message loop, requests), `config.rs` (`jlens.json`), `text.rs` (positions, incremental sync), `uri.rs` (paths of `file:` URIs) |
-| `crates/jlens-cli/src` | the `jlens` binary (clap); `jlens lsp` runs `jlens-lsp` |
-| `crates/jlens-wasm` | wasm-bindgen bindings; `src/source.rs` reads `evaluate`'s input object (a JavaScript helper per level); `src/types.d.ts` holds the hand-written TypeScript declarations; `tests/` holds the JS suite (`suite.mjs`), shared by Node and the browser |
+| `crates/jlens-wasm` | wasm-bindgen bindings; `src/source.rs` reads `evaluate`'s input object (a JavaScript helper per level); `src/types.d.ts` holds the hand-written TypeScript declarations; `tests/` holds the JS suite (`suite.mjs`), shared by Node and the browser; its own rules are in `crates/jlens-wasm/AGENTS.md` |
 | `tests/jsonata-suite` | the vendored official suite (do not edit by hand; `cargo xtask update-suite` replaces it and applies `SUITE_EDITS`) |
-| `tests/conformance` | `baseline.txt`, `overrides.json`, `REPORT.md` |
 | `docs/src` | the book; `language/functions.md` and `language/errors.md` are generated |
-| `docs/examples` | sample documents for the book's examples |
 | `xtask/src` | `cargo xtask` commands: conformance, gen-docs, doc-check, differential, fuzz-seed, fuzz-replay, wasm, wasm-test, serve, ab |
 | `benches/` | the benchmark workload; `cargo xtask ab` compares two revisions; `benches/compare` compares jlens with jsonata-js (npm): speed, the book's examples, and `cargo xtask differential` |
 | `fuzz/` | cargo-fuzz targets (nightly, Linux; outside the workspace), their bodies in `src/targets.rs`; corpora seeded by `cargo xtask fuzz-seed`, run weekly by `.github/workflows/fuzz.yml`; `cargo xtask fuzz-replay` reruns saved inputs on any platform |
-| `examples/web-editor` | the browser demo (CodeMirror 6, no build step) |
-| `fixtures/` | sample inputs used by tests and guides |
 
 ## Before you finish a change
 
@@ -41,10 +34,8 @@ cargo clippy -p jlens-wasm --target wasm32-unknown-unknown
 cargo xtask wasm-test                             # after touching jlens-wasm or anything it exposes
 ```
 
-`cargo xtask wasm-test` needs:
-- `wasm-bindgen-cli`, at exactly the version in `Cargo.lock`;
-- Node.js 20+;
-- a Chromium-based browser for the browser half (`JLENS_BROWSER`).
+`cargo xtask wasm-test`'s requirements, and the rules for changing the Wasm API, are in
+`crates/jlens-wasm/AGENTS.md`.
 
 ## Rules
 
@@ -95,11 +86,6 @@ cargo xtask wasm-test                             # after touching jlens-wasm or
   - Significant design decisions get an ADR in `docs/adr/`.
 - **Snapshots** (`insta`): review every changed `.snap` file. Update them with
   `INSTA_UPDATE=always cargo test -p <crate>`, then read the diff.
-- **Wasm API changes** need four updates:
-  - the Rust bindings;
-  - `src/types.d.ts` (the classes are declared there with `skip_typescript`);
-  - `tests/suite.mjs` and `tests/types.ts`;
-  - `docs/src/guides/wasm.md`.
 - **All project artifacts are in English**: code, comments, docs and commit messages.
 
 ## Gotchas
@@ -107,13 +93,6 @@ cargo xtask wasm-test                             # after touching jlens-wasm or
 - On the maintainer's Windows machine, `python` is not on PATH; use `uv run python`. Git Bash
   rewrites some paths; prefer the dedicated tools or PowerShell when that bites.
 - Floating point: in examples, round results that would print as `206.70000000000002`.
-- `wasm-opt` comes from the installed binaryen, or from npm `binaryen` through `npx`.
-  Without either, the package is about 45% larger.
-- The browser tests run Chrome or Edge with `--headless=new --dump-dom` and virtual time
-  (`--virtual-time-budget`), which does not always advance during synchronous work: a check that
-  waits for wall-clock time (a timeout) can hang the page. Keep such checks out of the browser
-  runner (`env.virtualTime` in `crates/jlens-wasm/tests/suite.mjs`). Each run is bounded and
-  retried once, and a page that never finishes prints its last console lines (the case that hung).
 
 ## Releasing
 
