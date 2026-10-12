@@ -122,7 +122,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - run: sha256sum * > SHA256SUMS
+      - run: sha256sum -- * > SHA256SUMS
         working-directory: dist
       # A build provenance attestation for each archive listed in SHA256SUMS, stored with the
       # repository (gh attestation verify).
