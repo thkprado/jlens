@@ -8,7 +8,7 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
   (`jlens lsp`);
 - **`jlens-wasm`**: an ES module for the browser (npm package `jlens-wasm`).
 
-> **Status: version 0.11.0.** jlens passes 1,688 of the 1,690 cases of the
+> **Status: version 0.11.1.** jlens passes 1,688 of the 1,690 cases of the
 > official JSONata 2.2.2 test suite; the other two are documented overrides. Evaluations can be
 > audited and explained, schemas inferred from samples drive completion and diagnostics, and
 > everything is available in the browser as a WebAssembly ES module. See the

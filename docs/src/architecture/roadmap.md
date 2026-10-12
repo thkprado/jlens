@@ -34,6 +34,7 @@ The [changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md) lists 
 | 0.9.0 | A number that overflows to infinity and a date beyond JavaScript's range fail with `D1001` where they arise; `$formatNumber` and `$formatBase` write every digit of a large number; loops over floating-point numbers end on NaN and infinity; a parser stack overflow found by fuzzing fixed; `cargo xtask fuzz-replay` replays fuzz inputs on any platform |
 | 0.10.0 | A recursion through a higher-order function fails with `D1011` instead of overflowing the stack; WebAssembly's default `maxDepth` is 500; `cargo xtask ab` compares the speed of two revisions |
 | 0.11.0 | Faster evaluation of common shapes: field lookups on a single value, comparisons with a string literal, order-by keys evaluated once, blocks without frames, the result converted to JSON in one pass, less set-up per evaluation |
+| 0.11.1 | `$fromMillis` and `$now` fail with `D3150` on a timezone that is not a number |
 
 ## Priorities
 
