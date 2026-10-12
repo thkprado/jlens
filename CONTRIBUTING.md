@@ -73,7 +73,8 @@ cargo +nightly fuzz run evaluate --sanitizer none --debug-assertions  # fuzzing,
    (`Cargo.toml`).
 2. Move the `Unreleased` entries of `CHANGELOG.md` under the new version, and open the section
    with a sentence that sums up the release. The section becomes the GitHub release notes;
-   preview them with `cargo xtask release-notes X.Y.Z`.
+   preview them with `cargo xtask release-notes X.Y.Z`, which points relative links
+   (`](docs/...)`) at the files of the tag.
 3. Check that everything passes, including the packages:
 
    ```sh

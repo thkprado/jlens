@@ -6,6 +6,9 @@ use anyhow::{Context, Result, bail};
 
 use crate::root;
 
+/// The repository, which the relative links of the changelog point into.
+const REPOSITORY: &str = "https://github.com/thkprado/jlens";
+
 /// Appended to the notes of every release.
 const INSTALL: &str = "\
 ### Install
@@ -31,8 +34,8 @@ pub fn print(version: &str) -> Result<()> {
     Ok(())
 }
 
-/// The section of `version` in the changelog, unwrapped, followed by the install instructions and
-/// the comparison link of the version.
+/// The section of `version` in the changelog, unwrapped and with its relative links made absolute
+/// at the tag, followed by the install instructions and the comparison link of the version.
 fn notes(changelog: &str, version: &str) -> Result<String> {
     let heading = format!("## [{version}]");
     let mut lines = changelog.lines().skip_while(|line| *line != heading);
@@ -46,6 +49,7 @@ fn notes(changelog: &str, version: &str) -> Result<String> {
     if body.is_empty() {
         bail!("the `{heading}` section of CHANGELOG.md is empty");
     }
+    let body = absolute_links(&body, &format!("{REPOSITORY}/blob/v{version}/"));
     let mut out = format!("{body}\n\n{INSTALL}");
     let link = format!("[{version}]: ");
     if let Some(url) = changelog.lines().find_map(|line| line.strip_prefix(&link))
@@ -85,6 +89,55 @@ fn unwrap(lines: &[&str]) -> String {
         }
     }
     out.join("\n").trim().to_string()
+}
+
+/// Prefixes the relative targets of inline links (`](docs/...)`) with `base`: the release page
+/// resolves them against itself, where they break. Code blocks and code spans are kept as they
+/// are. Runs on unwrapped text, so that a link split over two lines is whole.
+fn absolute_links(body: &str, base: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut fenced = false;
+    for line in body.split('\n') {
+        let fence = line.trim_start().starts_with("```");
+        fenced ^= fence;
+        if fenced || fence {
+            out.push(line.to_string());
+            continue;
+        }
+        let mut text = String::with_capacity(line.len());
+        let mut code = false;
+        let mut rest = line;
+        while let Some(at) = rest.find(['`', ']']) {
+            let (before, mark, after) = (&rest[..at], &rest[at..=at], &rest[at + 1..]);
+            text.push_str(before);
+            text.push_str(mark);
+            rest = after;
+            if mark == "`" {
+                code = !code;
+            } else if let Some(target) = after.strip_prefix('(')
+                && !code
+                && is_relative(target)
+            {
+                text.push('(');
+                text.push_str(base);
+                rest = target.trim_start_matches("./");
+            }
+        }
+        text.push_str(rest);
+        out.push(text);
+    }
+    out.join("\n")
+}
+
+/// Whether a link target (the text after `](`) is a path in the repository, rather than a URL or
+/// an anchor of the page.
+fn is_relative(target: &str) -> bool {
+    let end = target.find([')', ' ']).unwrap_or(target.len());
+    let target = &target[..end];
+    !(target.is_empty()
+        || target.contains("://")
+        || target.starts_with(['#', '/'])
+        || target.starts_with("mailto:"))
 }
 
 #[cfg(test)]
@@ -144,6 +197,31 @@ release.
         let notes = notes(CHANGELOG, "0.1.0").unwrap();
         assert!(notes.starts_with("The first release.\n\n### Install"));
         assert!(!notes.contains("Full changelog"));
+    }
+
+    #[test]
+    fn makes_relative_links_absolute_at_the_tag() {
+        let changelog = "\
+## [0.3.0]
+
+- A new code ([ADR
+  0010](docs/src/adr/0010-lazy-input.md)), see [the guide](./docs/src/guide.md#top).
+- Kept: [site](https://example.com/a), [anchor](#install), `[code](docs/x.md)`.
+
+```md
+[block](docs/x.md)
+```
+";
+        let notes = notes(changelog, "0.3.0").unwrap();
+        let (body, _) = notes.split_once("\n\n### Install").unwrap();
+        assert_eq!(
+            body,
+            "- A new code ([ADR 0010](https://github.com/thkprado/jlens/blob/v0.3.0/\
+             docs/src/adr/0010-lazy-input.md)), see [the guide](https://github.com/thkprado/\
+             jlens/blob/v0.3.0/docs/src/guide.md#top).\n\
+             - Kept: [site](https://example.com/a), [anchor](#install), `[code](docs/x.md)`.\n\n\
+             ```md\n[block](docs/x.md)\n```"
+        );
     }
 
     #[test]
