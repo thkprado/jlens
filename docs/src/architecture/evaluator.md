@@ -93,7 +93,7 @@ clears those frames when the evaluation ends.
 
 | Limit | Option | Error | Default |
 |---|---|---|---|
-| Evaluation depth | `Options::max_depth` | `D1011` | 50,000 native, 800 in Wasm |
+| Evaluation depth | `Options::max_depth` | `D1011` | 50,000 native, 500 in Wasm |
 | Wall-clock time | `Options::timeout` | `D1012` | none |
 | Cancellation from another thread | `Options::cancel_token` | `U1003` | none |
 | Expression nesting | (fixed) | `U1001` | 1,000 levels of syntax tree, checked by the parser |
@@ -113,9 +113,14 @@ needs limits so that it fails with an error instead of crashing the process.
   each recursive step (`jlens_core::stack`), failing with `D1011` (evaluation) or `U1001`
   (parsing) instead. WebAssembly frames also use the JavaScript engine's own stack, which is about
   1 MiB in V8 and cannot be measured from inside the module; the lower default depth limit
-  (800) keeps evaluations inside it, also while V8 recompiles the module's hot functions, when
-  frames are larger. A larger `maxDepth` can raise a JavaScript
-  `RangeError` and break the instance.
+  (500) keeps evaluations inside it. The [WebAssembly guide](../guides/wasm.md#limits-and-memory)
+  has the measurements behind it. A larger `maxDepth` can raise a JavaScript `RangeError` and
+  break the instance.
+- **Calls from native functions.** A lambda whose body is a tail call leaves no expression on
+  the stack, so a recursion through a higher-order function
+  (`function($n){ $map([$n], function($v){ $f($v) }) }`) deepens only through the native
+  function's calls back. Each of those calls counts as a level of depth and checks the stack
+  too.
 
 The nesting limit bounds every recursive walk of the syntax tree, including the ones that do
 not grow the stack, such as cloning and dropping it. Both nested subexpressions and the operators

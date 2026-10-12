@@ -6,6 +6,24 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `jlens-wasm`: the default evaluation depth limit (`maxDepth`) is 500 instead of 800. Once V8
+  has optimized the module, its frames are about 1.6 times larger, and an audited recursion
+  through an order-by, an object constructor, a group or a transform overflowed V8's stack below
+  depth 800 with a `RangeError`, which leaves the instance unusable, instead of failing with
+  `D1011`. The [WebAssembly guide](docs/src/guides/wasm.md#limits-and-memory) lists the depths
+  measured.
+
+### Fixed
+
+- A recursion through a higher-order function whose lambda ends in a tail call
+  (`function($n){ $map([$n], function($v){ $f($v) }) }`) overflowed the stack instead of failing
+  with `D1011`: it aborted a native process, and raised a `RangeError` in WebAssembly. No
+  expression stayed on the stack between two levels, so the depth never grew. Each call back
+  from a native function (`$map`, `$filter`, `$reduce`, `$sort`, `$replace`...) now counts as a
+  level of depth.
+
 ## [0.9.0]
 
 Numbers and dates at the edges: a number that overflows to infinity and a date beyond

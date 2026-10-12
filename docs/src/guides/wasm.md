@@ -344,7 +344,7 @@ monaco.languages.registerCompletionItemProvider("jsonata", {
 
 | Limit | Default | Error |
 |---|---|---|
-| Evaluation depth (`maxDepth`) | 800 | `D1011` |
+| Evaluation depth (`maxDepth`) | 500 | `D1011` |
 | Evaluation time (`timeout`, milliseconds) | none | `D1012` |
 | Length of a string built (`maxStringLength`, bytes of UTF-8) | 256 MiB | `U1001` |
 | Items of an array built (`maxArrayLength`) | 16,777,216 | `U1001` |
@@ -360,8 +360,25 @@ engine's stack, which is about 1 MiB in V8, and deep recursion beyond it raises 
 `RangeError`. Such an error, like any trap, leaves the module instance unusable. The defaults
 keep evaluations inside the engine's stack, with headroom. Raise `maxDepth` only if you have
 measured what your target engines allow. The jlens errors themselves (`JlensError`,
-`TypeError`) never affect the instance. The
-[evaluator chapter](../architecture/evaluator.md#guardrails) has the details.
+`TypeError`) never affect the instance.
+
+How deep an evaluation fits depends on the shape of the recursion and on V8's compiler. V8
+first runs the module with its baseline compiler (Liftoff), then recompiles the functions an
+evaluation uses often with its optimizing compiler (TurboFan), whose frames for jlens's
+evaluator are about 1.6 times larger. Measured in Node.js 24 once the module is optimized, an
+audited recursion overflows V8's stack near these depths (an unaudited one fits about 10% more):
+
+| The recursive function's body | Overflows near |
+|---|---|
+| `[$n, $n]^($f($n - 1))` (order-by) | 670 |
+| `{'a': $f($n - 1)}`, `[$n]{'k': $f($n - 1)}` (group) | 710 |
+| `{'a': 1} ~> \|$\|{'b': $f($n - 1)}\|` (transform) | 720 |
+| `[$n][$f($n - 1)]` (filter) | 750 |
+| `$f($n - 1) + 1`, `[$f($n - 1)]` | 840 |
+| `$n = 0 ? 0 : 1 + $f($n - 1)` | 920 |
+
+The default of 500 leaves room for shapes not measured here, and for engines with smaller
+stacks. The [evaluator chapter](../architecture/evaluator.md#guardrails) has the details.
 
 `Expression`, `Document` and `LanguageService` objects live in WebAssembly memory. The garbage collector
 frees them through `FinalizationRegistry`. Call `free()`, or use `using`, to release them

@@ -128,6 +128,31 @@ fn guardrails_stop_runaway_evaluations() {
 }
 
 #[test]
+fn recursion_through_native_callbacks_is_bounded() {
+    // The lambda's body is a tail call, so no expression stays on the stack between levels:
+    // only the calls back from the native function count toward the depth.
+    for callback in [
+        "$map([$n], function($v){ $f($v) })",
+        "$filter([$n], function($v){ $f($v) })",
+        "$reduce([1, 2], function($a, $v){ $f($v) })",
+        "$sort([1, 2], function($a, $b){ $f($n) })",
+        "$sift({'a': 1}, function($v){ $f($v) })",
+        "$each({'a': 1}, function($v){ $f($v) })",
+        "$single([$n], function($v){ $f($v) })",
+        "$replace('a', /a/, function($m){ $f($n) })",
+        "$replace('a', function($s){ $f($n) }, 'b')",
+    ] {
+        let source = format!("($f := function($n){{ {callback} }}; $f(0))");
+        let options = Options::new().max_depth(2_000);
+        let err = Expression::compile(&source)
+            .unwrap()
+            .evaluate_with(None, &Bindings::new(), &options)
+            .unwrap_err();
+        assert_eq!(err.code(), "D1011", "{source}");
+    }
+}
+
+#[test]
 fn guardrails_stop_catastrophic_regexes() {
     // Without a limit this match would backtrack for years (ADR 0009).
     let source = format!("$contains('{}!', /^(a+)+$/)", "a".repeat(40));

@@ -386,7 +386,7 @@ impl FromIterator<(String, JsonValue)> for Bindings {
 pub struct Options {
     /// Maximum wall-clock time for one evaluation. Exceeding it raises `D1012`.
     pub timeout: Option<Duration>,
-    /// Maximum evaluation depth (default 50,000; 1,000 on WebAssembly). Exceeding it raises
+    /// Maximum evaluation depth (default 50,000; 500 on WebAssembly). Exceeding it raises
     /// `D1011`.
     pub max_depth: Option<usize>,
     /// The evaluation's timestamp, in milliseconds since the epoch, for `$now()` and

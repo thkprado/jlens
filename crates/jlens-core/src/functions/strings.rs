@@ -189,7 +189,7 @@ fn evaluate_matcher<'a>(
     s: Value<'a>,
     call: &Call<'_, 'a>,
 ) -> R<'a> {
-    let result = ev.apply(matcher, vec![s], &Value::Null, call.env)?;
+    let result = ev.callback(matcher, vec![s], call.env)?;
     if let Value::Undefined = result {
         return Ok(result);
     }
@@ -388,7 +388,7 @@ pub(super) fn replace<'a>(
         result.push_str(&utf16_substring(&s, position, Some(start)));
         let replaced = match &replacement {
             Value::String(r) => Value::string(substitute(r, &matches)),
-            func => ev.apply(func, vec![matches.clone()], &Value::Null, call.env)?,
+            func => ev.callback(func, vec![matches.clone()], call.env)?,
         };
         match replaced {
             Value::String(r) => result.push_str(&r),

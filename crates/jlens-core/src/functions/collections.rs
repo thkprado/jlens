@@ -15,7 +15,7 @@ fn call<'a>(
     args: Vec<Value<'a>>,
     c: &Call<'_, 'a>,
 ) -> R<'a> {
-    ev.apply(func, args, &Value::Null, c.env)
+    ev.callback(func, args, c.env)
 }
 
 pub(super) fn map<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'_, 'a>) -> R<'a> {

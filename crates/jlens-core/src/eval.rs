@@ -90,10 +90,11 @@ pub(crate) struct Limits {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) const DEFAULT_MAX_DEPTH: usize = 50_000;
 /// In WebAssembly, the frames of the evaluation also take the JavaScript engine's stack (about
-/// 1 MiB in V8), which jlens cannot measure. While V8 recompiles the module's hot functions, an
-/// audited evaluation at depth 1,000 could exceed it.
+/// 1 MiB in V8), which jlens cannot measure. Once V8 has optimized the module (TurboFan, whose
+/// frames are about 1.6 times those of its baseline compiler), an audited recursion through an
+/// object constructor, a group or an order-by exceeds it near depth 700.
 #[cfg(target_arch = "wasm32")]
-pub(crate) const DEFAULT_MAX_DEPTH: usize = 800;
+pub(crate) const DEFAULT_MAX_DEPTH: usize = 500;
 
 /// Default maximum length of a built string, in bytes (256 MiB). jsonata-js is limited by the
 /// JavaScript engine (about 2^29 UTF-16 units in V8); jlens fails cleanly instead of running
@@ -1238,6 +1239,28 @@ impl<'a> Evaluator<'_, 'a> {
                 None => e,
             }
         })
+    }
+
+    /// Applies a function on behalf of a native function (`$map`, `$sort`, `$replace`...). A
+    /// recursion through such calls evaluates no expression between two levels when the
+    /// lambda's body is a tail call (`function($n){ $map(..., function($v){ $f($v) }) }`), so
+    /// each call counts as a level of depth and checks the stack itself.
+    pub(crate) fn callback(
+        &mut self,
+        func: &Value<'a>,
+        args: Vec<Value<'a>>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
+        if crate::stack::exhausted() {
+            return Err(Error::new("D1011").with("value", self.depth));
+        }
+        self.depth += 1;
+        let result = crate::stack::grow(|| {
+            self.guardrails()?;
+            self.apply(func, args, &Value::Null, env)
+        });
+        self.depth -= 1;
+        result
     }
 
     /// Applies a function, running tail-call thunks in a loop (the trampoline).

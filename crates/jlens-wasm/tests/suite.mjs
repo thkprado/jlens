@@ -187,10 +187,20 @@ export const cases = [
     const deep = new j.Expression("($f := function($n){ $n = 0 ? 0 : 1 + $f($n - 1) }; $f(1000000))");
     throws(() => deep.evaluate(), (e) => equal(e.code, "D1011"));
     equal(deep.evaluateWithAudit(undefined, null, { level: "full" }).error.code, "D1011", "audited");
+    // After a few runs V8 recompiles the hot functions with larger frames (TurboFan). The default
+    // depth must hold then too, for the shape with the largest frames (the guide's table); 800
+    // overflows by the third run.
+    const orderBy = new j.Expression("($f := function($n){ [$n, $n]^($f($n - 1)) }; $f(0))");
+    for (let i = 0; i < 20; i++) {
+      equal(orderBy.evaluateWithAudit(undefined, null, { level: "full" }).error.code, "D1011", `run ${i}`);
+    }
+    // A tail call leaves only the native function's calls back on the stack.
+    const callback = new j.Expression("($f := function($n){ $map([$n], function($v){ $f($v) }) }; $f(0))");
+    throws(() => callback.evaluate(), (e) => equal(e.code, "D1011"));
     const nested = "(".repeat(1001) + "1" + ")".repeat(1001);
     throws(() => new j.Expression(nested), (e) => equal(e.code, "U1001"));
     const ok999 = "(".repeat(999) + "1" + ")".repeat(999);
-    // Each level of nesting is a level of evaluation too, beyond the default depth of 800.
+    // Each level of nesting is a level of evaluation too, beyond the default depth of 500.
     equal(new j.Expression(ok999).evaluate(undefined, null, { maxDepth: 1000 }), 1, "999 levels");
     equal(j.parseRecover(nested).diagnostics[0].code, "U1001", "recovering parse");
     equal(new j.Expression("1 + 1").evaluate(), 2, "still usable");
