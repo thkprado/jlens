@@ -143,6 +143,11 @@ fn number_to_words(value: f64, ordinal: bool) -> String {
             words
         }
     }
+    // A date beyond JavaScript's range has NaN fields (the day of the year, the week); written
+    // as nothing, like roman numerals and letters. jsonata-js recurses until its stack overflows.
+    if !value.is_finite() {
+        return String::new();
+    }
     lookup(value, false, ordinal)
 }
 
@@ -263,6 +268,10 @@ fn roman_to_decimal(roman: &str) -> f64 {
 /// Computed in floating point, as in jsonata-js: above 2^53, `value - 1` rounds to `value`, and
 /// the letters follow that rounding.
 fn decimal_to_letters(mut value: f64, a: char) -> String {
+    // Infinity never reaches zero; jsonata-js loops forever.
+    if value.is_infinite() {
+        return String::new();
+    }
     let mut letters = Vec::new();
     while value > 0.0 {
         letters.push(char::from_u32(((value - 1.0) % 26.0) as u32 + a as u32).unwrap_or('?'));

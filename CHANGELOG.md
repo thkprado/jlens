@@ -31,6 +31,10 @@ expression reaches, natively and in WebAssembly.
   of dozens of digits (dates beyond JavaScript's range, ±8.64e15 ms, now give undefined, as in
   jsonata-js), and `$formatNumber`
   rounding a very large number to many decimals (`$formatNumber(1e300, '#.000…')`).
+- A stack overflow and an endless loop found by fuzzing: numbers in words of a date field that a
+  date beyond JavaScript's range leaves NaN (`$fromMillis(1e17, '[dw]')`, or a huge time zone
+  offset), and letters for infinity (`$formatInteger(1e308 * 10, 'a')`). Both now write
+  nothing, as roman numerals do; jsonata-js overflows its stack and loops forever.
 - A long width with a grouping separator (`$fromMillis(0, '[D0:0,1000000]')`) took quadratic
   time: separators are now inserted in one pass. Found by fuzzing.
 - Stack overflows found by fuzzing: recovering from hundreds of unclosed brackets

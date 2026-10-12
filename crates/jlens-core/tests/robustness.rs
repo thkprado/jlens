@@ -556,6 +556,12 @@ fn fuzz_crashes_stay_fixed() {
             "$toMillis('197001', '[Y,99999999999999999999][M01]')",
             Ok(json!(null)),
         ),
+        // Words for a NaN field (a date beyond JavaScript's range) recursed forever, and
+        // letters for infinity looped forever.
+        ("$fromMillis(1e17, '[dw]|[dI]|[d]')", Ok(json!("||NaN"))),
+        ("$fromMillis(0, '[dwo]', '10010200101041')", Ok(json!(""))),
+        ("$formatInteger(1e308 * 10, 'w')", Ok(json!(""))),
+        ("$formatInteger(1e308 * 10, 'a')", Ok(json!(""))),
     ];
     for (source, expected) in cases {
         let result = Expression::compile(source).unwrap().evaluate_with(
