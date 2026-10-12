@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Expression::evaluate_source` and the `jlens_core::input` module evaluate an input in another
+  representation than `serde_json`: a `Source` writes one level at a time to a `Sink`, when the
+  evaluation reaches it. A level that a source fails to read stops the evaluation with the new
+  code `U1004` ([ADR 0010](docs/src/adr/0010-lazy-input.md)).
+
 ### Fixed
 
 - `jlens lsp` keeps running when a bug makes a request panic: it answers that request with an
@@ -34,11 +41,21 @@ All notable changes are recorded here. The format follows
   ([ADR 0010](docs/src/adr/0010-lazy-input.md)). A path into the benchmark document takes 1.9 µs
   instead of 115 µs; expressions that read every item cost about as much as before. Variables
   given in `Bindings` are read the same way. `evaluate_document` is unchanged.
+- `jlens-wasm`: `evaluate` reads its input object during the evaluation, one object or array at a
+  time, instead of converting it through `JSON.stringify` first. A path into the benchmark
+  document takes 8 µs instead of 310 µs; the other cases cost the same, within 3%. The input is
+  still read as `JSON.stringify` reads it, but a cycle or a `BigInt` throws only when the
+  expression reads the object or array that holds it. The package has a `snippets/` directory,
+  for the JavaScript that reads the input.
 - Converting an input document is about 20% faster, natively and in WebAssembly: the objects of
   a document share their keys instead of allocating each. `$each`, `$sift`, `$keys` and
   transforms no longer copy keys either.
 - `jlens-wasm` is built with `opt-level = "s"` and `wasm-opt -Os` instead of `"z"` and `-Oz`:
   evaluations are 5–38% faster, and the module grows from about 410 to 460 KiB gzipped.
+- `jlens-wasm`: the default evaluation depth limit (`maxDepth`) is 800 instead of 1,000. While V8
+  recompiled the module, an audited recursion near 1,000 levels could overflow the JavaScript
+  stack with a `RangeError` instead of failing with `D1011`. An expression nested more than 800
+  levels deep needs a larger `maxDepth` to evaluate.
 - `$fromMillis` fails with `D3132` for a picture marker whose component is unknown, also when it
   has a presentation (`'[Qx]'`), where it wrote nothing; jsonata-js writes "undefined".
 - The nesting limit (1,000 levels, `U1001`) also counts the operators of a chain: a chain of

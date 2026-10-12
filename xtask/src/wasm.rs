@@ -187,6 +187,7 @@ fn write_package(out: &Path) -> Result<()> {
     "{OUT_NAME}.d.ts",
     "{OUT_NAME}_bg.wasm",
     "{OUT_NAME}_bg.wasm.d.ts",
+    "snippets/",
     "README.md",
     "LICENSE"
   ],

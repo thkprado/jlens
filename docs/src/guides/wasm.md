@@ -85,8 +85,9 @@ expr.free();                                 // release it (or let the garbage c
 ```
 
 - **`input`** can be any JSON-compatible value. `undefined`, or no argument, means there is no
-  input document, so `$` is undefined. Values pass through `JSON.stringify`. As a result, `Date`
-  objects become strings, and functions and `undefined` fields are dropped.
+  input document, so `$` is undefined. Values are read as `JSON.stringify` reads them. As a
+  result, `Date` objects become strings, and functions and `undefined` fields are dropped. See
+  [how the input is read](#how-the-input-is-read).
 - **`bindings`** is an object of variables and functions: `{limit: 10}` makes `$limit`
   available, and a function becomes a [host function](#host-functions).
 - **`options`** sets the [limits](#limits-and-memory) (`timeout`, `maxDepth`,
@@ -100,11 +101,32 @@ expr.free();                                 // release it (or let the garbage c
 documents that you already have as text, such as a `fetch` response body, it avoids converting
 the document to JavaScript objects and back.
 
+### How the input is read
+
+`evaluate` reads its input during the evaluation, one object or array at a time, when the
+expression first reaches it ([ADR 0010](../adr/0010-lazy-input.md)). A path such as
+`customer.name` reads two small objects, however large the rest of the document is. An object or
+array of more than 16 values is read whole, with everything it holds, through `JSON.stringify`,
+which is faster than reading its values one by one.
+
+Two consequences follow:
+
+- **Errors appear when their part is read.** A cycle, a `BigInt`, or a `toJSON` method that
+  throws makes `JSON.stringify` throw. `evaluate` throws the same exception, but only when the
+  expression reads the object or array that holds it: an expression that never reaches it
+  succeeds.
+- **The input must not change during the evaluation.** A [host function](#host-functions) that
+  modifies the input object can change what the rest of the evaluation reads. Copy the input
+  first if a function must modify it.
+
+`evaluateJson`, `evaluateWithAudit` and `Document` convert their whole input first.
+
 ### Reusing a document
 
-Each `evaluate` call converts its input. For a document of a few dozen kilobytes that costs
-hundreds of microseconds, often more than the evaluation itself. To evaluate several
-expressions against one document (a set of rules, say), convert it once:
+`evaluate` reads the parts of the input that the expression reaches, on every call. For an
+expression that reads most of a document of a few dozen kilobytes, that costs hundreds of
+microseconds, often more than the evaluation itself. To evaluate several expressions against
+one document (a set of rules, say), convert it once:
 
 ```js
 import { Document } from "jlens-wasm";
@@ -322,7 +344,7 @@ monaco.languages.registerCompletionItemProvider("jsonata", {
 
 | Limit | Default | Error |
 |---|---|---|
-| Evaluation depth (`maxDepth`) | 1,000 | `D1011` |
+| Evaluation depth (`maxDepth`) | 800 | `D1011` |
 | Evaluation time (`timeout`, milliseconds) | none | `D1012` |
 | Length of a string built (`maxStringLength`, bytes of UTF-8) | 256 MiB | `U1001` |
 | Items of an array built (`maxArrayLength`) | 16,777,216 | `U1001` |

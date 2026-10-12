@@ -11,12 +11,12 @@ in `docs/`.
 
 | Path | What lives there |
 |---|---|
-| `crates/jlens-core/src` | `lexer.rs`, `parser.rs` (Pratt, recover mode), `process.rs` (raw tree → `Ast`), `eval.rs` (interpreter), `value.rs` (value and sequence model), `functions/` (library and catalog), `datetime.rs`, `regex.rs`, `signature.rs`, `error.rs` (codes and messages), `audit/` (tracer, collector, explain), `document.rs`, `stack.rs` |
+| `crates/jlens-core/src` | `lexer.rs`, `parser.rs` (Pratt, recover mode), `process.rs` (raw tree → `Ast`), `eval.rs` (interpreter), `value.rs` (value and sequence model), `functions/` (library and catalog), `datetime.rs`, `regex.rs`, `signature.rs`, `error.rs` (codes and messages), `audit/` (tracer, collector, explain), `document.rs`, `input.rs` (the `Source` trait, ADR 0010), `stack.rs` |
 | `crates/jlens-schema/src` | `shape.rs` (Schema, inference, overrides), `jsonschema.rs`, `typing.rs` (typing walker), `service.rs` (LanguageService) |
 | `crates/jlens-regress` | fork of `regress` 0.12.0 with interruptible matches (ADR 0009); keep the diff to upstream small, mark changes `jlens-regress` |
 | `crates/jlens-lsp/src` | the language server: `server.rs` (message loop, requests), `config.rs` (`jlens.json`), `text.rs` (positions, incremental sync), `uri.rs` (paths of `file:` URIs) |
 | `crates/jlens-cli/src` | the `jlens` binary (clap); `jlens lsp` runs `jlens-lsp` |
-| `crates/jlens-wasm` | wasm-bindgen bindings; `src/types.d.ts` holds the hand-written TypeScript declarations; `tests/` holds the JS suite (`suite.mjs`), shared by Node and the browser |
+| `crates/jlens-wasm` | wasm-bindgen bindings; `src/source.rs` reads `evaluate`'s input object (a JavaScript helper per level); `src/types.d.ts` holds the hand-written TypeScript declarations; `tests/` holds the JS suite (`suite.mjs`), shared by Node and the browser |
 | `tests/jsonata-suite` | the vendored official suite (do not edit by hand; `cargo xtask update-suite` replaces it and applies `SUITE_EDITS`) |
 | `tests/conformance` | `baseline.txt`, `overrides.json`, `REPORT.md` |
 | `docs/src` | the book; `language/functions.md` and `language/errors.md` are generated |

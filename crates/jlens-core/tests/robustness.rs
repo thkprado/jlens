@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use jlens_core::input::{Sink, Source};
 use jlens_core::{Bindings, CancelToken, Document, Error, Expression, HostFunction, Options};
 use proptest::prelude::*;
 use serde_json::json;
@@ -153,6 +154,50 @@ fn bindings() -> Bindings {
         )
 }
 
+/// JSON read through the [`Source`] trait, one level at a time. An object with a field named
+/// `fails` cannot be read: its level fails.
+enum JsonSource<'j> {
+    /// The input itself, the only value of its level.
+    Root(&'j serde_json::Value),
+    Level(&'j serde_json::Value),
+}
+
+fn write<'j>(sink: &mut Sink<'_, 'j>, json: &'j serde_json::Value) {
+    match json {
+        serde_json::Value::Null => sink.null(),
+        serde_json::Value::Bool(b) => sink.bool(*b),
+        serde_json::Value::Number(n) => sink.number(n.as_f64().unwrap_or(f64::NAN)),
+        serde_json::Value::String(s) => sink.string(s),
+        serde_json::Value::Array(_) => sink.array(JsonSource::Level(json)),
+        serde_json::Value::Object(_) => sink.object(JsonSource::Level(json)),
+    }
+}
+
+impl<'j> Source<'j> for JsonSource<'j> {
+    fn read(&self, sink: &mut Sink<'_, 'j>) -> Result<(), String> {
+        match self {
+            JsonSource::Root(json) => write(sink, json),
+            JsonSource::Level(serde_json::Value::Array(items)) => {
+                items.iter().for_each(|item| write(sink, item))
+            }
+            JsonSource::Level(serde_json::Value::Object(fields)) => {
+                if fields.contains_key("fails") {
+                    // Half a level, then a failure: the level is left empty.
+                    sink.key("half");
+                    sink.null();
+                    return Err("bad field".into());
+                }
+                for (key, value) in fields {
+                    sink.key(key);
+                    write(sink, value);
+                }
+            }
+            JsonSource::Level(_) => {}
+        }
+        Ok(())
+    }
+}
+
 fn input() -> serde_json::Value {
     json!({
         "a": {"b": [1, 2, {"b": "x"}]},
@@ -277,11 +322,15 @@ proptest! {
             let bindings = bindings().var("o", input.clone());
             let lazy = expr.evaluate_with(Some(&input), &bindings, &options);
             let document = expr.evaluate_document(&Document::new(&input), &bindings, &options);
+            let source = expr.evaluate_source(&JsonSource::Root(&input), &bindings, &options);
             let timed_out = |r: &Result<Option<serde_json::Value>, Error>| {
                 r.as_ref().is_err_and(|e| e.code() == "D1012")
             };
             if !timed_out(&lazy) && !timed_out(&document) {
                 prop_assert_eq!(format!("{lazy:?}"), format!("{document:?}"));
+            }
+            if !timed_out(&source) && !timed_out(&document) {
+                prop_assert_eq!(format!("{source:?}"), format!("{document:?}"));
             }
         }
     }
@@ -307,6 +356,53 @@ fn unread_input_is_returned_as_converted() {
     let expr = Expression::compile("o").unwrap();
     let error = expr.evaluate_with(Some(&input), &Bindings::new(), &options);
     assert_eq!(error.unwrap_err().code(), "U1001");
+}
+
+#[test]
+fn a_level_that_cannot_be_read_fails_the_evaluation() {
+    let input = json!({
+        "ok": {"a": 1},
+        "bad": {"fails": true, "a": 2},
+        "list": [{"bad": {"fails": true}}]
+    });
+    let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = called.clone();
+    let bindings = Bindings::new().function(
+        "f",
+        HostFunction::new(1, move |args, _| {
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(args[0].clone())
+        }),
+    );
+    let evaluate = |source: &str| {
+        let expr = Expression::compile(source).unwrap();
+        expr.evaluate_source(&JsonSource::Root(&input), &bindings, &Options::default())
+    };
+    // The levels an expression does not reach are never read.
+    assert_eq!(evaluate("ok.a").unwrap(), Some(json!(1)));
+    assert_eq!(evaluate("$exists(bad)").unwrap(), Some(json!(true)));
+    // Reading the bad level fails with U1004, carrying the source's message, whatever the
+    // expression does with the empty level.
+    for source in [
+        "bad.a",
+        "bad",
+        "$count($keys(bad))",
+        "list.bad.x",
+        "$string($)",
+        "**.a",
+    ] {
+        let error = evaluate(source).unwrap_err();
+        assert_eq!(error.code(), "U1004", "{source}");
+        assert!(error.message().contains("bad field"), "{source}");
+    }
+    // A host function is not called with a level that could not be read.
+    assert_eq!(evaluate("$f(bad)").unwrap_err().code(), "U1004");
+    assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
+    // Nothing written: the input is undefined.
+    let expr = Expression::compile("$type($)").unwrap();
+    let nothing = JsonSource::Level(&serde_json::Value::Null);
+    let result = expr.evaluate_source(&nothing, &Bindings::new(), &Options::default());
+    assert_eq!(result.unwrap(), None);
 }
 
 /// Patterns that backtrack exponentially on a run of a's that ends in a character they cannot

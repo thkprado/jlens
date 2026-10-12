@@ -43,6 +43,7 @@ pub mod error;
 mod eval;
 pub mod functions;
 mod host;
+pub mod input;
 mod json;
 mod lexer;
 mod parser;
@@ -165,18 +166,45 @@ impl Expression {
         bindings: &Bindings,
         options: &Options,
     ) -> Result<Option<JsonValue>> {
-        let keys = value::Keys::shared();
+        let shared = value::Shared::new();
         eval::evaluate(
             &self.ast,
             input.map_or(value::Value::Undefined, |json| {
-                value::Value::lazy(json, &keys)
+                value::Value::lazy(json, &shared)
             }),
             bindings
                 .iter()
-                .map(|(name, json)| (name, value::Value::lazy(json, &keys))),
+                .map(|(name, json)| (name, value::Value::lazy(json, &shared))),
             bindings,
             limits(options),
             None,
+            None,
+        )
+    }
+
+    /// Evaluates the expression against an input read from a [`Source`](input::Source), one
+    /// level at a time, as the evaluation reaches it. Use it for an input that is not a
+    /// `serde_json::Value`, without converting it first.
+    ///
+    /// `input` writes the input document as the only value of its level, or nothing for
+    /// *undefined*. A level that the source fails to read stops the evaluation with `U1004`.
+    pub fn evaluate_source<'a>(
+        &self,
+        input: &dyn input::Source<'a>,
+        bindings: &'a Bindings,
+        options: &Options,
+    ) -> Result<Option<JsonValue>> {
+        let shared = value::Shared::new();
+        eval::evaluate(
+            &self.ast,
+            value::Value::from_source(input, &shared)?,
+            bindings
+                .iter()
+                .map(|(name, json)| (name, value::Value::lazy(json, &shared))),
+            bindings,
+            limits(options),
+            None,
+            Some(shared.clone()),
         )
     }
 
@@ -198,6 +226,7 @@ impl Expression {
             bindings,
             limits(options),
             None,
+            None,
         )
     }
 
@@ -211,18 +240,19 @@ impl Expression {
         options: &Options,
         tracer: &mut dyn audit::Tracer,
     ) -> Result<Option<JsonValue>> {
-        let keys = value::Keys::shared();
+        let shared = value::Shared::new();
         eval::evaluate(
             &self.ast,
             input.map_or(value::Value::Undefined, |json| {
-                value::Value::lazy(json, &keys)
+                value::Value::lazy(json, &shared)
             }),
             bindings
                 .iter()
-                .map(|(name, json)| (name, value::Value::lazy(json, &keys))),
+                .map(|(name, json)| (name, value::Value::lazy(json, &shared))),
             bindings,
             limits(options),
             Some(tracer),
+            None,
         )
     }
 

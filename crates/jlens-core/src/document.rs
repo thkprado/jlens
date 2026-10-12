@@ -1,9 +1,10 @@
 //! Input documents converted once, for many evaluations.
 
 use std::fmt;
+use std::marker::PhantomData;
 use std::rc::Rc;
 
-use serde::de::{Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
+use serde::de::{DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::Value as JsonValue;
 
 use crate::value::{Keys, Map, Value};
@@ -48,10 +49,9 @@ impl Document {
     /// Parses JSON text straight into the internal representation. This is faster than parsing
     /// into a `serde_json::Value` and converting it.
     pub fn parse(text: &str) -> serde_json::Result<Self> {
-        let mut deserializer = serde_json::Deserializer::from_str(text);
-        let value = Value::deserialize(&mut deserializer)?;
-        deserializer.end()?;
-        Ok(Document { value })
+        Ok(Document {
+            value: parse_value(text, &mut Keys::default())?,
+        })
     }
 
     /// The document as JSON.
@@ -76,75 +76,74 @@ impl From<&JsonValue> for Document {
     }
 }
 
-impl<'de> Deserialize<'de> for Value<'static> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        ValueSeed(&mut Keys::default()).deserialize(deserializer)
-    }
+/// Parses JSON text into a value, sharing the keys of its objects through `keys`.
+pub(crate) fn parse_value<'a>(text: &str, keys: &mut Keys) -> serde_json::Result<Value<'a>> {
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    let value = ValueSeed(keys, PhantomData).deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    Ok(value)
 }
 
 /// Deserializes a value, sharing the keys of its objects through one table.
-struct ValueSeed<'k>(&'k mut Keys);
+struct ValueSeed<'k, 'a>(&'k mut Keys, PhantomData<Value<'a>>);
 
-impl<'de> DeserializeSeed<'de> for ValueSeed<'_> {
-    type Value = Value<'static>;
+impl<'de, 'a> DeserializeSeed<'de> for ValueSeed<'_, 'a> {
+    type Value = Value<'a>;
 
-    fn deserialize<D: Deserializer<'de>>(
-        self,
-        deserializer: D,
-    ) -> Result<Value<'static>, D::Error> {
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value<'a>, D::Error> {
         deserializer.deserialize_any(self)
     }
 }
 
-impl<'de> Visitor<'de> for ValueSeed<'_> {
-    type Value = Value<'static>;
+impl<'de, 'a> Visitor<'de> for ValueSeed<'_, 'a> {
+    type Value = Value<'a>;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a JSON value")
     }
 
-    fn visit_bool<E>(self, b: bool) -> Result<Value<'static>, E> {
+    fn visit_bool<E>(self, b: bool) -> Result<Value<'a>, E> {
         Ok(Value::Bool(b))
     }
 
-    fn visit_i64<E>(self, n: i64) -> Result<Value<'static>, E> {
+    fn visit_i64<E>(self, n: i64) -> Result<Value<'a>, E> {
         Ok(Value::Number(n as f64))
     }
 
-    fn visit_u64<E>(self, n: u64) -> Result<Value<'static>, E> {
+    fn visit_u64<E>(self, n: u64) -> Result<Value<'a>, E> {
         Ok(Value::Number(n as f64))
     }
 
-    fn visit_f64<E>(self, n: f64) -> Result<Value<'static>, E> {
+    fn visit_f64<E>(self, n: f64) -> Result<Value<'a>, E> {
         Ok(Value::Number(n))
     }
 
-    fn visit_str<E>(self, s: &str) -> Result<Value<'static>, E> {
+    fn visit_str<E>(self, s: &str) -> Result<Value<'a>, E> {
         Ok(Value::string(s))
     }
 
-    fn visit_unit<E>(self) -> Result<Value<'static>, E> {
+    fn visit_unit<E>(self) -> Result<Value<'a>, E> {
         Ok(Value::Null)
     }
 
-    fn visit_none<E>(self) -> Result<Value<'static>, E> {
+    fn visit_none<E>(self) -> Result<Value<'a>, E> {
         Ok(Value::Null)
     }
 
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value<'static>, A::Error> {
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value<'a>, A::Error> {
         let mut items = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-        while let Some(item) = seq.next_element_seed(ValueSeed(self.0))? {
+        while let Some(item) = seq.next_element_seed(ValueSeed(&mut *self.0, PhantomData))? {
             items.push(item);
         }
         Ok(Value::array(items, 0))
     }
 
-    fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Value<'static>, A::Error> {
+    fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Value<'a>, A::Error> {
         let mut map =
             Map::with_capacity_and_hasher(access.size_hint().unwrap_or(0), Default::default());
         // A repeated key keeps its first position and takes the last value, as in `JSON.parse`.
         while let Some(key) = access.next_key_seed(KeySeed(self.0))? {
-            let value = access.next_value_seed(ValueSeed(self.0))?;
+            let value = access.next_value_seed(ValueSeed(&mut *self.0, PhantomData))?;
             map.insert(key, value);
         }
         Ok(Value::object(map))

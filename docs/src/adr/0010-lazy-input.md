@@ -107,6 +107,31 @@ evaluations.
   than step 1, interleaving conversion with evaluation. Same-build runs on the maintainer's
   machine sometimes differ by 25–55% on a few `evaluate_document` cases, so a case that moves
   must be measured again before it is trusted.
+- Step 3 (the `Source` trait, `U1004` and the WebAssembly source) settled the names:
+  - `jlens_core::input::Source<'a>` has one method, `read(&self, sink: &mut Sink<'_, 'a>) ->
+    Result<(), String>`. A source stands for an array, an object, or the input itself, which
+    writes the input as the only value of its level (nothing for undefined), so the input
+    needs no type of its own. `Expression::evaluate_source` takes it, with bindings that live as
+    long as `'a`, since values of one evaluation share one lifetime.
+  - `Sink` writes scalars (`null`, `bool`, `number`, `string`), nested sources (`array`,
+    `object`), and the key of the next field (`key`). Two methods serve speed: `reserve`, a hint
+    of the number of values, and `json_members`, which writes a level from JSON text, converted
+    at once.
+  - A failed read is recorded with the key table, in the state the lazy values of an evaluation
+    share. The evaluator tests a flag at each step, after converting the arguments of a host
+    function, and when the evaluation ends, whatever its outcome, so that an error caused by the
+    empty level never hides `U1004`.
+- In WebAssembly, writing a level value by value costs more per value than `JSON.stringify` and
+  a parse in Rust: reading the whole benchmark document so took 560 µs, against 320 µs for
+  the conversion it replaces. The JavaScript helper therefore returns a level of more than 16
+  values as its `JSON.stringify` text, which the source writes with `json_members`; a text
+  that `serde_json` cannot read (a lone surrogate, more than 128 levels) is read again, value
+  by value. A smaller level returns its tags and numbers in a `Float64Array`, its strings and
+  keys in one string, and its nested arrays and objects as nodes that keep their parent's node,
+  so that a cycle is detected as `JSON.stringify` detects it.
+- On the benchmark document, step 3 measured, against step 2: natively, every case within ±2%;
+  in WebAssembly, `evaluate` path 7.6 µs (313 µs before), and the other cases within ±3.5% of
+  the conversion through `JSON.stringify`, in one Node.js process.
 
 ## Alternatives not taken
 

@@ -83,6 +83,38 @@ export const cases = [
     throws(() => expr.evaluateJson("{not json"), (e) => ok(e instanceof TypeError, "TypeError"));
   }],
 
+  ["evaluate reads the input like JSON.stringify, one level at a time", (j) => {
+    const value = (source, input) => new j.Expression(source).evaluate(input);
+    const input = {
+      date: new Date(Date.UTC(2024, 0, 2)),
+      boxed: [new Number(1), new String("s"), new Boolean(false)],
+      gaps: [undefined, () => 1, Symbol("s"), NaN, -Infinity],
+      skipped: { u: undefined, f() {}, s: Symbol("s"), kept: 1 },
+      custom: { toJSON(key) { return { key }; } },
+      text: "a\u00e9\u{1d11e}b",
+      nested: { a: [{ b: "x" }, { b: "y" }] },
+    };
+    equal(value("date", input), "2024-01-02T00:00:00.000Z", "toJSON");
+    equal(value("boxed", input), [1, "s", false], "boxed primitives");
+    equal(value("gaps", input), [null, null, null, null, null], "gaps in arrays");
+    equal(value("$keys(skipped)", input), "kept", "left out of objects");
+    equal(value("custom", input), { key: "custom" }, "toJSON with its key");
+    equal(value("$length(text) & text", input), "4" + input.text, "strings");
+    equal(value("nested.a.b", input), ["x", "y"], "nested levels");
+    equal(value("$", input), JSON.parse(JSON.stringify(input)), "the whole input");
+    equal(value("$", new Date(0)), "1970-01-01T00:00:00.000Z", "a Date as the input");
+    equal(value("$", () => 1), undefined, "a function as the input");
+    // A cycle or a BigInt throws JSON.stringify's TypeError, only when its level is read.
+    const tricky = { ok: { a: 1 }, deep: {}, big: { n: 10n } };
+    tricky.deep.again = tricky.deep;
+    equal(value("ok.a", tricky), 1, "levels not read");
+    throws(() => value("deep.again", tricky), (e) => ok(e instanceof TypeError && /circular/.test(e.message), "cycle"));
+    throws(() => value("big", tricky), (e) => ok(e instanceof TypeError && /BigInt/.test(e.message), "BigInt"));
+    // A toJSON that throws: its own exception.
+    const boom = new Error("boom");
+    throws(() => value("x", { x: { toJSON() { throw boom; } } }), (e) => ok(e === boom, "the same exception"));
+  }],
+
   ["syntax errors are JlensErrors with UTF-16 offsets", (j) => {
     throws(() => new j.Expression("'𝄞é' & items[0;]"), (e) => {
       ok(e instanceof Error, "an Error");
@@ -158,7 +190,8 @@ export const cases = [
     const nested = "(".repeat(1001) + "1" + ")".repeat(1001);
     throws(() => new j.Expression(nested), (e) => equal(e.code, "U1001"));
     const ok999 = "(".repeat(999) + "1" + ")".repeat(999);
-    equal(new j.Expression(ok999).evaluate(), 1, "999 levels");
+    // Each level of nesting is a level of evaluation too, beyond the default depth of 800.
+    equal(new j.Expression(ok999).evaluate(undefined, null, { maxDepth: 1000 }), 1, "999 levels");
     equal(j.parseRecover(nested).diagnostics[0].code, "U1001", "recovering parse");
     equal(new j.Expression("1 + 1").evaluate(), 2, "still usable");
   }],

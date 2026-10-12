@@ -19,7 +19,7 @@ export type HostFunction = (...args: any[]) => unknown;
 export interface EvaluateOptions {
   /** Maximum duration of one evaluation, in milliseconds (error `D1012`). */
   timeout?: number;
-  /** Maximum evaluation depth (default 1,000; error `D1011`). */
+  /** Maximum evaluation depth (default 800; error `D1011`). */
   maxDepth?: number;
   /** Maximum length, in bytes of UTF-8, of a string the evaluation builds (default 256 MiB; error `U1001`). */
   maxStringLength?: number;

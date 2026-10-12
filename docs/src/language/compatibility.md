@@ -46,7 +46,7 @@ error. jlens cannot represent that input, so it skips those two cases.
 | Topic | jsonata-js | jlens |
 |---|---|---|
 | Object key order | JavaScript order: integer-like keys first, ascending, then insertion order | Insertion order, always |
-| Recursion limit | The JavaScript stack (`RangeError`) | `D1011` after `Options::max_depth` evaluation levels (50,000 by default; 1,000 in Wasm) |
+| Recursion limit | The JavaScript stack (`RangeError`) | `D1011` after `Options::max_depth` evaluation levels (50,000 by default; 800 in Wasm) |
 | Nesting limit | The JavaScript stack: about 2,000 terms in a chain such as `1 + 1 + …` work, 5,000 raise a `RangeError` | `U1001` beyond 1,000 levels of syntax tree: nested subexpressions, and each operator of a chain (a chain of more than 1,000 terms is rejected) |
 | Very long strings and arrays | Limited by the JavaScript engine (a `RangeError`, or running out of memory) | `U1001` beyond `Options::max_string_length` (256 MiB) or `Options::max_array_length` (16,777,216 items) |
 | A very large result, such as an object nested in itself many times | Limited by the JavaScript engine when the result is serialized | `U1001` beyond `Options::max_result_size` (256 MiB of JSON text) |
@@ -77,6 +77,19 @@ error. jlens cannot represent that input, so it skips those two cases.
 The suite runner's own guard raises `U1001` for its `timelimit`/`depth` cases; jlens enforces
 the same limits through `Options` and reports `D1011`/`D1012`, which the conformance harness
 accepts in place of `U1001`.
+
+### The input in WebAssembly
+
+jsonata-js evaluates the JavaScript object it is given. jlens-wasm `evaluate` reads that object
+as `JSON.stringify` does, one object or array at a time, when the expression reaches it
+([ADR 0010](../adr/0010-lazy-input.md)):
+
+| Topic | jsonata-js | jlens |
+|---|---|---|
+| A `Date`, a boxed primitive (`new Number(1)`), an object with a `toJSON` method | The object itself | What `JSON.stringify` writes: a `Date` is its ISO 8601 string |
+| `undefined`, functions and symbols in the input | Visible to the expression | Left out of objects, and `null` in arrays, as in `JSON.stringify` |
+| A cycle or a `BigInt` | Read as they are | The `TypeError` that `JSON.stringify` throws, when the expression reads the object or array that holds them. An object or array of more than 16 values is read whole, so the error comes when it is read, wherever it is inside |
+| A host function that modifies the input | Later reads see the change | The same for the parts not read yet; a part already read keeps what was read |
 
 ### Host functions
 

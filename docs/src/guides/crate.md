@@ -143,6 +143,17 @@ against the same document, convert it once into a
 `Document::new` converts a `serde_json::Value`. A `Document` is not `Send`: use it on the thread
 that created it. [Performance](../architecture/performance.md) has measurements.
 
+## Other input representations
+
+An input held in another representation than `serde_json` (another JSON library, a database
+row, a host language's objects) can be read the same way, one level at a time, without being
+converted first. Implement
+[`input::Source`](https://docs.rs/jlens-core/latest/jlens_core/input/trait.Source.html) for
+it, and evaluate with `Expression::evaluate_source`. The documentation of the
+[`input`](https://docs.rs/jlens-core/latest/jlens_core/input/index.html) module has an
+example. A level that the source fails to read stops the evaluation with `U1004`. The
+WebAssembly package reads JavaScript objects this way.
+
 ## Explaining results
 
 `evaluate_audited` records an audit tree of the evaluation: comparisons and their operands,

@@ -20,7 +20,7 @@ use crate::functions::{self, Call, boolean};
 use crate::regex::Regex;
 use crate::signature::Signature;
 use crate::value::{
-    self, CONS, Function, KEEP_SINGLETON, Lambda, Map, OUTER_WRAPPER, Object, SEQUENCE,
+    self, CONS, Function, KEEP_SINGLETON, Lambda, Map, OUTER_WRAPPER, Object, SEQUENCE, Shared,
     TUPLE_STREAM, Value,
 };
 
@@ -89,8 +89,11 @@ pub(crate) struct Limits {
 /// JavaScript stack; jlens needs one to fail cleanly instead of overflowing the native stack.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) const DEFAULT_MAX_DEPTH: usize = 50_000;
+/// In WebAssembly, the frames of the evaluation also take the JavaScript engine's stack (about
+/// 1 MiB in V8), which jlens cannot measure. While V8 recompiles the module's hot functions, an
+/// audited evaluation at depth 1,000 could exceed it.
 #[cfg(target_arch = "wasm32")]
-pub(crate) const DEFAULT_MAX_DEPTH: usize = 1_000;
+pub(crate) const DEFAULT_MAX_DEPTH: usize = 800;
 
 /// Default maximum length of a built string, in bytes (256 MiB). jsonata-js is limited by the
 /// JavaScript engine (about 2^29 UTF-16 units in V8); jlens fails cleanly instead of running
@@ -117,6 +120,8 @@ pub(crate) struct Evaluator<'t, 'a> {
     rng: u64,
     /// Receives evaluation events (auditing, logging). `None` costs one check per hook.
     tracer: Option<&'t mut dyn Tracer>,
+    /// The state of an input read from a `Source`, which can fail (ADR 0010, decision 6).
+    source: Option<Rc<Shared>>,
 }
 
 impl Drop for Evaluator<'_, '_> {
@@ -192,6 +197,7 @@ pub(crate) fn evaluate<'a, 'v>(
     bindings: &crate::Bindings,
     limits: Limits,
     tracer: Option<&mut dyn Tracer>,
+    source: Option<Rc<Shared>>,
 ) -> Result<Option<serde_json::Value>> {
     if ast.has_errors() {
         return Err(Error::new("S0500").at(Default::default(), 0));
@@ -205,6 +211,7 @@ pub(crate) fn evaluate<'a, 'v>(
         timestamp: 0.0,
         rng: 0,
         tracer,
+        source,
     };
     let since_epoch = || {
         web_time::SystemTime::now()
@@ -254,6 +261,11 @@ pub(crate) fn evaluate<'a, 'v>(
         })?;
         Ok((v, json))
     });
+    // A level of the input that could not be read fails the evaluation, whatever it gave.
+    let result = match ev.read_failure() {
+        Err(e) => Err(e),
+        Ok(()) => result,
+    };
     if let Some(t) = ev.tracer.as_deref_mut() {
         match &result {
             Ok((v, _)) => t.end(Outcome::Value(ValueRef(v))),
@@ -317,7 +329,17 @@ impl<'a> Evaluator<'_, 'a> {
         if self.depth > self.limits.max_depth {
             return Err(Error::new("D1011").with("value", self.limits.max_depth));
         }
+        self.read_failure()?;
         self.time_limits()
+    }
+
+    /// Fails with `U1004` once a level of the input could not be read from its source.
+    #[inline]
+    fn read_failure(&self) -> Result<()> {
+        match &self.source {
+            Some(shared) if shared.failed() => Err(shared.failure()),
+            _ => Ok(()),
+        }
     }
 
     /// Fails with `D1012` once the timeout has passed, or `U1003` once the token is cancelled.
@@ -1287,7 +1309,9 @@ impl<'a> Evaluator<'_, 'a> {
                     Some(sig) => sig.validate(args, input)?,
                     None => args,
                 };
-                let result = host.call(&args, input, self.limits.max_result_size)?;
+                let result = host.call(&args, input, self.limits.max_result_size, || {
+                    self.read_failure()
+                })?;
                 self.check_size(result)
             }
             Function::Partial {
@@ -1313,9 +1337,12 @@ impl<'a> Evaluator<'_, 'a> {
                             env,
                         },
                     ),
-                    Function::Host(host) => {
-                        host.call(&full, &Value::Undefined, self.limits.max_result_size)
-                    }
+                    Function::Host(host) => host.call(
+                        &full,
+                        &Value::Undefined,
+                        self.limits.max_result_size,
+                        || self.read_failure(),
+                    ),
                     _ => Err(Error::new("T1006")),
                 }?;
                 self.check_size(result)

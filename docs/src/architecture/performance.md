@@ -24,21 +24,22 @@ different absolute values.
 
 ### Native (criterion)
 
-Each `evaluate` call converts its input from `serde_json::Value` first. `evaluate_document`
+Each `evaluate` call reads its `serde_json::Value` input as the expression reaches it, one
+object or array at a time ([ADR 0010](../adr/0010-lazy-input.md)). `evaluate_document`
 evaluates against a [`Document`](#reusing-documents) converted beforehand.
 
 | Case | `evaluate` | `evaluate_document` |
 |---|---:|---:|
-| path (`customer.name`) | 115 µs | 0.9 µs |
-| filter + aggregate | 269 µs | 160 µs |
-| group-by | 664 µs | 518 µs |
-| sort + map | 1.88 ms | 1.78 ms |
-| strings | 307 µs | 198 µs |
-| regex | 342 µs | 232 µs |
-| number formatting | 304 µs | 193 µs |
-| transform | 1.07 ms | 946 µs |
-| recursion (`$f(15)`, Fibonacci) | 1.09 ms | 998 µs |
-| shipping rule | 524 µs | 413 µs |
+| path (`customer.name`) | 1.9 µs | 0.9 µs |
+| filter + aggregate | 292 µs | 163 µs |
+| group-by | 695 µs | 526 µs |
+| sort + map | 1.94 ms | 1.76 ms |
+| strings | 321 µs | 200 µs |
+| regex | 356 µs | 233 µs |
+| number formatting | 226 µs | 198 µs |
+| transform | 1.09 ms | 962 µs |
+| recursion (`$f(15)`, Fibonacci) | 1.03 ms | 1.03 ms |
+| shipping rule | 550 µs | 421 µs |
 
 | Other measurements | Time |
 |---|---:|
@@ -50,14 +51,10 @@ evaluates against a [`Document`](#reusing-documents) converted beforehand.
 | Shipping rule, audit level `decisions` | 1.95 ms (3.7× without a tracer) |
 | Shipping rule, audit level `full` | 7.56 ms (14× without a tracer) |
 
-The steps of a single `evaluate` call, for the path case:
-
-| Step | Time |
-|---|---:|
-| Convert the `serde_json::Value` input | 91 µs |
-| Drop the converted input after the evaluation | 17 µs |
-| Evaluate | 0.9 µs |
-| `evaluate`, all steps | 115 µs |
+The path case reads two objects of the input, the document and its `customer`: `evaluate`
+takes 1.9 µs, where converting the whole input first took 115 µs (91 µs to convert, 17 µs to
+drop, 0.9 µs to evaluate). An expression that reads every item pays for converting them, as
+before.
 
 ### WebAssembly against jsonata-js (Node.js)
 
@@ -68,30 +65,30 @@ that its asynchronous `evaluate` requires.
 
 | Case | jsonata-js 2.2.2 | jlens-wasm `evaluate` | jlens-wasm `evaluateDocument` |
 |---|---:|---:|---:|
-| path | 2.1 µs | 308 µs | 2.5 µs |
-| filter + aggregate | 593 µs | 451 µs | 147 µs |
-| group-by | 992 µs | 814 µs | 515 µs |
-| sort + map | 4.90 ms | 1.92 ms | 1.58 ms |
-| strings | 571 µs | 501 µs | 191 µs |
-| regex | 621 µs | 566 µs | 252 µs |
-| number formatting | 541 µs | 582 µs | 268 µs |
-| transform | 1.30 ms | 1.69 ms | 1.38 ms |
-| recursion | 7.62 ms | 1.32 ms | 1.02 ms |
-| shipping rule | 1.60 ms | 691 µs | 387 µs |
+| path | 2.2 µs | 8.1 µs | 2.5 µs |
+| filter + aggregate | 668 µs | 494 µs | 169 µs |
+| group-by | 1.00 ms | 868 µs | 539 µs |
+| sort + map | 4.88 ms | 2.20 ms | 1.86 ms |
+| strings | 594 µs | 533 µs | 204 µs |
+| regex | 631 µs | 582 µs | 253 µs |
+| number formatting | 570 µs | 614 µs | 291 µs |
+| transform | 1.35 ms | 1.78 ms | 1.44 ms |
+| recursion | 7.83 ms | 1.03 ms | 1.03 ms |
+| shipping rule | 1.65 ms | 762 µs | 444 µs |
 
 jsonata-js works on the JavaScript objects it is given, so it never pays for converting the
-input. jlens-wasm `evaluate` has to convert it, in two steps:
+input. jlens-wasm `evaluate` reads the input object as the expression reaches it: an object or
+array of up to 16 values through one call to a JavaScript helper, a larger one whole, through
+`JSON.stringify` and a parse into jlens's representation. The path case reads two small
+objects. An expression that reads every item pays what converting the whole input does:
+`JSON.stringify` of the input takes 46 µs, and parsing that text 273 µs.
 
-| Step | Time |
-|---|---:|
-| `JSON.stringify` of the input, on the JavaScript side | 41 µs |
-| Parse that text into jlens's representation, and free it after the evaluation | 256 µs |
+`evaluate` is faster than jsonata-js on seven of the ten cases. Against a `Document` converted
+once, jlens-wasm is faster on eight, by up to 7.6× on recursion.
 
-Even so, `evaluate` is faster than jsonata-js on seven of the ten cases. Against a `Document`
-converted once, jlens-wasm is faster on eight, by up to 7.5× on recursion.
-
-It is slower on two cases:
+It is slower on three cases:
 - `path`, which does almost no work, so the overhead of calling into WebAssembly dominates;
+- `number formatting`, by 8%, because it reads every item;
 - `transform`, whose deep copy of the document is the job V8's own JSON round trip does best.
 
 ## Using the API efficiently
@@ -99,9 +96,10 @@ It is slower on two cases:
 - **Compile once.** `Expression::compile` (`new Expression` in JavaScript) parses and
   post-processes. A compiled expression is immutable: keep it, share it between threads (it is
   `Send + Sync`), and evaluate it as often as needed.
-- **Reuse documents.** Converting the input dominates cheap evaluations: a 24 KB document costs
-  about 110 µs natively, and about 300 µs in WebAssembly. To evaluate several expressions against one
-  document, such as a set of rules, or one expression repeatedly, convert the document once.
+- **Reuse documents.** `evaluate` converts the parts of the input that the expression reads.
+  For an expression that reads all of a 24 KB document, that costs about 110 µs natively, and
+  about 300 µs in WebAssembly. To evaluate several expressions against one document, such as a
+  set of rules, or one expression repeatedly, convert the document once.
 - **Prefer JSON text when you have it.** `Document::parse` (`evaluateJson` in JavaScript)
   parses straight into jlens's representation. That is faster than parsing into a
   `serde_json::Value` and converting it.

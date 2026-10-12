@@ -48,18 +48,79 @@ impl Keys {
         }
         key
     }
+}
 
-    /// A table shared by the lazy values of one evaluation (ADR 0010).
-    pub(crate) fn shared() -> Rc<RefCell<Keys>> {
+/// What the lazy values of one evaluation share (ADR 0010): the table of their keys, and the
+/// first error of a [`Source`] that failed to read a level.
+#[derive(Default)]
+pub(crate) struct Shared {
+    keys: RefCell<Keys>,
+    failed: Cell<bool>,
+    failure: RefCell<Option<String>>,
+}
+
+impl Shared {
+    pub(crate) fn new() -> Rc<Shared> {
         Rc::default()
+    }
+
+    /// Whether a level could not be read.
+    #[inline]
+    pub(crate) fn failed(&self) -> bool {
+        self.failed.get()
+    }
+
+    /// The `U1004` error of the first level that could not be read.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn failure(&self) -> Error {
+        let failure = self.failure.borrow();
+        Error::new("U1004").with("message", failure.as_deref().unwrap_or_default())
+    }
+
+    fn fail(&self, message: String) {
+        self.failed.set(true);
+        self.failure.borrow_mut().get_or_insert(message);
     }
 }
 
 /// The part of the input that a lazy array or object stands for, not read yet (ADR 0010). The
 /// first access to the array's items or the object's map reads one level of it.
 struct Pending<'a> {
-    json: &'a JsonValue,
-    keys: Rc<RefCell<Keys>>,
+    origin: Origin<'a>,
+    shared: Rc<Shared>,
+}
+
+enum Origin<'a> {
+    Json(&'a JsonValue),
+    Source(Box<dyn Source<'a> + 'a>),
+}
+
+impl<'a> Pending<'a> {
+    /// The JSON this stands for, when it is JSON.
+    fn json(&self) -> Option<&'a JsonValue> {
+        match self.origin {
+            Origin::Json(json) => Some(json),
+            Origin::Source(_) => None,
+        }
+    }
+
+    /// Reads a level from a source into `level`. A source that fails leaves the level empty,
+    /// and its error is recorded for the evaluation (ADR 0010, decision 6).
+    fn read_source(&self, source: &dyn Source<'a>, level: Level<'_, 'a>) {
+        let mut sink = Sink {
+            level,
+            shared: &self.shared,
+            key: None,
+        };
+        if let Err(message) = source.read(&mut sink) {
+            self.shared.fail(message);
+            match sink.level {
+                Level::Items(items) => items.clear(),
+                Level::Fields(map) => map.clear(),
+            }
+        }
+    }
 }
 
 /// A JSONata value.
@@ -102,12 +163,18 @@ impl<'a> LazyItems<'a> {
     /// The items, read from the input on the first call.
     #[inline(never)]
     fn read(&self) -> &Vec<Value<'a>> {
-        self.items.get_or_init(|| match &self.pending {
-            Pending {
-                json: JsonValue::Array(items),
-                keys,
-            } => items.iter().map(|v| Value::lazy(v, keys)).collect(),
-            _ => Vec::new(),
+        let pending = &self.pending;
+        self.items.get_or_init(|| match &pending.origin {
+            Origin::Json(JsonValue::Array(items)) => items
+                .iter()
+                .map(|v| Value::lazy(v, &pending.shared))
+                .collect(),
+            Origin::Json(_) => Vec::new(),
+            Origin::Source(source) => {
+                let mut items = Vec::new();
+                pending.read_source(&**source, Level::Items(&mut items));
+                items
+            }
         })
     }
 }
@@ -122,10 +189,10 @@ impl<'a> Array<'a> {
         }
     }
 
-    /// The input this array stands for, when it has not been read.
+    /// The input JSON this array stands for, when it has not been read.
     fn unread(&self) -> Option<&'a JsonValue> {
         match &self.lazy {
-            Some(lazy) if lazy.items.get().is_none() => Some(lazy.pending.json),
+            Some(lazy) if lazy.items.get().is_none() => lazy.pending.json(),
             _ => None,
         }
     }
@@ -133,7 +200,9 @@ impl<'a> Array<'a> {
     /// Whether the array has not been read from the input yet. Such an array holds only values
     /// of the input.
     pub fn is_unread(&self) -> bool {
-        self.unread().is_some()
+        self.lazy
+            .as_ref()
+            .is_some_and(|lazy| lazy.items.get().is_none())
     }
 
     pub fn has(&self, flag: u8) -> bool {
@@ -188,13 +257,19 @@ impl<'a> Object<'a> {
     #[inline(never)]
     fn read(&self, pending: &Pending<'a>) {
         self.read.set(true);
-        if let (JsonValue::Object(fields), Ok(mut map)) = (pending.json, self.map.try_borrow_mut())
-        {
-            *map = Map::with_capacity_and_hasher(fields.len(), Default::default());
-            let mut shared = pending.keys.borrow_mut();
-            for (k, v) in fields {
-                map.insert(shared.get(k), Value::lazy(v, &pending.keys));
+        let Ok(mut map) = self.map.try_borrow_mut() else {
+            return;
+        };
+        match &pending.origin {
+            Origin::Json(JsonValue::Object(fields)) => {
+                *map = Map::with_capacity_and_hasher(fields.len(), Default::default());
+                let mut keys = pending.shared.keys.borrow_mut();
+                for (k, v) in fields {
+                    map.insert(keys.get(k), Value::lazy(v, &pending.shared));
+                }
             }
+            Origin::Json(_) => {}
+            Origin::Source(source) => pending.read_source(&**source, Level::Fields(&mut map)),
         }
     }
 
@@ -210,10 +285,10 @@ impl<'a> Object<'a> {
         self.cell().borrow_mut()
     }
 
-    /// The input this object stands for, when it has not been read.
+    /// The input JSON this object stands for, when it has not been read.
     fn unread(&self) -> Option<&'a JsonValue> {
         match &self.pending {
-            Some(p) if !self.read.get() => Some(p.json),
+            Some(p) if !self.read.get() => p.json(),
             _ => None,
         }
     }
@@ -221,7 +296,7 @@ impl<'a> Object<'a> {
     /// Whether the object has not been read from the input yet. Such an object holds only
     /// values of the input.
     pub fn is_unread(&self) -> bool {
-        self.unread().is_some()
+        self.pending.is_some() && !self.read.get()
     }
 }
 
@@ -477,27 +552,14 @@ impl<'a> Value<'a> {
     /// A value over input JSON that reads it one level at a time, on first access (ADR 0010):
     /// an array or object is converted only when the evaluation reads it. `keys` is shared by
     /// the lazy values of one evaluation.
-    pub fn lazy(json: &'a JsonValue, keys: &Rc<RefCell<Keys>>) -> Value<'a> {
+    pub fn lazy(json: &'a JsonValue, shared: &Rc<Shared>) -> Value<'a> {
+        let pending = || Pending {
+            origin: Origin::Json(json),
+            shared: shared.clone(),
+        };
         match json {
-            JsonValue::Array(items) if !items.is_empty() => Value::Array(Rc::new(Array {
-                items: Vec::new(),
-                flags: Cell::new(0),
-                lazy: Some(Box::new(LazyItems {
-                    pending: Pending {
-                        json,
-                        keys: keys.clone(),
-                    },
-                    items: OnceCell::new(),
-                })),
-            })),
-            JsonValue::Object(fields) if !fields.is_empty() => Value::Object(Rc::new(Object {
-                map: RefCell::new(Map::default()),
-                pending: Some(Pending {
-                    json,
-                    keys: keys.clone(),
-                }),
-                read: Cell::new(false),
-            })),
+            JsonValue::Array(items) if !items.is_empty() => Value::lazy_array(pending()),
+            JsonValue::Object(fields) if !fields.is_empty() => Value::lazy_object(pending()),
             JsonValue::Null => Value::Null,
             JsonValue::Bool(b) => Value::Bool(*b),
             JsonValue::Number(n) => Value::Number(n.as_f64().unwrap_or(f64::NAN)),
@@ -507,7 +569,41 @@ impl<'a> Value<'a> {
         }
     }
 
-    /// The input an array or object stands for, when it has not been read.
+    fn lazy_array(pending: Pending<'a>) -> Value<'a> {
+        Value::Array(Rc::new(Array {
+            items: Vec::new(),
+            flags: Cell::new(0),
+            lazy: Some(Box::new(LazyItems {
+                pending,
+                items: OnceCell::new(),
+            })),
+        }))
+    }
+
+    fn lazy_object(pending: Pending<'a>) -> Value<'a> {
+        Value::Object(Rc::new(Object {
+            map: RefCell::new(Map::default()),
+            pending: Some(pending),
+            read: Cell::new(false),
+        }))
+    }
+
+    /// The input of an evaluation, read from a [`Source`] that writes it as the only value of
+    /// its level (nothing for undefined). The error of a source that fails is returned.
+    pub(crate) fn from_source(source: &dyn Source<'a>, shared: &Rc<Shared>) -> Result<Value<'a>> {
+        let mut items = Vec::new();
+        let mut sink = Sink {
+            level: Level::Items(&mut items),
+            shared,
+            key: None,
+        };
+        source
+            .read(&mut sink)
+            .map_err(|message| Error::new("U1004").with("message", message))?;
+        Ok(items.into_iter().next().unwrap_or_default())
+    }
+
+    /// The input JSON an array or object stands for, when it has not been read.
     fn unread(&self) -> Option<&'a JsonValue> {
         match self {
             Value::Array(a) => a.unread(),
@@ -597,6 +693,136 @@ impl<'a> Value<'a> {
                         Value::Undefined | Value::Function(_) => true,
                         v => spend(budget, k.len() + 4) && v.json_fits(budget),
                     })
+            }
+        }
+    }
+}
+
+/// Input read one level at a time, for evaluations whose input is not a `serde_json::Value`
+/// (see [`Expression::evaluate_source`](crate::Expression::evaluate_source) and ADR 0010).
+///
+/// A source stands for an array, an object, or the input itself. Each level is read once, on
+/// the evaluation's first access to it, and only the levels the expression reaches are read.
+/// A source that borrows nothing implements `Source<'a>` for every `'a`.
+pub trait Source<'a> {
+    /// Writes the values of this level to `sink`, in order: the items of an array, the fields
+    /// of an object (each value after its key, given with [`Sink::key`]), or the input itself
+    /// as the only value (nothing when it is undefined). Nested arrays and objects are written
+    /// as new sources, read when the evaluation reaches them.
+    ///
+    /// An error stops the evaluation with `U1004`, whose message is the error's. The level is
+    /// left empty, and the evaluation fails at its next step, before it calls a host function,
+    /// or before it returns its result.
+    fn read(&self, sink: &mut Sink<'_, 'a>) -> std::result::Result<(), String>;
+}
+
+/// Where a [`Source`] writes the values of a level.
+pub struct Sink<'s, 'a> {
+    level: Level<'s, 'a>,
+    shared: &'s Rc<Shared>,
+    key: Option<Rc<str>>,
+}
+
+enum Level<'s, 'a> {
+    Items(&'s mut Vec<Value<'a>>),
+    Fields(&'s mut Map<'a>),
+}
+
+impl<'a> Sink<'_, 'a> {
+    /// Tells how many more values the level holds, when the source knows: room is made for
+    /// them at once. It is only a hint.
+    pub fn reserve(&mut self, additional: usize) {
+        // A hint larger than any level, from a source that miscounts, is ignored.
+        let additional = additional.min(1 << 16);
+        match &mut self.level {
+            Level::Items(items) => items.reserve(additional),
+            Level::Fields(map) => map.reserve(additional),
+        }
+    }
+
+    /// The key of the next value, in an object; ignored in an array or for the input. In an
+    /// object, a value written without a key is left out, and a key written again replaces the
+    /// earlier value, keeping its position.
+    pub fn key(&mut self, key: &str) {
+        if let Level::Fields(_) = self.level {
+            self.key = Some(self.shared.keys.borrow_mut().get(key));
+        }
+    }
+
+    /// Writes `null`.
+    pub fn null(&mut self) {
+        self.push(Value::Null);
+    }
+
+    /// Writes a boolean.
+    pub fn bool(&mut self, value: bool) {
+        self.push(Value::Bool(value));
+    }
+
+    /// Writes a number. JSON has no NaN or infinity: a source that follows JSON writes `null`
+    /// for them, as `JSON.stringify` does.
+    pub fn number(&mut self, value: f64) {
+        self.push(Value::Number(value));
+    }
+
+    /// Writes a string.
+    pub fn string(&mut self, value: &str) {
+        self.push(Value::string(value));
+    }
+
+    /// Writes the items of a JSON array, or the fields of a JSON object, given as text: an
+    /// array's items in an array, an object's fields in an object. They are converted at once,
+    /// with everything they hold, rather than one level at a time. When the text is not valid
+    /// JSON, or nests deeper than 128 levels, nothing is written and the error is returned.
+    ///
+    /// Use it for a level that is cheaper to serialize than to write value by value.
+    pub fn json_members(&mut self, text: &str) -> std::result::Result<(), String> {
+        let value: Value<'a> =
+            crate::document::parse_value(text, &mut self.shared.keys.borrow_mut())
+                .map_err(|e| e.to_string())?;
+        match (value, &mut self.level) {
+            (Value::Array(array), Level::Items(items)) => match Rc::try_unwrap(array) {
+                Ok(array) => items.extend(array.items),
+                Err(array) => items.extend(array.items().iter().cloned()),
+            },
+            (Value::Object(object), Level::Fields(map)) => match Rc::try_unwrap(object) {
+                Ok(object) => map.extend(object.map.into_inner()),
+                Err(object) => {
+                    map.extend(object.borrow().iter().map(|(k, v)| (k.clone(), v.clone())))
+                }
+            },
+            (_, Level::Items(_)) => return Err("expected a JSON array".into()),
+            (_, Level::Fields(_)) => return Err("expected a JSON object".into()),
+        }
+        Ok(())
+    }
+
+    /// Writes an array, read from `source` when the evaluation reaches it.
+    pub fn array(&mut self, source: impl Source<'a> + 'a) {
+        let pending = self.pending(Box::new(source));
+        self.push(Value::lazy_array(pending));
+    }
+
+    /// Writes an object, read from `source` when the evaluation reaches it.
+    pub fn object(&mut self, source: impl Source<'a> + 'a) {
+        let pending = self.pending(Box::new(source));
+        self.push(Value::lazy_object(pending));
+    }
+
+    fn pending(&self, source: Box<dyn Source<'a> + 'a>) -> Pending<'a> {
+        Pending {
+            origin: Origin::Source(source),
+            shared: self.shared.clone(),
+        }
+    }
+
+    fn push(&mut self, value: Value<'a>) {
+        match &mut self.level {
+            Level::Items(items) => items.push(value),
+            Level::Fields(map) => {
+                if let Some(key) = self.key.take() {
+                    map.insert(key, value);
+                }
             }
         }
     }

@@ -104,6 +104,7 @@ impl HostFunction {
         args: &[Value<'a>],
         input: &Value<'a>,
         limit: usize,
+        read_failure: impl FnOnce() -> Result<()>,
     ) -> Result<Value<'a>> {
         let too_large = || {
             Error::new("U1001").with(
@@ -118,6 +119,9 @@ impl HostFunction {
             return Err(too_large());
         }
         let json: Vec<Option<JsonValue>> = args.iter().map(Value::to_json).collect();
+        // Converting the arguments reads them: a part of the input that could not be read is
+        // not given to the function.
+        read_failure()?;
         let input = match input {
             // The input array, wrapped so that it counts as a single context value.
             Value::Array(a) if a.has(OUTER_WRAPPER) && a.len() == 1 => &a.items()[0],

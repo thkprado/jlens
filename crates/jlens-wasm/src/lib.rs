@@ -20,6 +20,7 @@
 mod convert;
 mod host;
 mod service;
+mod source;
 
 pub use service::{LanguageService, functions, infer_schema};
 
@@ -102,6 +103,9 @@ impl Expression {
     /// `$limit`, and `{rate: (region) => ...}` defines `$rate(region)`.
     /// Returns `undefined` when the result is undefined; throws a `JlensError` when the
     /// evaluation fails.
+    ///
+    /// The input is read during the evaluation, one level at a time, as the expression reaches
+    /// it (ADR 0010).
     #[wasm_bindgen(skip_typescript)]
     pub fn evaluate(
         &self,
@@ -109,14 +113,22 @@ impl Expression {
         bindings: Option<JsValue>,
         options: Option<JsValue>,
     ) -> Result<JsValue, JsValue> {
-        let document = match &input {
-            Some(input) => convert::document(input, "input")?,
-            None => None,
-        };
         let scope = Scope::enter();
         let (bindings, options) = self.arguments(&scope, bindings, options)?;
         let options = convert::options(options.as_ref())?;
-        let result = self.run(&scope, document.as_ref(), &bindings, &options)?;
+        let result = match input.filter(|input| !input.is_undefined()) {
+            Some(input) => {
+                let source = source::JsSource::input(input);
+                self.inner
+                    .evaluate_source(&source, &bindings, &options)
+                    .map_err(|e| {
+                        source
+                            .exception(&e)
+                            .unwrap_or_else(|| self.error(&scope, &e))
+                    })?
+            }
+            None => self.run(&scope, None, &bindings, &options)?,
+        };
         Ok(result.map_or(JsValue::UNDEFINED, |v| to_js(&v)))
     }
 
@@ -223,10 +235,16 @@ impl Expression {
             Some(document) => self.inner.evaluate_document(document, bindings, options),
             None => self.inner.evaluate_with(None, bindings, options),
         }
-        .map_err(|e| match scope.exception(&e) {
-            Some(exception) => locate(exception, &e),
-            None => js_error(&e, &self.offsets),
-        })
+        .map_err(|e| self.error(scope, &e))
+    }
+
+    /// The exception for an evaluation error: a `JlensError`, or the exception a JavaScript
+    /// function threw.
+    fn error(&self, scope: &Scope, err: &jlens_core::Error) -> JsValue {
+        match scope.exception(err) {
+            Some(exception) => locate(exception, err),
+            None => js_error(err, &self.offsets),
+        }
     }
 
     /// Reads the `bindings` and `options` arguments of the evaluation methods. The functions of
