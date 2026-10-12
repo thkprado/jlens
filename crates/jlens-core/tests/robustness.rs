@@ -562,6 +562,10 @@ fn fuzz_crashes_stay_fixed() {
         ("$fromMillis(0, '[dwo]', '10010200101041')", Ok(json!(""))),
         ("$formatInteger(1e308 * 10, 'w')", Ok(json!(""))),
         ("$formatInteger(1e308 * 10, 'a')", Ok(json!(""))),
+        // An exponent picture scaled an infinite mantissa forever. The text is what the other
+        // pictures give for infinity (roadmap 0.9 #5 decides where infinity stops).
+        ("$formatNumber(1e308 * 10, '0e0')", Ok(json!("Infinitye0"))),
+        ("$formatNumber(-1e308 * 10, '0.0e0')", Ok(json!("-NaN.0e0"))),
     ];
     for (source, expected) in cases {
         let result = Expression::compile(source).unwrap().evaluate_with(

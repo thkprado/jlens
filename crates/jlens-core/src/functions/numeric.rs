@@ -564,7 +564,8 @@ fn format_number_with(value: f64, picture: &str, p: &Props) -> Result<String> {
         let min_mantissa = 10f64.powi(pic.scaling as i32 - 1);
         let mut m = adjusted;
         let mut e = 0i32;
-        if m != 0.0 {
+        // Infinity never scales into range; jsonata-js loops forever.
+        if m != 0.0 && m.is_finite() {
             while m.abs() < min_mantissa {
                 m *= 10.0;
                 e -= 1;

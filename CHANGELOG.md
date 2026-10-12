@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `$formatNumber` with an exponent picture no longer loops forever on an infinite number
+  (`$formatNumber(1e308 * 10, '0e0')`), found by reviewing every loop and recursion over
+  floating-point numbers.
+
 ## [0.8.0]
 
 Proven robustness and fast single evaluations: coverage-guided fuzzing found and fixed panics,
