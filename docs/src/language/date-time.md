@@ -94,6 +94,7 @@ $fromMillis(1544450400000, "[Y]-[M01]-[D01]T[H01]:[m01]:[s01][Z]", "+0530")
 A timezone that is not a number is an error:
 
 ```jsonata-example
+differs: jsonata-js writes "NaN" in every component
 $fromMillis(1544450400000, "[Y]", "CET")
 => error D3150
 ```
