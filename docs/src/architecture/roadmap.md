@@ -122,6 +122,7 @@ Both outcomes close the item.
 | 2 | The cost lazy input left on evaluations that read their whole input: `regex` +4%, `filter` +2.8%, `strings` +2.7% when measured, above the 3% that 0.8 allowed | Measured again with the A/B command; the cost removed, or recorded on the performance page with its cause | **done** |
 | 3 | WebAssembly's default `maxDepth` back to 1000. Since lazy input, an audited recursion near 1,000 levels overflows V8's stack while the function is optimized, so the default became 800; the cause of the larger frames was not found | The cause found and the default restored, or the cause (or what was ruled out) recorded in the WebAssembly guide | |
 | 4 | Two crashes of the fuzzing runs, both stack overflows without a message, never reproduced: one while `parse` loaded its corpus, one in `pictures` | The cached corpora and any input saved since (`last-input`) replayed with the replay command; a crash that reproduces fixed, with a regression test; otherwise what was tried recorded in the fuzzing section | |
+| 5 | Two `cargo xtask ab` runs at once both fail when they build the same revision: each adds and removes the same temporary worktree in `target/ab` | Concurrent runs either share the build (a lock, or a worktree per run) or the second stops with a clear message; the performance page says whether runs may overlap | |
 
 ## 0.11: faster evaluation of common shapes
 
