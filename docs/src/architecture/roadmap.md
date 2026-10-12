@@ -98,6 +98,30 @@ tests them and explains their results before they ship.
 | 2 | The cost of a single evaluation is measured and cut where the value model allows it. `evaluate` converts the whole input before it reads any of it: on the 24 KB document of the benchmarks, a path takes 153 µs natively and 402 µs in WebAssembly, against 0.9 µs and 2.5 µs with a `Document`, and 2.1 µs in jsonata-js. In WebAssembly the input goes through `JSON.stringify`, `serde_json` and the conversion to values | The performance page shows the time of each step; the steps that can go without changing the value model are gone; no benchmark case is slower | **done** |
 | 3 | Lazy conversion of input documents: an evaluation converts only the parts of its input it reads. This changes the value model ([ADR 0003](../adr/0003-value-model.md)); the design comes first, in [ADR 0010](../adr/0010-lazy-input.md) | ADR accepted; with `evaluate`, the path case is within 10× of `evaluate_document`, natively and in WebAssembly; property tests; no other benchmark case more than 3% slower | **done** |
 
+## 0.9: numbers and dates at the edges, and tools for the next steps
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | CI lints the workflows: `actionlint`, with `shellcheck` for the scripts of `run` steps | A CI job; the workflows pass it | |
+| 2 | `cargo xtask release-notes` writes links that work on the GitHub release page. The changelog links pages relatively (`](docs/src/...)`), which break there; for 0.8.0 they were fixed by hand in the draft | Relative links become absolute at the tag (`blob/vX.Y.Z/...`); a unit test | |
+| 3 | A fuzz input can be replayed without libFuzzer. The targets cannot link on Windows, so a crash is reproduced today with a throwaway program that repeats the target's calls | One command runs a saved input (such as `last-input` from a failed run) through the body of any target, on a 1 MB stack like the fuzzing thread, on any platform; the fuzzing section of the conformance page says how | |
+| 4 | Loops and recursion over floating-point numbers end on NaN and infinity. Fuzzing found two that did not (`number_to_words`, `decimal_to_letters`); the others are found by reading the code rather than waiting for the weekly run | Every loop or recursion whose end depends on an `f64` reviewed; each one that could run forever or overflow the stack fixed, with a regression test | |
+| 5 | Decide where an infinite number stops. `1e308 * 10` is infinity in both engines, and jsonata-js raises `D1001` only when an infinite number is the operand of another operator, so it reaches functions and comes out as a result. jlens may fail at the operator that overflows instead | Behaviour of both engines recorded; the decision made and implemented; the compatibility page, and the differential rules when jlens differs | |
+| 6 | `$formatNumber` formats large numbers exactly. `$formatNumber(1e21, '#,##0.00')` gives `"1e,+21.00"` in both engines: the exponent of JavaScript's number-to-string conversion leaks into the picture | The digits of the number formatted through the picture; the compatibility page and the differential rules | |
+| 7 | One model for dates beyond JavaScript's range. Today `$fromMillis(1e17, '[Y0001]')` computes a year ("0843") while the day of the year and the week are NaN, because only part of the date code clips like V8; jsonata-js gives NaN everywhere | One model chosen (clip like JavaScript, or never clip) and applied to every date component; the compatibility page | |
+
+## 0.10: performance and robustness debts
+
+Explorations: each one may end in a fix, or in the cause written down and the debt accepted.
+Both outcomes close the item.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | A/B benchmarks as a command. Criterion is bimodal on the maintainer's machine, so changes are measured by building one program per variant and running them alternately, by hand | A command (an `xtask` or a script in `benches/`) that builds two revisions and compares them by alternating runs; the performance page says how | |
+| 2 | The cost lazy input left on evaluations that read their whole input: `regex` +4%, `filter` +2.8%, `strings` +2.7% when measured, above the 3% that 0.8 allowed | Measured again with the A/B command; the cost removed, or recorded on the performance page with its cause | |
+| 3 | WebAssembly's default `maxDepth` back to 1000. Since lazy input, an audited recursion near 1,000 levels overflows V8's stack while the function is optimized, so the default became 800; the cause of the larger frames was not found | The cause found and the default restored, or the cause (or what was ruled out) recorded in the WebAssembly guide | |
+| 4 | Two crashes of the fuzzing runs, both stack overflows without a message, never reproduced: one while `parse` loaded its corpus, one in `pictures` | The cached corpora and any input saved since (`last-input`) replayed with the replay command; a crash that reproduces fixed, with a regression test; otherwise what was tried recorded in the fuzzing section | |
+
 ## Later
 
 Not commitments, in order of priority:
