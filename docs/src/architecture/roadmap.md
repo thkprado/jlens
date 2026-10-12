@@ -123,6 +123,34 @@ Both outcomes close the item.
 | 3 | WebAssembly's default `maxDepth` back to 1000. Since lazy input, an audited recursion near 1,000 levels overflows V8's stack while the function is optimized, so the default became 800; the cause of the larger frames was not found | The cause found and the default restored, or the cause (or what was ruled out) recorded in the WebAssembly guide | |
 | 4 | Two crashes of the fuzzing runs, both stack overflows without a message, never reproduced: one while `parse` loaded its corpus, one in `pictures` | The cached corpora and any input saved since (`last-input`) replayed with the replay command; a crash that reproduces fixed, with a regression test; otherwise what was tried recorded in the fuzzing section | |
 
+## 0.11: faster evaluation of common shapes
+
+A comparison with [jsonata-core](https://github.com/txjmb/jsonata-core) 2.2.11, another Rust
+port, on the cases of `benches/` (`evaluate_document` against its `evaluate`, both converting the
+result to `serde_json::Value`) found it 2 to 5 times faster on five cases: path (0.9 against
+0.1 µs), filter + aggregate (164 against 93 µs), group-by (570 against 123 µs), sort + map
+(1.79 ms against 655 µs) and the shipping rule (433 against 254 µs). Both engines are about
+equal on the other cases, and jlens is faster on regex. Measuring
+parts of these expressions traced the gaps to a few places in `eval.rs`, where work is repeated
+or allocated that no result depends on. Each item removes one of them without changing any
+result, error or evaluation order that jsonata-js shows. jsonata-core's other technique, a
+second evaluator for simple expressions, is left out: two evaluators of the same language can
+disagree.
+
+Every item is measured with `cargo xtask ab` against the commit before it, and checked with the
+conformance suite and a `cargo xtask differential` run. When a tracer is attached, evaluation
+takes the general path, so audits keep reporting every node.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | Sort keys are evaluated once per item. The order-by operator (`^(...)`) evaluates the keys of both items at every comparison, as jsonata-js does: about 3,000 evaluations to sort 200 items, where 200 suffice. `items^(tax)` takes 1.05 ms, against 208 µs in jsonata-core | Each item's keys computed on first use and kept, so the keys are evaluated in the same order and the first error is the same; tests for `T2007` and `T2008`; sort + map faster with `ab`; the compatibility page notes that a key using `$random` is drawn once per item | |
+| 2 | A block without a binding creates no frame. `(...)` allocates a frame each time it is evaluated, so `items.(unitPrice)` takes 85 µs where `items.unitPrice` takes 16 µs | Post-processing marks the blocks whose own expressions bind a variable (`:=`), and only those create a frame; tests for scoping and for closures defined in a block; `ab` | |
+| 3 | A field name evaluated on an object is a lookup. A bare name such as `unitPrice` is a path of one step, which builds and flattens sequences: about five allocations per evaluation. `items.(unitPrice * quantity)` takes 159 µs, against 39 µs in jsonata-core | A one-step path of a name, without stages, on an input that is not an array, returns the field when its value is not an array, and takes the general path otherwise; unit tests for the sequence and singleton rules it skips; filter + aggregate, group-by and the shipping rule faster with `ab` | |
+| 4 | A string literal does not allocate each time it is evaluated. Today it builds a new `Rc<str>`, so `items[type = 'electronic']` allocates one string per item. Exploration: a string shared by the evaluation, or a comparison with the literal that builds no value | The allocation gone and measured with `ab`, or the cost and the options recorded on the performance page | |
+| 5 | The result is converted in one pass. Converting the whole document as a result takes 210 µs, against 152 µs in jsonata-core: its size is measured in a first walk, then it is converted in a second | The size counted while converting, stopping at `Options::max_result_size` as before; the property tests of the size cap pass unchanged; a large result faster with `ab` | |
+| 6 | The fixed cost of an evaluation is cut. `1` takes 0.35 µs, against 0.07 µs in jsonata-core: the clock is read twice for `$now` and the seed of `$random`, and the root frame and the binding of `$` allocate | The clock read once, and only what an evaluation uses set up; the path case faster with `ab` | |
+| 7 | The performance page shows the new numbers, natively and in WebAssembly, with the comparison with jsonata-js | The tables measured again; the "Where the time goes" section updated | |
+
 ## Later
 
 Not commitments, in order of priority:
@@ -137,3 +165,9 @@ Not commitments, in order of priority:
 - **Asynchronous functions**, as in jsonata-js, whose functions may return promises. This needs
   an evaluator that can suspend, and an ADR first. Until then, a host function that returns a
   promise fails with `U1002`.
+- **A faster allocator for the CLI.** Evaluation spends most of its time allocating. On
+  Windows, linking the `jlens` binary with `mimalloc` made every case of `benches/` 20 to 45%
+  faster, and `Document::parse` went from 180 to 121 µs. Worth doing only if Linux shows a
+  similar gain, measured first. The library leaves the global allocator to the application, so
+  the performance page would recommend it to embedders. `mimalloc` builds C code, so each
+  release target and `cargo-deny` need checking.
