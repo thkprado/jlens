@@ -100,9 +100,12 @@ cargo +nightly fuzz run evaluate --sanitizer none --debug-assertions  # fuzzing,
    If a binary fails, nothing has been published: fix the cause on `main`, then move the tag to
    the fixed commit (`git tag -f vX.Y.Z`, `git push -f origin vX.Y.Z`); re-run the failed jobs
    instead when only a runner failed. If the draft release fails after the packages are
-   published, fix the workflow on `main` and run it by hand for the tag:
-   `gh workflow run release.yml -f tag=vX.Y.Z`. That run publishes nothing; it builds the
-   binaries of the tag, attests them and drafts the release.
+   published, run the workflow by hand on the tag: `gh workflow run release.yml --ref vX.Y.Z`.
+   That run publishes nothing; it builds the binaries of the tag, attests them and drafts the
+   release. It runs the workflow as it was at the tag, never one given by a branch, so that no
+   run checks out other code in the cache scope of `main`. When that workflow itself is broken,
+   draft the release by hand as above (without attestations) and fix the workflow on `main` for
+   the next release.
 5. Review the draft on the Releases page, edit it if needed, and publish it. `cargo binstall`
    finds the binaries once the release is published.
 6. Check that the packages prove where they were built:

@@ -6,19 +6,17 @@ name: Release
 # builds. The npm package is published with provenance and the binary archives get build
 # attestations, both signed through Sigstore with the run's OIDC token. Needs the repository
 # secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN.
-# Run by hand (workflow_dispatch) with an existing tag, it publishes nothing: it builds the
-# binaries of that tag, attests them and drafts its release, for a release whose draft failed
-# after publishing.
+# Run by hand (workflow_dispatch) on an existing tag (gh workflow run release.yml --ref vX.Y.Z),
+# it publishes nothing: it builds the binaries of that tag, attests them and drafts its release,
+# for a release whose draft failed after publishing. It takes no ref as input: every job builds
+# the commit of the tag the run was started on, so no run can check out other code (a fork's
+# commit, say) in the cache scope of the default branch.
 # See CONTRIBUTING.md for the release checklist.
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "An existing version tag (vX.Y.Z) whose binaries and draft release to build"
-        required: true
 
 # Jobs read the repository; a job that needs more asks for it.
 permissions:
@@ -26,15 +24,23 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  TAG: ${{ inputs.tag || github.ref_name }}
+  TAG: ${{ github.ref_name }}
 
 jobs:
+  # A run by hand must be started on a version tag, not on a branch.
+  tag:
+    name: The run is on a version tag
+    runs-on: ubuntu-latest
+    steps:
+      - run: '[[ "$GITHUB_REF" == refs/tags/v* ]]'
+
   # Every binary builds before anything is published: a target that fails stops the release
   # while it can still be tagged again.
   binaries:
+    needs: tag
     uses: ./.github/workflows/binaries.yml
     with:
-      ref: ${{ inputs.tag || github.ref_name }}
+      name: ${{ github.ref_name }}
       upload: true
 
   crates:
@@ -110,8 +116,6 @@ jobs:
       artifact-metadata: write
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo xtask release-notes "$TAG" > notes.md
       - uses: actions/download-artifact@v8

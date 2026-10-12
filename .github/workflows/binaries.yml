@@ -1,7 +1,9 @@
 name: Binaries
 
 # Builds the jlens binary for each platform, as jlens-X.Y.Z-<target>.tar.gz (.zip on Windows)
-# holding a jlens-X.Y.Z-<target> directory. The [package.metadata.binstall] section of
+# holding a jlens-X.Y.Z-<target> directory. It builds the commit that triggered the caller, never
+# a ref given as input: an input ref could check out code from a fork in the cache scope of the
+# default branch (cache poisoning). The [package.metadata.binstall] section of
 # crates/jlens-cli/Cargo.toml points cargo binstall at these names.
 # Called by the Release workflow, which uploads the archives and publishes only once every
 # target has built, and by CI on each push to main, so that a target that stops building is
@@ -10,8 +12,8 @@ name: Binaries
 on:
   workflow_call:
     inputs:
-      ref:
-        description: "The tag (vX.Y.Z) or commit to build; the archives are named after it"
+      name:
+        description: "What the archives are named after: the tag (vX.Y.Z) or the commit"
         type: string
         required: true
       upload:
@@ -41,8 +43,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -58,9 +58,9 @@ jobs:
       - name: Package
         shell: bash
         env:
-          REF: ${{ inputs.ref }}
+          NAME: ${{ inputs.name }}
         run: |
-          name="jlens-${REF#v}-${{ matrix.target }}"
+          name="jlens-${NAME#v}-${{ matrix.target }}"
           mkdir "$name"
           cp LICENSE crates/jlens-cli/README.md "$name/"
           if [ "$RUNNER_OS" = Windows ]; then

@@ -135,4 +135,4 @@ jobs:
     if: github.event_name == 'push'
     uses: ./.github/workflows/binaries.yml
     with:
-      ref: ${{ github.sha }}
+      name: ${{ github.sha }}
