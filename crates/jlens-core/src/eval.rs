@@ -645,6 +645,25 @@ impl<'a> Evaluator<'_, 'a> {
         input: &Value<'a>,
         env: &Env<'a>,
     ) -> Result<Value<'a>> {
+        // A field of a single input: the general path would wrap the input and the field in
+        // sequences, then unwrap the singleton. An array field takes the general path, which
+        // flattens or keeps it. The step's depth is counted as if it were evaluated.
+        if let [step] = steps
+            && let NodeKind::Name { name } = &step.kind
+            && !keep_singleton_array
+            && !expr.attrs.keep_array
+            && expr.attrs.group.is_none()
+            && !input.is_array()
+            && self.tracer.is_none()
+            && self.depth < self.limits.max_depth
+            && is_plain_step(step)
+        {
+            let value = functions::lookup(input, name);
+            if !value.is_array() {
+                return Ok(value);
+            }
+        }
+
         // A path starting with a variable is absolute; otherwise an input array is iterated.
         let mut input_seq =
             if input.is_array() && !matches!(steps[0].kind, NodeKind::Variable { .. }) {
@@ -1639,6 +1658,19 @@ fn procedure_name(procedure: &Node) -> Option<&str> {
         },
         _ => None,
     }
+}
+
+/// A path step without filters, grouping or bindings, whose value is its result as is.
+fn is_plain_step(step: &Node) -> bool {
+    let a = &step.attrs;
+    a.stages.is_empty()
+        && a.predicate.is_empty()
+        && a.group.is_none()
+        && !a.tuple
+        && !a.cons_array
+        && a.focus.is_none()
+        && a.index.is_none()
+        && a.ancestor_label.is_none()
 }
 
 fn first_step_name(procedure: &Node) -> Option<&str> {

@@ -16,6 +16,9 @@ All notable changes are recorded here. The format follows
 - A block (`(...)`) creates a frame for its variables only when its expressions may bind one:
   `items.(unitPrice)` takes 77 µs instead of 83 µs. `NodeKind::Block` has a new field, `frame`,
   set by post-processing.
+- A field name evaluated on a single value (`price` in `items[price > 10]`) is a lookup, without
+  the sequences of a general path: the filter + aggregate benchmark takes 56 µs instead of
+  161 µs, the shipping rule 152 µs instead of 414 µs, group-by 575 µs instead of 842 µs.
 
 ## [0.10.0]
 

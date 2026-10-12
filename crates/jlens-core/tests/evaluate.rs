@@ -339,6 +339,66 @@ fn blocks_scope_the_variables_they_bind() {
 }
 
 #[test]
+fn a_field_of_one_value_keeps_the_sequence_rules() {
+    // Results from jsonata-js 2.2.2. A name evaluated on a value that is not an array is a
+    // lookup; these check the sequence and singleton rules of the general path it skips.
+    for (expr, input, expected) in [
+        ("a", json!({"a": 1}), Some(json!(1))),
+        ("a", json!({"a": null}), Some(json!(null))),
+        ("a", json!({"a": [1]}), Some(json!([1]))),
+        ("a", json!({"a": [1, [2, 3]]}), Some(json!([1, [2, 3]]))),
+        ("a", json!({"a": []}), Some(json!([]))),
+        ("a", json!({}), None),
+        ("a", json!("text"), None),
+        ("a[]", json!({"a": 1}), Some(json!([1]))),
+        ("a[]", json!({"a": [1]}), Some(json!([1]))),
+        ("[a]", json!({"a": 1}), Some(json!([1]))),
+        ("[a]", json!({"a": [1]}), Some(json!([1]))),
+        ("a[0]", json!({"a": 5}), Some(json!(5))),
+        ("a[0]", json!({"a": [5, 6]}), Some(json!(5))),
+        ("a{\"k\": $}", json!({"a": 1}), Some(json!({"k": 1}))),
+        ("$count(a)", json!({"a": [1]}), Some(json!(1))),
+        ("$type(a)", json!({"a": [1]}), Some(json!("array"))),
+        (
+            "a.(b)",
+            json!({"a": [{"b": [1]}, {"b": [[2]]}]}),
+            Some(json!([1, [2]])),
+        ),
+        (
+            "items.(p)",
+            json!({"items": [{"p": [1, 2]}, {"p": 3}, {}]}),
+            Some(json!([1, 2, 3])),
+        ),
+        // Fields of constructed objects: a sequence, an array of arrays, a function.
+        (
+            "($o := {\"s\": [1,2].($ * 2)}; $o.(s))",
+            json!({}),
+            Some(json!([2, 4])),
+        ),
+        (
+            "($o := {\"s\": [[1]]}; $o.(s))",
+            json!({}),
+            Some(json!([[1]])),
+        ),
+        (
+            "($f := function(){1}; {\"f\": $f}.(f)())",
+            json!({}),
+            Some(json!(1)),
+        ),
+    ] {
+        assert_eq!(eval(expr, input), expected, "{expr}");
+    }
+    let err = Expression::compile("items.(p * q)")
+        .unwrap()
+        .evaluate(
+            Some(&json!({"items": [{"p": 2, "q": [5]}]})),
+            &Bindings::new(),
+        )
+        .unwrap_err();
+    assert_eq!(err.code(), "T2002");
+}
+
+#[test]
 fn size_caps_stop_huge_values() {
     let code = |source: &str, options: &Options| {
         Expression::compile(source)

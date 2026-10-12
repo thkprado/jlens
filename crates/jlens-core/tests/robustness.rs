@@ -334,6 +334,34 @@ proptest! {
             }
         }
     }
+
+    /// Evaluation takes fast paths only without a tracer; an audit takes the general path
+    /// everywhere: the results are the same.
+    #[test]
+    fn fast_paths_agree_with_an_audit(source in expression()) {
+        if let Ok(expr) = Expression::compile(&source) {
+            let options = Options::new()
+                .timeout(Duration::from_millis(50))
+                .max_depth(300)
+                .now(0)
+                .seed(1);
+            let bindings = bindings();
+            let input = input();
+            let plain = expr.evaluate_with(Some(&input), &bindings, &options);
+            let (audited, _) = expr.evaluate_audited(
+                Some(&input),
+                &bindings,
+                &options,
+                &jlens_core::audit::AuditOptions::full(),
+            );
+            let timed_out = |r: &Result<Option<serde_json::Value>, Error>| {
+                r.as_ref().is_err_and(|e| e.code() == "D1012")
+            };
+            if !timed_out(&plain) && !timed_out(&audited) {
+                prop_assert_eq!(format!("{plain:?}"), format!("{audited:?}"));
+            }
+        }
+    }
 }
 
 #[test]
