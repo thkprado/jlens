@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0]
+
+Numbers and dates at the edges: a number that overflows to infinity and a date beyond
+JavaScript's range fail with `D1001` where they arise, large numbers are formatted with every
+digit, and the loops and recursions over floating-point numbers end on NaN and infinity.
+
 ### Changed
 
 - A number that overflows to infinity fails with `D1001` where it overflows: the arithmetic
@@ -343,7 +349,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/thkprado/jlens/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/thkprado/jlens/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/thkprado/jlens/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/thkprado/jlens/compare/v0.5.0...v0.6.0
