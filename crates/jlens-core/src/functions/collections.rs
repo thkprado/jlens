@@ -401,7 +401,11 @@ pub(super) fn eval<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'
         ),
         focus => focus,
     };
-    let ast = crate::parse(&source).map_err(|e| Error::new("D3120").with("value", e.message()))?;
+    let mut ast =
+        crate::parse(&source).map_err(|e| Error::new("D3120").with("value", e.message()))?;
+    // The text may call `$eval` under a name bound outside it.
+    ast.root
+        .walk_mut(&mut |node| crate::process::mark_frame(node, true));
     ev.eval(&ast.root, &input, c.env)
         .map_err(|e| Error::new("D3121").with("value", e.message()))
 }

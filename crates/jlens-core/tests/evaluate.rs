@@ -310,6 +310,35 @@ fn order_by_raises_the_first_error_jsonata_js_raises() {
 }
 
 #[test]
+fn blocks_scope_the_variables_they_bind() {
+    // Results from jsonata-js 2.2.2. A block binds in a frame of its own only when it may
+    // bind; these check that the others still see, and never leak, the variables around them.
+    for (expr, expected) in [
+        ("($x := 1; ($x := 2); $x)", Some(json!(1))),
+        ("($x := 1; ($y := 2; $x + $y))", Some(json!(3))),
+        ("($x := 1; (($x := 2)); $x)", Some(json!(1))),
+        ("($x := 1; ($x > 0 ? ($x := 5) : 0); $x)", Some(json!(1))),
+        ("($x := 1; [1,2].($y := $); $y)", None),
+        ("[1,2].($x := $; $x * 2)", Some(json!([2, 4]))),
+        // Closures defined in a block.
+        (
+            "($f := ($n := 10; function($v){$v + $n}); [$f(1), $n])",
+            Some(json!([11])),
+        ),
+        ("($g := (function(){ $y }); $y := 5; $g())", Some(json!(5))),
+        // `$eval` binds in the frame of its caller, under any name.
+        ("( $eval('$x := 5'); $x )", Some(json!(5))),
+        ("( ($eval('$x := 5')); $x )", None),
+        ("($e := $eval; ($e('$x := 5')); $x)", None),
+        ("($e := $eval; ('$x := 5' ~> $e); $x)", None),
+        ("($e := $eval; $e('($e(\"$z := 3\"); $z)'))", Some(json!(3))),
+        ("($e := $eval; $e('(($e(\"$z := 3\")); $z)'))", None),
+    ] {
+        assert_eq!(eval(expr, json!({})), expected, "{expr}");
+    }
+}
+
+#[test]
 fn size_caps_stop_huge_values() {
     let code = |source: &str, options: &Options| {
         Expression::compile(source)

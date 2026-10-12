@@ -527,11 +527,17 @@ impl<'a> Evaluator<'_, 'a> {
                     self.eval(rhs, input, env)?
                 }
             }
-            NodeKind::Block { exprs } => {
-                let frame = self.child(env);
+            NodeKind::Block { exprs, frame } => {
+                let child;
+                let frame = if *frame {
+                    child = self.child(env);
+                    &child
+                } else {
+                    env
+                };
                 let mut result = Value::Undefined;
                 for e in exprs {
-                    result = self.eval(e, input, &frame)?;
+                    result = self.eval(e, input, frame)?;
                 }
                 result
             }

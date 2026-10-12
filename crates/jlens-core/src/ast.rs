@@ -214,6 +214,10 @@ pub enum NodeKind {
     Block {
         /// The expressions, evaluated in order.
         exprs: Vec<Node>,
+        /// The block is evaluated in a frame of its own, for the variables its expressions may
+        /// bind. Set by post-processing; a block that binds none shares its enclosing frame.
+        #[serde(skip)]
+        frame: bool,
     },
     /// `$var := value`.
     Bind {
@@ -596,7 +600,7 @@ impl Node {
                     f(e);
                 }
             }
-            NodeKind::Block { exprs } => exprs.iter().for_each(&mut f),
+            NodeKind::Block { exprs, .. } => exprs.iter().for_each(&mut f),
             NodeKind::Function { procedure, args } | NodeKind::Partial { procedure, args } => {
                 f(procedure);
                 args.iter().for_each(&mut f);
@@ -652,7 +656,7 @@ impl Node {
                     f(e);
                 }
             }
-            NodeKind::Block { exprs } => exprs.iter_mut().for_each(&mut *f),
+            NodeKind::Block { exprs, .. } => exprs.iter_mut().for_each(&mut *f),
             NodeKind::Function { procedure, args } | NodeKind::Partial { procedure, args } => {
                 f(procedure);
                 args.iter_mut().for_each(&mut *f);

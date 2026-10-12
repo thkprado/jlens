@@ -402,7 +402,7 @@ impl<'s> Walker<'s, '_> {
                 let t = self.walk(lhs, ctx, scope);
                 t.union(self.walk(rhs, ctx, scope))
             }
-            NodeKind::Block { exprs } => {
+            NodeKind::Block { exprs, .. } => {
                 let mark = scope.len();
                 let mut last = Ty::unknown();
                 for e in exprs {

@@ -57,7 +57,7 @@ fn outline(n: &Node) -> String {
         NodeKind::Fallback { op, lhs, rhs } => {
             format!("({} {} {})", outline(lhs), op.symbol(), outline(rhs))
         }
-        NodeKind::Block { exprs } => format!("({})", join(exprs, "; ")),
+        NodeKind::Block { exprs, .. } => format!("({})", join(exprs, "; ")),
         NodeKind::Bind { lhs, rhs } => format!("({} := {})", outline(lhs), outline(rhs)),
         NodeKind::Apply { lhs, rhs } => format!("({} ~> {})", outline(lhs), outline(rhs)),
         NodeKind::Function { procedure, args } => {

@@ -13,6 +13,9 @@ All notable changes are recorded here. The format follows
   instead of 1.90 ms. Results and errors are unchanged; a key with a side effect, such as one
   using `$random`, is drawn once per item (see the
   [compatibility page](docs/src/language/compatibility.md#evaluation)).
+- A block (`(...)`) creates a frame for its variables only when its expressions may bind one:
+  `items.(unitPrice)` takes 77 µs instead of 83 µs. `NodeKind::Block` has a new field, `frame`,
+  set by post-processing.
 
 ## [0.10.0]
 

@@ -46,7 +46,11 @@ impl<'a> Processor<'a> {
                 .with("token", root.type_name());
             self.report(err)?;
         }
-        // Final pass: ids, labels of ancestor slots, and UTF-16 positions.
+        let mut eval = false;
+        root.walk(&mut |node| {
+            eval |= matches!(&node.kind, NodeKind::Variable { name } if name == "eval");
+        });
+        // Final pass: ids, labels of ancestor slots, UTF-16 positions and block frames.
         let utf16 = utf16_table(self.src);
         let slots = &self.slots;
         let mut next_id = 0;
@@ -58,6 +62,7 @@ impl<'a> Processor<'a> {
                 *label = slots[*slot].label.clone();
             }
             node.attrs.ancestor_label = node.attrs.ancestor.map(|s| slots[s].label.clone());
+            mark_frame(node, eval);
         });
         Ok(root)
     }
@@ -358,7 +363,14 @@ impl<'a> Processor<'a> {
                     }
                     out.push(part);
                 }
-                let mut node = Node::new(NodeKind::Block { exprs: out }, span, pos);
+                let mut node = Node::new(
+                    NodeKind::Block {
+                        exprs: out,
+                        frame: true,
+                    },
+                    span,
+                    pos,
+                );
                 node.attrs.seeking_parent = seeking;
                 node.attrs.cons_array = cons_array;
                 node
@@ -634,7 +646,7 @@ impl<'a> Processor<'a> {
                 }
             }
             NodeKind::Parent { .. } => self.slots[slot].level += 1,
-            NodeKind::Block { exprs } => {
+            NodeKind::Block { exprs, .. } => {
                 if let Some(last) = exprs.last_mut() {
                     node.attrs.tuple = true;
                     self.seek_parent(last, slot)?;
@@ -761,13 +773,38 @@ fn tail_call_optimize_inner(mut expr: Node) -> Node {
             **rhs = tail_call_optimize(inner);
             expr
         }
-        NodeKind::Block { exprs } => {
+        NodeKind::Block { exprs, .. } => {
             if let Some(last) = exprs.pop() {
                 exprs.push(tail_call_optimize(last));
             }
             expr
         }
         _ => expr,
+    }
+}
+
+/// Decides whether a block needs a frame of its own: when one of its expressions may bind a
+/// variable in the frame it is evaluated in. Each other block gets a frame of its own if it
+/// needs one, and a lambda binds in the frame of its call, so neither is looked into.
+///
+/// `$eval` binds in the frame of its caller, as in jsonata-js, so when `eval` is set (the
+/// expression names `$eval`, or was parsed by it) a block whose expressions call a function
+/// keeps its frame too: the function called may be `$eval` under another name.
+pub(crate) fn mark_frame(node: &mut Node, eval: bool) {
+    fn binds(node: &Node, eval: bool) -> bool {
+        match &node.kind {
+            NodeKind::Bind { .. } => true,
+            NodeKind::Function { .. } | NodeKind::Apply { .. } if eval => true,
+            NodeKind::Block { .. } | NodeKind::Lambda(_) => false,
+            _ => {
+                let mut found = false;
+                node.for_each_child(|c| found = found || crate::stack::grow(|| binds(c, eval)));
+                found
+            }
+        }
+    }
+    if let NodeKind::Block { exprs, frame } = &mut node.kind {
+        *frame = exprs.iter().any(|e| binds(e, eval));
     }
 }
 
