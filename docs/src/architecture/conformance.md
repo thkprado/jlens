@@ -118,6 +118,16 @@ program; a panic is reported and the next input runs.
 Each crash becomes an ordinary test in the crate where the bug was, which runs with
 `cargo test` on every platform.
 
+Two early crashes left no input: stack overflows in `pictures` (run 38159469720) and in `parse`
+(run 38158412916), both before the targets wrote `last-input`. In October 2026 every input the
+failed runs kept was replayed: their corpora (45,148 `parse` and 17,703 `pictures` inputs),
+their `last-input` and `crash-*` files, and the seeds of every target. None crashes. The
+cached corpora cannot be downloaded, but each run executes its whole corpus before fuzzing, and
+the run of 0.9.0 (38225748988) did so for all six targets without a crash. Both crashes most
+likely had causes fixed since, which later runs found with an input: numbers in words recursing
+on the NaN day that `pictures` began to produce in the commit of its crash, and a lambda body
+whose tail calls were marked without growing the stack. They are not tracked further.
+
 ## Differential testing
 
 The suite covers the cases its authors thought of. Differential testing covers others: it
