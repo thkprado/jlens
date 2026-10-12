@@ -390,7 +390,8 @@ pub struct Options {
     /// `D1011`.
     pub max_depth: Option<usize>,
     /// The evaluation's timestamp, in milliseconds since the epoch, for `$now()` and
-    /// `$millis()`. Default: the system clock when the evaluation starts.
+    /// `$millis()`. Default: the system clock, read once, the first time the evaluation needs
+    /// it.
     pub now: Option<i64>,
     /// Seed for `$random()` and `$shuffle()`. Default: one taken from the system clock.
     pub seed: Option<u64>,

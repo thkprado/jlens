@@ -28,6 +28,9 @@ use crate::value::{
 pub(crate) struct Frame<'a> {
     vars: RefCell<HashMap<String, Value<'a>, foldhash::fast::RandomState>>,
     parent: Option<Env<'a>>,
+    /// In the root frame, the input of the evaluation (`$$`) when no binding of `$` hides it;
+    /// keeping it out of `vars` spares every evaluation a binding.
+    input: Value<'a>,
 }
 
 /// A shared reference to a [`Frame`].
@@ -38,6 +41,7 @@ impl<'a> Frame<'a> {
         Rc::new(Frame {
             vars: RefCell::new(HashMap::default()),
             parent: parent.cloned(),
+            input: Value::Undefined,
         })
     }
 
@@ -50,6 +54,7 @@ impl<'a> Frame<'a> {
             }
             match &frame.parent {
                 Some(p) => frame = p,
+                None if name == "$" => return frame.input.clone(),
                 None => return frame.builtin(name),
             }
         }
@@ -110,14 +115,17 @@ pub(crate) const DEFAULT_MAX_RESULT_SIZE: usize = 1 << 28;
 pub(crate) struct Evaluator<'t, 'a> {
     depth: usize,
     limits: Limits,
-    started: Instant,
+    /// When the evaluation started, read only when it has a timeout.
+    started: Option<Instant>,
     /// Frames that may be part of reference cycles (a frame binding a closure that captures
     /// it). Their bindings are cleared when the evaluation ends so the memory is reclaimed.
     cyclic: Vec<Weak<Frame<'a>>>,
     regexes: HashMap<(String, String), Rc<Regex>>,
-    /// Milliseconds since the epoch, fixed for the whole evaluation (`$now`, `$millis`).
-    timestamp: f64,
-    /// State of the xorshift generator behind `$random` and `$shuffle`.
+    /// The system clock, read once, the first time the evaluation needs it: for its
+    /// timestamp (`$now`, `$millis`) or the seed of `$random` and `$shuffle`.
+    clock: Option<Duration>,
+    /// State of the xorshift generator behind `$random` and `$shuffle`; 0 until it is seeded
+    /// from the clock.
     rng: u64,
     /// Receives evaluation events (auditing, logging). `None` costs one check per hook.
     tracer: Option<&'t mut dyn Tracer>,
@@ -205,31 +213,26 @@ pub(crate) fn evaluate<'a, 'v>(
     }
     let mut ev = Evaluator {
         depth: 0,
+        started: limits.timeout.map(|_| Instant::now()),
+        rng: limits.seed.map_or(0, |seed| splitmix64(seed) | 1),
         limits,
-        started: Instant::now(),
         cyclic: Vec::new(),
         regexes: HashMap::new(),
-        timestamp: 0.0,
-        rng: 0,
+        clock: None,
         tracer,
         source,
     };
-    let since_epoch = || {
-        web_time::SystemTime::now()
-            .duration_since(web_time::UNIX_EPOCH)
-            .unwrap_or_default()
-    };
-    ev.timestamp = match ev.limits.now {
-        Some(millis) => millis as f64,
-        None => since_epoch().as_millis() as f64,
-    };
-    ev.rng = match ev.limits.seed {
-        Some(seed) => splitmix64(seed) | 1,
-        None => (since_epoch().as_nanos() as u64) | 1,
-    };
-    let env = Frame::new(None);
+    let mut input = input;
+    let env = Rc::new(Frame {
+        vars: RefCell::new(HashMap::default()),
+        parent: None,
+        input: input.clone(),
+    });
     for (name, value) in variables {
-        ev.bind(&env, name, value);
+        // The input takes the place of a variable named `$`, as it did when it was bound.
+        if name != "$" {
+            ev.bind(&env, name, value);
+        }
     }
     for (name, function) in bindings.functions() {
         ev.bind(
@@ -238,19 +241,20 @@ pub(crate) fn evaluate<'a, 'v>(
             Value::function(Function::Host(function.clone())),
         );
     }
-    let mut input = input;
-    ev.bind(&env, "$", input.clone());
     if let Value::Array(a) = &input
         && !a.is_sequence()
     {
         // An input array is wrapped so that it counts as a single context value.
         input = Value::array(vec![input.clone()], SEQUENCE | OUTER_WRAPPER);
     }
-    if let Some(t) = ev.tracer.as_deref_mut() {
-        t.begin(&EvalInfo {
-            source: &ast.source,
-            timestamp: ev.timestamp,
-        });
+    if ev.tracer.is_some() {
+        let timestamp = ev.timestamp();
+        if let Some(t) = ev.tracer.as_deref_mut() {
+            t.begin(&EvalInfo {
+                source: &ast.source,
+                timestamp,
+            });
+        }
     }
     let result = ev.eval(&ast.root, &input, &env).and_then(|v| {
         let limit = ev.limits.max_result_size;
@@ -285,13 +289,28 @@ fn splitmix64(seed: u64) -> u64 {
 }
 
 impl<'a> Evaluator<'_, 'a> {
+    /// The system clock as a duration since the epoch, read once per evaluation.
+    fn clock(&mut self) -> Duration {
+        *self.clock.get_or_insert_with(|| {
+            web_time::SystemTime::now()
+                .duration_since(web_time::UNIX_EPOCH)
+                .unwrap_or_default()
+        })
+    }
+
     /// The evaluation timestamp in milliseconds since the epoch.
-    pub(crate) fn timestamp(&self) -> f64 {
-        self.timestamp
+    pub(crate) fn timestamp(&mut self) -> f64 {
+        match self.limits.now {
+            Some(millis) => millis as f64,
+            None => self.clock().as_millis() as f64,
+        }
     }
 
     /// A pseudo-random number in [0, 1).
     pub(crate) fn random(&mut self) -> f64 {
+        if self.rng == 0 {
+            self.rng = (self.clock().as_nanos() as u64) | 1;
+        }
         // xorshift64*
         let mut x = self.rng;
         x ^= x >> 12;
@@ -345,8 +364,8 @@ impl<'a> Evaluator<'_, 'a> {
 
     /// Fails with `D1012` once the timeout has passed, or `U1003` once the token is cancelled.
     fn time_limits(&self) -> Result<()> {
-        if let Some(timeout) = self.limits.timeout
-            && self.started.elapsed() > timeout
+        if let (Some(timeout), Some(started)) = (self.limits.timeout, self.started)
+            && started.elapsed() > timeout
         {
             return Err(Error::new("D1012").with("value", timeout.as_millis() as u64));
         }

@@ -685,3 +685,37 @@ fn a_builtin_is_one_value_per_evaluation() {
     );
     assert_eq!(eval("$sum = $count", json!(null)), Some(json!(false)));
 }
+
+#[test]
+fn the_clock_is_read_once_per_evaluation() {
+    // Without `Options::now` and `seed`, the timestamp and the seed come from one clock read,
+    // the first time the evaluation needs it.
+    let result = eval(
+        "[$now() = $now(), $millis() = $millis(), $toMillis($now()) = $millis(), $random() != $random()]",
+        Value::Null,
+    );
+    assert_eq!(result, Some(json!([true, true, true, true])));
+}
+
+#[test]
+fn the_input_is_found_as_a_variable_unless_it_is_hidden() {
+    let input = json!({"a": 1});
+    assert_eq!(eval("[1].$$.a", input.clone()), Some(json!(1)));
+    assert_eq!(eval("($$ := 5; $$)", input.clone()), Some(json!(5)));
+    assert_eq!(
+        eval("($f := function(){ $$.a }; {'a': 2}.$f())", input.clone()),
+        Some(json!(1))
+    );
+    // A binding named `$` does not hide the input, as before.
+    let bindings = Bindings::new().var("$", 7);
+    let result = Expression::compile("$$")
+        .unwrap()
+        .evaluate(Some(&input), &bindings)
+        .unwrap();
+    assert_eq!(result, Some(input));
+    let result = Expression::compile("$$")
+        .unwrap()
+        .evaluate(None, &bindings)
+        .unwrap();
+    assert_eq!(result, None);
+}

@@ -25,6 +25,12 @@ All notable changes are recorded here. The format follows
 - The result is converted to JSON in one pass, counting its size against
   `Options::max_result_size` while converting it, instead of measuring it first: returning the
   whole 200-order input (`$`) takes 236 µs instead of 271 µs.
+- An evaluation sets up less before it starts: the system clock is read once, the first time
+  `$now`, `$millis`, `$random` or `$shuffle` needs it, instead of twice at the start; the start
+  time only with a timeout; and the input (`$$`) is kept in the root frame instead of being bound
+  as a variable. Evaluating `1` takes 106 ns instead of 350 ns, the path benchmark 676 ns
+  instead of 927 ns. Without `Options::now`, the timestamp is the clock when the evaluation
+  first needs it rather than when it starts.
 
 ## [0.10.0]
 
