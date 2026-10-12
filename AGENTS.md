@@ -21,9 +21,9 @@ in `docs/`.
 | `tests/conformance` | `baseline.txt`, `overrides.json`, `REPORT.md` |
 | `docs/src` | the book; `language/functions.md` and `language/errors.md` are generated |
 | `docs/examples` | sample documents for the book's examples |
-| `xtask/src` | `cargo xtask` commands: conformance, gen-docs, doc-check, differential, fuzz-seed, wasm, wasm-test, serve |
+| `xtask/src` | `cargo xtask` commands: conformance, gen-docs, doc-check, differential, fuzz-seed, fuzz-replay, wasm, wasm-test, serve |
 | `benches/` | the benchmark workload; `benches/compare` compares jlens with jsonata-js (npm): speed, the book's examples, and `cargo xtask differential` |
-| `fuzz/` | cargo-fuzz targets (nightly, Linux; outside the workspace); corpora seeded by `cargo xtask fuzz-seed`, run weekly by `.github/workflows/fuzz.yml` |
+| `fuzz/` | cargo-fuzz targets (nightly, Linux; outside the workspace), their bodies in `src/targets.rs`; corpora seeded by `cargo xtask fuzz-seed`, run weekly by `.github/workflows/fuzz.yml`; `cargo xtask fuzz-replay` reruns saved inputs on any platform |
 | `examples/web-editor` | the browser demo (CodeMirror 6, no build step) |
 | `fixtures/` | sample inputs used by tests and guides |
 

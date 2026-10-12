@@ -1,4 +1,7 @@
-//! What the fuzz targets share: a small stack, the limits of an evaluation and its bindings.
+//! What the fuzz targets share: a small stack, the limits of an evaluation and its bindings, and
+//! the bodies of the targets (`targets`).
+
+pub mod targets;
 
 use std::path::PathBuf;
 use std::sync::OnceLock;

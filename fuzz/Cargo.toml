@@ -11,12 +11,19 @@ publish = false
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
+libfuzzer-sys = { version = "0.4", optional = true }
 jlens-core = { path = "../crates/jlens-core" }
 jlens-schema = { path = "../crates/jlens-schema" }
 # As jlens-core depends on it.
 regress = { package = "jlens-regress", path = "../crates/jlens-regress", default-features = false, features = ["std", "prohibit-unsafe"] }
 serde_json = "1"
+
+[features]
+default = ["libfuzzer"]
+# The fuzz targets, which link libFuzzer.
+libfuzzer = ["dep:libfuzzer-sys"]
+# The `replay` program, which does not.
+replay = []
 
 # A workspace of its own, so that the main workspace does not claim this crate.
 [workspace]
@@ -28,6 +35,7 @@ path = "fuzz_targets/parse.rs"
 test = false
 doc = false
 bench = false
+required-features = ["libfuzzer"]
 
 [[bin]]
 name = "parse_recover"
@@ -35,6 +43,7 @@ path = "fuzz_targets/parse_recover.rs"
 test = false
 doc = false
 bench = false
+required-features = ["libfuzzer"]
 
 [[bin]]
 name = "evaluate"
@@ -42,6 +51,7 @@ path = "fuzz_targets/evaluate.rs"
 test = false
 doc = false
 bench = false
+required-features = ["libfuzzer"]
 
 [[bin]]
 name = "regex"
@@ -49,6 +59,7 @@ path = "fuzz_targets/regex.rs"
 test = false
 doc = false
 bench = false
+required-features = ["libfuzzer"]
 
 [[bin]]
 name = "pictures"
@@ -56,6 +67,7 @@ path = "fuzz_targets/pictures.rs"
 test = false
 doc = false
 bench = false
+required-features = ["libfuzzer"]
 
 [[bin]]
 name = "language_service"
@@ -63,3 +75,13 @@ path = "fuzz_targets/language_service.rs"
 test = false
 doc = false
 bench = false
+required-features = ["libfuzzer"]
+
+# Runs saved inputs through the targets without libFuzzer: `cargo xtask fuzz-replay`.
+[[bin]]
+name = "replay"
+path = "src/replay.rs"
+test = false
+doc = false
+bench = false
+required-features = ["replay"]

@@ -33,7 +33,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           cargo fmt --manifest-path fuzz/Cargo.toml --check
-          cargo clippy --manifest-path fuzz/Cargo.toml --all-targets
+          cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --all-features
       - run: cargo test --workspace
       - name: Generated docs are up to date
         run: cargo xtask gen-docs --check

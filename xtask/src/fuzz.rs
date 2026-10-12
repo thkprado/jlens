@@ -1,10 +1,12 @@
 //! `cargo xtask fuzz-seed`: seeds the corpora of the fuzz targets (`fuzz/`) with the cases of
-//! the JSONata suite, and with a few regular expressions and pictures.
+//! the JSONata suite, and with a few regular expressions and pictures. `cargo xtask fuzz-replay`:
+//! runs saved inputs through a target, without libFuzzer.
 
 use std::collections::BTreeSet;
-use std::fs;
+use std::process::Command;
+use std::{env, fs};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::Value as JsonValue;
 
 /// Regular expressions, as the `regex` target reads them: flag bits (`i` is 1, `m` 2, `s` 4,
@@ -96,6 +98,39 @@ pub fn seed() -> Result<()> {
         input
     });
     write("pictures", &pictures.collect())
+}
+
+/// Runs saved inputs through the body of a fuzz target with the `replay` program of `fuzz/`,
+/// which does not link libFuzzer. It builds with optimizations and debug assertions, as the
+/// `Fuzz` workflow does: an unoptimized build has larger stack frames than the 1 MB thread was
+/// sized for.
+pub fn replay(args: &[String]) -> Result<()> {
+    if args.len() < 2 {
+        bail!(
+            "fuzz-replay needs a target and the inputs to run\n\n{}",
+            super::USAGE
+        );
+    }
+    let status = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+        .args(["run", "--quiet", "--release", "--manifest-path"])
+        .arg(super::root().join("fuzz/Cargo.toml"))
+        .args([
+            "--no-default-features",
+            "--features",
+            "replay",
+            "--bin",
+            "replay",
+            "--",
+        ])
+        .args(args)
+        .env("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS", "true")
+        .env("CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS", "true")
+        .status()
+        .context("running the replay program")?;
+    if !status.success() {
+        bail!("replaying {} failed", args[0]);
+    }
+    Ok(())
 }
 
 fn suite_cases() -> Result<Vec<JsonValue>> {

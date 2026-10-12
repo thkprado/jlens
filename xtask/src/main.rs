@@ -24,6 +24,8 @@ commands:
                                     run N generated expressions (1000) in jlens and jsonata-js
                                     and report where they differ (needs benches/compare installed)
   fuzz-seed                         seed the corpora of the fuzz targets with the JSONata suite
+  fuzz-replay <target> <path>...    run saved inputs (files, or directories of them) through a
+                                    fuzz target, without libFuzzer, on any platform
   wasm [--dev]                      build the browser package in crates/jlens-wasm/pkg
   wasm-test [--require-browser] [--example]
                                     build the package and test it in Node.js and a headless browser
@@ -39,6 +41,7 @@ fn main() -> Result<()> {
         Some("doc-check") => docs::check(),
         Some("differential") => differential::run(&args[1..]),
         Some("fuzz-seed") => fuzz::seed(),
+        Some("fuzz-replay") => fuzz::replay(&args[1..]),
         Some("wasm") => wasm::build(args.iter().any(|a| a == "--dev")),
         Some("wasm-test") => wasm::test(
             args.iter().any(|a| a == "--require-browser"),

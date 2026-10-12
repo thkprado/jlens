@@ -93,14 +93,27 @@ overflow stops the target before libFuzzer can write the input; the targets writ
 the file that `JLENS_FUZZ_LAST_INPUT` names before running it, and the workflow uploads that file
 as `last-input`.
 
-cargo-fuzz needs nightly Rust and Linux or macOS. To reproduce a crash, on Linux:
+cargo-fuzz needs nightly Rust and Linux or macOS. To fuzz, on Linux:
 
 ```sh
 cargo install cargo-fuzz
 cargo xtask fuzz-seed
-cargo +nightly fuzz run evaluate --sanitizer none --debug-assertions            # fuzz
-cargo +nightly fuzz run evaluate --sanitizer none --debug-assertions <crash file>  # one input
+cargo +nightly fuzz run evaluate --sanitizer none --debug-assertions
 ```
+
+The bodies of the targets live in `fuzz/src/targets.rs`, apart from libFuzzer. To reproduce a
+crash on any platform, with stable Rust, replay the saved input, such as the `last-input` or
+`crash-*` file of a failed run, or a whole directory of them, such as a corpus:
+
+```sh
+cargo xtask fuzz-replay evaluate fuzz-evaluate/last-input
+cargo xtask fuzz-replay parse fuzz/corpus/parse
+```
+
+The replay runs each input through the target's body on the same 1 MB thread, in an optimized
+build with debug assertions, as the workflow does. It prints the path of each input before
+running it, so the last path printed names the input of a stack overflow, which stops the
+program; a panic is reported and the next input runs.
 
 Each crash becomes an ordinary test in the crate where the bug was, which runs with
 `cargo test` on every platform.

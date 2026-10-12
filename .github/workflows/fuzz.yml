@@ -3,8 +3,7 @@ name: Fuzz
 # Coverage-guided fuzzing of the parser, the evaluator, regular expressions, pictures and the
 # language service (cargo-fuzz, libFuzzer; see "Fuzzing" in docs/src/architecture/conformance.md).
 # Each target starts from the seeds of `cargo xtask fuzz-seed` and from the corpus of its last run. A crash fails the run and uploads the input
-# that caused it: reproduce it on Linux with
-# `cargo +nightly fuzz run <target> --sanitizer none --debug-assertions <file>`.
+# that caused it: reproduce it on any platform with `cargo xtask fuzz-replay <target> <file>`.
 
 on:
   schedule:

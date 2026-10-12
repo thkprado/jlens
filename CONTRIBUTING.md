@@ -43,6 +43,7 @@ cargo xtask serve                              # serve the repository, for examp
 (cd benches/compare && npm install && node compare.mjs && node doc-examples.mjs)
 cargo xtask differential                       # generated expressions, jlens against jsonata-js
 cargo +nightly fuzz run evaluate --sanitizer none --debug-assertions  # fuzzing, Linux only
+cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs, any platform
 ```
 
 ## Guidelines
