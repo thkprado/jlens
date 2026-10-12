@@ -143,8 +143,8 @@ fn number_to_words(value: f64, ordinal: bool) -> String {
             words
         }
     }
-    // A date beyond JavaScript's range has NaN fields (the day of the year, the week); written
-    // as nothing, like roman numerals and letters. jsonata-js recurses until its stack overflows.
+    // NaN and infinity (from a `Source`) are written as nothing, like roman numerals and letters.
+    // jsonata-js recurses until its stack overflows.
     if !value.is_finite() {
         return String::new();
     }
@@ -684,10 +684,26 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// The range of a JavaScript `Date`: 100,000,000 days on either side of 1970. Dates beyond it
+/// fail (`$fromMillis`) or are not dates (`$toMillis`); within it every component is exact.
+const MAX_MILLIS: f64 = 8.64e15;
+
 /// `Date.UTC(year, monthIndex, day, hours, minutes, seconds, millis)`, with JavaScript's
 /// normalization of out-of-range fields and of two-digit years. Like V8, it gives NaN for a
-/// year beyond ±1,000,000 or a month beyond ±10,000,000, and for a time beyond ±8.64e15 ms.
+/// time beyond ±8.64e15 ms.
 fn date_utc(year: f64, month: f64, day: f64, h: f64, mi: f64, s: f64, ms: f64) -> f64 {
+    let time = calendar_millis(year, month, day, h, mi, s, ms);
+    if time.abs() > MAX_MILLIS {
+        f64::NAN
+    } else {
+        time
+    }
+}
+
+/// `date_utc` without the range of `Date`, for the dates that a component of a date in range is
+/// counted from, which can lie beyond it (1 January of -271821). NaN for a year beyond
+/// ±1,000,000 or a month beyond ±10,000,000, as in V8, which keeps the arithmetic in `i64`.
+fn calendar_millis(year: f64, month: f64, day: f64, h: f64, mi: f64, s: f64, ms: f64) -> f64 {
     let fields = [year, month, day, h, mi, s, ms];
     if fields.iter().any(|f| !f.is_finite()) {
         return f64::NAN;
@@ -703,12 +719,11 @@ fn date_utc(year: f64, month: f64, day: f64, h: f64, mi: f64, s: f64, ms: f64) -
     let (y, m) = (year as i64, month as i64);
     let days =
         days_from_civil(y + m.div_euclid(12), m.rem_euclid(12) + 1, 1) as f64 + day.trunc() - 1.0;
-    let time = days * MILLIS_IN_A_DAY
+    days * MILLIS_IN_A_DAY
         + h.trunc() * 3_600_000.0
         + mi.trunc() * 60_000.0
         + s.trunc() * 1000.0
-        + ms.trunc();
-    if time.abs() > 8.64e15 { f64::NAN } else { time }
+        + ms.trunc()
 }
 
 /// The UTC fields of a timestamp, like the `getUTC*` methods of `Date`.
@@ -746,7 +761,7 @@ fn fields(millis: f64) -> Fields {
 /// ISO 8601: the week (and the month-week in XPath F&O) starts on the Monday of the week that
 /// contains the first Thursday.
 fn start_of_first_week(year: i64, month: i64) -> f64 {
-    let jan1 = date_utc(year as f64, month as f64, 1.0, 0.0, 0.0, 0.0, 0.0);
+    let jan1 = calendar_millis(year as f64, month as f64, 1.0, 0.0, 0.0, 0.0, 0.0);
     let mut day = fields(jan1).weekday;
     if day == 0 {
         day = 7;
@@ -784,7 +799,7 @@ fn fragment(date: &Fields, component: char) -> Component {
         'M' => n(date.month + 1),
         'D' => n(date.day),
         'd' => {
-            let today = date_utc(
+            let today = calendar_millis(
                 date.year as f64,
                 date.month as f64,
                 date.day as f64,
@@ -793,13 +808,13 @@ fn fragment(date: &Fields, component: char) -> Component {
                 0.0,
                 0.0,
             );
-            let first = date_utc(date.year as f64, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0);
+            let first = calendar_millis(date.year as f64, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0);
             Component::Number((today - first) / MILLIS_IN_A_DAY + 1.0)
         }
         'F' => n(if date.weekday == 0 { 7 } else { date.weekday }),
         'W' => {
             let start = start_of_first_week(date.year, 0);
-            let today = date_utc(
+            let today = calendar_millis(
                 date.year as f64,
                 date.month as f64,
                 date.day as f64,
@@ -820,7 +835,7 @@ fn fragment(date: &Fields, component: char) -> Component {
         }
         'w' => {
             let start = start_of_first_week(date.year, date.month);
-            let today = date_utc(
+            let today = calendar_millis(
                 date.year as f64,
                 date.month as f64,
                 date.day as f64,
@@ -1078,7 +1093,12 @@ pub(crate) fn from_millis(
         picture.unwrap_or("[Y0001]-[M01]-[D01]T[H01]:[m01]:[s01].[f001][Z01:01t]"),
     )?;
     let offset_millis = (60.0 * offset_hours + offset_minutes) * 60_000.0;
-    let date = fields(millis + offset_millis);
+    // jsonata-js writes every component of a date beyond the range as "NaN".
+    let local = millis + offset_millis;
+    if local.abs() > MAX_MILLIS {
+        return Err(Error::new("D1001").with("value", crate::value::json_number(millis)));
+    }
+    let date = fields(local);
 
     let mut out = String::new();
     for part in &spec {
@@ -1455,7 +1475,13 @@ fn parse_datetime(
     if tz != 0.0 && !tz.is_nan() {
         millis -= tz * 60_000.0;
     }
-    Ok(Some(millis))
+    // jsonata-js checks the range before the offset, so it can return a date that
+    // `$fromMillis` rejects.
+    Ok(Some(if millis.abs() > MAX_MILLIS {
+        f64::NAN
+    } else {
+        millis
+    }))
 }
 
 #[cfg(test)]

@@ -146,9 +146,10 @@ pub fn run(args: &[String]) -> Result<()> {
         } else if exact_digits(expr, &actual, expected) {
             exact += 1;
         } else if actual["error"] == "D1001" {
-            // jlens raises D1001 only where a number overflows to infinity (`1 / 0`), which
+            // jlens raises D1001 where a number overflows to infinity (`1 / 0`), which
             // jsonata-js passes on: to its result, where JSON writes `null`, or to an operator
-            // that raises D1001 or another error later.
+            // that raises D1001 or another error later. `$fromMillis` raises it for a date
+            // beyond JavaScript's range, which jsonata-js writes as "NaN".
             overflowed += 1;
         } else {
             divergences.push(json!({
@@ -175,7 +176,7 @@ pub fn run(args: &[String]) -> Result<()> {
          {split} (jsonata-js split a character), {mangled} (regex left of ?? or ?:), \
          {raced} (concurrent errors), \
          {mutated} (jsonata-js changed its input), {flagged} (wildcard over a sequence), \
-         {dropped} (dropped quirk), {overflowed} (overflow to infinity), \
+         {dropped} (dropped quirk), {overflowed} (number out of range), \
          {exact} (exact digits of a large number)"
     );
     if !divergences.is_empty() {

@@ -615,9 +615,30 @@ fn fuzz_crashes_stay_fixed() {
             "$toMillis('197001', '[Y,99999999999999999999][M01]')",
             Ok(json!(null)),
         ),
-        // Words for a NaN field (a date beyond JavaScript's range) recursed forever.
-        ("$fromMillis(1e17, '[dw]|[dI]|[d]')", Ok(json!("||NaN"))),
-        ("$fromMillis(0, '[dwo]', '10010200101041')", Ok(json!(""))),
+        // A date beyond JavaScript's range (±8.64e15 ms after the offset) fails. Its fields used
+        // to be NaN in part, and words for them recursed forever.
+        ("$fromMillis(1e17, '[dw]|[dI]|[d]')", Err("D1001")),
+        ("$fromMillis(1e17, '[Y0001]')", Err("D1001")),
+        ("$fromMillis(-1e300)", Err("D1001")),
+        ("$fromMillis(0, '[dwo]', '10010200101041')", Err("D1001")),
+        ("$fromMillis(8.64e15 + 1)", Err("D1001")),
+        ("$fromMillis(8.64e15, '[Y]', '+0100')", Err("D1001")),
+        ("$fromMillis(8.64e15, '[Y]', '-0100')", Ok(json!("275760"))),
+        // Within the range every component is exact, also where the day of the year or the week
+        // counts from a date beyond it (jsonata-js: "-271821 NaN NaN NaN").
+        (
+            "$fromMillis(-8.64e15, '[Y] [d] [W] [X] [w] [x]')",
+            Ok(json!("-271821 110 16 -271821 4 4")),
+        ),
+        (
+            "$fromMillis(8.64e15, '[Y] [d] [W] [X]')",
+            Ok(json!("275760 257 37 275760")),
+        ),
+        // A date that the offset moves beyond the range is not a date (jsonata-js returns it).
+        (
+            "$toMillis('275760-09-13T00:00-0100', '[Y]-[M]-[D]T[H]:[m][Z0000]')",
+            Ok(json!(null)),
+        ),
         // A number that overflows fails where it overflows, so no expression gives infinity to
         // a function; `infinite_input_ends` passes it from a source.
         ("$formatInteger(1e308 * 10, 'w')", Err("D1001")),

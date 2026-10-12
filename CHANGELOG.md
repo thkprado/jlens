@@ -13,6 +13,12 @@ All notable changes are recorded here. The format follows
   infinity on, and JSON writes it as `null` in a result. `$average` of numbers whose sum
   overflows now gives their mean
   ([compatibility notes](docs/src/language/compatibility.md#evaluation)).
+- `$fromMillis` fails with `D1001` for a date beyond JavaScript's range (±8.64e15 ms after the
+  time zone), where jsonata-js writes "NaN" for every component. jlens used to write a year
+  computed past the range (`$fromMillis(1e17)` was "0843-11-07T09:46:40.000Z") with NaN for the
+  day of the year and the week. Within the range every component is exact, also near its ends,
+  where jsonata-js writes NaN for the day of the year and the week
+  ([compatibility notes](docs/src/language/compatibility.md#evaluation)).
 
 ### Fixed
 
