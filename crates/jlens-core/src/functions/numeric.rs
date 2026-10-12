@@ -191,18 +191,45 @@ pub(super) fn format_base<'a>(
     Ok(Value::string(to_radix(value, radix as u32)))
 }
 
-/// `Number.prototype.toString(radix)` for integral values.
+/// `Number.prototype.toString(radix)` for integral values, with every digit exact: from 2^53, V8
+/// writes zeros for the digits below the number's precision in a radix that is not a power of two.
 fn to_radix(value: f64, radix: u32) -> String {
-    if radix == 10 {
+    if radix == 10 || !value.is_finite() {
         return js_number(value);
     }
     let negative = value < 0.0;
-    let mut n = value.abs() as u128;
+    // The integer as 32-bit limbs, least significant first: its mantissa shifted by its exponent.
+    let bits = value.abs().to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let fraction = bits & ((1 << 52) - 1);
+    let (mantissa, shift) = if exponent == 0 {
+        (fraction, -1074)
+    } else {
+        (fraction | 1 << 52, exponent - 1075)
+    };
+    let mut limbs = if shift < 0 {
+        let n = mantissa >> shift.unsigned_abs().min(63);
+        vec![n as u32, (n >> 32) as u32]
+    } else {
+        let mut limbs = vec![0; (shift / 32) as usize];
+        let wide = u128::from(mantissa) << (shift % 32);
+        limbs.extend([wide as u32, (wide >> 32) as u32, (wide >> 64) as u32]);
+        limbs
+    };
+    let divisor = u64::from(radix);
     let mut digits = Vec::new();
     loop {
-        digits.push(std::char::from_digit((n % u128::from(radix)) as u32, radix).unwrap_or('0'));
-        n /= u128::from(radix);
-        if n == 0 {
+        let mut remainder = 0;
+        for limb in limbs.iter_mut().rev() {
+            let current = remainder << 32 | u64::from(*limb);
+            *limb = (current / divisor) as u32;
+            remainder = current % divisor;
+        }
+        digits.push(std::char::from_digit(remainder as u32, radix).unwrap_or('0'));
+        while limbs.last() == Some(&0) {
+            limbs.pop();
+        }
+        if limbs.is_empty() {
             break;
         }
     }
@@ -212,9 +239,10 @@ fn to_radix(value: f64, radix: u32) -> String {
     digits.iter().rev().collect()
 }
 
-/// `Number.prototype.toFixed`: rounds half away from zero on the exact binary value.
+/// `Number.prototype.toFixed`: rounds half away from zero on the exact binary value. From 1e21,
+/// where JavaScript switches to exponent notation (`1e+21`), it keeps writing digits.
 fn to_fixed(x: f64, dp: usize) -> String {
-    if !x.is_finite() || x.abs() >= 1e21 {
+    if !x.is_finite() {
         return js_number(x);
     }
     let exact = format!("{:.*}", dp + 30, x.abs());
@@ -684,6 +712,36 @@ mod tests {
         assert_eq!(fmt(0.14, "01%"), "14%");
         assert_eq!(fmt(-6.0, "000"), "-006");
         assert_eq!(fmt(1e6, "#,##0"), "1,000,000");
+    }
+
+    #[test]
+    fn format_number_from_1e21_writes_digits() {
+        assert_eq!(fmt(1e21, "#,##0.00"), "1,000,000,000,000,000,000,000.00");
+        assert_eq!(fmt(1e20, "0%"), "10000000000000000000000%");
+        assert_eq!(fmt(-1.5e22, "0"), "-15000000000000000000000");
+        // The exact binary value, as below 1e21 (123456789012345680000 writes ...683,968).
+        assert_eq!(fmt(1e23, "0"), "99999999999999991611392");
+        assert_eq!(fmt(1e300, "#,##0").len(), 301 + 100);
+    }
+
+    #[test]
+    fn format_base_writes_exact_digits() {
+        assert_eq!(
+            to_radix(1e30, 3),
+            "212120220222112010021212002200000020022221100201112201012210221"
+        );
+        assert_eq!(to_radix(2e30, 36), "5dwijtb562osg8s15iww");
+        assert_eq!(
+            to_radix(1e300, 16),
+            format!("17e43c8800759c{}", "0".repeat(236))
+        );
+        assert_eq!(
+            to_radix(-f64::MAX, 2),
+            format!("-{}", "1".repeat(53) + &"0".repeat(971))
+        );
+        assert_eq!(to_radix(0.0, 7), "0");
+        assert_eq!(to_radix(-0.0, 7), "0");
+        assert_eq!(to_radix(f64::NAN, 16), "NaN");
     }
 
     #[test]

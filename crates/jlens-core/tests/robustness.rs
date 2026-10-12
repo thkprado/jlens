@@ -577,7 +577,11 @@ fn fuzz_crashes_stay_fixed() {
         // Rounding a huge number to many decimals overflowed.
         (
             "$formatNumber(1e300, '##4.11111111111111111101')",
-            Ok(json!("1e+300.00000000000000000000")),
+            Ok(json!(format!(
+                "{}.{}",
+                format!("{:.0}", 1e300),
+                "0".repeat(20)
+            ))),
         ),
         ("$round(1e300, 20)", Ok(json!(1e300))),
         // Width modifiers beyond the string limit.

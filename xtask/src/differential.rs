@@ -6,7 +6,7 @@
 //! and writes its outcomes next to them; the divergences are written to
 //! `target/differential/divergences.json`.
 //!
-//! Nine kinds of disagreement are not divergences, and are counted apart (see "Differential
+//! Ten kinds of disagreement are not divergences, and are counted apart (see "Differential
 //! testing" in `docs/src/architecture/conformance.md`): a JavaScript exception inside jsonata-js,
 //! which has no error code to compare; a case jsonata-js never finished; a jsonata-js result
 //! with half of a character, which a jlens string cannot hold; an expression with a
@@ -14,8 +14,9 @@
 //! different error codes from an expression whose array or object constructors jsonata-js
 //! evaluates concurrently; an evaluation in which jsonata-js changed its input document; a
 //! wildcard that gives jsonata-js's internal flag `sequence` as a `true` item; an expression
-//! that may meet one of the jsonata-js quirks that jlens dropped; and a number that overflows to
-//! infinity, where jlens fails and jsonata-js goes on.
+//! that may meet one of the jsonata-js quirks that jlens dropped; a number that overflows to
+//! infinity, where jlens fails and jsonata-js goes on; and a large number whose digits jlens
+//! writes exactly.
 
 use std::fs;
 use std::process::Command;
@@ -106,7 +107,7 @@ pub fn run(args: &[String]) -> Result<()> {
         .max_depth(MAX_DEPTH);
     let (mut agreed, mut limits, mut crashed, mut hung, mut split) = (0, 0, 0, 0, 0);
     let (mut mangled, mut raced, mut mutated, mut flagged, mut dropped) = (0, 0, 0, 0, 0);
-    let mut overflowed = 0;
+    let (mut overflowed, mut exact) = (0, 0);
     let mut divergences = Vec::new();
     for ((expr, input), expected) in cases.iter().zip(&mut reference) {
         let changed_input = expected
@@ -142,6 +143,8 @@ pub fn run(args: &[String]) -> Result<()> {
             flagged += 1;
         } else if dropped_quirk(expr) {
             dropped += 1;
+        } else if exact_digits(expr, &actual, expected) {
+            exact += 1;
         } else if actual["error"] == "D1001" {
             // jlens raises D1001 only where a number overflows to infinity (`1 / 0`), which
             // jsonata-js passes on: to its result, where JSON writes `null`, or to an operator
@@ -172,7 +175,8 @@ pub fn run(args: &[String]) -> Result<()> {
          {split} (jsonata-js split a character), {mangled} (regex left of ?? or ?:), \
          {raced} (concurrent errors), \
          {mutated} (jsonata-js changed its input), {flagged} (wildcard over a sequence), \
-         {dropped} (dropped quirk), {overflowed} (overflow to infinity)"
+         {dropped} (dropped quirk), {overflowed} (overflow to infinity), \
+         {exact} (exact digits of a large number)"
     );
     if !divergences.is_empty() {
         let path = dir.join("divergences.json");
@@ -322,6 +326,26 @@ fn dropped_quirk(expr: &str) -> bool {
         };
     });
     found
+}
+
+/// Whether jlens wrote the digits of a large number where jsonata-js did not. `$formatNumber`
+/// from 1e21 writes JavaScript's exponent notation through the picture, so jsonata-js's result
+/// has an `e` and a `+` with at most a separator between them (`1e,+21.00`). `$formatBase` from
+/// 2^53 writes zeros below the number's precision in a radix that is not a power of two, so the
+/// results differ only where jsonata-js has a zero.
+fn exact_digits(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
+    let (jlens, js) = (actual.to_string(), expected.to_string());
+    let calls = |name: &str| expr.contains(&format!("${name}("));
+    let exponent = js
+        .as_bytes()
+        .windows(3)
+        .any(|w| w[0] == b'e' && (w[1] == b'+' || w[2] == b'+'));
+    let zeros = jlens.len() == js.len()
+        && jlens
+            .bytes()
+            .zip(js.bytes())
+            .all(|(a, b)| a == b || b == b'0');
+    (calls("formatNumber") && exponent) || (calls("formatBase") && zeros)
 }
 
 /// Whether the integer part of a sub-picture of `picture` has groups of different sizes after

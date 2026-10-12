@@ -16,6 +16,12 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- `$formatNumber` writes the digits of a number from 1e21 (`$formatNumber(1e21, '#,##0.00')` is
+  "1,000,000,000,000,000,000,000.00"), where jsonata-js passes JavaScript's exponent notation
+  through the picture ("1e,+21.00"). `$formatBase` writes every digit of a large number exactly:
+  it used to stop at 2^128 (`$formatBase(1e300, 16)` was a run of `f`), and jsonata-js writes
+  zeros below the number's precision in a radix that is not a power of two
+  ([compatibility notes](docs/src/language/compatibility.md#evaluation)).
 - `$formatNumber` with an exponent picture no longer loops forever on an infinite number (from a
   `Source`, or `1e308 * 10` before the change above), found by reviewing every loop and recursion
   over floating-point numbers.
