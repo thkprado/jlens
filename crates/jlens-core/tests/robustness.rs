@@ -473,6 +473,14 @@ fn fuzz_parse_crashes_stay_fixed() {
         // Chains of operators built trees deeper than the nesting limit.
         format!("1{}", "+1".repeat(10_000)),
     ];
+    // A lambda whose body is a long chain of conditions, processed with little stack left:
+    // marking its tail calls recursed without growing the stack.
+    let valid = [format!(
+        "{}function(){{ {}1 }}{}",
+        "(".repeat(175),
+        "1 ? 1 : ".repeat(405),
+        ")".repeat(175)
+    )];
     std::thread::Builder::new()
         .stack_size(1 << 20)
         .spawn(move || {
@@ -480,6 +488,9 @@ fn fuzz_parse_crashes_stay_fixed() {
                 let ast = jlens_core::parse_recover(source);
                 assert!(ast.has_errors(), "{}", &source[..20]);
                 let _ = jlens_core::parse(source);
+            }
+            for source in &valid {
+                assert!(jlens_core::parse(source).is_ok(), "{}", &source[..20]);
             }
         })
         .unwrap()

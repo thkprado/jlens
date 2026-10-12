@@ -11,6 +11,8 @@ All notable changes are recorded here. The format follows
 - `$formatNumber` with an exponent picture no longer loops forever on an infinite number
   (`$formatNumber(1e308 * 10, '0e0')`), found by reviewing every loop and recursion over
   floating-point numbers.
+- Parsing no longer overflows the stack on a lambda whose body is a long chain of conditions
+  (`? :`, `?:`, `??`) when the lambda itself sits deep in the expression; found by fuzzing.
 
 ## [0.8.0]
 

@@ -616,6 +616,10 @@ impl<'a> Processor<'a> {
 
     /// Walks back from `node` to find the step that a parent operator refers to.
     fn seek_parent(&mut self, node: &mut Node, slot: SlotId) -> Result<()> {
+        crate::stack::grow(|| self.seek_parent_inner(node, slot))
+    }
+
+    fn seek_parent_inner(&mut self, node: &mut Node, slot: SlotId) -> Result<()> {
         match &mut node.kind {
             NodeKind::Name { .. } | NodeKind::Wildcard => {
                 self.slots[slot].level -= 1;
@@ -721,7 +725,12 @@ fn variable_name(raw: &Raw) -> String {
 
 /// Wraps function calls in tail position in a thunk, so the trampoline in the evaluator can
 /// run tail-recursive functions without growing the stack.
-fn tail_call_optimize(mut expr: Node) -> Node {
+fn tail_call_optimize(expr: Node) -> Node {
+    // A chain of conditions in a lambda's body recurses hundreds of times, with nodes by value.
+    crate::stack::grow(|| tail_call_optimize_inner(expr))
+}
+
+fn tail_call_optimize_inner(mut expr: Node) -> Node {
     match &mut expr.kind {
         NodeKind::Function { .. } if expr.attrs.predicate.is_empty() => {
             let (span, pos) = (expr.span, expr.pos);
