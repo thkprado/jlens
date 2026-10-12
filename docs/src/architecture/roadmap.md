@@ -155,15 +155,64 @@ takes the general path, so audits keep reporting every node.
 | 6 | The fixed cost of an evaluation is cut. `1` takes 0.35 µs, against 0.07 µs in jsonata-core: the clock is read twice for `$now` and the seed of `$random`, and the root frame and the binding of `$` allocate | The clock read once, and only what an evaluation uses set up; the path case faster with `ab` | **done**: the clock is read on first use, the start time only with a timeout, and the input is kept in the root frame instead of a binding of `$`: `1` 350 → 106 ns, path 927 → 676 ns (`ab --mode document`) |
 | 7 | The performance page shows the new numbers, natively and in WebAssembly, with the comparison with jsonata-js | The tables measured again; the "Where the time goes" section updated | **done**: natively, `evaluate_document` is 2 to 4 times faster than in 0.8 on filter + aggregate, sort + map and the shipping rule; jlens-wasm `evaluateDocument` is now faster than jsonata-js on all ten cases |
 
+## 0.12: jlens online
+
+Today the book and the web editor exist only in the repository: the README links no site, CI
+builds the book only to check it, and trying the editor takes a clone, a Rust toolchain and
+`cargo xtask wasm`. This release publishes both on GitHub Pages, at each release tag, as
+[try.jsonata.org](https://try.jsonata.org) does for jsonata-js. The editor shows what sets
+jlens apart (completion from an inferred schema, diagnostics, the explanation and audit tree of
+every result), and everything runs in the browser: no expression or document leaves the
+visitor's machine.
+
+The site is the book at the root and the editor under `editor/`, built from the files of the
+tag, so the editor runs the engine that the book of that version describes. The first
+deployment, and enabling Pages in the repository settings, wait for the maintainer.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | One command builds the site. `cargo xtask site` builds the book and the WebAssembly package and assembles them in `target/site`: the book at the root, the editor in `editor/` with the package in `editor/pkg/`. The editor imports the package by a bare name (`jlens-wasm`) mapped in its import map, so the same files run from the repository (`../../crates/jlens-wasm/pkg/jlens.js`) and from the site (`./pkg/jlens.js`): the command rewrites only that entry | The command; `cargo xtask serve` can serve `target/site` (a flag), and `wasm-test --example` also loads the built editor; the editor README and `CONTRIBUTING.md` say how to preview the site; the book's introduction and the WebAssembly guide link the editor | |
+| 2 | A `Pages` workflow publishes the site at each `v*` tag, and by hand on a tag (`workflow_dispatch`), with `actions/upload-pages-artifact` and `actions/deploy-pages`. `book.toml` sets `site-url = "/jlens/"`, so the book's 404 page works under the project path | The workflow passes `actionlint`; the maintainer has set Pages to "GitHub Actions"; a first deployment of the last tag, made with the maintainer's confirmation, serves the book and the editor at `https://thkprado.github.io/jlens/`; `homepage` in `Cargo.toml` and in the npm package, and the README, point to it (crates.io and npm show it from the next release) | |
+| 3 | The editor stays responsive. Evaluation runs on the page's thread with a 2 s timeout, so a slow expression freezes typing for up to 2 s at each keystroke. Evaluation moves to a Web Worker, and an evaluation still running when the expression changes is dropped (the worker is replaced) | Typing never waits for an evaluation; the timeout and `D1011` are reported as now; `wasm-test --example` passes for the repository and the site | |
+| 4 | Expressions can be shared. A "Share" button puts the expression, the input and the bindings in the address: compressed with `CompressionStream` (`deflate-raw`), in base64url, after `#`, so that no server stores them. Opening such an address restores them; the named examples (`#invoice`) keep working. The header links the book and says that evaluation runs in the browser | A round-trip test of the encoding; a size limit (some tools cut addresses beyond about 8 KB: the button says so instead of giving a broken link); the editor README documents the format | |
+| 5 | Release 0.12.0, which deploys the site of its tag | The release checklist of `CONTRIBUTING.md`, with a step for the `Pages` run; the site serves 0.12.0 | |
+
+## 0.13: host functions that call back
+
+A host function cannot call a JSONata function it receives as an argument: the argument arrives
+as `None` (`undefined` in WebAssembly), as ADR 0006 decided. Rule engines need it for helpers
+written in the host language that apply a function given to them (`$retry($fetch, 3)`,
+`$memoize(function($k) {...})`, a lookup with a fallback function). This release adds a
+callable handle without changing the functions already written against ADR 0006.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | The design, in ADR 0011. First, what jsonata-js does: in `benches/compare`, register a JavaScript function, pass it a lambda, a built-in function (`$uppercase`) and a partial application, and record what it receives and whether it can call each. Then the Rust API; a proposal to check: `HostCall::function(i) -> Option<Callable<'_>>` and `Callable::call(&self, args: &[Option<JsonValue>]) -> Result<Option<JsonValue>>`, keeping the JSON boundary. The handle borrows the call, so it cannot outlive it. The nested evaluation counts toward the same depth, timeout, cancellation and size limits; its tracer events nest under the host call's node; its errors come back to the host function as `Err` with their codes, and pass through when the host function returns them | ADR 0011 accepted by the maintainer, with the jsonata-js findings; any difference planned for the compatibility page | |
+| 2 | The Rust implementation, as ADR 0011 decides | Unit tests: lambdas, built-in and host functions, partial applications and closures passed back; errors and their codes; a recursion through a host function ends with `D1011`; a timeout inside the callback; a property case in `robustness.rs`; an audit snapshot with a nested call; a snippet in `guide.rs` and the host function section of the crate guide; `cargo xtask ab` shows no change on the untraced path | |
+| 3 | The same in WebAssembly. A JavaScript host function receives a JavaScript function for a JSONata function argument; calling it after the host function has returned throws, with a jlens code (`U`) | The four updates of a Wasm API change (`crates/jlens-wasm/AGENTS.md`); tests in `suite.mjs` for Node and the browser; the WebAssembly guide | |
+| 4 | Release 0.13.0 | The release checklist; ADR 0006 points to ADR 0011 | |
+
+## 0.14: more ways to install the CLI
+
+Today the `jlens` command comes from the release archives, `cargo binstall` or `cargo install`.
+Tools like [jq](https://jqlang.org/download/) also come from the package managers people already
+use. Each channel adds a step to every release, and one more place where a release can fail. So
+they come in order of reach, each published by `release.yml` from the archives already built
+and attested, never rebuilt, and each one stays only if it updates without manual work.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | The CLI from npm, designed. The idea noted earlier, a `bin` in `jlens-wasm`, needs either a second CLI in JavaScript, which could drift from the contract of ADR 0008, or `jlens-cli` compiled to WASI, which Node.js runs only with an experimental warning. The third way is the one of esbuild and Biome: a small `jlens` package whose `optionalDependencies` are one package per platform, each holding the release binary, picked by `os` and `cpu` | The decision recorded in ADR 0012, with the npm names checked to be free | |
+| 2 | The npm packages, published by `release.yml` with provenance, after the binaries | `npm pack` of every package in CI, and a job that installs the packed packages on Linux, macOS and Windows and runs `jlens --version`; the installation page; `npx jlens --version` works after the release | |
+| 3 | Homebrew. A tap, `thkprado/homebrew-jlens` (created by the maintainer), with a formula for the macOS and Linux archives and their checksums from `SHA256SUMS`; `release.yml` updates it with a token limited to that repository | `brew install thkprado/jlens/jlens` installs the release; the formula's `test` runs `jlens --version`; the installation page; the token's scope documented in `CONTRIBUTING.md` | |
+| 4 | Windows: a Scoop bucket, `thkprado/scoop-jlens`, with a manifest that updates itself from the GitHub releases (`checkver`, `autoupdate`). winget is left out for now: each version is a pull request that Microsoft reviews | `scoop install jlens` works after adding the bucket; the installation page | |
+| 5 | A container image, `ghcr.io/thkprado/jlens`: `FROM scratch` with the static Linux binaries (x86-64 and ARM64), built from the release archives and attested | `docker run --rm -i ghcr.io/thkprado/jlens eval '...'` works on both architectures; the installation page | |
+| 6 | Release 0.14.0 | The release checklist, with a check of each channel after the release | |
+
 ## Later
 
 Not commitments, in order of priority:
 
-- **Host functions that call back** the JSONata functions they receive as arguments, through a
-  callable handle. This extends the host function API of ADR 0006 without changing the
-  functions already written against it.
-- **The CLI from npm**, as a `bin` in the WebAssembly package that runs under Node.js, so that
-  `npx` runs it where no Rust toolchain or prebuilt binary is available.
 - **A VS Code extension** that starts `jlens lsp` for `.jsonata` files, with a TextMate grammar
   for syntax highlighting. The other editors with an LSP client need no extension.
 - **Asynchronous functions**, as in jsonata-js, whose functions may return promises. This needs
@@ -177,3 +226,8 @@ Not commitments, in order of priority:
   similar gain, measured first. The library leaves the global allocator to the application, so
   the performance page would recommend it to embedders. `mimalloc` builds C code, so each
   release target and `cargo-deny` need checking.
+- **String literals in arguments, `&` and object values** still build a string each time they
+  are evaluated: 0.11 #4 removed it only for `=` and `!=`. Sharing one per evaluation needs a
+  slot per literal, since the AST is `Send` and values use `Rc`. Measure its share of the time
+  first, with cases added to `benches/`; below about 5%, record it on the performance page and
+  close the item.
