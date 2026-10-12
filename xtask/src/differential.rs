@@ -139,7 +139,7 @@ pub fn run(args: &[String]) -> Result<()> {
             raced += 1;
         } else if changed_input {
             mutated += 1;
-        } else if sequence_flag(expr, &actual, expected) {
+        } else if sequence_flag(expr, input.is_none(), &actual, expected) {
             flagged += 1;
         } else if dropped_quirk(expr) {
             dropped += 1;
@@ -265,7 +265,15 @@ fn concurrent(expr: &str) -> bool {
 /// array that jsonata-js builds from a path carries the own property `sequence: true`, and its
 /// wildcard enumerates the properties of an array item, flag included
 /// (`$map([1, 2], function($e){ items.$ }).*`).
-fn sequence_flag(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
+///
+/// Without an input, the flag need not reach the result: a path whose first step is an array
+/// constructor evaluates it on the sequence `[undefined]`, so a wildcard in it gives
+/// `[undefined, true]`, and the path goes on where jlens's stops at `[]` (`[*].price` is
+/// `undefined` in jsonata-js, `[]` in jlens). Such a case counts too, whatever the outcomes.
+fn sequence_flag(expr: &str, no_input: bool, actual: &JsonValue, expected: &JsonValue) -> bool {
+    if no_input && wildcard_first(expr) {
+        return true;
+    }
     let (Some(actual), Some(expected)) = (actual["value"].as_array(), expected["value"].as_array())
     else {
         return false;
@@ -284,6 +292,22 @@ fn sequence_flag(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
         .ast()
         .root
         .walk(&mut |node: &Node| found |= matches!(node.kind, NodeKind::Wildcard));
+    found
+}
+
+/// Whether `expr` has a path whose first step is an array constructor with a wildcard in it.
+fn wildcard_first(expr: &str) -> bool {
+    let Ok(compiled) = Expression::compile(expr) else {
+        return false;
+    };
+    let mut found = false;
+    compiled.ast().root.walk(&mut |node: &Node| {
+        if let NodeKind::Path { steps, .. } = &node.kind
+            && steps.first().is_some_and(|s| s.attrs.cons_array)
+        {
+            steps[0].walk(&mut |n: &Node| found |= matches!(n.kind, NodeKind::Wildcard));
+        }
+    });
     found
 }
 

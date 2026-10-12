@@ -178,7 +178,11 @@ counts them apart:
   the evaluation (a group-by on an empty array adds an item to it), and the outcomes differ.
 - **Wildcard over a sequence**: the expression has a wildcard, and the jsonata-js result is
   jlens's with `true` items added. An array that jsonata-js builds from a path carries an own
-  property `sequence: true`, which its wildcard enumerates with the items.
+  property `sequence: true`, which its wildcard enumerates with the items. Without an input, the
+  flag can change a result without appearing in it: a path whose first step is an array
+  constructor evaluates it on the sequence `[undefined]`, so `[*].price` is `undefined` in
+  jsonata-js, which went on with `[undefined, true]`, and `[]` in jlens. A case without input
+  whose expression has such a path counts here whatever the outcomes.
 - **Dropped quirk**: the expression may meet a jsonata-js quirk that jlens does not reproduce:
   a regular expression literal applied with `~>` to anything but a string literal,
   `$formatNumber` with a literal picture whose integer part has irregular grouping
