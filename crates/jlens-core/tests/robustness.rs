@@ -663,6 +663,16 @@ fn fuzz_crashes_stay_fixed() {
             "$fromMillis(8.64e15, '[Y] [d] [W] [X]')",
             Ok(json!("275760 257 37 275760")),
         ),
+        // A timezone that is not a number fails (jsonata-js writes every component as "NaN"); one
+        // that starts with a number is read as far as its digits go, as JavaScript's parseInt.
+        ("$fromMillis(0, undefined, 'two')", Err("D3150")),
+        ("$fromMillis(0, '[Y] [H]:[m] [Z]', '')", Err("D3150")),
+        ("$fromMillis(0, '[Y] [H]:[m] [Z]', '+')", Err("D3150")),
+        ("$now('[Y]', 'abc')", Err("D3150")),
+        (
+            "$fromMillis(0, '[H]:[m] [Z]', ' +0530x')",
+            Ok(json!("5:30 +05:30")),
+        ),
         // A date that the offset moves beyond the range is not a date (jsonata-js returns it).
         (
             "$toMillis('275760-09-13T00:00-0100', '[Y]-[M]-[D]T[H]:[m][Z0000]')",

@@ -107,7 +107,7 @@ pub fn run(args: &[String]) -> Result<()> {
         .max_depth(MAX_DEPTH);
     let (mut agreed, mut limits, mut crashed, mut hung, mut split) = (0, 0, 0, 0, 0);
     let (mut mangled, mut raced, mut mutated, mut flagged, mut dropped) = (0, 0, 0, 0, 0);
-    let (mut overflowed, mut exact) = (0, 0);
+    let (mut overflowed, mut exact, mut timezone) = (0, 0, 0);
     let mut divergences = Vec::new();
     for ((expr, input), expected) in cases.iter().zip(&mut reference) {
         let changed_input = expected
@@ -151,6 +151,10 @@ pub fn run(args: &[String]) -> Result<()> {
             // that raises D1001 or another error later. `$fromMillis` raises it for a date
             // beyond JavaScript's range, which jsonata-js writes as "NaN".
             overflowed += 1;
+        } else if actual["error"] == "D3150" {
+            // jlens raises D3150 where `$fromMillis` or `$now` is given a timezone that is not a
+            // number, which jsonata-js reads as NaN and writes as "NaN" in every component.
+            timezone += 1;
         } else {
             divergences.push(json!({
                 "expr": expr,
@@ -177,7 +181,7 @@ pub fn run(args: &[String]) -> Result<()> {
          {raced} (concurrent errors), \
          {mutated} (jsonata-js changed its input), {flagged} (wildcard over a sequence), \
          {dropped} (dropped quirk), {overflowed} (number out of range), \
-         {exact} (exact digits of a large number)"
+         {exact} (exact digits of a large number), {timezone} (timezone not a number)"
     );
     if !divergences.is_empty() {
         let path = dir.join("divergences.json");

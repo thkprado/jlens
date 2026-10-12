@@ -1076,7 +1076,8 @@ fn apply_case(s: &str, case: Option<Case>) -> String {
 }
 
 /// `$fromMillis` / `$now`: formats a timestamp. Fails with `U1001` when a width modifier
-/// (`[Y,1000000000]`) asks for more than `max_len` digits.
+/// (`[Y,1000000000]`) asks for more than `max_len` digits, and with `D3150` when the timezone
+/// does not start with a number (jsonata-js writes every component as "NaN").
 pub(crate) fn from_millis(
     millis: f64,
     picture: Option<&str>,
@@ -1086,6 +1087,9 @@ pub(crate) fn from_millis(
     let (mut offset_hours, mut offset_minutes) = (0.0, 0.0);
     if let Some(tz) = timezone {
         let offset = js_parse_int(tz);
+        if offset.is_nan() {
+            return Err(Error::new("D3150").with("value", tz));
+        }
         offset_hours = (offset / 100.0).floor();
         offset_minutes = offset % 100.0;
     }

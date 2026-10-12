@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `$fromMillis` and `$now` fail with the new code `D3150` when the timezone does not start with
+  a number (`$fromMillis(0, undefined, "two")`). They wrote a date with a garbled offset
+  ("1970-01-01T00:00:00.0000N:aN"), where jsonata-js writes "NaN" in every component (see the
+  [compatibility page](docs/src/language/compatibility.md#evaluation)).
+
 ## [0.11.0]
 
 Common expressions evaluate up to three times faster: a field of a single value is a lookup,

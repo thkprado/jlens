@@ -91,6 +91,13 @@ $fromMillis(1544450400000, "[Y]-[M01]-[D01]T[H01]:[m01]:[s01][Z]", "+0530")
 => "2018-12-10T19:30:00+05:30"
 ```
 
+A timezone that is not a number is an error:
+
+```jsonata-example
+$fromMillis(1544450400000, "[Y]", "CET")
+=> error D3150
+```
+
 ### Parsing
 
 `$toMillis` parses with the same pictures. Parts missing from the picture take default values:
