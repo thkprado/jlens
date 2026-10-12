@@ -640,18 +640,76 @@ impl<'a> Value<'a> {
     }
 
     /// Converts a value into JSON like [`Value::to_json`], failing when its compact JSON text
-    /// would be longer than `limit` bytes (see [`Value::json_fits`]). The size is measured
-    /// before anything is converted.
+    /// would be longer than `limit` bytes (see [`Value::json_fits`]). The size is counted while
+    /// converting, which stops as soon as it is exceeded.
     pub(crate) fn to_json_within(
         &self,
         limit: usize,
     ) -> std::result::Result<Option<JsonValue>, TooLarge> {
         let mut budget = limit;
-        if self.json_fits(&mut budget) {
-            Ok(self.to_json())
-        } else {
-            Err(TooLarge)
+        self.to_json_spending(&mut budget)
+    }
+
+    /// [`Value::to_json`], spending the length of the text from `budget` as
+    /// [`Value::json_fits`] does.
+    fn to_json_spending(
+        &self,
+        budget: &mut usize,
+    ) -> std::result::Result<Option<JsonValue>, TooLarge> {
+        if let Some(json) = self.unread() {
+            return copy_json_within(json, budget).map(Some);
         }
+        Ok(Some(match self {
+            Value::Undefined | Value::Function(_) => return Ok(None),
+            Value::Null => {
+                charge(budget, 4)?;
+                JsonValue::Null
+            }
+            Value::Bool(b) => {
+                charge(budget, if *b { 4 } else { 5 })?;
+                JsonValue::Bool(*b)
+            }
+            Value::Number(n) => {
+                charge(budget, number_len(*n))?;
+                json_number(*n)
+            }
+            Value::String(s) => {
+                charge(budget, s.len() + 2)?;
+                JsonValue::String(s.to_string())
+            }
+            Value::Array(a) => {
+                let items = a.items();
+                charge(budget, 1 + items.len().max(1))?;
+                let mut out = Vec::with_capacity(items.len());
+                for v in items.iter() {
+                    out.push(match v {
+                        Value::Undefined | Value::Function(_) => {
+                            charge(budget, 4)?;
+                            JsonValue::Null
+                        }
+                        v => v.to_json_spending(budget)?.unwrap_or(JsonValue::Null),
+                    });
+                }
+                JsonValue::Array(out)
+            }
+            Value::Object(o) => {
+                let o = o.borrow();
+                charge(budget, if o.is_empty() { 2 } else { 1 })?;
+                let mut out = serde_json::Map::with_capacity(o.len());
+                for (k, v) in o.iter() {
+                    if let Some(json) = match v {
+                        Value::Undefined | Value::Function(_) => None,
+                        v => {
+                            charge(budget, k.len() + 4)?;
+                            v.to_json_spending(budget)?
+                        }
+                    } {
+                        out.insert(k.to_string(), json);
+                    }
+                }
+                JsonValue::Object(out)
+            }
+        }))
     }
 
     /// The JSON of a value shown in an error detail; `None` when it is undefined, or larger
@@ -844,6 +902,50 @@ fn copy_json(json: &JsonValue) -> JsonValue {
     }
 }
 
+/// [`copy_json`], spending the length of the text from `budget` as [`json_text_fits`] does.
+fn copy_json_within(
+    json: &JsonValue,
+    budget: &mut usize,
+) -> std::result::Result<JsonValue, TooLarge> {
+    Ok(match json {
+        JsonValue::Null => {
+            charge(budget, 4)?;
+            JsonValue::Null
+        }
+        JsonValue::Bool(b) => {
+            charge(budget, if *b { 4 } else { 5 })?;
+            JsonValue::Bool(*b)
+        }
+        JsonValue::Number(n) => {
+            let n = n.as_f64().unwrap_or(f64::NAN);
+            charge(budget, number_len(n))?;
+            json_number(n)
+        }
+        JsonValue::String(s) => {
+            charge(budget, s.len() + 2)?;
+            JsonValue::String(s.clone())
+        }
+        JsonValue::Array(items) => {
+            charge(budget, 1 + items.len().max(1))?;
+            JsonValue::Array(
+                items
+                    .iter()
+                    .map(|v| copy_json_within(v, budget))
+                    .collect::<std::result::Result<_, _>>()?,
+            )
+        }
+        JsonValue::Object(fields) => {
+            charge(budget, if fields.is_empty() { 2 } else { 1 })?;
+            let mut out = serde_json::Map::with_capacity(fields.len());
+            for (k, v) in fields {
+                charge(budget, k.len() + 4)?;
+                out.insert(k.clone(), copy_json_within(v, budget)?);
+            }
+            JsonValue::Object(out)
+        }
+    })
+}
+
 /// [`Value::json_fits`] for input JSON.
 fn json_text_fits(json: &JsonValue, budget: &mut usize) -> bool {
     match json {
@@ -900,6 +1002,15 @@ impl Inspect for Value<'_> {
 }
 
 /// Takes `bytes` from `budget`; false when there are not enough left.
+/// [`spend`], failing when the bytes do not fit.
+fn charge(budget: &mut usize, bytes: usize) -> std::result::Result<(), TooLarge> {
+    if spend(budget, bytes) {
+        Ok(())
+    } else {
+        Err(TooLarge)
+    }
+}
+
 fn spend(budget: &mut usize, bytes: usize) -> bool {
     match budget.checked_sub(bytes) {
         Some(rest) => {
@@ -1124,7 +1235,7 @@ mod tests {
             "f": [{}]
         }));
         let len = stringify(&v, false, usize::MAX).unwrap().len();
-        assert!(v.to_json_within(len).is_ok());
+        assert_eq!(v.to_json_within(len).unwrap(), v.to_json());
         assert!(v.to_json_within(len - 1).is_err());
     }
 

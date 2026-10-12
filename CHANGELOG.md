@@ -22,6 +22,9 @@ All notable changes are recorded here. The format follows
 - `=` and `!=` with a string literal (`type = 'electronic'`) compare with the literal's text
   instead of building a string value each time: the filter + aggregate benchmark takes 44 µs
   instead of 56 µs, the shipping rule 127 µs instead of 150 µs.
+- The result is converted to JSON in one pass, counting its size against
+  `Options::max_result_size` while converting it, instead of measuring it first: returning the
+  whole 200-order input (`$`) takes 236 µs instead of 271 µs.
 
 ## [0.10.0]
 
