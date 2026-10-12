@@ -32,6 +32,7 @@ The [changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md) lists 
 | 0.7.0 | Three jsonata-js quirks that expose JavaScript are no longer reproduced: a regular expression applied to a value that is not a string, irregular grouping in `$formatNumber`, `$substringBefore` and `$substringAfter` without `chars` |
 | 0.8.0 | Coverage-guided fuzzing in a weekly `Fuzz` workflow, and the panics, stack overflows and slow cases it found fixed; `jlens lsp` survives a panicking request; `evaluate` reads its input lazily, one level at a time ([ADR 0010](../adr/0010-lazy-input.md)), natively and in WebAssembly, and `evaluate_source` reads other representations |
 | 0.9.0 | A number that overflows to infinity and a date beyond JavaScript's range fail with `D1001` where they arise; `$formatNumber` and `$formatBase` write every digit of a large number; loops over floating-point numbers end on NaN and infinity; a parser stack overflow found by fuzzing fixed; `cargo xtask fuzz-replay` replays fuzz inputs on any platform |
+| 0.10.0 | A recursion through a higher-order function fails with `D1011` instead of overflowing the stack; WebAssembly's default `maxDepth` is 500; `cargo xtask ab` compares the speed of two revisions |
 
 ## Priorities
 

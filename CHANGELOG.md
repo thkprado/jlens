@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0]
+
+Deep recursions fail with `D1011` instead of overflowing the stack: a recursion through a
+higher-order function counts its depth, and WebAssembly's default depth limit leaves room for
+V8's optimized frames.
+
 ### Changed
 
 - `jlens-wasm`: the default evaluation depth limit (`maxDepth`) is 500 instead of 800. Once V8
@@ -367,7 +373,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/thkprado/jlens/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/thkprado/jlens/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/thkprado/jlens/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/thkprado/jlens/compare/v0.6.0...v0.7.0

@@ -17,7 +17,7 @@ From 0.6.0 on, each archive has a build attestation: a signed statement that the
 workflow of this repository built it, from which commit. Check one with the GitHub CLI:
 
 ```sh
-gh attestation verify jlens-0.9.0-x86_64-unknown-linux-musl.tar.gz --repo thkprado/jlens
+gh attestation verify jlens-0.10.0-x86_64-unknown-linux-musl.tar.gz --repo thkprado/jlens
 ```
 
 Elsewhere, build it from source with Rust 1.88 or later:
@@ -30,7 +30,7 @@ cargo install --path crates/jlens-cli            # from a checkout
 
 ```text
 $ jlens --version
-jlens 0.9.0
+jlens 0.10.0
 ```
 
 The [CLI guide](../guides/cli.md) describes every command.
@@ -39,8 +39,8 @@ The [CLI guide](../guides/cli.md) describes every command.
 
 ```toml
 [dependencies]
-jlens-core = "0.9"     # the language: parsing, evaluation, functions, auditing
-jlens-schema = "0.9"   # optional: schema inference and the language service
+jlens-core = "0.10"    # the language: parsing, evaluation, functions, auditing
+jlens-schema = "0.10"  # optional: schema inference and the language service
 serde_json = "1"
 ```
 
