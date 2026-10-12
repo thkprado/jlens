@@ -83,6 +83,21 @@ takes 1.9 µs, where converting the whole input first took 115 µs (91 µs to co
 drop, 0.9 µs to evaluate). An expression that reads every item pays for converting them, as
 before.
 
+On this machine, such an expression costs more with lazy input than it did when `evaluate`
+converted the whole input first: measured with `cargo xtask ab` against the revision before
+lazy input (d0e9789), `filter + aggregate` is 7% slower, `strings` 10% and `regex` 4%. The
+conversion is not the cause:
+- The whole cost comes from step 2 of [ADR 0010](../adr/0010-lazy-input.md), and it does not depend on reading
+  lazily. Converting the whole input eagerly at the current revision costs the same.
+- Converting the document alone (`Document::new` and its drop) takes 94 µs at both
+  revisions, and `evaluate_document` is as fast as before.
+- The cause is Windows' default allocator. With `mimalloc` as the global allocator in both
+  programs, the gap falls to 1–3%, which is the cost of the lazy values themselves, and every
+  one of these cases runs in about half the time.
+
+An application that calls `evaluate` on whole documents can set a faster global allocator;
+the library leaves that choice to it.
+
 ### WebAssembly against jsonata-js (Node.js)
 
 Both run in the same Node.js process, on the same input. The WebAssembly module is the release

@@ -119,7 +119,7 @@ Both outcomes close the item.
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
 | 1 | A/B benchmarks as a command. Criterion is bimodal on the maintainer's machine, so changes are measured by building one program per variant and running them alternately, by hand | A command (an `xtask` or a script in `benches/`) that builds two revisions and compares them by alternating runs; the performance page says how | **done** |
-| 2 | The cost lazy input left on evaluations that read their whole input: `regex` +4%, `filter` +2.8%, `strings` +2.7% when measured, above the 3% that 0.8 allowed | Measured again with the A/B command; the cost removed, or recorded on the performance page with its cause | |
+| 2 | The cost lazy input left on evaluations that read their whole input: `regex` +4%, `filter` +2.8%, `strings` +2.7% when measured, above the 3% that 0.8 allowed | Measured again with the A/B command; the cost removed, or recorded on the performance page with its cause | **done** |
 | 3 | WebAssembly's default `maxDepth` back to 1000. Since lazy input, an audited recursion near 1,000 levels overflows V8's stack while the function is optimized, so the default became 800; the cause of the larger frames was not found | The cause found and the default restored, or the cause (or what was ruled out) recorded in the WebAssembly guide | |
 | 4 | Two crashes of the fuzzing runs, both stack overflows without a message, never reproduced: one while `parse` loaded its corpus, one in `pictures` | The cached corpora and any input saved since (`last-input`) replayed with the replay command; a crash that reproduces fixed, with a regression test; otherwise what was tried recorded in the fuzzing section | |
 
@@ -167,7 +167,9 @@ Not commitments, in order of priority:
   promise fails with `U1002`.
 - **A faster allocator for the CLI.** Evaluation spends most of its time allocating. On
   Windows, linking the `jlens` binary with `mimalloc` made every case of `benches/` 20 to 45%
-  faster, and `Document::parse` went from 180 to 121 µs. Worth doing only if Linux shows a
+  faster, and `Document::parse` went from 180 to 121 µs; `evaluate` on the filter, strings
+  and regex cases took half the time, and the cost lazy input left on them fell from 5–8% to
+  1–3% (see the performance page). Worth doing only if Linux shows a
   similar gain, measured first. The library leaves the global allocator to the application, so
   the performance page would recommend it to embedders. `mimalloc` builds C code, so each
   release target and `cargo-deny` need checking.
