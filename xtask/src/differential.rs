@@ -6,15 +6,16 @@
 //! and writes its outcomes next to them; the divergences are written to
 //! `target/differential/divergences.json`.
 //!
-//! Eight kinds of disagreement are not divergences, and are counted apart (see "Differential
+//! Nine kinds of disagreement are not divergences, and are counted apart (see "Differential
 //! testing" in `docs/src/architecture/conformance.md`): a JavaScript exception inside jsonata-js,
 //! which has no error code to compare; a case jsonata-js never finished; a jsonata-js result
 //! with half of a character, which a jlens string cannot hold; an expression with a
 //! regular expression literal on the left of `??` or `?:`, which the jsonata-js parser mangles;
 //! different error codes from an expression whose array or object constructors jsonata-js
 //! evaluates concurrently; an evaluation in which jsonata-js changed its input document; a
-//! wildcard that gives jsonata-js's internal flag `sequence` as a `true` item; and an expression
-//! that may meet one of the jsonata-js quirks that jlens dropped.
+//! wildcard that gives jsonata-js's internal flag `sequence` as a `true` item; an expression
+//! that may meet one of the jsonata-js quirks that jlens dropped; and a number that overflows to
+//! infinity, where jlens fails and jsonata-js goes on.
 
 use std::fs;
 use std::process::Command;
@@ -105,6 +106,7 @@ pub fn run(args: &[String]) -> Result<()> {
         .max_depth(MAX_DEPTH);
     let (mut agreed, mut limits, mut crashed, mut hung, mut split) = (0, 0, 0, 0, 0);
     let (mut mangled, mut raced, mut mutated, mut flagged, mut dropped) = (0, 0, 0, 0, 0);
+    let mut overflowed = 0;
     let mut divergences = Vec::new();
     for ((expr, input), expected) in cases.iter().zip(&mut reference) {
         let changed_input = expected
@@ -140,6 +142,11 @@ pub fn run(args: &[String]) -> Result<()> {
             flagged += 1;
         } else if dropped_quirk(expr) {
             dropped += 1;
+        } else if actual["error"] == "D1001" {
+            // jlens raises D1001 only where a number overflows to infinity (`1 / 0`), which
+            // jsonata-js passes on: to its result, where JSON writes `null`, or to an operator
+            // that raises D1001 or another error later.
+            overflowed += 1;
         } else {
             divergences.push(json!({
                 "expr": expr,
@@ -165,7 +172,7 @@ pub fn run(args: &[String]) -> Result<()> {
          {split} (jsonata-js split a character), {mangled} (regex left of ?? or ?:), \
          {raced} (concurrent errors), \
          {mutated} (jsonata-js changed its input), {flagged} (wildcard over a sequence), \
-         {dropped} (dropped quirk)"
+         {dropped} (dropped quirk), {overflowed} (overflow to infinity)"
     );
     if !divergences.is_empty() {
         let path = dir.join("divergences.json");

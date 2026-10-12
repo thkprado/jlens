@@ -6,11 +6,19 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A number that overflows to infinity fails with `D1001` where it overflows: the arithmetic
+  operators (`1e308 * 10`, `1 / 0`), `$sum`, `$round` and `$parseInteger`. jsonata-js passes the
+  infinity on, and JSON writes it as `null` in a result. `$average` of numbers whose sum
+  overflows now gives their mean
+  ([compatibility notes](docs/src/language/compatibility.md#evaluation)).
+
 ### Fixed
 
-- `$formatNumber` with an exponent picture no longer loops forever on an infinite number
-  (`$formatNumber(1e308 * 10, '0e0')`), found by reviewing every loop and recursion over
-  floating-point numbers.
+- `$formatNumber` with an exponent picture no longer loops forever on an infinite number (from a
+  `Source`, or `1e308 * 10` before the change above), found by reviewing every loop and recursion
+  over floating-point numbers.
 - Parsing no longer overflows the stack on a lambda whose body is a long chain of conditions
   (`? :`, `?:`, `??`) when the lambda itself sits deep in the expression; found by fuzzing.
 

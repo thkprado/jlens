@@ -498,6 +498,50 @@ fn fuzz_parse_crashes_stay_fixed() {
         .unwrap();
 }
 
+/// A number that is not finite, written as the input by a source that does not follow JSON.
+struct Infinite(f64);
+
+impl<'a> Source<'a> for Infinite {
+    fn read(&self, sink: &mut Sink<'_, 'a>) -> Result<(), String> {
+        sink.number(self.0);
+        Ok(())
+    }
+}
+
+#[test]
+fn infinite_input_ends() {
+    let cases: &[(f64, &str, Result<serde_json::Value, &str>)] = &[
+        // Letters and words for infinity looped forever.
+        (f64::INFINITY, "$formatInteger($, 'w')", Ok(json!(""))),
+        (f64::INFINITY, "$formatInteger($, 'a')", Ok(json!(""))),
+        // An exponent picture scaled an infinite mantissa forever. The text is what the other
+        // pictures give for infinity.
+        (
+            f64::INFINITY,
+            "$formatNumber($, '0e0')",
+            Ok(json!("Infinitye0")),
+        ),
+        (
+            f64::NEG_INFINITY,
+            "$formatNumber($, '0.0e0')",
+            Ok(json!("-NaN.0e0")),
+        ),
+        (f64::INFINITY, "$ + 1", Err("D1001")),
+    ];
+    for (input, source, expected) in cases {
+        let result = Expression::compile(source).unwrap().evaluate_source(
+            &Infinite(*input),
+            &Bindings::new(),
+            &Options::new(),
+        );
+        let got = match &result {
+            Ok(v) => Ok(v.clone().unwrap_or(serde_json::Value::Null)),
+            Err(e) => Err(e.code()),
+        };
+        assert_eq!(&got, expected, "{source}");
+    }
+}
+
 #[test]
 fn nested_fallbacks_stay_linear() {
     // `?:` and `??` used to copy their left side into a condition, doubling the tree at each
@@ -567,16 +611,16 @@ fn fuzz_crashes_stay_fixed() {
             "$toMillis('197001', '[Y,99999999999999999999][M01]')",
             Ok(json!(null)),
         ),
-        // Words for a NaN field (a date beyond JavaScript's range) recursed forever, and
-        // letters for infinity looped forever.
+        // Words for a NaN field (a date beyond JavaScript's range) recursed forever.
         ("$fromMillis(1e17, '[dw]|[dI]|[d]')", Ok(json!("||NaN"))),
         ("$fromMillis(0, '[dwo]', '10010200101041')", Ok(json!(""))),
-        ("$formatInteger(1e308 * 10, 'w')", Ok(json!(""))),
-        ("$formatInteger(1e308 * 10, 'a')", Ok(json!(""))),
-        // An exponent picture scaled an infinite mantissa forever. The text is what the other
-        // pictures give for infinity (roadmap 0.9 #5 decides where infinity stops).
-        ("$formatNumber(1e308 * 10, '0e0')", Ok(json!("Infinitye0"))),
-        ("$formatNumber(-1e308 * 10, '0.0e0')", Ok(json!("-NaN.0e0"))),
+        // A number that overflows fails where it overflows, so no expression gives infinity to
+        // a function; `infinite_input_ends` passes it from a source.
+        ("$formatInteger(1e308 * 10, 'w')", Err("D1001")),
+        ("$formatNumber(-1 / 0, '0e0')", Err("D1001")),
+        ("$sum([1e308, 1e308])", Err("D1001")),
+        ("$average([1e308, 1e308])", Ok(json!(1e308))),
+        ("$round(1.7e308, -308)", Err("D1001")),
     ];
     for (source, expected) in cases {
         let result = Expression::compile(source).unwrap().evaluate_with(

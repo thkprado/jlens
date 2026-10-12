@@ -1,5 +1,9 @@
 {
   "$comment": "Intentional deviations from the official suite. Keys are case ids (<group>/<file>[#index]). Each entry needs a \"reason\" and may set \"skip\": true, \"alternateResult\" or \"alternateCode\". Keys starting with '$' are ignored.",
+  "function-string/case019": {
+    "reason": "`1/0` overflows to infinity, which JSON cannot hold: jlens raises D1001 at the division, where jsonata-js passes Infinity on and $string raises D3001 (see \"A number that overflows to infinity\" in docs/src/language/compatibility.md).",
+    "alternateCode": "D1001"
+  },
   "function-encodeUrl/case002": {
     "reason": "The case file contains a lone UTF-16 surrogate (U+D800). Rust strings are UTF-8 and cannot represent it, so neither the test data nor a jlens input can carry this value.",
     "skip": true

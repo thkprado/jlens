@@ -134,8 +134,14 @@ natives! {
         let Some(arr) = items.as_array().filter(|a| !a.items().is_empty()) else {
             return Ok(Value::Undefined);
         };
-        let total = sum(&items)?.as_number().unwrap_or(0.0);
-        Ok(Value::Number(total / arr.len() as f64))
+        let n = arr.len() as f64;
+        let total: f64 = arr.items().iter().filter_map(Value::as_number).sum();
+        if total.is_infinite() {
+            // The sum overflows, but the mean of finite numbers is finite.
+            let mean = arr.items().iter().filter_map(Value::as_number).map(|x| x / n).sum();
+            return value::finite(mean);
+        }
+        Ok(Value::Number(total / n))
     };
 
     // String
@@ -164,7 +170,7 @@ natives! {
     };
     "parseInteger" "<s-s:n>" ["value", "picture"] 2 Numeric "Parses an integer written according to an XPath picture string" => |_, a, _| match text(&a, 0) {
         None => Ok(Value::Undefined),
-        Some(v) => crate::datetime::parse_integer(&v, &text(&a, 1).unwrap_or_default()).map(Value::Number),
+        Some(v) => crate::datetime::parse_integer(&v, &text(&a, 1).unwrap_or_default()).and_then(value::finite),
     };
 
     // Numeric
@@ -172,7 +178,7 @@ natives! {
     "floor" "<n-:n>" ["arg"] 1 Numeric "Rounds down" => |_, a, _| Ok(num(&a, 0).map_or(Value::Undefined, |v| Value::Number(v.floor())));
     "ceil" "<n-:n>" ["arg"] 1 Numeric "Rounds up" => |_, a, _| Ok(num(&a, 0).map_or(Value::Undefined, |v| Value::Number(v.ceil())));
     "round" "<n-n?:n>" ["arg", "precision"] 2 Numeric "Rounds half to even, optionally to a number of decimal places" => |_, a, _| {
-        Ok(num(&a, 0).map_or(Value::Undefined, |v| Value::Number(n::round(v, num(&a, 1).unwrap_or(0.0)))))
+        num(&a, 0).map_or(Ok(Value::Undefined), |v| value::finite(n::round(v, num(&a, 1).unwrap_or(0.0))))
     };
     "abs" "<n-:n>" ["arg"] 1 Numeric "Absolute value" => |_, a, _| Ok(num(&a, 0).map_or(Value::Undefined, |v| Value::Number(v.abs())));
     "sqrt" "<n-:n>" ["arg"] 1 Numeric "Square root" => n::sqrt;
@@ -352,9 +358,7 @@ fn sum<'a>(items: &Value<'a>) -> Result<Value<'a>> {
     let Value::Array(a) = items else {
         return Ok(Value::Undefined);
     };
-    Ok(Value::Number(
-        a.items().iter().filter_map(Value::as_number).sum(),
-    ))
+    value::finite(a.items().iter().filter_map(Value::as_number).sum())
 }
 
 fn extreme<'a>(items: &Value<'a>, pick: fn(f64, f64) -> f64) -> Result<Value<'a>> {

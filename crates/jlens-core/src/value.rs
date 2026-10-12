@@ -932,6 +932,15 @@ fn number_len(n: f64) -> usize {
     }
 }
 
+/// A computed number, or D1001 when it overflowed to infinity, which JSON cannot hold.
+pub(crate) fn finite<'a>(n: f64) -> Result<Value<'a>> {
+    if n.is_infinite() {
+        Err(Error::new("D1001").with("value", json_number(n)))
+    } else {
+        Ok(Value::Number(n))
+    }
+}
+
 /// A number as JSON: integral values become JSON integers, non-finite ones `null`.
 pub(crate) fn json_number(n: f64) -> JsonValue {
     if n.fract() == 0.0 && n.abs() < 9.007_199_254_740_992e15 {

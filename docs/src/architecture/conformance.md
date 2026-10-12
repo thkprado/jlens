@@ -143,7 +143,7 @@ that reaches either limit is skipped. The divergences are printed and written to
 `target/differential/divergences.json`. The command fails when there are any. A seed
 reproduces a run.
 
-Eight kinds of disagreement are known differences of jsonata-js, listed in the
+Nine kinds of disagreement are known differences of jsonata-js, listed in the
 [compatibility notes](../language/compatibility.md). They are not divergences; the command
 counts them apart:
 
@@ -174,6 +174,9 @@ counts them apart:
   `$formatNumber` with a literal picture whose integer part has irregular grouping
   (`'#,##,##0'`), or `$substringBefore` / `$substringAfter` whose `chars` is not a string
   literal.
+- **Overflow to infinity**: jlens failed with `D1001`, which it raises only where a number
+  overflows to infinity (`1 / 0`). jsonata-js passes the infinity on, to its result or to an
+  operator that fails later.
 
 The `Differential` workflow runs 20,000 cases from a new seed every week, and on demand with a
 chosen number of cases and seed. When it fails, the cases and outcomes are attached to the run.

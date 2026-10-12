@@ -1619,13 +1619,16 @@ fn numeric<'a>(lhs: &Value<'a>, rhs: &Value<'a>, op: BinaryOp) -> Result<Value<'
     let (Some(l), Some(r)) = (lhs.as_number(), rhs.as_number()) else {
         return Ok(Value::Undefined);
     };
-    Ok(Value::Number(match op {
+    let n = match op {
         BinaryOp::Add => l + r,
         BinaryOp::Sub => l - r,
         BinaryOp::Mul => l * r,
         BinaryOp::Div => l / r,
         _ => l % r,
-    }))
+    };
+    // jsonata-js returns the infinity of an overflow (`1e308 * 10`, `1 / 0`) and raises D1001
+    // only where it becomes an operand; JSON has no infinity, so jlens fails here.
+    value::finite(n)
 }
 
 fn comparison<'a>(lhs: &Value<'a>, rhs: &Value<'a>, op: BinaryOp) -> Result<Value<'a>> {
