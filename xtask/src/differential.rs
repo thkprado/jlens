@@ -234,14 +234,8 @@ fn regex_before_default(expr: &str) -> bool {
     };
     let mut found = false;
     compiled.ast().root.walk(&mut |node: &Node| {
-        // `a ?: b` and `a ?? b` are conditions whose test is `a` itself, or `$exists(a)`, both
-        // with the span of `a`.
-        if let NodeKind::Condition {
-            condition, then, ..
-        } = &node.kind
-            && condition.span == then.span
-        {
-            then.walk(&mut |n: &Node| found |= matches!(n.kind, NodeKind::Regex { .. }));
+        if let NodeKind::Fallback { lhs, .. } = &node.kind {
+            lhs.walk(&mut |n: &Node| found |= matches!(n.kind, NodeKind::Regex { .. }));
         }
     });
     found
