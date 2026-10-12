@@ -13,6 +13,11 @@
 //! A revision is anything `git rev-parse` accepts, or `.` for the working tree with its
 //! uncommitted changes. The program of a commit is built once, in a temporary git worktree,
 //! and kept in `target/ab/bin`.
+//!
+//! Runs may overlap. Each keeps its worktrees and probe crates in its own directory,
+//! `target/ab/run-<process id>`, removed when it ends; Cargo's lock on the shared target
+//! directory takes their builds one at a time, and a program reaches `target/ab/bin` by a
+//! rename, so a run sees either no program or a whole one.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -37,7 +42,7 @@ publish = false
 [workspace]
 
 [[bin]]
-name = "probe"
+name = "{bin}"
 path = "main.rs"
 
 [dependencies]
@@ -78,7 +83,8 @@ pub fn run(args: &[String]) -> Result<()> {
     let rounds = flag(args, "--rounds")?.unwrap_or(10).max(1);
     let sample_ms = flag(args, "--sample-ms")?.unwrap_or(10).max(1);
 
-    let programs = [build(a)?, build(b)?];
+    let work = Work::new()?;
+    let programs = [work.build(a)?, work.build(b)?];
     let benches = root().join("benches");
     let mut times: [BTreeMap<String, Vec<u128>>; 2] = Default::default();
     let mut order = Vec::new();
@@ -145,62 +151,109 @@ A is {a}, B is {b}"
     Ok(())
 }
 
-/// Builds the probe against the `jlens-core` of `rev`, and returns the path of the program.
-fn build(rev: &str) -> Result<PathBuf> {
-    let dir = root().join("target/ab");
-    let bin = dir.join("bin");
-    fs::create_dir_all(&bin)?;
-    if rev == "." {
-        let program = bin.join(format!("worktree{}", env::consts::EXE_SUFFIX));
-        compile(rev, &root(), &dir.join("probe-worktree"), &program)?;
-        return Ok(program);
-    }
-
-    let commit = git(&["rev-parse", "--verify", &format!("{rev}^{{commit}}")])
-        .with_context(|| format!("{rev:?} is not a revision"))?;
-    let short = &commit[..12];
-    let program = bin.join(format!("{short}{}", env::consts::EXE_SUFFIX));
-    if program.is_file() {
-        return Ok(program);
-    }
-    let source = dir.join(format!("src-{short}"));
-    if source.exists() {
-        // Left by an interrupted build.
-        let _ = git(&["worktree", "remove", "--force", &path(&source)]);
-        let _ = fs::remove_dir_all(&source);
-    }
-    git(&["worktree", "add", "--detach", &path(&source), &commit])?;
-    let built = compile(rev, &source, &dir.join(format!("probe-{short}")), &program);
-    git(&["worktree", "remove", "--force", &path(&source)])?;
-    built?;
-    Ok(program)
+/// The directory of one run, `target/ab/run-<process id>`, removed when the run ends.
+struct Work {
+    dir: PathBuf,
 }
 
-/// Builds the probe crate in `crate_dir` against the `jlens-core` of the checkout at `checkout`,
-/// with the versions of that checkout's lock file, and copies the program to `program`.
-fn compile(rev: &str, checkout: &Path, crate_dir: &Path, program: &Path) -> Result<()> {
-    fs::create_dir_all(crate_dir)?;
-    let core = path(&checkout.join("crates/jlens-core"));
-    fs::write(
-        crate_dir.join("Cargo.toml"),
-        MANIFEST.replace("{core}", &core),
-    )?;
-    fs::write(crate_dir.join("main.rs"), PROBE)?;
-    fs::copy(checkout.join("Cargo.lock"), crate_dir.join("Cargo.lock"))?;
-    let target = root().join("target/ab/target");
-    eprintln!("building the probe of {rev}");
-    let status = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-        .current_dir(crate_dir)
-        .args(["build", "--quiet", "--release"])
-        .env("CARGO_TARGET_DIR", &target)
-        .status()
-        .context("running cargo build")?;
-    if !status.success() {
-        bail!("building the probe of {rev} failed");
+impl Work {
+    fn new() -> Result<Work> {
+        let ab = root().join("target/ab");
+        fs::create_dir_all(ab.join("bin"))?;
+        // Directories of interrupted runs: the one with this process id cannot belong to a live
+        // run, and no run lasts a day.
+        let mut pruned = false;
+        for entry in fs::read_dir(&ab)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(pid) = name.to_str().and_then(|n| n.strip_prefix("run-")) else {
+                continue;
+            };
+            let age = entry.metadata()?.modified()?.elapsed().unwrap_or_default();
+            if pid == std::process::id().to_string() || age.as_secs() > 24 * 60 * 60 {
+                let _ = fs::remove_dir_all(entry.path());
+                pruned = true;
+            }
+        }
+        if pruned {
+            git(&["worktree", "prune"])?;
+        }
+        let dir = ab.join(format!("run-{}", std::process::id()));
+        fs::create_dir_all(&dir)?;
+        Ok(Work { dir })
     }
-    let built = target.join(format!("release/probe{}", env::consts::EXE_SUFFIX));
-    fs::copy(&built, program).with_context(|| format!("copying {}", built.display()))?;
-    Ok(())
+
+    /// Builds the probe against the `jlens-core` of `rev`, and returns the path of the program.
+    fn build(&self, rev: &str) -> Result<PathBuf> {
+        if rev == "." {
+            let program = self
+                .dir
+                .join(format!("worktree{}", env::consts::EXE_SUFFIX));
+            self.compile(rev, &root(), "worktree", &program)?;
+            return Ok(program);
+        }
+
+        let commit = git(&["rev-parse", "--verify", &format!("{rev}^{{commit}}")])
+            .with_context(|| format!("{rev:?} is not a revision"))?;
+        let short = &commit[..12];
+        let file = format!("{short}{}", env::consts::EXE_SUFFIX);
+        let program = root().join("target/ab/bin").join(&file);
+        if program.is_file() {
+            return Ok(program);
+        }
+        let source = self.dir.join(format!("src-{short}"));
+        git(&["worktree", "add", "--detach", &path(&source), &commit])?;
+        let built = self.compile(rev, &source, short, &self.dir.join(&file));
+        git(&["worktree", "remove", "--force", &path(&source)])?;
+        built?;
+        // Another run may have published the same program meanwhile; on Windows the rename then
+        // fails while that program runs, and its program serves as well.
+        if let Err(error) = fs::rename(self.dir.join(&file), &program)
+            && !program.is_file()
+        {
+            return Err(error).with_context(|| format!("publishing {}", program.display()));
+        }
+        Ok(program)
+    }
+
+    /// Builds the probe crate `probe-{name}` against the `jlens-core` of the checkout at
+    /// `checkout`, with the versions of that checkout's lock file, and copies the program to
+    /// `program`.
+    fn compile(&self, rev: &str, checkout: &Path, name: &str, program: &Path) -> Result<()> {
+        let crate_dir = self.dir.join(format!("probe-{name}"));
+        fs::create_dir_all(&crate_dir)?;
+        let core = path(&checkout.join("crates/jlens-core"));
+        // The program's name is the run's own, so that runs building at once do not overwrite
+        // each other's in the shared target directory.
+        let bin = format!("probe-{}", std::process::id());
+        fs::write(
+            crate_dir.join("Cargo.toml"),
+            MANIFEST.replace("{core}", &core).replace("{bin}", &bin),
+        )?;
+        fs::write(crate_dir.join("main.rs"), PROBE)?;
+        fs::copy(checkout.join("Cargo.lock"), crate_dir.join("Cargo.lock"))?;
+        let target = root().join("target/ab/target");
+        eprintln!("building the probe of {rev}");
+        let status = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+            .current_dir(&crate_dir)
+            .args(["build", "--quiet", "--release"])
+            .env("CARGO_TARGET_DIR", &target)
+            .status()
+            .context("running cargo build")?;
+        if !status.success() {
+            bail!("building the probe of {rev} failed");
+        }
+        let built = target.join(format!("release/{bin}{}", env::consts::EXE_SUFFIX));
+        fs::copy(&built, program).with_context(|| format!("copying {}", built.display()))?;
+        let _ = fs::remove_file(&built);
+        Ok(())
+    }
+}
+
+impl Drop for Work {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
 }
 
 fn git(args: &[&str]) -> Result<String> {

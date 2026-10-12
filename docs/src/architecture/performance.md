@@ -34,6 +34,10 @@ cargo xtask ab main . --mode document         # evaluate_document instead of eva
   profile. A revision is anything git names (a commit, a tag, a branch), or `.` for the working
   tree with its uncommitted changes. A commit is built once, in a temporary git worktree, and
   its program is kept in `target/ab/bin`.
+- Two runs may overlap: each builds in its own directory, `target/ab/run-<process id>`, and
+  they share the programs already built. Their measurements disturb each other, though: two
+  runs of nearly the same code at once differed by 8% on the machine below. Compare revisions
+  one run at a time.
 - It runs the two programs in alternation, ten rounds by default (`--rounds`): A then B, then B
   then A, so that a drift of the machine reaches both. In each run, a case takes the fastest of
   five samples of about 10 ms each (`--sample-ms`).
