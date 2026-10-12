@@ -36,6 +36,7 @@ fn valid() -> impl Strategy<Value = String> {
             "0",
             "-2.5",
             "'s'",
+            "'p'",
             "true",
             "null",
             "[]",

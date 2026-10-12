@@ -399,6 +399,62 @@ fn a_field_of_one_value_keeps_the_sequence_rules() {
 }
 
 #[test]
+fn equality_with_a_string_literal_keeps_the_rules_of_equality() {
+    // Results from jsonata-js 2.2.2. `=` and `!=` compare with a string literal without
+    // building its value; these check the undefined, type and sequence rules.
+    for (expr, input, expected) in [
+        ("a = 'x'", json!({"a": "x"}), true),
+        ("a != 'x'", json!({"a": "x"}), false),
+        ("'x' = a", json!({"a": "x"}), true),
+        ("'x' != a", json!({"a": "y"}), true),
+        ("a = 'x'", json!({}), false),
+        ("a != 'x'", json!({}), false),
+        ("'x' != a", json!({}), false),
+        ("a = 'x'", json!({"a": ["x"]}), false),
+        ("a != 'x'", json!({"a": ["x"]}), true),
+        ("a = '1'", json!({"a": 1}), false),
+        ("a != '1'", json!({"a": 1}), true),
+        ("a != 'x'", json!({"a": null}), true),
+        ("'x' = 'x'", json!({}), true),
+        ("a = 'x'[0]", json!({"a": "x"}), true),
+        ("a.b = 'x'", json!({"a": [{"b": "x"}]}), true),
+        ("a.b = 'x'", json!({"a": [{"b": "x"}, {"b": "x"}]}), false),
+        ("a.b != 'x'", json!({"a": [{"b": "x"}, {"b": "x"}]}), true),
+        ("a = ''", json!({"a": ""}), true),
+        ("a = 'é'", json!({"a": "e\u{301}"}), false),
+    ] {
+        assert_eq!(eval(expr, input), Some(json!(expected)), "{expr}");
+    }
+    for source in ["$error('m') = 'x'", "'x' = $error('m')"] {
+        let err = Expression::compile(source)
+            .unwrap()
+            .evaluate(None, &Bindings::new())
+            .unwrap_err();
+        assert_eq!(err.code(), "D3137", "{source}");
+    }
+    // The literal's depth counts as if it were evaluated: an audit takes the general path.
+    for source in ["((a = 'x'))", "(('x' = a))"] {
+        let expr = Expression::compile(source).unwrap();
+        let input = json!({"a": "x"});
+        for depth in 1..6 {
+            let options = Options::new().max_depth(depth);
+            let plain = expr.evaluate_with(Some(&input), &Bindings::new(), &options);
+            let (audited, _) = expr.evaluate_audited(
+                Some(&input),
+                &Bindings::new(),
+                &options,
+                &jlens_core::audit::AuditOptions::full(),
+            );
+            assert_eq!(
+                format!("{plain:?}"),
+                format!("{audited:?}"),
+                "{source} {depth}"
+            );
+        }
+    }
+}
+
+#[test]
 fn size_caps_stop_huge_values() {
     let code = |source: &str, options: &Options| {
         Expression::compile(source)

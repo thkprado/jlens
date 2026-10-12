@@ -19,6 +19,9 @@ All notable changes are recorded here. The format follows
 - A field name evaluated on a single value (`price` in `items[price > 10]`) is a lookup, without
   the sequences of a general path: the filter + aggregate benchmark takes 56 µs instead of
   161 µs, the shipping rule 152 µs instead of 414 µs, group-by 575 µs instead of 842 µs.
+- `=` and `!=` with a string literal (`type = 'electronic'`) compare with the literal's text
+  instead of building a string value each time: the filter + aggregate benchmark takes 44 µs
+  instead of 56 µs, the shipping rule 127 µs instead of 150 µs.
 
 ## [0.10.0]
 

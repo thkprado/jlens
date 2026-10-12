@@ -978,6 +978,51 @@ impl<'a> Evaluator<'_, 'a> {
     // -----------------------------------------------------------------------------------------
     // Operators
 
+    /// `=` or `!=` with a string literal operand, compared without building the literal's
+    /// value. `None` when neither operand is one, or when a tracer is attached, which is given
+    /// both operands as values.
+    fn equals_literal(
+        &mut self,
+        op: BinaryOp,
+        lhs_node: &Node,
+        rhs_node: &Node,
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Option<Value<'a>>> {
+        if self.tracer.is_some() {
+            return Ok(None);
+        }
+        let (literal, other, literal_first) =
+            match (string_literal(lhs_node), string_literal(rhs_node)) {
+                (_, Some(literal)) => (literal, lhs_node, false),
+                (Some(literal), None) => (literal, rhs_node, true),
+                (None, None) => return Ok(None),
+            };
+        // Evaluating the literal could only fail on its guardrails, checked in its place.
+        if literal_first {
+            self.literal_guardrails()?;
+        }
+        let value = self.eval(other, input, env)?;
+        if !literal_first {
+            self.literal_guardrails()?;
+        }
+        let result = match &value {
+            Value::Undefined => false,
+            Value::String(s) => (**s == *literal) == (op == BinaryOp::Eq),
+            _ => op == BinaryOp::Ne,
+        };
+        Ok(Some(Value::Bool(result)))
+    }
+
+    /// [`Self::guardrails`] of a literal evaluated one level below the current node.
+    fn literal_guardrails(&self) -> Result<()> {
+        if self.depth >= self.limits.max_depth {
+            return Err(Error::new("D1011").with("value", self.limits.max_depth));
+        }
+        self.read_failure()?;
+        self.time_limits()
+    }
+
     fn binary(
         &mut self,
         expr: &Node,
@@ -991,6 +1036,11 @@ impl<'a> Evaluator<'_, 'a> {
             e.at_if_missing(expr.span, expr.position)
                 .with_token_if_missing(op.symbol())
         };
+        if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
+            && let Some(result) = self.equals_literal(op, lhs_node, rhs_node, input, env)?
+        {
+            return Ok(result);
+        }
         let lhs = self.eval(lhs_node, input, env)?;
 
         if matches!(op, BinaryOp::And | BinaryOp::Or) {
@@ -1671,6 +1721,14 @@ fn is_plain_step(step: &Node) -> bool {
         && a.focus.is_none()
         && a.index.is_none()
         && a.ancestor_label.is_none()
+}
+
+/// The value of a string literal whose evaluation is the value alone.
+fn string_literal(node: &Node) -> Option<&str> {
+    match &node.kind {
+        NodeKind::String { value } if is_plain_step(node) => Some(value),
+        _ => None,
+    }
 }
 
 fn first_step_name(procedure: &Node) -> Option<&str> {
