@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0]
+
+Proven robustness and fast single evaluations: coverage-guided fuzzing found and fixed panics,
+stack overflows and slow cases, and `evaluate` now reads only the parts of its input that an
+expression reaches, natively and in WebAssembly.
+
 ### Added
 
 - `Expression::evaluate_source` and the `jlens_core::input` module evaluate an input in another
@@ -305,7 +311,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/thkprado/jlens/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/thkprado/jlens/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/thkprado/jlens/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/thkprado/jlens/compare/v0.4.0...v0.5.0

@@ -30,6 +30,7 @@ The [changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md) lists 
 | 0.5.0 | A cap on the size of a result (`U1001`); the size caps, clock and seed in the WebAssembly package, and the size caps in `jlens eval` and `jlens test`; differential testing against jsonata-js (`cargo xtask differential`); every binary built before a release publishes anything; a security policy |
 | 0.6.0 | Regular expressions bounded by the timeout and cancellation ([ADR 0009](../adr/0009-bounded-regex.md)), on `jlens-regress`, a fork of `regress` 0.12.0; differential tests that reach regular expressions, pictures and decoders; npm provenance and build attestations for the binaries |
 | 0.7.0 | Three jsonata-js quirks that expose JavaScript are no longer reproduced: a regular expression applied to a value that is not a string, irregular grouping in `$formatNumber`, `$substringBefore` and `$substringAfter` without `chars` |
+| 0.8.0 | Coverage-guided fuzzing in a weekly `Fuzz` workflow, and the panics, stack overflows and slow cases it found fixed; `jlens lsp` survives a panicking request; `evaluate` reads its input lazily, one level at a time ([ADR 0010](../adr/0010-lazy-input.md)), natively and in WebAssembly, and `evaluate_source` reads other representations |
 
 ## Priorities
 
