@@ -9,10 +9,10 @@ It needs no build step, and runs online at <https://thkprado.github.io/jlens/edi
 - live evaluation, with the explanation and the audit tree of every result (click a node to
   select its source). It runs in a Web Worker, so typing never waits for it: when the expression
   changes during an evaluation, the worker is terminated and replaced;
-- ready-made examples, chosen in the header: a free-shipping rule for a store order, a
-  host function that calls the function it receives (`#host-functions`, see below), and the
+- ready-made examples, chosen in the header: a free-shipping rule for a store order, the
   samples of [try.jsonata.org](https://try.jsonata.org) (Invoice, Address, Schema, Library,
-  Bindings). The choice is kept in the address (`#invoice`), so an example can be linked;
+  Bindings), and last a host function that calls the function it receives (`#host-functions`,
+  see below). The choice is kept in the address (`#invoice`), so an example can be linked;
 - shared addresses: the Share button puts the expression, the input document and the bindings
   in the address and copies it (see below).
 
