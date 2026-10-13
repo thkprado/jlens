@@ -33,6 +33,30 @@ $ jlens --version
 jlens 0.13.0
 ```
 
+In a JavaScript project, the same binary comes from npm, in the package `jlens-cli` (from
+0.14.0 on):
+
+```sh
+npx jlens-cli --version              # run it without installing
+npm install --save-dev jlens-cli     # or add it to the project; npm scripts then run `jlens`
+```
+
+`jlens-cli` runs the release binary for your platform, which npm installs from one of its
+optional dependencies, `jlens-cli-<os>-<cpu>`, with no install script. Each run starts Node.js
+first, which adds some tens of milliseconds. An install with `--omit=optional` leaves the binary
+out, and so does a platform without a release binary (Windows on ARM64, for one): `jlens` then
+says which package it looked for and exits with code 2.
+
+Install the command through one channel. With more than one, the first `jlens` on the `PATH`
+runs, whatever its version; inside npm scripts and `npx`, the project's own `jlens-cli` comes
+first. To see which one runs:
+
+```sh
+jlens --version
+which -a jlens       # Linux and macOS: every jlens on the PATH, the one that runs first
+where.exe jlens      # Windows
+```
+
 The [CLI guide](../guides/cli.md) describes every command.
 
 ## Rust crates

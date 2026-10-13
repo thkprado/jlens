@@ -149,7 +149,7 @@ fn optimize(wasm: &Path) -> Result<()> {
     Ok(())
 }
 
-fn workspace_version() -> Result<String> {
+pub fn workspace_version() -> Result<String> {
     let manifest = fs::read_to_string(root().join("Cargo.toml"))?;
     manifest
         .lines()

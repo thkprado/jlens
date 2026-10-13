@@ -89,11 +89,15 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
 4. Commit, tag `vX.Y.Z`, and push the tag. The `Release` workflow first builds the `jlens`
    binaries for Linux, macOS and Windows (CI builds them on each push to `main` too), then
    publishes `jlens-regress`, `jlens-core`, `jlens-schema`, `jlens-lsp` and `jlens-cli` to
-   crates.io, in that order, and `jlens-wasm` to npm with provenance, then attests the binary
-   archives (build provenance, through `actions/attest`) and drafts the GitHub release with the
-   notes of the version, the archives and their `SHA256SUMS`. It needs the repository secrets
-   `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`; the provenance and the attestations are signed with
-   the run's OIDC token, so they need no secret.
+   crates.io, in that order, and to npm with provenance `jlens-wasm` and the packages of the
+   CLI (ADR 0012: the five `jlens-cli-<os>-<cpu>` packages built by `cargo xtask npm-cli` from
+   the archives, then `jlens-cli`), then attests the binary archives (build provenance, through
+   `actions/attest`) and drafts the GitHub release with the notes of the version, the archives
+   and their `SHA256SUMS`. It needs the repository secrets `CARGO_REGISTRY_TOKEN` and
+   `NPM_TOKEN`; `NPM_TOKEN` must be allowed to publish all seven npm packages, and to create the
+   CLI's six for their first release. The provenance and the attestations are signed with the
+   run's OIDC token, so they need no secret. If the CLI's npm job fails halfway, re-run it: it
+   skips the packages whose version is already on npm.
 
    To publish by hand instead: `cargo publish -p jlens-regress`, then `-p jlens-core`, then
    `-p jlens-schema`, then `-p jlens-lsp`, then `-p jlens-cli`; then
@@ -120,6 +124,8 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    cd dist
    for f in jlens-*; do gh attestation verify "$f" --repo thkprado/jlens; done
    npm view jlens-wasm@X.Y.Z dist.attestations   # lists the provenance (slsa.dev) statement
+   npm view jlens-cli@X.Y.Z dist.attestations    # and of jlens-cli-<os>-<cpu> likewise
+   npx -y jlens-cli@X.Y.Z --version              # the binary of this platform, from npm
    ```
 
    The package page on npmjs.com also shows a Provenance section linking to the workflow run.

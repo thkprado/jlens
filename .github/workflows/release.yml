@@ -1,11 +1,11 @@
 name: Release
 
 # When a version tag (v0.1.0, ...) is pushed, builds the jlens binaries (binaries.yml), then
-# publishes the crates to crates.io and the WebAssembly package to npm, then drafts the GitHub
-# release from CHANGELOG.md with the binaries attached. Nothing is published unless every binary
-# builds. The npm package is published with provenance and the binary archives get build
-# attestations, both signed through Sigstore with the run's OIDC token. Needs the repository
-# secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN.
+# publishes the crates to crates.io, and to npm the WebAssembly package and the packages of the
+# CLI (ADR 0012), then drafts the GitHub release from CHANGELOG.md with the binaries attached.
+# Nothing is published unless every binary builds. The npm packages are published with
+# provenance and the binary archives get build attestations, both signed through Sigstore with
+# the run's OIDC token. Needs the repository secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN.
 # Run by hand (workflow_dispatch) on an existing tag (gh workflow run release.yml --ref vX.Y.Z),
 # it publishes nothing: it builds the binaries of that tag, attests them and drafts its release,
 # for a release whose draft failed after publishing. It takes no ref as input: every job builds
@@ -102,10 +102,54 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+  # The CLI on npm (ADR 0012): a package per platform holding the binary of its archive, then
+  # jlens-cli, which depends on them, so that a published jlens-cli never points to a missing
+  # package. A package whose version is already on npm is skipped: re-running the job completes
+  # a release that failed halfway through.
+  npm-cli:
+    name: npm (CLI)
+    needs: binaries
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # id-token signs the provenance statements of the packages.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: The tag matches the workspace version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          test "v$version" = "$TAG"
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - run: cargo xtask npm-cli dist
+      - name: Publish
+        working-directory: target/npm-cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          version=${TAG#v}
+          for name in jlens-cli-linux-x64 jlens-cli-linux-arm64 jlens-cli-darwin-x64 \
+              jlens-cli-darwin-arm64 jlens-cli-win32-x64 jlens-cli; do
+            if [ -n "$(npm view "$name@$version" version 2> /dev/null)" ]; then
+              echo "$name@$version is already on npm"
+            else
+              (cd "$name" && npm publish --provenance --access public)
+            fi
+          done
+
   github:
     name: GitHub release (draft)
-    needs: [crates, npm, binaries]
-    # crates and npm are skipped when the workflow is run by hand.
+    needs: [crates, npm, npm-cli, binaries]
+    # crates and the npm jobs are skipped when the workflow is run by hand.
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     # contents creates the release; the others sign and store the attestations.

@@ -152,3 +152,60 @@ jobs:
     uses: ./.github/workflows/binaries.yml
     with:
       name: ${{ github.sha }}
+      upload: true
+
+  # The npm packages of the CLI (ADR 0012), built from those archives as the Release workflow
+  # builds them, then installed on each OS from the packed tarballs.
+  npm-cli:
+    name: CLI npm packages
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - run: cargo xtask npm-cli dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-cli
+          path: target/npm-cli/*.tgz
+          if-no-files-found: error
+
+  npm-cli-install:
+    name: CLI from npm (${{ matrix.os }})
+    needs: npm-cli
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-cli
+          path: packed
+      # jlens-cli with the platform package of the runner; npm skips the other optional
+      # dependencies, as it does when it installs from the registry.
+      - name: Install the packed packages and run jlens
+        shell: bash
+        run: |
+          platform=$(node -p 'process.platform + "-" + process.arch')
+          mkdir project
+          cd project
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund ../packed/jlens-cli-"$platform"-*.tgz ../packed/jlens-cli-[0-9]*.tgz
+          npx jlens --version
+          test "$(echo '{"a": [1, 2]}' | npx jlens eval "\$sum(a)")" = 3
+          code=0
+          npx jlens eval 2> /dev/null || code=$?
+          test "$code" = 2

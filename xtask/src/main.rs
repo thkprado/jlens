@@ -13,6 +13,7 @@ mod ab_probe;
 mod differential;
 mod docs;
 mod fuzz;
+mod npm;
 mod release;
 mod site;
 mod wasm;
@@ -31,6 +32,9 @@ commands:
   fuzz-seed                         seed the corpora of the fuzz targets with the JSONata suite
   fuzz-replay <target> <path>...    run saved inputs (files, or directories of them) through a
                                     fuzz target, without libFuzzer, on any platform
+  npm-cli <archives directory>      build the npm packages of the CLI (jlens-cli and one per
+                                    platform) from the release archives, into target/npm-cli,
+                                    and pack them
   wasm [--dev]                      build the browser package in crates/jlens-wasm/pkg
   wasm-test [--require-browser] [--example]
                                     build the package and test it in Node.js and a headless browser;
@@ -54,6 +58,14 @@ fn main() -> Result<()> {
         Some("differential") => differential::run(&args[1..]),
         Some("fuzz-seed") => fuzz::seed(),
         Some("fuzz-replay") => fuzz::replay(&args[1..]),
+        Some("npm-cli") => match args.get(1) {
+            Some(dir) => npm::build(Path::new(dir)),
+            None => bail!(
+                "npm-cli needs the directory of the release archives
+
+{USAGE}"
+            ),
+        },
         Some("wasm") => wasm::build(args.iter().any(|a| a == "--dev")),
         Some("wasm-test") => wasm::test(
             args.iter().any(|a| a == "--require-browser"),

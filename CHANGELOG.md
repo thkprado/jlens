@@ -10,6 +10,10 @@ All notable changes are recorded here. The format follows
 
 - The pages of the crates on crates.io and of `jlens-wasm` on npm link the book and the web
   editor; `jlens-cli` names the CLI guide as its documentation.
+- The `jlens` command on npm (ADR 0012): `npx jlens-cli` or `npm install --save-dev jlens-cli`
+  runs the release binary of the platform, which npm installs from one of the packages
+  `jlens-cli-<os>-<cpu>` (Linux x64 and arm64, macOS x64 and arm64, Windows x64), published
+  with provenance and without install scripts.
 
 ## [0.13.0]
 

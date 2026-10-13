@@ -6,6 +6,7 @@ command line. Part of [jlens](https://github.com/thkprado/jlens).
 ```sh
 cargo binstall jlens-cli     # a prebuilt binary, from the GitHub release
 cargo install jlens-cli      # or build it from source
+npx jlens-cli --version      # or from npm, in JavaScript projects (from 0.14.0 on)
 ```
 
 ```text
