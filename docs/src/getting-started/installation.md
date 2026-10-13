@@ -41,6 +41,15 @@ On macOS and Linux, Homebrew installs the same binary from the tap
 brew install thkprado/jlens/jlens
 ```
 
+On Windows, Scoop installs it from the bucket
+[`thkprado/scoop-jlens`](https://github.com/thkprado/scoop-jlens) (from 0.14.0 on), and
+`scoop update jlens` follows the releases:
+
+```sh
+scoop bucket add jlens https://github.com/thkprado/scoop-jlens
+scoop install jlens/jlens
+```
+
 In a JavaScript project, the same binary comes from npm, in the package `jlens-cli` (from
 0.14.0 on):
 

@@ -123,7 +123,11 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    `thkprado/homebrew-jlens`, with the permission Contents: read and write and nothing else.
    Such a token expires: renew it before then, or the workflow fails. To write the formula
    again (after renewing the token, say), run the workflow by hand on the tag:
-   `gh workflow run homebrew.yml --ref vX.Y.Z`.
+   `gh workflow run homebrew.yml --ref vX.Y.Z`. It also starts the `Scoop` workflow, which
+   writes the manifest of the Windows binary (`cargo xtask scoop`) to the bucket
+   `thkprado/scoop-jlens`, with the secret `SCOOP_BUCKET_TOKEN`: a token like the one of the
+   tap, whose only repository is `thkprado/scoop-jlens`. It is run again the same way:
+   `gh workflow run scoop.yml --ref vX.Y.Z`.
 6. Check that the packages prove where they were built:
 
    ```sh
@@ -134,6 +138,7 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    npm view jlens-cli@X.Y.Z dist.attestations    # and of jlens-cli-<os>-<cpu> likewise
    npx -y jlens-cli@X.Y.Z --version              # the binary of this platform, from npm
    brew upgrade thkprado/jlens/jlens && jlens --version   # macOS and Linux, after the Homebrew run
+   scoop update jlens; jlens --version                    # Windows, after the Scoop run
    ```
 
    The package page on npmjs.com also shows a Provenance section linking to the workflow run.

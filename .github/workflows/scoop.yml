@@ -1,0 +1,59 @@
+name: Scoop
+
+# When a release is published, writes the Scoop manifest of its Windows binary (cargo xtask
+# scoop, from the release's SHA256SUMS) to the bucket thkprado/scoop-jlens, so that
+# `scoop install jlens/jlens` installs it once the bucket is added. It runs on publication, as
+# the Homebrew workflow does: the archives of a draft cannot be downloaded. Needs the
+# repository secret SCOOP_BUCKET_TOKEN, a token that can write the contents of the bucket and
+# nothing else (CONTRIBUTING.md).
+# Run by hand (workflow_dispatch) on the tag of a published release
+# (gh workflow run scoop.yml --ref vX.Y.Z), it writes the manifest of that release again.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# The job reads the repository; it writes the bucket with its own token.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  manifest:
+    name: Update the bucket
+    runs-on: ubuntu-latest
+    steps:
+      - name: The run is on a version tag
+        run: '[[ "$GITHUB_REF" == refs/tags/v* ]]'
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: The tag matches the workspace version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          test "v$version" = "$TAG"
+      - run: gh release download "$TAG" --pattern SHA256SUMS --dir dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: cargo xtask scoop dist/SHA256SUMS > jlens.json
+      # git, not actions/checkout: the bucket may still be empty, with no branch to check out.
+      - name: Commit the manifest to the bucket
+        env:
+          BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+        run: |
+          git clone "https://x-access-token:$BUCKET_TOKEN@github.com/thkprado/scoop-jlens.git" bucket
+          mkdir -p bucket/bucket
+          cp jlens.json bucket/bucket/jlens.json
+          cd bucket
+          git add bucket/jlens.json
+          if git diff --cached --quiet; then
+            echo "the bucket already has this manifest"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "jlens ${TAG#v}"
+          git push origin HEAD:main

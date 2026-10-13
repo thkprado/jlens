@@ -48,7 +48,7 @@ class Jlens < Formula
     for os in ["macos", "linux"] {
         out.push_str(&format!("\n  on_{os} do\n"));
         for (_, cpu, target) in TARGETS.iter().filter(|t| t.0 == os) {
-            let (sha256, file) = archive(sums, target)?;
+            let (sha256, file) = archive(sums, target, "tar.gz")?;
             out.push_str(&format!(
                 "    on_{cpu} do\n      url \"{base}/{file}\"\n      sha256 \"{sha256}\"\n    end\n"
             ));
@@ -71,10 +71,10 @@ end
     Ok(out)
 }
 
-/// The checksum and the file name of the `.tar.gz` archive of `target` in a `SHA256SUMS` file
-/// (`<sha256>  <file>`, or `<sha256> *<file>` from a binary-mode checksum).
-fn archive<'a>(sums: &'a str, target: &str) -> Result<(&'a str, &'a str)> {
-    let suffix = format!("-{target}.tar.gz");
+/// The checksum and the file name of the archive of `target` (extension `ext`) in a `SHA256SUMS`
+/// file (`<sha256>  <file>`, or `<sha256> *<file>` from a binary-mode checksum).
+pub fn archive<'a>(sums: &'a str, target: &str, ext: &str) -> Result<(&'a str, &'a str)> {
+    let suffix = format!("-{target}.{ext}");
     sums.lines()
         .filter_map(|line| line.split_once(' '))
         .map(|(sha256, file)| (sha256, file.trim_start_matches([' ', '*'])))
@@ -135,14 +135,15 @@ mod tests {
             "f".repeat(64)
         );
         assert_eq!(
-            archive(&sums, "aarch64-apple-darwin").unwrap().1,
+            archive(&sums, "aarch64-apple-darwin", "tar.gz").unwrap().1,
             "jlens-abc-aarch64-apple-darwin.tar.gz"
         );
-        assert!(archive(&sums, "x86_64-apple-darwin").is_err());
+        assert!(archive(&sums, "x86_64-apple-darwin", "tar.gz").is_err());
         assert!(
             archive(
                 "abc  jlens-1-aarch64-apple-darwin.tar.gz",
-                "aarch64-apple-darwin"
+                "aarch64-apple-darwin",
+                "tar.gz"
             )
             .is_err()
         );

@@ -16,6 +16,7 @@ mod fuzz;
 mod homebrew;
 mod npm;
 mod release;
+mod scoop;
 mod site;
 mod wasm;
 
@@ -40,6 +41,10 @@ commands:
   npm-cli <archives directory>      build the npm packages of the CLI (jlens-cli and one per
                                     platform) from the release archives, into target/npm-cli,
                                     and pack them
+  scoop <SHA256SUMS> [--url <base>]
+                                    print the Scoop manifest of the CLI, for the Windows archive
+                                    listed in a release's SHA256SUMS, downloaded from the
+                                    GitHub release or from <base>
   wasm [--dev]                      build the browser package in crates/jlens-wasm/pkg
   wasm-test [--require-browser] [--example]
                                     build the package and test it in Node.js and a headless browser;
@@ -81,6 +86,20 @@ fn main() -> Result<()> {
             Some(dir) => npm::build(Path::new(dir)),
             None => bail!(
                 "npm-cli needs the directory of the release archives
+
+{USAGE}"
+            ),
+        },
+        Some("scoop") => match args.get(1) {
+            Some(sums) => scoop::print(
+                Path::new(sums),
+                args.iter()
+                    .position(|a| a == "--url")
+                    .and_then(|i| args.get(i + 1))
+                    .map(String::as_str),
+            ),
+            None => bail!(
+                "scoop needs the path of a SHA256SUMS file
 
 {USAGE}"
             ),

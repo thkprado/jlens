@@ -262,3 +262,48 @@ jobs:
           brew install local/jlens/jlens
           brew test local/jlens/jlens
           jlens --version
+
+  # The Scoop manifest, written as the Scoop workflow writes it but pointing at the CI archive
+  # (put in C:\jlens-dist by the install job), then installed by Scoop on Windows.
+  scoop:
+    name: Scoop manifest
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - run: sha256sum -- *.zip > SHA256SUMS
+        working-directory: dist
+      - run: cargo xtask scoop dist/SHA256SUMS --url file:///C:/jlens-dist > dist/jlens.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: scoop
+          path: |
+            dist/jlens.json
+            dist/*.zip
+          if-no-files-found: error
+
+  scoop-install:
+    name: CLI from Scoop (windows-latest)
+    needs: scoop
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: scoop
+          path: C:\jlens-dist
+      # Scoop is not installed on the runners; its installer refuses an administrator unless told.
+      - name: Install Scoop, then the manifest, and run jlens
+        shell: pwsh
+        run: |
+          Invoke-Expression "& {$(Invoke-RestMethod https://get.scoop.sh)} -RunAsAdmin"
+          $env:PATH = "$env:USERPROFILE\scoop\shims;$env:PATH"
+          scoop install C:\jlens-dist\jlens.json
+          jlens --version
+          $sum = '{"a": [1, 2]}' | jlens eval '$sum(a)'
+          if ($sum -ne '3') { throw "jlens printed $sum" }

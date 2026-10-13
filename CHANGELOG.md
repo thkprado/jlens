@@ -17,6 +17,9 @@ All notable changes are recorded here. The format follows
 - The `jlens` command on Homebrew, for macOS and Linux: `brew install thkprado/jlens/jlens`
   installs the release binary from the tap `thkprado/homebrew-jlens`, which each published
   release updates.
+- The `jlens` command on Scoop, for Windows: after
+  `scoop bucket add jlens https://github.com/thkprado/scoop-jlens`, `scoop install jlens/jlens`
+  installs the release binary, and each published release updates the bucket.
 
 ## [0.13.0]
 
