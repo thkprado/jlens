@@ -2,6 +2,7 @@
 
 import init, {
   type AuditResult,
+  type Callable,
   type Completions,
   type Diagnostic,
   type EvaluateOptions,
@@ -45,6 +46,8 @@ export async function check(): Promise<void> {
   doc.free();
   const add: HostFunction = (a: number, b: number) => a + b;
   const r6: unknown = expr.evaluate({}, { add, rate: 0.5 });
+  const apply: HostFunction = (f: Callable, x: unknown) => (f.arity > 0 ? f(x) : f());
+  const r7: unknown = expr.evaluate({}, { apply });
   expr.registerFunction("tax", (amount: number) => amount * 0.2, "<n:n>");
   expr.registerFunction("now", () => 0);
   const type: string = expr.ast().type;
@@ -71,5 +74,5 @@ export async function check(): Promise<void> {
   const hover = service.hover("a", 0)?.contents;
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();
-  console.log(v, source, r1, r2, r3, r4, r5, r6, withFunctions, text, failed, start, type, ast.id, d, kinds, hover, help, catalog);
+  console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, text, failed, start, type, ast.id, d, kinds, hover, help, catalog);
 }

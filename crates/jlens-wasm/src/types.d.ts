@@ -7,13 +7,23 @@ export type Bindings = Record<string, unknown>;
 
 /**
  * A JavaScript function called from an expression. Arguments and the result are converted
- * through JSON: `undefined` stands for undefined, and a function argument arrives as
- * `undefined`. `this` is `undefined`; use a signature with `-` to receive the context value.
+ * through JSON: `undefined` stands for undefined, and a function argument arrives as a
+ * `Callable`. `this` is `undefined`; use a signature with `-` to receive the context value.
  * Without a signature, `length` tells higher-order functions how many arguments to pass. An
  * exception it throws is rethrown by the evaluation, with the `position` and `token` of the call
  * when it has none. Returning a promise fails with `U1002`.
  */
 export type HostFunction = (...args: any[]) => unknown;
+
+/**
+ * A JSONata function passed to a `HostFunction`, such as the lambda in `$retry(function() {...},
+ * 3)`. Calling it applies the function, synchronously, with the context value `null`: arguments
+ * and the result are converted through JSON, and a JavaScript function among the arguments
+ * becomes `undefined`. Its errors are thrown as a `JlensError` with their codes, or as the
+ * exception a host function threw. `length` is 0 and `arity` is the number of parameters, as in
+ * jsonata-js. Valid until the host function returns: calling it later throws `U1005`.
+ */
+export type Callable = ((...args: any[]) => unknown) & { readonly arity: number };
 
 /** Evaluation guardrails, and the clock and seed that make an evaluation reproducible. */
 export interface EvaluateOptions {

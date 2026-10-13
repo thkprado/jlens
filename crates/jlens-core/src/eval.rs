@@ -257,7 +257,7 @@ impl crate::host::Caller for HostCaller<'_, '_, '_> {
             Error::new("U1001").with(
                 "message",
                 format!(
-                    "The result of a function called by a host function would exceed the size                      limit of {limit} bytes"
+                    "The result of a function called by a host function would exceed the size limit of {limit} bytes"
                 ),
             )
         })?;

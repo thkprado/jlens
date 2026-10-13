@@ -156,7 +156,8 @@ expr.registerFunction("shipping", (weight, region) => weight * rates[region], "<
 ```
 
 - **Arguments and the result** pass through JSON, like the input. `undefined` stands for
-  undefined, and a function argument arrives as `undefined`.
+  undefined, and a function argument arrives as a JavaScript function that calls it
+  ([below](#functions-as-arguments)).
 - **A signature** (`registerFunction`'s third argument) checks the arguments before each call,
   with the errors of the built-in functions (`T0410`, `T0412`). A parameter with `-` receives the
   context value when the argument is missing: `<n-:n>` makes `price.$double()` work.
@@ -172,6 +173,40 @@ expr.registerFunction("shipping", (weight, region) => weight * rates[region], "<
   and both replace a built-in function.
 
 The [Rust crate guide](crate.md#host-functions) describes the same model.
+
+### Functions as arguments
+
+A host function can call a JSONata function it receives, such as a fallback or a step to retry:
+a lambda, a built-in function, a partial application, a chain or another host function.
+
+```js
+const retry = (step, times) => {
+  for (let i = 1; ; i++) {
+    try {
+      return step(i);
+    } catch (e) {
+      if (i >= times) throw e;
+    }
+  }
+};
+new Expression("$retry(function($i) { $lookup(sku, $i) }, 3)").evaluate(order, { retry, lookup });
+```
+
+- **The call is part of the evaluation**, as when `$map` calls its function. The context value
+  is `null`, and a lambda keeps the variables of its definition. The call counts as a level of
+  depth, so a recursion through a host function ends with `D1011`; it checks the timeout; its
+  result is limited by `maxResultSize`.
+- **It is synchronous**: it returns the result, where jsonata-js returns a promise. Code written
+  for jsonata-js with `await step(i)` keeps working.
+- **Arguments and the result pass through JSON.** A sequence comes back as an array or a single
+  value; a JavaScript function among the arguments becomes `undefined`, and a function result
+  comes back as `undefined`.
+- **Its `length` is 0** and its `arity` property is the number of parameters, as in jsonata-js.
+- **Errors are thrown** as a `JlensError` with their codes, or as the exception a host function
+  threw. The host function can catch them, or let them through, which ends the evaluation with
+  that error.
+- **It is valid until the host function returns.** Called later, from a promise or a timer, it
+  throws `U1005`.
 
 ## Errors
 

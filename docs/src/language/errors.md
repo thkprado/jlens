@@ -148,6 +148,7 @@ Raised when an evaluation exceeds its configured limits, is cancelled, or needs 
 | `U1002` | `The function ${{{token}}} returned a promise: asynchronous functions are not supported` |
 | `U1003` | `The evaluation was cancelled` |
 | `U1004` | `The input could not be read: {{{message}}}` |
+| `U1005` | `A function passed to ${{{token}}} was called after ${{{token}}} returned` |
 | `U2001` | `The input is not valid JSON: {{{message}}}` |
 
 ## Warnings (W)

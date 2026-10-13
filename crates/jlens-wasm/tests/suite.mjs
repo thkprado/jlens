@@ -210,6 +210,7 @@ export const cases = [
     const bindings = {
       add: (a, b) => a + b,
       args: function (a) { return [...arguments].map((x) => (x === undefined ? null : x)); },
+      types: function () { return [...arguments].map((x) => typeof x); },
       two: (v, i) => [v, i],
       pair: () => [{ a: 1 }, { a: 2 }],
       nothing: () => undefined,
@@ -220,7 +221,7 @@ export const cases = [
     equal(ev("$add(1, 2)"), 3);
     equal(ev("$add(price, $rate)", { price: 2 }), 2.5, "with a variable");
     equal(ev("$args(1, 'a', missing, {'k': [1]})", {}), [1, "a", null, { k: [1] }], "arguments as JSON");
-    equal(ev("$args($add, function($x) { $x })"), [null, null], "function arguments");
+    equal(ev("$types($add, function($x) { $x }, 1)"), ["function", "function", "number"], "function arguments");
     equal(ev("$pair().a"), [1, 2], "results are values");
     equal(ev("$nothing()"), undefined, "undefined result");
     equal(ev("$self()"), true, "this");
@@ -292,6 +293,50 @@ export const cases = [
       equal([e.name, e.code, e.token], ["JlensError", "U1002", "fetch"]);
       ok(e.message.includes("$fetch"), e.message);
     });
+  }],
+
+  ["host functions call the functions they receive", (j) => {
+    const bindings = {
+      apply: (f, ...args) => f(...args),
+      shape: (f) => [typeof f, f.length, f.arity],
+      safe: (f) => { try { return f(); } catch (e) { return e.code; } },
+      give: (f) => f(() => 1, [2]),
+      add: (a, b) => a + b,
+    };
+    const ev = (src, more, options) => new j.Expression(src).evaluate(null, { ...bindings, ...more }, options);
+    equal(ev("$apply(function($x, $y) { $x + $y }, 1, 2)"), 3, "a lambda");
+    equal(ev("$apply($uppercase, 'a')"), "A", "a built-in function");
+    equal(ev("$apply($substring(?, 1), 'abc')"), "bc", "a partial application");
+    equal(ev("$apply($uppercase ~> $trim, ' a ')"), "A", "a chain");
+    equal(ev("$apply($add, 1, 2)"), 3, "a host function");
+    equal(ev("($n := 5; $apply(function() { $n + 1 }))"), 6, "a closure");
+    equal(ev("$shape(function($a, $b) { 0 })"), ["function", 0, 2], "length 0 and arity");
+    equal(ev("$apply($string)"), "null", "the context is null");
+    equal(ev("$give(function($f, $a) { {'f': $type($f), 'a': $a} })"), { a: [2] }, "a JavaScript function becomes undefined");
+    equal(ev("$apply(function() { $uppercase })"), undefined, "a function result is undefined");
+    const twice = new j.Expression("$twice(function($n) { $n * 3 }, 2)");
+    twice.registerFunction("twice", (f, x) => f(f(x)), "<fx:x>");
+    equal(twice.evaluate(), 18, "with a signature");
+    // Errors are thrown with their codes; the host function may catch them or let them through.
+    equal(ev("$safe(function() { $error('no') })"), "D3137", "caught");
+    throws(() => ev("$apply(function() { $error('no') })"), (e) => {
+      equal([e.name, e.code, e.message], ["JlensError", "D3137", "no"]);
+    });
+    const audited = new j.Expression("$apply(function() { 1 + 'a' })").evaluateWithAudit(null, bindings);
+    equal([audited.error.code, audited.error.position], ["T2002", 23], "audited, at the error's position");
+    const failing = new Error("down");
+    throws(() => ev("$apply($rate)", { rate: () => { throw failing; } }), (e) => ok(e === failing, "a host exception"));
+    const deep = "($f := function($n) { $apply($f, $n + 1) }; $f(0))";
+    throws(() => ev(deep, {}, { maxDepth: 50 }), (e) => equal(e.code, "D1011"));
+    // Called after the host function returned, it throws U1005.
+    let kept;
+    equal(ev("$keep(function($x) { $x + 1 })", { keep: (f) => { kept = f; return f(1); } }), 2, "kept");
+    throws(() => kept(1), (e) => equal([e.name, e.code, e.token], ["JlensError", "U1005", "keep"]));
+    // Called again while it runs, through another host function: an error, not a crash.
+    let stash;
+    const reentry = { outer: (f) => { stash = f; return f(); }, inner: () => stash() };
+    throws(() => ev("$outer(function() { $inner() })", reentry), (e) => equal(e.code, "U1001"));
+    equal(ev("$apply($add, 2, 3)"), 5, "still usable");
   }],
 
   ["invalid arguments are TypeErrors", (j) => {

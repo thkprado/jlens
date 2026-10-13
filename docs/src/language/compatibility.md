@@ -108,7 +108,9 @@ functions in the bindings object or `registerFunction` in the WebAssembly packag
 | Topic | jsonata-js | jlens |
 |---|---|---|
 | Arguments and result | The JavaScript values themselves, which the function may modify | JSON copies: the function cannot change the values of the evaluation |
-| A function as an argument (`$f($g)`) | An `async` function that applies it, with an `arity` property, which the host can call even after it returns | `None` among the arguments. In Rust, `HostCall::function` gives a `Callable`, valid until the host function returns (ADR 0011). In WebAssembly, `undefined` |
+| A function as an argument (`$f($g)`) | An `async` function that applies it, with an `arity` property | In Rust, `None` among the arguments, and `HostCall::function` gives a `Callable` (ADR 0011). In WebAssembly, a function with an `arity` property, as in jsonata-js |
+| Calling a function argument | Returns a promise | Synchronous: returns the result. In WebAssembly, `await f(x)` keeps working; `f(x).then(...)` does not |
+| Calling a function argument after the host function returns | Works: the function holds its environment | Not possible in Rust (the `Callable` borrows the call); in WebAssembly, it throws `U1005` |
 | The result of a function called by the host | The internal value: a sequence keeps its `sequence` flag, a function is an internal object | JSON: a sequence is an array or a single value, a function is `None` |
 | A recursion through a host function | Runs until the heap is exhausted | `D1011`, as any recursion too deep |
 | The context value | `this`: the context value for a function in the bindings, `{environment, input}` for one registered with `registerFunction`. An input array arrives in its wrapper | `HostCall::input`, the context value itself, an input array included. In WebAssembly, `this` is `undefined`: a signature with `-` passes the context value as an argument |

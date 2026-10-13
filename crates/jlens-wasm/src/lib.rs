@@ -22,6 +22,8 @@ mod host;
 mod service;
 mod source;
 
+use std::rc::Rc;
+
 pub use service::{LanguageService, functions, infer_schema};
 
 use jlens_core::audit::{self, AuditOptions, CaptureLimits};
@@ -49,7 +51,7 @@ pub fn version() -> String {
 #[wasm_bindgen(skip_typescript)]
 pub struct Expression {
     inner: jlens_core::Expression,
-    offsets: Offsets,
+    offsets: Rc<Offsets>,
     registered: Vec<Registered>,
 }
 
@@ -63,7 +65,7 @@ impl Expression {
         let inner = jlens_core::Expression::compile(source).map_err(|e| js_error(&e, &offsets))?;
         Ok(Expression {
             inner,
-            offsets,
+            offsets: Rc::new(offsets),
             registered: Vec::new(),
         })
     }
@@ -113,7 +115,7 @@ impl Expression {
         bindings: Option<JsValue>,
         options: Option<JsValue>,
     ) -> Result<JsValue, JsValue> {
-        let scope = Scope::enter();
+        let scope = Scope::enter(&self.offsets);
         let (bindings, options) = self.arguments(&scope, bindings, options)?;
         let options = convert::options(options.as_ref())?;
         let result = match input.filter(|input| !input.is_undefined()) {
@@ -148,7 +150,7 @@ impl Expression {
             ),
             None => None,
         };
-        let scope = Scope::enter();
+        let scope = Scope::enter(&self.offsets);
         let (bindings, options) = self.arguments(&scope, bindings, options)?;
         let options = convert::options(options.as_ref())?;
         let result = self.run(&scope, document.as_ref(), &bindings, &options)?;
@@ -164,7 +166,7 @@ impl Expression {
         bindings: Option<JsValue>,
         options: Option<JsValue>,
     ) -> Result<JsValue, JsValue> {
-        let scope = Scope::enter();
+        let scope = Scope::enter(&self.offsets);
         let (bindings, options) = self.arguments(&scope, bindings, options)?;
         let options = convert::options(options.as_ref())?;
         let result = self.run(&scope, Some(&document.inner), &bindings, &options)?;
@@ -184,7 +186,7 @@ impl Expression {
             Some(input) => from_js(input, "input")?,
             None => None,
         };
-        let scope = Scope::enter();
+        let scope = Scope::enter(&self.offsets);
         let (bindings, options) = self.arguments(&scope, bindings, options)?;
         let eval_options = convert::options(options.as_ref())?;
         let audit_options = audit_options(options.as_ref())?;

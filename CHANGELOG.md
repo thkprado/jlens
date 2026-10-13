@@ -13,6 +13,15 @@ All notable changes are recorded here. The format follows
   gives a `Callable` for an argument that is a function (a lambda, a built-in function, a
   partial application, a chain or a host function); `Callable::call` applies it to JSON
   arguments, within the evaluation's depth, timeout, cancellation and size limits.
+- In WebAssembly, a JavaScript host function receives a JSONata function argument as a
+  JavaScript function that calls it, with an `arity` property, as in jsonata-js (`Callable` in
+  the TypeScript declarations). It is synchronous, and calling it after the host function has
+  returned throws the new error `U1005`.
+
+### Changed
+
+- In WebAssembly, a function passed to a host function no longer arrives as `undefined`: a host
+  function that tested for `undefined` sees a function instead.
 
 ## [0.12.0]
 
