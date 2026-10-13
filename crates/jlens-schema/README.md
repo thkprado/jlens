@@ -30,7 +30,9 @@ let warnings = service.diagnostics("items.prise");
 assert!(warnings[0].message.contains("did you mean `price`"));
 ```
 
-See the [API reference](https://docs.rs/jlens-schema) and the schema guide of the jlens book.
+See the [API reference](https://docs.rs/jlens-schema) and the
+[schema guide](https://thkprado.github.io/jlens/guides/schema.html) of the
+[jlens book](https://thkprado.github.io/jlens/).
 
 ## License
 

@@ -23,5 +23,6 @@ workspace folder says which schema, variables and host functions apply to which 
 ```
 
 To embed the server, run `jlens_lsp::run` on an `lsp_server::Connection`. The
-[editors guide](https://github.com/thkprado/jlens/blob/main/docs/src/guides/editors.md) covers
-the configuration and the setup of Neovim, Helix and Emacs.
+[editors guide](https://thkprado.github.io/jlens/guides/editors.html) of the
+[jlens book](https://thkprado.github.io/jlens/) covers the configuration and the setup of Neovim,
+Helix and Emacs.

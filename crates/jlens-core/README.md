@@ -1,7 +1,8 @@
 # jlens-core
 
 A [JSONata](https://jsonata.org/) engine in Rust, with evaluation audits. It is the language
-core of [jlens](https://github.com/thkprado/jlens).
+core of [jlens](https://github.com/thkprado/jlens). Try expressions in the
+[web editor](https://thkprado.github.io/jlens/editor/), which runs jlens in your browser.
 
 - **Complete JSONata 2.2.** Every operator and built-in function. It passes 1,688 of the 1,690
   cases of the official test suite; the other two are documented.
@@ -29,8 +30,8 @@ assert_eq!(total, Some(json!(25)));
 ## Documentation
 
 - The [API reference](https://docs.rs/jlens-core).
-- The jlens book: a language reference, and guides to the crate, auditing and performance
-  (`docs/` in the repository).
+- The [jlens book](https://thkprado.github.io/jlens/): a language reference, and guides to the
+  [crate](https://thkprado.github.io/jlens/guides/crate.html), auditing and performance.
 - `jlens-schema` adds schema inference and editor support (completion, diagnostics, hover).
 - `jlens-cli` is the `jlens` command.
 

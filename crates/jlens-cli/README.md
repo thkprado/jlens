@@ -29,7 +29,9 @@ $ jlens functions formatNumber                                     # built-in re
 | `jlens functions` | Describe the built-in functions |
 | `jlens ast` | Show the tokens or the syntax tree |
 
-The CLI guide of the jlens book documents every option and exit code.
+The [CLI guide](https://thkprado.github.io/jlens/guides/cli.html) of the
+[jlens book](https://thkprado.github.io/jlens/) documents every option and exit code. The
+[web editor](https://thkprado.github.io/jlens/editor/) runs the same engine in your browser.
 
 ## License
 

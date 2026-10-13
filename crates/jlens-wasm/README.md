@@ -7,6 +7,9 @@ diagnostics and hover driven by a JSON Schema inferred from sample documents.
 This is an ES module for browsers (`--target web`). It also runs in Node.js 20+ and Deno if you
 pass the `.wasm` bytes to `init`.
 
+Try it in the [web editor](https://thkprado.github.io/jlens/editor/), which is built on this
+package, and read the [jlens book](https://thkprado.github.io/jlens/) for the language and the API.
+
 ```js
 import init, { Expression } from "jlens-wasm";
 
@@ -39,7 +42,9 @@ with the JSONata error `code`, plus `position`, `start`, `end` and `token` when 
 
 All offsets, in both directions, are UTF-16 code units, like JavaScript string indexes.
 
-The full guide is the "WebAssembly (browser)" chapter of the jlens book (`docs/src/guides/wasm.md`).
+The full guide is the
+[WebAssembly chapter](https://thkprado.github.io/jlens/guides/wasm.html) of the
+[jlens book](https://thkprado.github.io/jlens/).
 
 ## License
 

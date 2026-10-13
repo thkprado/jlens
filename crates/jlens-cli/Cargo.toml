@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
+documentation = "https://thkprado.github.io/jlens/guides/cli.html"
 authors.workspace = true
 keywords.workspace = true
 categories = ["command-line-utilities"]

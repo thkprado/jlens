@@ -6,6 +6,11 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The pages of the crates on crates.io and of `jlens-wasm` on npm link the book and the web
+  editor; `jlens-cli` names the CLI guide as its documentation.
+
 ## [0.13.0]
 
 Host functions call the functions they receive (ADR 0011), in Rust and in WebAssembly: a helper
