@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0]
+
+The `jlens` command installs from the package managers people already use: npm
+(`npx jlens-cli`), Homebrew, Scoop and a container image on ghcr.io. Each channel carries the
+attested release binaries, never rebuilt.
+
 ### Added
 
 - The pages of the crates on crates.io and of `jlens-wasm` on npm link the book and the web
@@ -484,7 +490,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/thkprado/jlens/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/thkprado/jlens/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/thkprado/jlens/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/thkprado/jlens/compare/v0.11.0...v0.11.1

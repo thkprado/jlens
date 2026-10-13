@@ -37,6 +37,7 @@ The [changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md) lists 
 | 0.11.1 | `$fromMillis` and `$now` fail with `D3150` on a timezone that is not a number |
 | 0.12.0 | The book and the web editor published at <https://thkprado.github.io/jlens/> at each release tag; the editor evaluates in a Web Worker and shares expressions by address |
 | 0.13.0 | Host functions call the functions they receive, in Rust (`HostCall::function`, `Callable`) and in WebAssembly (a JavaScript function), within the evaluation's limits ([ADR 0011](../adr/0011-host-callbacks.md)) |
+| 0.14.0 | The `jlens` command from npm (`jlens-cli`, [ADR 0012](../adr/0012-npm-distribution.md)), Homebrew, Scoop and the container image `ghcr.io/thkprado/jlens`, all from the attested release binaries |
 
 ## Priorities
 
@@ -209,7 +210,7 @@ and attested, never rebuilt, and each one stays only if it updates without manua
 | 3 | Homebrew. A tap, `thkprado/homebrew-jlens` (created by the maintainer), with a formula for the macOS and Linux archives and their checksums from `SHA256SUMS`; `release.yml` updates it with a token limited to that repository | `brew install thkprado/jlens/jlens` installs the release; the formula's `test` runs `jlens --version`; the installation page; the token's scope documented in `CONTRIBUTING.md` | **done**: `cargo xtask homebrew` writes the formula from `SHA256SUMS`; the `Homebrew` workflow commits it to the tap when a release is published (a draft's archives cannot be downloaded yet), and CI installs and tests the formula with the CI archives on Linux and macOS. `brew install` is checked with the 0.14.0 release (#6) |
 | 4 | Windows: a Scoop bucket, `thkprado/scoop-jlens`, with a manifest that updates itself from the GitHub releases (`checkver`, `autoupdate`). winget is left out for now: each version is a pull request that Microsoft reviews | `scoop install jlens` works after adding the bucket; the installation page | **done**: `cargo xtask scoop` writes the manifest from `SHA256SUMS`, with a `checkver` and an `autoupdate` that Scoop's `checkver.ps1` turns into the same manifest; the `Scoop` workflow commits it to the bucket when a release is published, and CI installs the manifest with the CI archive on Windows. `scoop install` is checked with the 0.14.0 release (#6) |
 | 5 | A container image, `ghcr.io/thkprado/jlens`: `FROM scratch` with the static Linux binaries (x86-64 and ARM64), built from the release archives and attested | `docker run --rm -i ghcr.io/thkprado/jlens eval '...'` works on both architectures; the installation page | **done**: `crates/jlens-cli/Dockerfile` unpacks the musl archive of the platform being built into a `scratch` image, so the multi-platform build runs no emulated step; `release.yml` pushes it with the run's token, tagged `X.Y.Z`, `X.Y` and `latest`, and attests it; CI builds it from its own archives and runs it on x86-64 and ARM64 runners. The pull from ghcr.io is checked with the 0.14.0 release (#6) |
-| 6 | Release 0.14.0 | The release checklist, with a check of each channel after the release | |
+| 6 | Release 0.14.0 | The release checklist, with a check of each channel after the release | **done** |
 
 ## Later
 
