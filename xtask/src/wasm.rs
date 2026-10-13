@@ -252,19 +252,49 @@ pub fn test(require_browser: bool, example: bool) -> Result<()> {
     println!("browser tests passed ({})", browser.display());
 
     if example {
-        let url = format!("http://127.0.0.1:{port}/examples/web-editor/");
+        fs::write(root().join("target/editor-check.html"), EDITOR_CHECK)?;
+        let url = format!(
+            "http://127.0.0.1:{port}/target/editor-check.html?editor=/examples/web-editor/"
+        );
         check_editor(&browser, &url)?;
         println!("web editor example loaded and evaluated its sample");
 
         // The editor as the site serves it, without building the book.
         let site = root().join("target/site-editor-test");
         site::assemble_editor(&site.join("editor"))?;
+        fs::write(site.join("editor-check.html"), EDITOR_CHECK)?;
         let port = serve(site)?;
-        check_editor(&browser, &format!("http://127.0.0.1:{port}/editor/"))?;
+        check_editor(
+            &browser,
+            &format!("http://127.0.0.1:{port}/editor-check.html?editor=/editor/"),
+        )?;
         println!("web editor of the site loaded and evaluated its sample");
     }
     Ok(())
 }
+
+/// A page that loads the web editor named by `?editor=` in a frame and copies its result once
+/// the editor is ready. The editor evaluates in a Web Worker, and the headless browser's virtual
+/// time does not wait for a worker: it would dump the page before the worker has loaded the
+/// package. Each fetch pauses virtual time, so the page fetches until the editor is ready.
+const EDITOR_CHECK: &str = r#"<!doctype html>
+<meta charset="utf-8">
+<iframe id="editor"></iframe>
+<pre id="result"></pre>
+<script type="module">
+  const frame = document.getElementById("editor");
+  frame.src = new URLSearchParams(location.search).get("editor");
+  for (let i = 0; i < 20000; i++) {
+    const editor = frame.contentDocument;
+    if (editor?.body?.dataset.ready === "true") {
+      document.getElementById("result").textContent = editor.getElementById("result").textContent;
+      document.body.dataset.ready = "true";
+      break;
+    }
+    await fetch(location.href, { cache: "no-store" });
+  }
+</script>
+"#;
 
 fn check_editor(browser: &Path, url: &str) -> Result<()> {
     let dom = dump_dom(browser, url)?;

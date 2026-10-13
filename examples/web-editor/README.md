@@ -7,7 +7,8 @@ It needs no build step, and runs online at <https://thkprado.github.io/jlens/edi
 - diagnostics: syntax errors, and fields that are not in the schema (with "did you mean");
 - hover and signature help;
 - live evaluation, with the explanation and the audit tree of every result (click a node to
-  select its source);
+  select its source). It runs in a Web Worker, so typing never waits for it: when the expression
+  changes during an evaluation, the worker is terminated and replaced;
 - ready-made examples, chosen in the header: a free-shipping rule for a store order, and the
   samples of [try.jsonata.org](https://try.jsonata.org) (Invoice, Address, Schema, Library,
   Bindings). The choice is kept in the address (`#invoice`), so an example can be linked.
@@ -46,6 +47,7 @@ of the editor.
 | `jlens-codemirror.js` | The CodeMirror integration: highlighting, completion, linting, hover, signature help. Copy it into your application |
 | `audit-view.js` | Renders explanations and audit trees |
 | `main.js` | Wires the editor, the input document, the examples and the result panels |
+| `worker.js` | Evaluates in a Web Worker; the page passes it the address of the package, as import maps do not apply to workers |
 | `samples.js` | The examples: expression, input document and bindings of each |
 | `index.html`, `style.css` | The page |
 

@@ -15,6 +15,11 @@ All notable changes are recorded here. The format follows
   `Pages` workflow, at each release tag. The crates and the npm package name the site as
   their homepage.
 
+### Changed
+
+- The web editor evaluates in a Web Worker, so a slow expression no longer blocks typing; an
+  evaluation still running when the expression changes is dropped.
+
 ## [0.11.1]
 
 A fix for dates formatted with a timezone that is not a number.

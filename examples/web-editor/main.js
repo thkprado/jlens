@@ -3,7 +3,8 @@
 //
 // Serve the repository root (`cargo xtask serve`) after building the package (`cargo xtask
 // wasm`), then open /examples/web-editor/. The import map of index.html maps `jlens-wasm` to the
-// package; `cargo xtask site` rewrites that entry for the site.
+// package; `cargo xtask site` rewrites that entry for the site. Evaluation runs in a Web Worker
+// (worker.js), so that a slow expression never blocks typing.
 
 import { closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -12,12 +13,7 @@ import { lintKeymap } from "@codemirror/lint";
 import { Compartment } from "@codemirror/state";
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from "@codemirror/view";
 
-import init, {
-  Expression,
-  LanguageService,
-  inferSchema,
-  version,
-} from "jlens-wasm";
+import init, { LanguageService, inferSchema, version } from "jlens-wasm";
 import { renderAudit, renderExplanation, spansOf } from "./audit-view.js";
 import { jlensExtensions } from "./jlens-codemirror.js";
 import { samples } from "./samples.js";
@@ -50,38 +46,66 @@ function select(span) {
   editor.focus();
 }
 
-/** Evaluates the expression and refreshes the result, explanation and audit panels. */
-function evaluate() {
-  const source = editor.state.doc.toString();
-  let expr;
-  try {
-    expr = new Expression(source);
-  } catch (err) {
-    $("result").textContent = `${err.code}: ${err.message}`;
+// The worker that evaluates, started on first use. Import maps do not apply to workers, so it
+// receives the address of the package in its own.
+const workerUrl = new URL("worker.js", import.meta.url);
+workerUrl.searchParams.set("jlens", import.meta.resolve("jlens-wasm"));
+let worker = null;
+let busy = false;
+let latest = 0;
+
+/** Shows an evaluation's reply in the result, explanation and audit panels. */
+function show(reply) {
+  const { error } = reply;
+  if (error) {
+    $("result").textContent = error.code ? `${error.code}: ${error.message}` : error.message;
     $("result").className = "error";
-    return;
+  } else {
+    $("result").textContent =
+      reply.result === undefined ? "(undefined)" : JSON.stringify(reply.result, null, 2);
+    $("result").className = "";
   }
-  try {
-    const started = performance.now();
-    const outcome = expr.evaluateWithAudit(input, bindings, {
-      level: $("level").value,
-      timeout: 2000,
-    });
-    const elapsed = performance.now() - started;
-    if (outcome.error) {
-      $("result").textContent = `${outcome.error.code}: ${outcome.error.message}`;
-      $("result").className = "error";
-    } else {
-      $("result").textContent =
-        outcome.result === undefined ? "(undefined)" : JSON.stringify(outcome.result, null, 2);
-      $("result").className = "";
-    }
-    renderExplanation($("explanation"), outcome.explanation, select, spansOf(outcome.audit));
-    renderAudit($("audit"), outcome.audit, select);
-    $("status").textContent = `jlens ${version()} · evaluated in ${elapsed.toFixed(1)} ms`;
-  } finally {
-    expr.free();
+  if (reply.audit) {
+    renderExplanation($("explanation"), reply.explanation, select, spansOf(reply.audit));
+    renderAudit($("audit"), reply.audit, select);
+    $("status").textContent = `jlens ${version()} · evaluated in ${reply.elapsed.toFixed(1)} ms`;
   }
+  document.body.dataset.ready = "true";
+}
+
+/**
+ * Evaluates the expression in the worker. An evaluation still running is dropped: its worker is
+ * terminated and replaced, so the reply always belongs to the latest expression.
+ */
+function evaluate() {
+  if (busy) {
+    worker.terminate();
+    worker = null;
+  }
+  if (!worker) {
+    const current = new Worker(workerUrl, { type: "module" });
+    current.onmessage = ({ data }) => {
+      const reply = JSON.parse(data); // JSON text: see worker.js
+      if (current !== worker || reply.id !== latest) return;
+      busy = false;
+      show(reply);
+    };
+    current.onerror = (event) => {
+      if (current !== worker) return;
+      worker = null;
+      busy = false;
+      show({ error: { message: event.message || "The evaluation worker failed to start." } });
+    };
+    worker = current;
+  }
+  busy = true;
+  worker.postMessage({
+    id: ++latest,
+    source: editor.state.doc.toString(),
+    input,
+    bindings,
+    level: $("level").value,
+  });
 }
 
 let timer;
@@ -214,4 +238,3 @@ for (const tab of document.querySelectorAll("[role=tab]")) {
 
 updateService();
 evaluate();
-document.body.dataset.ready = "true";

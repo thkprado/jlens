@@ -353,7 +353,8 @@ monaco.languages.registerCompletionItemProvider("jsonata", {
 
 The size of the result counts a value each time it appears, as the JSON text does, and also
 limits the arguments passed to a host function. Wasm evaluations are synchronous, so there is
-no cancellation: use `timeout`.
+no cancellation: use `timeout`. In a browser, an evaluation can also run in a Web Worker, and
+terminating the worker stops it; the web editor does this.
 
 The depth limit is lower than on native targets (50,000). WebAssembly runs on the JavaScript
 engine's stack, which is about 1 MiB in V8, and deep recursion beyond it raises a JavaScript
@@ -398,7 +399,8 @@ complete page with no build step, published with this book as the
 [web editor](https://thkprado.github.io/jlens/editor/):
 - a JSONata editor (CodeMirror 6) with completion, diagnostics, hover and signature help, driven
   by a schema inferred from the input document;
-- live evaluation;
+- live evaluation, in a Web Worker (`worker.js`), so that a slow expression never blocks
+  typing;
 - the explanation and an audit tree viewer; clicking a node selects its source;
 - the inferred schema;
 - ready-made examples, including the samples of [try.jsonata.org](https://try.jsonata.org).
