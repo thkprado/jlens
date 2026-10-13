@@ -170,7 +170,7 @@ fn write_package(out: &Path) -> Result<()> {
     "url": "git+https://github.com/thkprado/jlens.git",
     "directory": "crates/jlens-wasm"
   }},
-  "homepage": "https://github.com/thkprado/jlens",
+  "homepage": "https://thkprado.github.io/jlens/",
   "bugs": "https://github.com/thkprado/jlens/issues",
   "type": "module",
   "main": "./{OUT_NAME}.js",

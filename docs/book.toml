@@ -5,6 +5,11 @@ authors = ["jlens contributors"]
 language = "en"
 src = "src"
 
+[output.html]
+# The site is served under the project path (https://thkprado.github.io/jlens/); the 404 page
+# needs it to load its styles and links.
+site-url = "/jlens/"
+
 [output.html.fold]
 enable = true
 level = 1

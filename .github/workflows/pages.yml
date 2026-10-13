@@ -1,0 +1,65 @@
+name: Pages
+
+# When a version tag (v0.12.0, ...) is pushed, builds the site of that tag with
+# `cargo xtask site` (the book at the root, the web editor and its WebAssembly package in
+# editor/) and deploys it to GitHub Pages, at https://thkprado.github.io/jlens/. The site always
+# shows a released version: the editor runs the engine that the book next to it describes.
+# Run by hand (workflow_dispatch) on an existing tag (gh workflow run pages.yml --ref vX.Y.Z),
+# it deploys the site of that tag again. Like release.yml, it takes no ref as input and refuses
+# a branch. Needs Pages set to "GitHub Actions" in the repository settings, and the github-pages
+# environment open to v* tags. See CONTRIBUTING.md for the release checklist.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Jobs read the repository; a job that needs more asks for it.
+permissions:
+  contents: read
+
+# One deployment at a time; a newer tag waits for the one in progress instead of cancelling it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-latest
+    steps:
+      - name: The run is on a version tag
+        run: '[[ "$GITHUB_REF" == refs/tags/v* ]]'
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+      - name: Install wasm-bindgen-cli (the version in Cargo.lock)
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          cargo install wasm-bindgen-cli --locked --version "$version"
+      - run: cargo xtask site
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: target/site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    # pages and id-token let deploy-pages publish the artifact of the build job.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
