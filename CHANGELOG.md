@@ -6,6 +6,10 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The site links the repository: the book from its menu bar, the web editor from its header.
+
 ## [0.12.0]
 
 jlens is online: the book and the web editor are published at

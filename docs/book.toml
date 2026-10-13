@@ -9,6 +9,8 @@ src = "src"
 # The site is served under the project path (https://thkprado.github.io/jlens/); the 404 page
 # needs it to load its styles and links.
 site-url = "/jlens/"
+# A link to the repository in the menu bar of every page.
+git-repository-url = "https://github.com/thkprado/jlens"
 
 [output.html.fold]
 enable = true
