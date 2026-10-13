@@ -36,6 +36,7 @@ The [changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md) lists 
 | 0.11.0 | Faster evaluation of common shapes: field lookups on a single value, comparisons with a string literal, order-by keys evaluated once, blocks without frames, the result converted to JSON in one pass, less set-up per evaluation |
 | 0.11.1 | `$fromMillis` and `$now` fail with `D3150` on a timezone that is not a number |
 | 0.12.0 | The book and the web editor published at <https://thkprado.github.io/jlens/> at each release tag; the editor evaluates in a Web Worker and shares expressions by address |
+| 0.13.0 | Host functions call the functions they receive, in Rust (`HostCall::function`, `Callable`) and in WebAssembly (a JavaScript function), within the evaluation's limits ([ADR 0011](../adr/0011-host-callbacks.md)) |
 
 ## Priorities
 
@@ -189,9 +190,9 @@ callable handle without changing the functions already written against ADR 0006.
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
 | 1 | The design, in ADR 0011. First, what jsonata-js does: in `benches/compare`, register a JavaScript function, pass it a lambda, a built-in function (`$uppercase`) and a partial application, and record what it receives and whether it can call each. Then the Rust API; a proposal to check: `HostCall::function(i) -> Option<Callable<'_>>` and `Callable::call(&self, args: &[Option<JsonValue>]) -> Result<Option<JsonValue>>`, keeping the JSON boundary. The handle borrows the call, so it cannot outlive it. The nested evaluation counts toward the same depth, timeout, cancellation and size limits; its tracer events nest under the host call's node; its errors come back to the host function as `Err` with their codes, and pass through when the host function returns them | ADR 0011 accepted by the maintainer, with the jsonata-js findings; any difference planned for the compatibility page | **done**: [ADR 0011](../adr/0011-host-callbacks.md); four differences planned for the compatibility page (#2, #3) |
-| 2 | The Rust implementation, as ADR 0011 decides | Unit tests: lambdas, built-in and host functions, partial applications and closures passed back; errors and their codes; a recursion through a host function ends with `D1011`; a timeout inside the callback; a property case in `robustness.rs`; an audit snapshot with a nested call; a snippet in `guide.rs` and the host function section of the crate guide; `cargo xtask ab` shows no change on the untraced path || **done**: `HostCall::function` and `Callable`; the crate guide's [functions as arguments](../guides/crate.md#functions-as-arguments) |
+| 2 | The Rust implementation, as ADR 0011 decides | Unit tests: lambdas, built-in and host functions, partial applications and closures passed back; errors and their codes; a recursion through a host function ends with `D1011`; a timeout inside the callback; a property case in `robustness.rs`; an audit snapshot with a nested call; a snippet in `guide.rs` and the host function section of the crate guide; `cargo xtask ab` shows no change on the untraced path | **done**: `HostCall::function` and `Callable`; the crate guide's [functions as arguments](../guides/crate.md#functions-as-arguments) |
 | 3 | The same in WebAssembly. A JavaScript host function receives a JavaScript function for a JSONata function argument; calling it after the host function has returned throws, with a jlens code (`U`) | The four updates of a Wasm API change (`crates/jlens-wasm/AGENTS.md`); tests in `suite.mjs` for Node and the browser; the WebAssembly guide | **done**: a JavaScript function with an `arity` property; [functions as arguments](../guides/wasm.md#functions-as-arguments) |
-| 4 | Release 0.13.0 | The release checklist; ADR 0006 points to ADR 0011 | |
+| 4 | Release 0.13.0 | The release checklist; ADR 0006 points to ADR 0011 | **done** |
 
 ## 0.14: more ways to install the CLI
 

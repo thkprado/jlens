@@ -1,6 +1,7 @@
 # 0006 — Host functions with a JSON boundary
 
-**Status:** Accepted
+**Status:** Accepted; extended by [ADR 0011](0011-host-callbacks.md), which lets host functions
+call the functions they receive
 
 ## Context
 
@@ -59,7 +60,7 @@ Options considered for the values that cross the boundary:
   array or object.
 - A host function cannot call a JSONata function it receives as an argument. A later decision can
   add a callable handle, or a public value type, without changing the functions written against
-  this API.
+  this API. [ADR 0011](0011-host-callbacks.md) added that handle (`HostCall::function`) in 0.13.0.
 - The evaluator's hot path only gains match arms. Tracing needs no new event: a host call is a
   function call node, with its `enter` and `exit` events.
 - Host functions run to completion. The evaluation's timeout is checked again once they return.

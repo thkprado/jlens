@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0]
+
+Host functions call the functions they receive (ADR 0011), in Rust and in WebAssembly: a helper
+written in the host language can apply a lambda, a built-in function or a partial application
+passed to it, within the evaluation's limits.
+
 ### Added
 
 - The site links the repository: the book from its menu bar, the web editor from its header.
@@ -460,7 +466,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/thkprado/jlens/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/thkprado/jlens/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/thkprado/jlens/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/thkprado/jlens/compare/v0.10.0...v0.11.0
