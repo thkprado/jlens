@@ -9,6 +9,10 @@ All notable changes are recorded here. The format follows
 ### Added
 
 - The site links the repository: the book from its menu bar, the web editor from its header.
+- Host functions call the functions they receive (ADR 0011). In Rust, `HostCall::function(i)`
+  gives a `Callable` for an argument that is a function (a lambda, a built-in function, a
+  partial application, a chain or a host function); `Callable::call` applies it to JSON
+  arguments, within the evaluation's depth, timeout, cancellation and size limits.
 
 ## [0.12.0]
 

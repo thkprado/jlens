@@ -1,0 +1,102 @@
+---
+source: crates/jlens-core/tests/audit.rs
+expression: tree
+---
+{
+  "header": {
+    "engine": "jlens-core 0.12.0",
+    "expressionHash": "7ede7939fd966878",
+    "inputHash": "cbf29ce484222325",
+    "timestamp": "[timestamp]",
+    "durationMs": "[duration]",
+    "level": "full",
+    "result": 42
+  },
+  "root": {
+    "node": 0,
+    "kind": "function",
+    "op": "$apply",
+    "span": {
+      "start": 0,
+      "end": 35
+    },
+    "source": "$apply(function($x) { $x * 2 }, 21)",
+    "output": 42,
+    "outcome": "value",
+    "children": [
+      {
+        "node": 1,
+        "kind": "variable",
+        "op": "$apply",
+        "span": {
+          "start": 0,
+          "end": 6
+        },
+        "source": "$apply",
+        "output": "<function>",
+        "outcome": "value"
+      },
+      {
+        "node": 2,
+        "kind": "lambda",
+        "span": {
+          "start": 7,
+          "end": 30
+        },
+        "source": "function($x) { $x * 2 }",
+        "output": "<function>",
+        "outcome": "value"
+      },
+      {
+        "node": 6,
+        "kind": "number",
+        "span": {
+          "start": 32,
+          "end": 34
+        },
+        "source": "21",
+        "output": 21,
+        "outcome": "value"
+      },
+      {
+        "node": 3,
+        "kind": "binary",
+        "op": "*",
+        "span": {
+          "start": 22,
+          "end": 28
+        },
+        "source": "$x * 2",
+        "output": 42,
+        "outcome": "value",
+        "children": [
+          {
+            "node": 4,
+            "kind": "variable",
+            "op": "$x",
+            "span": {
+              "start": 22,
+              "end": 24
+            },
+            "source": "$x",
+            "output": 21,
+            "outcome": "value"
+          },
+          {
+            "node": 5,
+            "kind": "number",
+            "span": {
+              "start": 27,
+              "end": 28
+            },
+            "source": "2",
+            "output": 2,
+            "outcome": "value"
+          }
+        ]
+      }
+    ]
+  },
+  "nodeCount": 7,
+  "truncated": false
+}

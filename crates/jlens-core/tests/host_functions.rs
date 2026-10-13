@@ -352,3 +352,177 @@ fn bindings_with_functions_can_be_shared_between_threads() {
         assert_eq!(h.join().unwrap(), Some(json!(3)));
     }
 }
+
+/// `$apply($f, args...)`: calls its first argument with the others (ADR 0011).
+fn apply() -> HostFunction {
+    HostFunction::new(2, |args, call| match call.function(0) {
+        Some(f) => f.call(args.get(1..).unwrap_or_default()),
+        None => Err(Error::new("ACME02").with("message", "Not a function")),
+    })
+}
+
+fn callback_bindings() -> Bindings {
+    Bindings::new()
+        .function("apply", apply())
+        .function("add", add())
+        .function(
+            "arity",
+            HostFunction::new(1, |_, call| Ok(call.function(0).map(|f| json!(f.arity())))),
+        )
+}
+
+#[test]
+fn host_functions_call_the_functions_they_receive() {
+    let b = callback_bindings();
+    let input = json!({"a": {"b": 5}, "items": [{"n": 1}, {"n": 2}]});
+    for (expr, expected) in [
+        ("$apply(function($x) { $x * 2 }, 21)", json!(42)),
+        ("$apply($uppercase, 'a')", json!("A")),
+        ("$apply($add, 1, 2)", json!(3)),
+        ("$apply($substring(?, 1), 'abc')", json!("bc")),
+        ("$apply($uppercase ~> $trim, ' a ')", json!("A")),
+        // A closure keeps the variables and the context of its definition.
+        ("($k := 10; $apply(function($x) { $x + $k }, 1))", json!(11)),
+        ("a.$apply(function() { b })", json!(5)),
+        // The context value of the call is null, as in jsonata-js.
+        ("$apply($string)", json!("null")),
+        // A sequence comes back as an array.
+        ("$apply(function() { items.n })", json!([1, 2])),
+        // A partial application of the host function.
+        (
+            "($p := $apply(function($x) { $x + 1 }, ?); $p(1))",
+            json!(2),
+        ),
+    ] {
+        assert_eq!(
+            eval(expr, Some(input.clone()), &b),
+            Some(expected),
+            "{expr}"
+        );
+    }
+    // A function result crosses as undefined.
+    assert_eq!(eval("$apply(function() { $sum })", None, &b), None);
+    // Arguments that are not functions give no handle, and a function passed to a callable
+    // crosses as undefined.
+    assert_eq!(
+        eval_with("$apply($apply, $add, 1, 2)", None, &b)
+            .unwrap_err()
+            .code(),
+        "ACME02"
+    );
+    assert_eq!(
+        eval_with("$apply(1)", None, &b).unwrap_err().code(),
+        "ACME02"
+    );
+}
+
+#[test]
+fn callables_have_the_arity_of_their_function() {
+    let b = callback_bindings();
+    for (expr, expected) in [
+        ("$arity(function($x, $y) { $x })", json!(2)),
+        ("$arity($substring)", json!(3)),
+        ("$arity($substring(?, 1))", json!(1)),
+        ("$arity($add)", json!(2)),
+        ("$arity(1)", Value::Null),
+    ] {
+        let result = eval(expr, None, &b).unwrap_or(Value::Null);
+        assert_eq!(result, expected, "{expr}");
+    }
+}
+
+#[test]
+fn arguments_are_indexed_after_the_signature_check() {
+    // The `-` modifier puts the context value first.
+    let b = Bindings::new().function(
+        "next",
+        HostFunction::with_signature("<n-f:n>", |args, call| {
+            call.function(1).unwrap().call(&args[..1])
+        })
+        .unwrap(),
+    );
+    assert_eq!(
+        eval(
+            "n.$next(function($x) { $x + 1 })",
+            Some(json!({"n": 5})),
+            &b
+        ),
+        Some(json!(6))
+    );
+}
+
+#[test]
+fn errors_of_a_callable_reach_the_host_function_with_their_codes() {
+    let b = callback_bindings().function(
+        "code",
+        HostFunction::new(1, |_, call| match call.function(0).unwrap().call(&[]) {
+            Ok(_) => Ok(None),
+            Err(e) => Ok(Some(json!(e.code()))),
+        }),
+    );
+    assert_eq!(
+        eval("$code(function() { 'a' + 1 })", None, &b),
+        Some(json!("T2001"))
+    );
+    assert_eq!(
+        eval("$code(function() { $error('boom') })", None, &b),
+        Some(json!("D3137"))
+    );
+    // Returned, the error ends the evaluation, with its own position.
+    let err = eval_with("$apply(function() { 'a' + 1 })", None, &b).unwrap_err();
+    let alone = eval_with("'a' + 1", None, &b).unwrap_err();
+    assert_eq!(err.code(), "T2001");
+    assert_eq!(err.position(), alone.position().map(|p| p + 20));
+}
+
+#[test]
+fn a_recursion_through_a_host_function_ends_with_d1011() {
+    let b = callback_bindings();
+    let expr = "($f := function($n) { $apply($f, $n + 1) }; $f(0))";
+    assert_eq!(eval_with(expr, None, &b).unwrap_err().code(), "D1011");
+    let options = Options::new().max_depth(100);
+    let err = Expression::compile(expr)
+        .unwrap()
+        .evaluate_with(None, &b, &options)
+        .unwrap_err();
+    assert_eq!(err.code(), "D1011");
+}
+
+#[test]
+fn callables_check_the_timeout_and_the_cancellation() {
+    // `$forever($f)` calls `$f` until it fails.
+    let forever = HostFunction::new(1, |_, call| {
+        let f = call.function(0).unwrap();
+        loop {
+            f.call(&[])?;
+        }
+    });
+    let b = Bindings::new().function("forever", forever);
+    let expr = Expression::compile("$forever(function() { 1 })").unwrap();
+    let options = Options::new().timeout(std::time::Duration::from_millis(20));
+    let err = expr.evaluate_with(None, &b, &options).unwrap_err();
+    assert_eq!(err.code(), "D1012");
+
+    let token = jlens_core::CancelToken::new();
+    let cancel = token.clone();
+    let b = Bindings::new().function(
+        "cancel",
+        HostFunction::new(1, move |_, call| {
+            cancel.cancel();
+            call.function(0).unwrap().call(&[])
+        }),
+    );
+    let expr = Expression::compile("$cancel(function() { 1 })").unwrap();
+    let options = Options::new().cancel_token(token);
+    let err = expr.evaluate_with(None, &b, &options).unwrap_err();
+    assert_eq!(err.code(), "U1003");
+}
+
+#[test]
+fn the_result_of_a_callable_is_limited_in_size() {
+    let b = callback_bindings();
+    let expr = Expression::compile("$apply(function() { [1..100] })").unwrap();
+    let options = Options::new().max_result_size(64);
+    let err = expr.evaluate_with(None, &b, &options).unwrap_err();
+    assert_eq!(err.code(), "U1001");
+}

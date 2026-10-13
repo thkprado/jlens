@@ -184,3 +184,19 @@ fn audited_results_match_plain_evaluation() {
     );
     assert_eq!(audited.unwrap(), plain);
 }
+
+/// A function called by a host function (ADR 0011): its steps nest under the host call's node.
+#[test]
+fn host_callback_nests_under_the_call() {
+    use jlens_core::HostFunction;
+    let apply = HostFunction::new(2, |args, call| call.function(0).unwrap().call(&args[1..]));
+    let bindings = Bindings::new().function("apply", apply);
+    let expr = Expression::compile("$apply(function($x) { $x * 2 }, 21)").unwrap();
+    let (result, tree) =
+        expr.evaluate_audited(None, &bindings, &Options::default(), &AuditOptions::full());
+    assert_eq!(result.unwrap(), Some(json!(42)));
+    insta::assert_json_snapshot!(tree, {
+        ".header.timestamp" => "[timestamp]",
+        ".header.durationMs" => "[duration]",
+    });
+}

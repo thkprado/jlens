@@ -198,6 +198,75 @@ fn transform_signature() -> &'static Signature {
     SIG.get_or_init(|| Signature::parse("<(oa):o>").expect("valid signature"))
 }
 
+/// The evaluator as a host function's call sees it (ADR 0011): borrowed for the call, so that
+/// the function can apply the functions among its arguments.
+struct HostCaller<'e, 't, 'a> {
+    ev: RefCell<&'e mut Evaluator<'t, 'a>>,
+    args: &'e [Value<'a>],
+    env: &'e Env<'a>,
+}
+
+impl<'e, 't, 'a> HostCaller<'e, 't, 'a> {
+    fn new(ev: &'e mut Evaluator<'t, 'a>, args: &'e [Value<'a>], env: &'e Env<'a>) -> Self {
+        HostCaller {
+            ev: RefCell::new(ev),
+            args,
+            env,
+        }
+    }
+}
+
+/// A host function cannot reach its own call from a nested evaluation, since its implementation
+/// is `'static`; should the evaluator still be busy, the call fails instead of panicking.
+fn evaluator_busy() -> Error {
+    Error::new("U1001").with(
+        "message",
+        "A host function called a function it received while the evaluation was busy",
+    )
+}
+
+impl crate::host::Caller for HostCaller<'_, '_, '_> {
+    fn read_failure(&self) -> Result<()> {
+        self.ev
+            .try_borrow()
+            .map_err(|_| evaluator_busy())?
+            .read_failure()
+    }
+
+    fn arity(&self, index: usize) -> Option<usize> {
+        match self.args.get(index)? {
+            Value::Function(f) => Some(f.arity()),
+            _ => None,
+        }
+    }
+
+    fn apply(
+        &self,
+        index: usize,
+        args: &[Option<serde_json::Value>],
+    ) -> Result<Option<serde_json::Value>> {
+        let mut ev = self.ev.try_borrow_mut().map_err(|_| evaluator_busy())?;
+        let func = self.args.get(index).cloned().unwrap_or_default();
+        let args = args
+            .iter()
+            .map(|a| a.as_ref().map_or(Value::Undefined, Value::from_json))
+            .collect();
+        let result = ev.callback(&func, args, self.env)?;
+        let limit = ev.limits.max_result_size;
+        let json = result.to_json_within(limit).map_err(|_| {
+            Error::new("U1001").with(
+                "message",
+                format!(
+                    "The result of a function called by a host function would exceed the size                      limit of {limit} bytes"
+                ),
+            )
+        })?;
+        // Converting the result reads it, as converting the arguments of a host call does.
+        ev.read_failure()?;
+        Ok(json)
+    }
+}
+
 /// Evaluates a parsed expression. This is the entry point used by `Expression::evaluate_with`.
 pub(crate) fn evaluate<'a, 'v>(
     ast: &Ast,
@@ -1439,9 +1508,7 @@ impl<'a> Evaluator<'_, 'a> {
                     Some(sig) => sig.validate(args, input)?,
                     None => args,
                 };
-                let result = host.call(&args, input, self.limits.max_result_size, || {
-                    self.read_failure()
-                })?;
+                let result = self.call_host(host, &args, input, env)?;
                 self.check_size(result)
             }
             Function::Partial {
@@ -1467,12 +1534,7 @@ impl<'a> Evaluator<'_, 'a> {
                             env,
                         },
                     ),
-                    Function::Host(host) => host.call(
-                        &full,
-                        &Value::Undefined,
-                        self.limits.max_result_size,
-                        || self.read_failure(),
-                    ),
+                    Function::Host(host) => self.call_host(host, &full, &Value::Undefined, env),
                     _ => Err(Error::new("T1006")),
                 }?;
                 self.check_size(result)
@@ -1509,6 +1571,20 @@ impl<'a> Evaluator<'_, 'a> {
             }
             Function::RegexNext { re, text, last } => crate::regex::next(self, re, text, *last),
         }
+    }
+
+    /// Calls a host function, lending it the evaluator so that it can apply the functions among
+    /// its arguments (ADR 0011). Out of line, to keep `apply_inner` small.
+    #[inline(never)]
+    fn call_host(
+        &mut self,
+        host: &crate::HostFunction,
+        args: &[Value<'a>],
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
+        let limit = self.limits.max_result_size;
+        host.call(args, input, limit, &HostCaller::new(self, args, env))
     }
 
     fn apply_lambda(&mut self, lambda: &Lambda<'a>, args: Vec<Value<'a>>) -> Result<Value<'a>> {

@@ -16,7 +16,7 @@ const TOKENS: &[&str] = &[
     "=", "!=", "<", "<=", ">", "and", "or", "in", "?", "??", "?:", ":=", "~>", "&", "..", "**",
     "^(", ">price", "@$v", "#$j", "|", "function($v){", "λ($w){", "$sum(", "$map(", "$string(",
     "$substring(", "$match(", "$replace(", "$split(", "$formatNumber(", "$fromMillis(", "$keys(",
-    "$merge(", "$sort(", "$reduce(", "$each(", "$eval(", "$echo(", "$checked(", "$fail(", "$echo(?, ", "/a+/", "/[/", "`a b`", "/* c */",
+    "$merge(", "$sort(", "$reduce(", "$each(", "$eval(", "$echo(", "$checked(", "$fail(", "$echo(?, ", "$apply(", "/a+/", "/[/", "`a b`", "/* c */",
     "/** @label \"x\" */", "<s:s>", "%", "\\", "é", "𝄞", " ",
 ];
 
@@ -98,6 +98,7 @@ fn valid() -> impl Strategy<Value = String> {
                 "$echo",
                 "$checked",
                 "$fail",
+                "$apply",
             ][..],
         );
         prop_oneof![
@@ -113,6 +114,8 @@ fn valid() -> impl Strategy<Value = String> {
             (inner.clone(), inner.clone()).prop_map(|(v, b)| format!("($y := {v}; {b})")),
             (inner.clone(), inner.clone())
                 .prop_map(|(d, b)| format!("($f := function($y){{ {b} }}; $f({d}))")),
+            (inner.clone(), inner.clone())
+                .prop_map(|(d, b)| format!("$apply(function($y){{ {b} }}, {d})")),
             (inner.clone(), inner.clone()).prop_map(|(s, k)| format!("{s}^({k})")),
             (inner.clone(), inner.clone(), inner.clone())
                 .prop_map(|(s, k, v)| format!("{s}{{{k}: {v}}}")),
@@ -134,7 +137,8 @@ fn expression() -> impl Strategy<Value = String> {
     ]
 }
 
-/// Host functions: one that returns its arguments, one with a signature, one that fails.
+/// Host functions: one that returns its arguments, one with a signature, one that fails, one
+/// that calls its first argument with the others.
 fn bindings() -> Bindings {
     Bindings::new()
         .var("x", json!([1, "two", null]))
@@ -152,6 +156,13 @@ fn bindings() -> Bindings {
         .function(
             "fail",
             HostFunction::new(0, |_, _| Err(Error::new("X0001").with("message", "fails"))),
+        )
+        .function(
+            "apply",
+            HostFunction::new(2, |args, call| match call.function(0) {
+                Some(f) => f.call(args.get(1..).unwrap_or_default()),
+                None => Ok(None),
+            }),
         )
 }
 

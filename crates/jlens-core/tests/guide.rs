@@ -162,6 +162,38 @@ fn host_functions() -> Result<()> {
 }
 
 #[test]
+fn host_callbacks() -> Result<()> {
+    use jlens_core::{Bindings, Expression, HostFunction};
+    use serde_json::json;
+    // ANCHOR: host_callbacks
+    // `$rate(region, fallback)`: the rate from the application's table, or `fallback(region)`.
+    let rate = HostFunction::with_signature("<sf:n>", |args, call| {
+        match args[0].as_ref().and_then(|r| r.as_str()) {
+            Some("north") => Ok(Some(json!(1.5))),
+            Some("south") => Ok(Some(json!(2))),
+            _ => {
+                let fallback = call.function(1).expect("the signature requires a function");
+                fallback.call(&[args[0].clone()])
+            }
+        }
+    })?;
+    let bindings = Bindings::new().function("rate", rate);
+
+    let expr = Expression::compile("$rate(region, function($r) { $length($r) / 10 })")?;
+    let order = json!({"region": "west"});
+    assert_eq!(expr.evaluate(Some(&order), &bindings)?, Some(json!(0.4)));
+
+    // An error in the fallback comes back to the host function, which returns it here.
+    let err = Expression::compile("$rate('west', function($r) { $error('No rate for ' & $r) })")?
+        .evaluate(None, &bindings)
+        .unwrap_err();
+    assert_eq!(err.code(), "D3137");
+    assert_eq!(err.message(), "No rate for west");
+    // ANCHOR_END: host_callbacks
+    Ok(())
+}
+
+#[test]
 fn documents() -> Result<()> {
     use jlens_core::{Bindings, Expression, Options};
     use serde_json::json;

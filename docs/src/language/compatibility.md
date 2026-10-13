@@ -108,7 +108,9 @@ functions in the bindings object or `registerFunction` in the WebAssembly packag
 | Topic | jsonata-js | jlens |
 |---|---|---|
 | Arguments and result | The JavaScript values themselves, which the function may modify | JSON copies: the function cannot change the values of the evaluation |
-| A function as an argument (`$f($g)`) | The function, which the host can call | `None` (undefined) |
+| A function as an argument (`$f($g)`) | An `async` function that applies it, with an `arity` property, which the host can call even after it returns | `None` among the arguments. In Rust, `HostCall::function` gives a `Callable`, valid until the host function returns (ADR 0011). In WebAssembly, `undefined` |
+| The result of a function called by the host | The internal value: a sequence keeps its `sequence` flag, a function is an internal object | JSON: a sequence is an array or a single value, a function is `None` |
+| A recursion through a host function | Runs until the heap is exhausted | `D1011`, as any recursion too deep |
 | The context value | `this`: the context value for a function in the bindings, `{environment, input}` for one registered with `registerFunction`. An input array arrives in its wrapper | `HostCall::input`, the context value itself, an input array included. In WebAssembly, `this` is `undefined`: a signature with `-` passes the context value as an argument |
 | A function that returns a promise | The evaluation awaits it | `U1002` |
 | An exception thrown by the function | Rethrown, with the `position` and `token` of the call | Rethrown as is in WebAssembly; `position` and `token` are added when missing |

@@ -107,7 +107,8 @@ a [`HostFunction`](https://docs.rs/jlens-core/latest/jlens_core/struct.HostFunct
 ```
 
 - **Arguments and results are JSON.** `None` stands for *undefined*. A function passed as an
-  argument (such as a lambda) arrives as `None`.
+  argument (such as a lambda) arrives as `None`; `HostCall::function` gives a handle to call it
+  ([below](#functions-as-arguments)).
 - **Signatures** use the [notation of the built-in functions](../language/programming.md#signatures).
   `HostFunction::with_signature` checks the arguments before each call, with the same errors
   (`T0410`, `T0412`). A parameter with `-` takes the context value when the argument is missing.
@@ -124,7 +125,30 @@ a [`HostFunction`](https://docs.rs/jlens-core/latest/jlens_core/struct.HostFunct
 
 Host functions are `Send + Sync`, so bindings that hold them can be shared between threads. A
 host function runs to completion: a [timeout](#guardrails) is checked again only once it
-returns.
+returns, or when it calls a function it received.
+
+### Functions as arguments
+
+A host function can call a function it receives, such as a fallback or a step to retry.
+`HostCall::function(i)` gives a
+[`Callable`](https://docs.rs/jlens-core/latest/jlens_core/struct.Callable.html) for argument `i`
+when it is a function: a lambda, a built-in function, a partial application, a chain or another
+host function.
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:host_callbacks}}
+```
+
+- **The call is part of the evaluation**, as when `$map` calls its function. The context value
+  is `null`, and a lambda keeps the variables of its definition. The call counts as a level of
+  depth, so a recursion through a host function ends with `D1011`; it checks the timeout and the
+  cancellation token; its result is limited by `max_result_size`. An audit shows its steps under
+  the host function's call.
+- **Arguments and the result are JSON**, as for the host function itself. A sequence comes back
+  as an array or a single value; a function crosses as `None`, in both directions.
+- **Errors come back as `Err`**, with their codes and positions. The host function can handle
+  them, or return them, which ends the evaluation.
+- **The handle borrows the call**: it cannot be kept and called after the host function returns.
 
 ## Many expressions, one document
 

@@ -58,7 +58,7 @@ pub use ast::{Ast, Node, NodeKind, Span};
 pub use document::Document;
 pub use error::{Diagnostic, Error, Result, Severity};
 pub use functions::{Category, FunctionInfo, catalog as function_catalog};
-pub use host::{HostCall, HostFunction};
+pub use host::{Callable, HostCall, HostFunction};
 pub use json::format_json;
 
 use std::sync::Arc;
