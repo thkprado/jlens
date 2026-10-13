@@ -263,6 +263,33 @@ jobs:
           brew test local/jlens/jlens
           jlens --version
 
+  # The container image, built from the CI archives with the Dockerfile of the Release workflow,
+  # for the platform of the runner only, then run on Linux x86-64 and ARM64.
+  container:
+    name: Container image (${{ matrix.arch }})
+    needs: binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, target: x86_64-unknown-linux-musl, os: ubuntu-latest }
+          - { arch: arm64, target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.target }}
+          path: dist
+      - run: docker build -f crates/jlens-cli/Dockerfile -t jlens dist
+      - name: Run jlens in the image
+        run: |
+          test "$(docker image inspect jlens --format '{{.Architecture}}')" = ${{ matrix.arch }}
+          docker run --rm jlens --version
+          test "$(echo '{"a": [1, 2]}' | docker run --rm -i jlens eval '$sum(a)')" = 3
+          echo '{"a": [1, 2]}' > input.json
+          test "$(docker run --rm -v "$PWD:/work" jlens eval -i input.json '$sum(a)')" = 3
+
   # The Scoop manifest, written as the Scoop workflow writes it but pointing at the CI archive
   # (put in C:\jlens-dist by the install job), then installed by Scoop on Windows.
   scoop:

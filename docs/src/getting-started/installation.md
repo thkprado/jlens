@@ -64,6 +64,23 @@ first, which adds some tens of milliseconds. An install with `--omit=optional` l
 out, and so does a platform without a release binary (Windows on ARM64, for one): `jlens` then
 says which package it looked for and exits with code 2.
 
+With Docker or Podman, the container image `ghcr.io/thkprado/jlens` (from 0.14.0 on) runs the
+static Linux binary, for `linux/amd64` and `linux/arm64`, with nothing else in the image. It is
+tagged with each version (`0.14.0`), each minor version (`0.14`) and `latest`. Give it `-i` to
+read standard input, or mount the current directory on `/work` to read files:
+
+```sh
+echo '{"a": [1, 2]}' | docker run --rm -i ghcr.io/thkprado/jlens eval '$sum(a)'
+docker run --rm -v "$PWD:/work" ghcr.io/thkprado/jlens eval -f rule.jsonata -i order.json
+```
+
+The image runs as an unprivileged user (UID 65532): add `--user "$(id -u):$(id -g)"` for files
+that only you can read. It has a build attestation too:
+
+```sh
+gh attestation verify oci://ghcr.io/thkprado/jlens:0.14.0 --repo thkprado/jlens
+```
+
 Install the command through one channel. With more than one, the first `jlens` on the `PATH`
 runs, whatever its version; inside npm scripts and `npx`, the project's own `jlens-cli` comes
 first. To see which one runs:

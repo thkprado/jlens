@@ -20,6 +20,9 @@ All notable changes are recorded here. The format follows
 - The `jlens` command on Scoop, for Windows: after
   `scoop bucket add jlens https://github.com/thkprado/scoop-jlens`, `scoop install jlens/jlens`
   installs the release binary, and each published release updates the bucket.
+- A container image, `ghcr.io/thkprado/jlens`, for `linux/amd64` and `linux/arm64`: the static
+  release binary and nothing else, tagged with the version, the minor version and `latest`, and
+  attested like the archives.
 
 ## [0.13.0]
 
