@@ -123,6 +123,12 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    ```
 
    The package page on npmjs.com also shows a Provenance section linking to the workflow run.
+7. Check the site. The tag also runs the `Pages` workflow, which builds the book and the web
+   editor of the tag (`cargo xtask site`) and deploys them to <https://thkprado.github.io/jlens/>
+   (the `github-pages` environment accepts `v*` tags). Check that the run passed
+   (`gh run list --workflow pages.yml --limit 1`), that the book's introduction names the new
+   version, and that the editor evaluates an example. If only the deployment failed, re-run it
+   on the tag: `gh workflow run pages.yml --ref vX.Y.Z`.
 
 ## License
 

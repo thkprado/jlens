@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0]
+
+jlens is online: the book and the web editor are published at
+<https://thkprado.github.io/jlens/>, built from each release tag. The editor evaluates in a Web
+Worker and shares expressions by address, without a server.
+
 ### Added
 
 - `cargo xtask site` builds the book and the web editor as one static site in `target/site`,
@@ -435,7 +441,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/thkprado/jlens/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/thkprado/jlens/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/thkprado/jlens/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/thkprado/jlens/compare/v0.9.0...v0.10.0
