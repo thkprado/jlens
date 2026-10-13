@@ -2,7 +2,8 @@
 // document, live evaluation, and an explanation and audit tree of every result.
 //
 // Serve the repository root (`cargo xtask serve`) after building the package (`cargo xtask
-// wasm`), then open /examples/web-editor/.
+// wasm`), then open /examples/web-editor/. The import map of index.html maps `jlens-wasm` to the
+// package; `cargo xtask site` rewrites that entry for the site.
 
 import { closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -16,7 +17,7 @@ import init, {
   LanguageService,
   inferSchema,
   version,
-} from "../../crates/jlens-wasm/pkg/jlens.js";
+} from "jlens-wasm";
 import { renderAudit, renderExplanation, spansOf } from "./audit-view.js";
 import { jlensExtensions } from "./jlens-codemirror.js";
 import { samples } from "./samples.js";

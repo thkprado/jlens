@@ -394,7 +394,8 @@ The package ships `jlens.d.ts`. Every argument and result is typed: `AuditResult
 ## The web editor example
 
 `examples/web-editor` is a
-complete page with no build step:
+complete page with no build step, published with this book as the
+[web editor](https://thkprado.github.io/jlens/editor/):
 - a JSONata editor (CodeMirror 6) with completion, diagnostics, hover and signature help, driven
   by a schema inferred from the input document;
 - live evaluation;
@@ -407,7 +408,10 @@ cargo xtask wasm
 cargo xtask serve        # then open the printed /examples/web-editor/ address
 ```
 
-CodeMirror is loaded from esm.sh through an import map, so the page needs network access.
+CodeMirror is loaded from esm.sh through an import map, so the page needs network access. The
+page imports the package by its name, `jlens-wasm`, which the same import map resolves.
+`cargo xtask site` builds the published site in `target/site`, the book with the editor in
+`editor/`, and `cargo xtask serve --site` serves it.
 
 ## Testing
 
@@ -416,4 +420,5 @@ CodeMirror is loaded from esm.sh through an import map, so the page needs networ
 - in a headless Chrome, Chromium or Edge (set `JLENS_BROWSER` to choose the executable).
 
 `--require-browser` fails when no browser is found, instead of skipping. `--example` also
-checks that the web editor loads and evaluates its sample.
+checks that the web editor loads and evaluates its sample, from the repository and as the site
+serves it.

@@ -41,6 +41,7 @@ cargo bench -p jlens-core                      # criterion benchmarks
 cargo xtask ab main .                          # compare the speed of main and the working tree
 PROPTEST_CASES=100000 cargo test -p jlens-core --test robustness
 cargo xtask serve                              # serve the repository, for examples/web-editor
+cargo xtask site && cargo xtask serve --site   # build and preview the site (book + web editor)
 (cd benches/compare && npm install && node compare.mjs && node doc-examples.mjs)
 cargo xtask differential                       # generated expressions, jlens against jsonata-js
 cargo +nightly fuzz run evaluate --sanitizer none --debug-assertions  # fuzzing, Linux only

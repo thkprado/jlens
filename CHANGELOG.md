@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `cargo xtask site` builds the book and the web editor as one static site in `target/site`,
+  with the editor in `editor/`; `cargo xtask serve --site` previews it. The web editor imports
+  the package by its name, `jlens-wasm`, through its import map.
+
 ## [0.11.1]
 
 A fix for dates formatted with a timezone that is not a number.

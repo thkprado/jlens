@@ -14,6 +14,7 @@ mod differential;
 mod docs;
 mod fuzz;
 mod release;
+mod site;
 mod wasm;
 
 const USAGE: &str = "\
@@ -32,8 +33,12 @@ commands:
                                     fuzz target, without libFuzzer, on any platform
   wasm [--dev]                      build the browser package in crates/jlens-wasm/pkg
   wasm-test [--require-browser] [--example]
-                                    build the package and test it in Node.js and a headless browser
-  serve                             serve the repository over HTTP (for examples/web-editor)
+                                    build the package and test it in Node.js and a headless browser;
+                                    --example also loads the web editor, from the repository and
+                                    as the site assembles it
+  serve [--site]                    serve the repository over HTTP (for examples/web-editor),
+                                    or with --site the site built by `site`
+  site                              build the book and the web editor into target/site
   release-notes <version>           print the GitHub release notes of <version>, from CHANGELOG.md
   ab <rev A> <rev B> [--rounds N] [--mode evaluate|document] [--case NAME]... [--sample-ms MS]
                                     compare the speed of two revisions (`.` is the working tree)
@@ -55,7 +60,8 @@ fn main() -> Result<()> {
             args.iter().any(|a| a == "--example"),
         ),
         Some("ab") => ab::run(&args[1..]),
-        Some("serve") => wasm::serve_forever(),
+        Some("serve") => wasm::serve_forever(args.iter().any(|a| a == "--site")),
+        Some("site") => site::build(),
         Some("release-notes") => match args.get(1) {
             Some(version) => release::print(version),
             None => bail!("release-notes needs a version\n\n{USAGE}"),

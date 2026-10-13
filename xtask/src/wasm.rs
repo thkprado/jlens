@@ -9,14 +9,14 @@ use std::{env, fs, thread};
 
 use anyhow::{Context, Result, bail};
 
-use crate::root;
+use crate::{root, site};
 
 /// Upper bound for the gzipped `.wasm` of a release build, in bytes. Raise it deliberately.
 const SIZE_BUDGET_GZIP: u64 = 600 * 1024;
 
 const OUT_NAME: &str = "jlens";
 
-fn pkg_dir() -> PathBuf {
+pub fn pkg_dir() -> PathBuf {
     root().join("crates/jlens-wasm/pkg")
 }
 
@@ -214,8 +214,9 @@ fn gzip_len(bytes: &[u8]) -> Result<u64> {
 
 /// Builds the package, then runs the JavaScript test suite in Node.js and in a headless
 /// browser (Chrome, Chromium or Edge; set `JLENS_BROWSER` to choose the executable). With
-/// `example`, also checks that `examples/web-editor` loads and evaluates its sample (this loads
-/// CodeMirror from esm.sh, so it needs network access).
+/// `example`, also checks that `examples/web-editor` loads and evaluates its sample, both from
+/// the repository and as `cargo xtask site` assembles it (this loads CodeMirror from esm.sh, so
+/// it needs network access).
 pub fn test(require_browser: bool, example: bool) -> Result<()> {
     build(false)?;
     let tests = root().join("crates/jlens-wasm/tests");
@@ -252,11 +253,23 @@ pub fn test(require_browser: bool, example: bool) -> Result<()> {
 
     if example {
         let url = format!("http://127.0.0.1:{port}/examples/web-editor/");
-        let dom = dump_dom(&browser, &url)?;
-        if !dom.contains("data-ready=\"true\"") || !dom.contains("FREE_SHIPPING") {
-            bail!("the web editor did not load or evaluate its sample ({url})");
-        }
+        check_editor(&browser, &url)?;
         println!("web editor example loaded and evaluated its sample");
+
+        // The editor as the site serves it, without building the book.
+        let site = root().join("target/site-editor-test");
+        site::assemble_editor(&site.join("editor"))?;
+        let port = serve(site)?;
+        check_editor(&browser, &format!("http://127.0.0.1:{port}/editor/"))?;
+        println!("web editor of the site loaded and evaluated its sample");
+    }
+    Ok(())
+}
+
+fn check_editor(browser: &Path, url: &str) -> Result<()> {
+    let dom = dump_dom(browser, url)?;
+    if !dom.contains("data-ready=\"true\"") || !dom.contains("FREE_SHIPPING") {
+        bail!("the web editor did not load or evaluate its sample ({url})");
     }
     Ok(())
 }
@@ -441,11 +454,22 @@ fn respond(mut stream: TcpStream, dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Serves the repository and prints the address of the web editor example.
-pub fn serve_forever() -> Result<()> {
-    let port = serve(root())?;
-    println!("serving the repository at http://127.0.0.1:{port}/");
-    println!("web editor: http://127.0.0.1:{port}/examples/web-editor/");
+/// Serves the repository, or with `site` the site built by `cargo xtask site`, and prints the
+/// address of the web editor.
+pub fn serve_forever(site: bool) -> Result<()> {
+    if site {
+        let dir = site::dir();
+        if !dir.join("index.html").is_file() {
+            bail!("{} is not built; run `cargo xtask site`", dir.display());
+        }
+        let port = serve(dir)?;
+        println!("serving the site at http://127.0.0.1:{port}/");
+        println!("web editor: http://127.0.0.1:{port}/editor/");
+    } else {
+        let port = serve(root())?;
+        println!("serving the repository at http://127.0.0.1:{port}/");
+        println!("web editor: http://127.0.0.1:{port}/examples/web-editor/");
+    }
     println!("press Ctrl+C to stop");
     loop {
         thread::park();

@@ -1,7 +1,7 @@
 # jlens web editor
 
 A JSONata editor for the browser, built on the jlens WebAssembly package and CodeMirror 6.
-It needs no build step. It shows:
+It needs no build step, and runs online at <https://thkprado.github.io/jlens/editor/>. It shows:
 - completion of fields, variables and functions, with the fields taken from a schema inferred
   from the input document;
 - diagnostics: syntax errors, and fields that are not in the schema (with "did you mean");
@@ -21,8 +21,23 @@ cargo xtask wasm     # builds crates/jlens-wasm/pkg
 cargo xtask serve    # serves the repository; open the printed /examples/web-editor/ address
 ```
 
-The page imports the package from `../../crates/jlens-wasm/pkg/`. It loads CodeMirror from
-esm.sh through an import map, so it needs network access.
+The page imports the package by its name, `jlens-wasm`, which the import map of `index.html`
+resolves to `../../crates/jlens-wasm/pkg/jlens.js`. The same import map loads CodeMirror from
+esm.sh, so the page needs network access.
+
+## The site
+
+The editor is published with the book. To preview the site:
+
+```sh
+cargo xtask site          # builds the package and the book into target/site
+cargo xtask serve --site  # serves target/site; the editor is under /editor/
+```
+
+`cargo xtask site` copies this directory to `target/site/editor/`, without this README, and the
+package to `editor/pkg/`, and rewrites the `jlens-wasm` entry of the import map to
+`./pkg/jlens.js`; nothing else changes. `cargo xtask wasm-test --example` loads both versions
+of the editor.
 
 ## Files
 

@@ -12,6 +12,10 @@ It ships in three forms that share a single engine:
 | Command line | `jlens` binary | Scripts, pipelines, NDJSON filtering, debugging expressions |
 | WebAssembly | `jlens-wasm` (npm package, ES module) | Browsers: evaluation, editors with autocomplete, audit viewers |
 
+To try it without installing anything, open the [web editor](https://thkprado.github.io/jlens/editor/):
+it runs jlens in your browser, with completion, diagnostics, and the explanation and audit tree
+of every result.
+
 What sets jlens apart from other JSONata implementations:
 
 - **Explainable evaluation.** jlens can record an *audit tree* of how an expression reached its
