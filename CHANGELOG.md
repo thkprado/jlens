@@ -14,6 +14,9 @@ All notable changes are recorded here. The format follows
   runs the release binary of the platform, which npm installs from one of the packages
   `jlens-cli-<os>-<cpu>` (Linux x64 and arm64, macOS x64 and arm64, Windows x64), published
   with provenance and without install scripts.
+- The `jlens` command on Homebrew, for macOS and Linux: `brew install thkprado/jlens/jlens`
+  installs the release binary from the tap `thkprado/homebrew-jlens`, which each published
+  release updates.
 
 ## [0.13.0]
 

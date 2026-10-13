@@ -33,6 +33,14 @@ $ jlens --version
 jlens 0.13.0
 ```
 
+On macOS and Linux, Homebrew installs the same binary from the tap
+[`thkprado/homebrew-jlens`](https://github.com/thkprado/homebrew-jlens) (from 0.14.0 on), and
+`brew upgrade` follows the releases:
+
+```sh
+brew install thkprado/jlens/jlens
+```
+
 In a JavaScript project, the same binary comes from npm, in the package `jlens-cli` (from
 0.14.0 on):
 

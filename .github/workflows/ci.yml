@@ -209,3 +209,56 @@ jobs:
           code=0
           npx jlens eval 2> /dev/null || code=$?
           test "$code" = 2
+
+  # The Homebrew formula, written as the Homebrew workflow writes it but pointing at the CI
+  # archives (put in /tmp/jlens-dist by the install job), then installed and tested by brew on
+  # Linux and macOS from a local tap.
+  homebrew:
+    name: Homebrew formula
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - run: sha256sum -- *.tar.gz > SHA256SUMS
+        working-directory: dist
+      - run: cargo xtask homebrew dist/SHA256SUMS --url file:///tmp/jlens-dist > dist/jlens.rb
+      - uses: actions/upload-artifact@v7
+        with:
+          name: homebrew
+          path: |
+            dist/jlens.rb
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  homebrew-install:
+    name: CLI from Homebrew (${{ matrix.os }})
+    needs: homebrew
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: homebrew
+          path: /tmp/jlens-dist
+      # Homebrew is installed on the Linux runners, but not on the PATH.
+      - name: Install the formula and run its test
+        run: |
+          if ! command -v brew > /dev/null; then
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          fi
+          brew tap-new --no-git local/jlens
+          cp /tmp/jlens-dist/jlens.rb "$(brew --repository local/jlens)/Formula/"
+          brew install local/jlens/jlens
+          brew test local/jlens/jlens
+          jlens --version

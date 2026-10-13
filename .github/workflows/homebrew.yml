@@ -1,0 +1,59 @@
+name: Homebrew
+
+# When a release is published, writes the Homebrew formula of its binaries (cargo xtask homebrew,
+# from the release's SHA256SUMS) to the tap thkprado/homebrew-jlens, so that
+# `brew install thkprado/jlens/jlens` installs it. It runs on publication, not with the Release
+# workflow: the archives of a draft cannot be downloaded, so a formula written earlier would
+# fail until the draft is published. Needs the repository secret HOMEBREW_TAP_TOKEN, a token
+# that can write the contents of the tap and nothing else (CONTRIBUTING.md).
+# Run by hand (workflow_dispatch) on the tag of a published release
+# (gh workflow run homebrew.yml --ref vX.Y.Z), it writes the formula of that release again.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# The job reads the repository; it writes the tap with its own token.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  formula:
+    name: Update the tap
+    runs-on: ubuntu-latest
+    steps:
+      - name: The run is on a version tag
+        run: '[[ "$GITHUB_REF" == refs/tags/v* ]]'
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: The tag matches the workspace version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          test "v$version" = "$TAG"
+      - run: gh release download "$TAG" --pattern SHA256SUMS --dir dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: cargo xtask homebrew dist/SHA256SUMS > jlens.rb
+      # git, not actions/checkout: the tap may still be empty, with no branch to check out.
+      - name: Commit the formula to the tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone "https://x-access-token:$TAP_TOKEN@github.com/thkprado/homebrew-jlens.git" tap
+          mkdir -p tap/Formula
+          cp jlens.rb tap/Formula/jlens.rb
+          cd tap
+          git add Formula/jlens.rb
+          if git diff --cached --quiet; then
+            echo "the tap already has this formula"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "jlens ${TAG#v}"
+          git push origin HEAD:main

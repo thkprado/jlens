@@ -13,6 +13,7 @@ mod ab_probe;
 mod differential;
 mod docs;
 mod fuzz;
+mod homebrew;
 mod npm;
 mod release;
 mod site;
@@ -32,6 +33,10 @@ commands:
   fuzz-seed                         seed the corpora of the fuzz targets with the JSONata suite
   fuzz-replay <target> <path>...    run saved inputs (files, or directories of them) through a
                                     fuzz target, without libFuzzer, on any platform
+  homebrew <SHA256SUMS> [--url <base>]
+                                    print the Homebrew formula of the CLI, for the archives
+                                    listed in a release's SHA256SUMS, downloaded from the
+                                    GitHub release or from <base>
   npm-cli <archives directory>      build the npm packages of the CLI (jlens-cli and one per
                                     platform) from the release archives, into target/npm-cli,
                                     and pack them
@@ -58,6 +63,20 @@ fn main() -> Result<()> {
         Some("differential") => differential::run(&args[1..]),
         Some("fuzz-seed") => fuzz::seed(),
         Some("fuzz-replay") => fuzz::replay(&args[1..]),
+        Some("homebrew") => match args.get(1) {
+            Some(sums) => homebrew::print(
+                Path::new(sums),
+                args.iter()
+                    .position(|a| a == "--url")
+                    .and_then(|i| args.get(i + 1))
+                    .map(String::as_str),
+            ),
+            None => bail!(
+                "homebrew needs the path of a SHA256SUMS file
+
+{USAGE}"
+            ),
+        },
         Some("npm-cli") => match args.get(1) {
             Some(dir) => npm::build(Path::new(dir)),
             None => bail!(

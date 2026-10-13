@@ -116,7 +116,14 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    draft the release by hand as above (without attestations) and fix the workflow on `main` for
    the next release.
 5. Review the draft on the Releases page, edit it if needed, and publish it. `cargo binstall`
-   finds the binaries once the release is published.
+   finds the binaries once the release is published. Publishing it starts the `Homebrew`
+   workflow, which writes the formula of the release (`cargo xtask homebrew`, from its
+   `SHA256SUMS`) to the tap `thkprado/homebrew-jlens`. It needs the repository secret
+   `HOMEBREW_TAP_TOKEN`: a fine-grained personal access token whose only repository is
+   `thkprado/homebrew-jlens`, with the permission Contents: read and write and nothing else.
+   Such a token expires: renew it before then, or the workflow fails. To write the formula
+   again (after renewing the token, say), run the workflow by hand on the tag:
+   `gh workflow run homebrew.yml --ref vX.Y.Z`.
 6. Check that the packages prove where they were built:
 
    ```sh
@@ -126,6 +133,7 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    npm view jlens-wasm@X.Y.Z dist.attestations   # lists the provenance (slsa.dev) statement
    npm view jlens-cli@X.Y.Z dist.attestations    # and of jlens-cli-<os>-<cpu> likewise
    npx -y jlens-cli@X.Y.Z --version              # the binary of this platform, from npm
+   brew upgrade thkprado/jlens/jlens && jlens --version   # macOS and Linux, after the Homebrew run
    ```
 
    The package page on npmjs.com also shows a Provenance section linking to the workflow run.
