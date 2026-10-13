@@ -62,3 +62,4 @@
   - [0009 Bounded regular expressions](adr/0009-bounded-regex.md)
   - [0010 Lazy input](adr/0010-lazy-input.md)
   - [0011 Host callbacks](adr/0011-host-callbacks.md)
+  - [0012 The CLI on npm](adr/0012-npm-distribution.md)
