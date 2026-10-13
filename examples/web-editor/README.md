@@ -9,13 +9,28 @@ It needs no build step, and runs online at <https://thkprado.github.io/jlens/edi
 - live evaluation, with the explanation and the audit tree of every result (click a node to
   select its source). It runs in a Web Worker, so typing never waits for it: when the expression
   changes during an evaluation, the worker is terminated and replaced;
-- ready-made examples, chosen in the header: a free-shipping rule for a store order, and the
+- ready-made examples, chosen in the header: a free-shipping rule for a store order, a
+  host function that calls the function it receives (`#host-functions`, see below), and the
   samples of [try.jsonata.org](https://try.jsonata.org) (Invoice, Address, Schema, Library,
   Bindings). The choice is kept in the address (`#invoice`), so an example can be linked;
 - shared addresses: the Share button puts the expression, the input document and the bindings
   in the address and copies it (see below).
 
 Everything runs in the browser: no expression or document leaves it.
+
+## Host functions
+
+The bindings are JSON, so an expression cannot bring JavaScript of its own. The editor offers
+one host function to every expression instead, as an application would with
+`registerFunction`: `$try(step, fallback)`, in `host-functions.js`. It calls `step` and, when
+that fails, gives `fallback`, or calls it with the error (`{code, message}`) when it is a
+function. JSONata has no way to catch an error, so this is something only the host can add. It
+lets the guardrails through (`D1011`, `D1012` and the `U` errors), so that a catch cannot keep
+a runaway evaluation alive.
+
+The worker registers it on each expression, and the page declares it to the language service,
+for completion, hover and signature help. The Host functions example uses it to price order
+lines whose prices may not be numbers.
 
 ## Shared addresses
 
@@ -65,6 +80,7 @@ of the editor.
 | `main.js` | Wires the editor, the input document, the examples and the result panels |
 | `worker.js` | Evaluates in a Web Worker; the page passes it the address of the package, as import maps do not apply to workers |
 | `samples.js` | The examples: expression, input document and bindings of each |
+| `host-functions.js` | The host function `$try`, and its declaration for the language service |
 | `share.js`, `share.test.mjs` | Shared addresses, and the test of their round trip (left out of the site) |
 | `index.html`, `style.css` | The page |
 

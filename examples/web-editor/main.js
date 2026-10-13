@@ -15,6 +15,7 @@ import { EditorView, highlightActiveLine, keymap, lineNumbers } from "@codemirro
 
 import init, { LanguageService, inferSchema, version } from "jlens-wasm";
 import { renderAudit, renderExplanation, spansOf } from "./audit-view.js";
+import { hostDeclarations } from "./host-functions.js";
 import { jlensExtensions } from "./jlens-codemirror.js";
 import { samples } from "./samples.js";
 import { MAX_ADDRESS, decodeShare, encodeShare } from "./share.js";
@@ -48,7 +49,7 @@ function updateService() {
     Object.entries(bindings).map(([name, value]) => [name, inferSchema([value])]),
   );
   service.free();
-  service = new LanguageService(schema, variables);
+  service = new LanguageService(schema, variables, hostDeclarations);
   $("schema").textContent = JSON.stringify(schema, null, 2);
 }
 

@@ -17,6 +17,8 @@ All notable changes are recorded here. The format follows
   JavaScript function that calls it, with an `arity` property, as in jsonata-js (`Callable` in
   the TypeScript declarations). It is synchronous, and calling it after the host function has
   returned throws the new error `U1005`.
+- The web editor offers a host function, `$try(step, fallback)`, which calls the function it
+  receives and catches its error, and a Host functions example that uses it.
 
 ### Changed
 

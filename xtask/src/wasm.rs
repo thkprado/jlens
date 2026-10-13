@@ -286,7 +286,7 @@ pub fn test(require_browser: bool, example: bool) -> Result<()> {
 
 /// A page that loads the web editor named by `?editor=` in a frame and copies its result once
 /// the editor is ready, then loads it again from a shared address (`#s=`) and copies that result
-/// too. The editor evaluates in a Web Worker, and the headless browser's virtual time does not
+/// too; that expression calls the editor's host function `$try`. The editor evaluates in a Web Worker, and the headless browser's virtual time does not
 /// wait for a worker: it would dump the page before the worker has loaded the package. Each
 /// fetch pauses virtual time, so the page fetches until the editor is ready.
 const EDITOR_CHECK: &str = r#"<!doctype html>
@@ -310,7 +310,7 @@ const EDITOR_CHECK: &str = r#"<!doctype html>
   $("result").textContent = await resultOf($("editor"), editor);
   const { encodeShare } = await import(`${editor}share.js`);
   const fragment = await encodeShare({
-    expression: '$tag & ": " & name',
+    expression: '($n := name; $try(function() { $error("x") }, function($e) { $tag & ": " & $n }))',
     input: { name: "jlens" },
     bindings: { tag: "shared-ok" },
   });
@@ -325,7 +325,7 @@ fn check_editor(browser: &Path, url: &str) -> Result<()> {
         bail!("the web editor did not load or evaluate its sample ({url})");
     }
     if !dom.contains("shared-ok: jlens") {
-        bail!("the web editor did not restore a shared address ({url})");
+        bail!("the web editor did not restore a shared address, or call its host function ({url})");
     }
     Ok(())
 }

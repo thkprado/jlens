@@ -438,7 +438,10 @@ complete page with no build step, published with this book as the
   typing;
 - the explanation and an audit tree viewer; clicking a node selects its source;
 - the inferred schema;
-- ready-made examples, including the samples of [try.jsonata.org](https://try.jsonata.org).
+- ready-made examples, including the samples of [try.jsonata.org](https://try.jsonata.org);
+- a host function, `$try` (`host-functions.js`), that calls the function it receives, with an
+  example that uses it: the worker registers it on each expression, and the page declares it to
+  the language service.
 
 ```sh
 cargo xtask wasm

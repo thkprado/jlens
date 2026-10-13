@@ -41,6 +41,38 @@ export const samples = [
 )`,
   },
   {
+    id: "host-functions",
+    label: "Host functions",
+    input: {
+      lines: [
+        { sku: "A1", price: "12.50", quantity: 2 },
+        { sku: "B2", price: "n/a", quantity: 1 },
+        { sku: "C3", price: "7", quantity: 3 },
+        { sku: "D4", price: "1,5", quantity: 4 },
+      ],
+    },
+    bindings: {},
+    expression: `/* $try is a host function: JavaScript that the editor registers (host-functions.js),
+   not part of JSONata. It calls the function it receives and, when that fails, calls the
+   fallback with the error. The functions read $line: the context of their call is null. */
+(
+  $lines := lines.(
+    $line := $;
+    {
+      'sku': sku,
+      'amount': $try(
+        function() { $number($line.price) * $line.quantity },
+        function($error) { {'error': $error.code, 'message': $error.message} }
+      )
+    }
+  );
+  {
+    'total': $sum($lines[$type(amount) = 'number'].amount),
+    'rejected': $lines[$type(amount) = 'object']
+  }
+)`,
+  },
+  {
     id: "invoice",
     label: "Invoice",
     input: {

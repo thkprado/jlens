@@ -7,6 +7,10 @@
 // means the expression did not compile or the evaluation threw. The reply is JSON text because
 // the audit tree of a deep recursion nests as deep as the recursion, and cloning it for
 // `postMessage` overflows a worker's stack, which is smaller than the page's.
+//
+// Each expression gets the editor's host functions (host-functions.js).
+
+import { hostFunctions } from "./host-functions.js";
 
 const ready = import(new URL(location.href).searchParams.get("jlens")).then(async (jlens) => {
   await jlens.default();
@@ -21,6 +25,7 @@ self.onmessage = async ({ data: { id, source, input, bindings, level } }) => {
   try {
     const { Expression } = await ready;
     expr = new Expression(source);
+    for (const f of hostFunctions) expr.registerFunction(f.name, f.implementation, f.signature);
   } catch (err) {
     reply({ id, error: errorInfo(err) });
     return;
