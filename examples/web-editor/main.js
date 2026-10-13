@@ -17,14 +17,25 @@ import init, { LanguageService, inferSchema, version } from "jlens-wasm";
 import { renderAudit, renderExplanation, spansOf } from "./audit-view.js";
 import { jlensExtensions } from "./jlens-codemirror.js";
 import { samples } from "./samples.js";
+import { MAX_ADDRESS, decodeShare, encodeShare } from "./share.js";
 
 const $ = (id) => document.getElementById(id);
 
 await init();
 $("status").textContent = `jlens ${version()} (WebAssembly)`;
 
-// The example named in the address (`#invoice`), or the first one.
-const initial = samples.find((s) => `#${s.id}` === location.hash) ?? samples[0];
+/** The state in the address: a shared one (`#s=...`), the example it names, or `null`. */
+async function fromAddress() {
+  try {
+    const shared = await decodeShare(location.hash);
+    if (shared) return { id: "", ...shared };
+  } catch (err) {
+    $("share-status").textContent = `This shared address is damaged: ${err.message}`;
+  }
+  return samples.find((s) => `#${s.id}` === location.hash) ?? null;
+}
+
+const initial = (await fromAddress()) ?? samples[0];
 let input = initial.input;
 let bindings = initial.bindings;
 let service = new LanguageService();
@@ -110,6 +121,7 @@ function evaluate() {
 
 let timer;
 function schedule() {
+  $("share-status").textContent = "";
   clearTimeout(timer);
   timer = setTimeout(evaluate, 150);
 }
@@ -206,10 +218,14 @@ function loadSample(sample) {
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: sample.expression } });
 }
 
+// A shared state is no example: the selector shows "Shared" until another is chosen.
+$("sample").append(new Option("Shared", ""));
+$("sample").options[0].hidden = true;
 for (const sample of samples) $("sample").append(new Option(sample.label, sample.id));
 $("sample").value = initial.id;
 $("sample").addEventListener("change", () => {
   const sample = samples.find((s) => s.id === $("sample").value);
+  if (!sample) return;
   window.history.replaceState(null, "", `#${sample.id}`); // `history` is CodeMirror's here
   loadSample(sample);
 });
@@ -225,6 +241,40 @@ $("bindings").addEventListener("input", () => {
   timer = setTimeout(readInputs, 300);
 });
 $("level").addEventListener("change", evaluate);
+
+// An address pasted into this tab changes only the fragment: nothing reloads.
+window.addEventListener("hashchange", async () => {
+  $("share-status").textContent = "";
+  const state = await fromAddress();
+  if (!state) return;
+  $("sample").value = state.id;
+  loadSample(state);
+});
+
+/** Puts the expression, the input document and the bindings in the address, and copies it. */
+async function share() {
+  const status = $("share-status");
+  if ($("input-error").textContent) {
+    status.textContent = "Correct the input document or the bindings first.";
+    return;
+  }
+  const fragment = await encodeShare({ expression: editor.state.doc.toString(), input, bindings });
+  const address = new URL(fragment, location.href).href;
+  if (address.length > MAX_ADDRESS) {
+    const kb = (address.length / 1000).toFixed(1);
+    status.textContent = `Too large to share: the address would be ${kb} KB, and some tools cut addresses beyond 8 KB.`;
+    return;
+  }
+  window.history.replaceState(null, "", fragment);
+  $("sample").value = "";
+  try {
+    await navigator.clipboard.writeText(address);
+    status.textContent = "Address copied.";
+  } catch {
+    status.textContent = "The address bar holds the shared address.";
+  }
+}
+$("share").addEventListener("click", share);
 
 for (const tab of document.querySelectorAll("[role=tab]")) {
   tab.addEventListener("click", () => {

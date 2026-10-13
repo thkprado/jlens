@@ -214,7 +214,8 @@ fn gzip_len(bytes: &[u8]) -> Result<u64> {
 
 /// Builds the package, then runs the JavaScript test suite in Node.js and in a headless
 /// browser (Chrome, Chromium or Edge; set `JLENS_BROWSER` to choose the executable). With
-/// `example`, also checks that `examples/web-editor` loads and evaluates its sample, both from
+/// `example`, also tests the shared addresses of `examples/web-editor` in Node.js, and checks
+/// that the editor loads, evaluates its sample and restores a shared address, both from
 /// the repository and as `cargo xtask site` assembles it (this loads CodeMirror from esm.sh, so
 /// it needs network access).
 pub fn test(require_browser: bool, example: bool) -> Result<()> {
@@ -252,12 +253,20 @@ pub fn test(require_browser: bool, example: bool) -> Result<()> {
     println!("browser tests passed ({})", browser.display());
 
     if example {
+        let status = Command::new("node")
+            .arg("--test")
+            .arg(root().join("examples/web-editor/share.test.mjs"))
+            .status()
+            .context("running node")?;
+        if !status.success() {
+            bail!("the tests of the web editor's shared addresses failed");
+        }
         fs::write(root().join("target/editor-check.html"), EDITOR_CHECK)?;
         let url = format!(
             "http://127.0.0.1:{port}/target/editor-check.html?editor=/examples/web-editor/"
         );
         check_editor(&browser, &url)?;
-        println!("web editor example loaded and evaluated its sample");
+        println!("web editor example loaded, evaluated its sample and restored a shared address");
 
         // The editor as the site serves it, without building the book.
         let site = root().join("target/site-editor-test");
@@ -268,31 +277,45 @@ pub fn test(require_browser: bool, example: bool) -> Result<()> {
             &browser,
             &format!("http://127.0.0.1:{port}/editor-check.html?editor=/editor/"),
         )?;
-        println!("web editor of the site loaded and evaluated its sample");
+        println!(
+            "web editor of the site loaded, evaluated its sample and restored a shared address"
+        );
     }
     Ok(())
 }
 
 /// A page that loads the web editor named by `?editor=` in a frame and copies its result once
-/// the editor is ready. The editor evaluates in a Web Worker, and the headless browser's virtual
-/// time does not wait for a worker: it would dump the page before the worker has loaded the
-/// package. Each fetch pauses virtual time, so the page fetches until the editor is ready.
+/// the editor is ready, then loads it again from a shared address (`#s=`) and copies that result
+/// too. The editor evaluates in a Web Worker, and the headless browser's virtual time does not
+/// wait for a worker: it would dump the page before the worker has loaded the package. Each
+/// fetch pauses virtual time, so the page fetches until the editor is ready.
 const EDITOR_CHECK: &str = r#"<!doctype html>
 <meta charset="utf-8">
 <iframe id="editor"></iframe>
+<iframe id="shared"></iframe>
 <pre id="result"></pre>
+<pre id="shared-result"></pre>
 <script type="module">
-  const frame = document.getElementById("editor");
-  frame.src = new URLSearchParams(location.search).get("editor");
-  for (let i = 0; i < 20000; i++) {
-    const editor = frame.contentDocument;
-    if (editor?.body?.dataset.ready === "true") {
-      document.getElementById("result").textContent = editor.getElementById("result").textContent;
-      document.body.dataset.ready = "true";
-      break;
+  const editor = new URLSearchParams(location.search).get("editor");
+  async function resultOf(frame, src) {
+    frame.src = src;
+    for (let i = 0; i < 20000; i++) {
+      const page = frame.contentDocument;
+      if (page?.body?.dataset.ready === "true") return page.getElementById("result").textContent;
+      await fetch(location.href, { cache: "no-store" });
     }
-    await fetch(location.href, { cache: "no-store" });
+    return "(not ready)";
   }
+  const $ = (id) => document.getElementById(id);
+  $("result").textContent = await resultOf($("editor"), editor);
+  const { encodeShare } = await import(`${editor}share.js`);
+  const fragment = await encodeShare({
+    expression: '$tag & ": " & name',
+    input: { name: "jlens" },
+    bindings: { tag: "shared-ok" },
+  });
+  $("shared-result").textContent = await resultOf($("shared"), editor + fragment);
+  document.body.dataset.ready = "true";
 </script>
 "#;
 
@@ -300,6 +323,9 @@ fn check_editor(browser: &Path, url: &str) -> Result<()> {
     let dom = dump_dom(browser, url)?;
     if !dom.contains("data-ready=\"true\"") || !dom.contains("FREE_SHIPPING") {
         bail!("the web editor did not load or evaluate its sample ({url})");
+    }
+    if !dom.contains("shared-ok: jlens") {
+        bail!("the web editor did not restore a shared address ({url})");
     }
     Ok(())
 }

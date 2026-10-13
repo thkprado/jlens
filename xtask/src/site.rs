@@ -54,8 +54,9 @@ pub fn assemble_editor(dest: &Path) -> Result<()> {
         fs::remove_dir_all(dest)?;
     }
     copy_dir(&root().join("examples/web-editor"), dest)?;
-    // The README links files of the repository.
+    // The README links files of the repository; the test runs in Node.js.
     fs::remove_file(dest.join("README.md"))?;
+    fs::remove_file(dest.join("share.test.mjs"))?;
 
     let index = dest.join("index.html");
     let html = fs::read_to_string(&index)?;

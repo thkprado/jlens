@@ -69,6 +69,11 @@ h3 { margin-top: 12px; }
 #status { margin: 0 0 0 auto; color: var(--muted); font-size: 12px; }
 .sample { color: var(--muted); font-size: 13px; display: flex; gap: 8px; align-items: baseline; }
 .sample select { padding: 2px 4px; max-width: 70vw; }
+#share { font: inherit; font-size: 13px; padding: 2px 10px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+#share:hover { border-color: var(--accent); }
+#share-status { margin: 0; }
+.about { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
+a { color: var(--accent); }
 
 main {
   display: grid;

@@ -14,6 +14,9 @@ All notable changes are recorded here. The format follows
 - The book and the web editor are published at <https://thkprado.github.io/jlens/> by the new
   `Pages` workflow, at each release tag. The crates and the npm package name the site as
   their homepage.
+- The web editor shares expressions: its Share button puts the expression, the input document
+  and the bindings in the address (`#s=`, compressed), so that no server stores them, and
+  opening that address restores them. Its header links the book.
 
 ### Changed
 
