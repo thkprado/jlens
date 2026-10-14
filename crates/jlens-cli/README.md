@@ -6,8 +6,11 @@ command line. Part of [jlens](https://github.com/thkprado/jlens).
 ```sh
 cargo binstall jlens-cli     # a prebuilt binary, from the GitHub release
 cargo install jlens-cli      # or build it from source
-npx jlens-cli --version      # or from npm, in JavaScript projects (from 0.14.0 on)
 ```
+
+On npm, `jlens-cli` is not published yet; the
+[installation page](https://thkprado.github.io/jlens/getting-started/installation.html) lists
+the other channels.
 
 ```text
 $ jlens eval -i order.json '$sum(items.(price * qty))'

@@ -9,7 +9,7 @@ All notable changes are recorded here. The format follows
 ## [0.14.0]
 
 The `jlens` command installs from the package managers people already use: npm
-(`npx jlens-cli`), Homebrew, Scoop and a container image on ghcr.io. Each channel carries the
+(`npx jlens-cli`, not published yet: see below), Homebrew, Scoop and a container image on ghcr.io. Each channel carries the
 attested release binaries, never rebuilt.
 
 ### Added
@@ -19,7 +19,9 @@ attested release binaries, never rebuilt.
 - The `jlens` command on npm (ADR 0012): `npx jlens-cli` or `npm install --save-dev jlens-cli`
   runs the release binary of the platform, which npm installs from one of the packages
   `jlens-cli-<os>-<cpu>` (Linux x64 and arm64, macOS x64 and arm64, Windows x64), published
-  with provenance and without install scripts.
+  with provenance and without install scripts. Not available yet: npm's spam detection held
+  back `jlens-cli-win32-x64` at the release, so `jlens-cli` is not published; the four other
+  platform packages are.
 - The `jlens` command on Homebrew, for macOS and Linux: `brew install thkprado/jlens/jlens`
   installs the release binary from the tap `thkprado/homebrew-jlens`, which each published
   release updates.

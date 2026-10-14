@@ -50,8 +50,9 @@ scoop bucket add jlens https://github.com/thkprado/scoop-jlens
 scoop install jlens/jlens
 ```
 
-In a JavaScript project, the same binary comes from npm, in the package `jlens-cli` (from
-0.14.0 on):
+In a JavaScript project, the same binary will come from npm, in the package `jlens-cli`. It is
+not published yet: at the 0.14.0 release, npm held back the name of the Windows package, and
+`jlens-cli` waits for it. Until then, use one of the channels above. Once published:
 
 ```sh
 npx jlens-cli --version              # run it without installing
