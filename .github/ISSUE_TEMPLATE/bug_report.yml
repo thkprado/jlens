@@ -1,0 +1,66 @@
+name: Bug report
+description: A wrong result, an error that should not happen, or a crash
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report vulnerabilities (a panic, a stack overflow, a limit that does not stop an
+        evaluation) privately, as [SECURITY.md](https://github.com/thkprado/jlens/blob/main/SECURITY.md)
+        describes, not here.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The jlens version (`jlens --version`, or the crate or npm package version).
+      placeholder: "0.14.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Where
+      options:
+        - jlens-core (Rust crate)
+        - jlens-schema (Rust crate)
+        - jlens CLI
+        - Language server (jlens lsp)
+        - jlens-wasm (npm package)
+        - Web editor or documentation
+    validations:
+      required: true
+  - type: textarea
+    id: expression
+    attributes:
+      label: Expression
+      description: The smallest JSONata expression that shows the problem.
+      render: jsonata
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      description: The smallest JSON input that shows the problem, if any.
+      render: json
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happens
+      description: The result, or the error with its code.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: >-
+        jlens follows jsonata-js 2.2.2. If you know what jsonata-js returns (for example on
+        try.jsonata.org), say so.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Other context
+      description: Platform, how you call jlens, options or limits you set.

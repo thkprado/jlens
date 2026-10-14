@@ -1,5 +1,7 @@
 # Contributing to jlens
 
+Everyone who takes part in the project follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 ## Setting up
 
 You need Rust 1.88 or later (stable). Some tasks need more:

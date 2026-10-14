@@ -79,7 +79,8 @@ cargo bench -p jlens-core              # benchmarks
 ```
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the full list of checks and the release process.
-To report a vulnerability, see [SECURITY.md](SECURITY.md).
+Taking part in the project means following the [code of conduct](CODE_OF_CONDUCT.md). To report
+a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## License
 
