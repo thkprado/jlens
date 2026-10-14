@@ -49,7 +49,7 @@ Three principles order the work after 0.2:
 2. **The CLI is a tool for automation and AI agents.** It never prompts, it gives the same
    output for the same input, and it has one documented machine-readable contract: what goes to
    standard output, what goes to standard error, and what each exit code means.
-3. **Editors come after.** The language server is done; the VS Code extension waits.
+3. **Editors come after.** The language server is done; the VS Code extension is 0.15.
 
 For ad-hoc JSON queries, `jq` remains the usual tool. jlens is for JSONata that will run
 somewhere else, such as a rules engine or a jsonata-js service. It checks those expressions,
@@ -213,23 +213,31 @@ and attested, never rebuilt, and each one stays only if it updates without manua
 | 6 | Release 0.14.0 | The release checklist, with a check of each channel after the release | **done**, except npm: Homebrew, Scoop, the container image and the archives checked; npm refused `jlens-cli-win32-x64` ("Package name triggered spam detection"), so `jlens-cli` was not published (#7) |
 | 7 | The CLI on npm, after #6. The four other platform packages are on npm at 0.14.0; a support ticket asks npm to allow the name. Without an answer by 2026-10-20, the platform packages move to a scope (`@jlens/cli-<os>-<cpu>`), which changes ADR 0012. Before the next release tag, either the name is allowed, the packages are renamed, or the npm job of the CLI is left out of that release | `npx jlens-cli --version` works; the installation page and the release notes show the npm channel again | pending |
 
+## 0.15: jlens in VS Code, and a faster CLI allocator
+
+`jlens lsp` has worked since 0.3, but VS Code starts language servers only from extensions, and
+most JSONata users write in VS Code. Neovim, Helix and Emacs need a few lines of configuration;
+VS Code needs an extension. Like the other channels, the extension ships the attested release
+binary, never a rebuilt one. The milestone also settles the allocator question of 0.8: on
+Windows, `mimalloc` made every benchmark 20 to 45% faster, and Linux has not been measured.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | The extension, designed: where the server comes from (one VSIX per platform with the release binary, as rust-analyzer does, a `jlens` found on the `PATH`, or a download at first start), a setting that points to another `jlens`, the language id and file extensions next to other JSONata extensions, the publisher on the Visual Studio Marketplace and Open VSX, and where its TypeScript lives in this repository | The decision recorded in ADR 0013, with the names checked to be free on both registries | |
+| 2 | Syntax highlighting: a TextMate grammar for JSONata (comments, strings, numbers, names, `$variables` and function calls, operators, regular expressions) and a language configuration (comments, brackets, auto-closing pairs) | The grammar's snapshot tests run in CI over the expressions of the suite and the book's examples, and cover every token kind | |
+| 3 | The extension starts `jlens lsp` with `vscode-languageclient` for `.jsonata` files: the setting for the server's path, a command that restarts it, its log in an output channel, a clear message when no server is found, and a JSON Schema for `jlens.json` so that VS Code checks it as it is edited | An extension test (`@vscode/test-electron`, in CI on Linux, macOS and Windows) opens an expression and gets a diagnostic, a completion and a hover from the server; the editors guide | |
+| 4 | Packaging: `cargo xtask vscode` builds one VSIX per release target from the archives, as `cargo xtask npm-cli` does, plus one without a binary for other platforms, which looks for `jlens` on the `PATH` | CI packs every VSIX and installs the one of its platform in the extension test | |
+| 5 | Publishing: `release.yml` publishes the VSIX files to the Marketplace and to Open VSX after the binaries, skipping a version already published; the tokens and the steps to renew them are documented in `CONTRIBUTING.md` | The release checklist checks the extension on both registries | |
+| 6 | The allocator of the CLI, measured on Linux: a `cargo xtask ab` run on a Linux runner, with and without `mimalloc` as the global allocator of `jlens` only; the library keeps leaving the choice to applications | If Linux gains about as much as Windows, `jlens` links `mimalloc` on every release target, `cargo-deny` accepts it, and the performance page shows both platforms; otherwise the measurement goes to the performance page and the item closes | |
+| 7 | Release 0.15.0. Before the tag, the npm channel of the CLI (0.14 #7) is settled or left out of the release | The release checklist, with the extension installed from both registries | |
+
 ## Later
 
 Not commitments, in order of priority:
 
-- **A VS Code extension** that starts `jlens lsp` for `.jsonata` files, with a TextMate grammar
-  for syntax highlighting. The other editors with an LSP client need no extension.
 - **Asynchronous functions**, as in jsonata-js, whose functions may return promises. This needs
   an evaluator that can suspend, and an ADR first. Until then, a host function that returns a
   promise fails with `U1002`.
-- **A faster allocator for the CLI.** Evaluation spends most of its time allocating. On
-  Windows, linking the `jlens` binary with `mimalloc` made every case of `benches/` 20 to 45%
-  faster, and `Document::parse` went from 180 to 121 µs; `evaluate` on the filter, strings
-  and regex cases took half the time, and the cost lazy input left on them fell from 5–8% to
-  1–3% (see the performance page). Worth doing only if Linux shows a
-  similar gain, measured first. The library leaves the global allocator to the application, so
-  the performance page would recommend it to embedders. `mimalloc` builds C code, so each
-  release target and `cargo-deny` need checking.
 - **String literals in arguments, `&` and object values** still build a string each time they
   are evaluated: 0.11 #4 removed it only for `=` and `!=`. Sharing one per evaluation needs a
   slot per literal, since the AST is `Send` and values use `Rc`. Measure its share of the time
