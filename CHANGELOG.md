@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A VS Code extension, `thkprado.jlens` on the Visual Studio Marketplace and Open VSX
+  (ADR 0013): highlighting of `.jsonata` files, and the diagnostics, completions and hovers of
+  `jlens lsp`, which it starts from the release binary bundled in the package of each release
+  platform, from `jlens.server.path`, or from the `PATH`. VS Code checks `jlens.json` against
+  its JSON Schema as it is edited. Each release publishes the extension with the same version.
+
 ## [0.14.0]
 
 The `jlens` command installs from the package managers people already use: npm

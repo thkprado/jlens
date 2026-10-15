@@ -1,0 +1,33 @@
+name: Marketplace identity
+
+# Prints the Visual Studio Marketplace ID of the managed identity that publishes the VS Code
+# extension (release.yml, job vscode), which the publisher thkprado takes as a member. Only a
+# workflow run can sign in as that identity, so its ID is read here, by hand, while setting it
+# up: gh workflow run marketplace-identity.yml, with the environment vscode accepting the branch
+# main for that run. See CONTRIBUTING.md.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identity:
+    name: Marketplace ID of the identity
+    runs-on: ubuntu-latest
+    environment: vscode
+    # id-token signs in to Microsoft Entra ID.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      # 499b84ac-... is the resource of Azure DevOps and the Marketplace.
+      - run: >-
+          az rest --uri https://app.vssps.visualstudio.com/_apis/profile/profiles/me
+          --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id --output tsv

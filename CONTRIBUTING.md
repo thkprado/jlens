@@ -95,14 +95,18 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    CLI (ADR 0012: the five `jlens-cli-<os>-<cpu>` packages built by `cargo xtask npm-cli` from
    the archives, then `jlens-cli`), and to ghcr.io the container image `ghcr.io/thkprado/jlens`
    (`crates/jlens-cli/Dockerfile`, the two static Linux binaries; tags `X.Y.Z`, `X.Y` and
-   `latest`), then attests the binary archives and the image (build provenance, through
-   `actions/attest`) and drafts the GitHub release with the notes of the version, the archives
-   and their `SHA256SUMS`. It needs the repository secrets `CARGO_REGISTRY_TOKEN` and
-   `NPM_TOKEN`; `NPM_TOKEN` must be allowed to publish all seven npm packages, and to create the
-   CLI's six for their first release. The image is pushed with the run's `GITHUB_TOKEN`. The
-   provenance and the attestations are signed with the run's OIDC token, so they need no
-   secret. If the CLI's npm job fails halfway, re-run it: it
-   skips the packages whose version is already on npm.
+   `latest`), and to the Visual Studio Marketplace and Open VSX the VS Code extension
+   `thkprado.jlens` (ADR 0013: the seven VSIX files of the targets and the one that uses the
+   `PATH`, built by `cargo xtask vscode` from the archives), then attests the binary archives
+   and the image (build provenance, through `actions/attest`) and drafts the GitHub release
+   with the notes of the version, the archives and their `SHA256SUMS`. It needs the repository
+   secrets `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`; `NPM_TOKEN` must be allowed to publish all
+   seven npm packages, and to create the CLI's six for their first release. The extension is
+   published from the environment `vscode`, set up as
+   [Publishing the VS Code extension](#publishing-the-vs-code-extension) says. The image is
+   pushed with the run's `GITHUB_TOKEN`. The provenance and the attestations are signed with
+   the run's OIDC token, so they need no secret. If the CLI's npm job or the extension's job
+   fails halfway, re-run it: it skips the packages whose version is already published.
 
    To publish by hand instead: `cargo publish -p jlens-regress`, then `-p jlens-core`, then
    `-p jlens-schema`, then `-p jlens-lsp`, then `-p jlens-cli`; then
@@ -146,7 +150,13 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    scoop update jlens; jlens --version                    # Windows, after the Scoop run
    docker run --rm ghcr.io/thkprado/jlens:X.Y.Z --version
    gh attestation verify oci://ghcr.io/thkprado/jlens:X.Y.Z --repo thkprado/jlens
+   code --install-extension thkprado.jlens --force   # from the Marketplace, then open a .jsonata file
+   node editors/vscode/node_modules/@vscode/vsce/vsce show thkprado.jlens   # the Marketplace's version
+   curl -s https://open-vsx.org/api/thkprado/jlens/X.Y.Z | jq '{version, targets: (.downloads | keys)}'
    ```
+
+   Open VSX lists eight targets: the seven platforms and `universal`. The extension's
+   **jlens** output channel shows the version of the server it started.
 
    The first push of the image creates the package `jlens` on GitHub, private: make it public
    once, in its Package settings (Change visibility), so that `docker pull` needs no login.
@@ -158,6 +168,46 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    (`gh run list --workflow pages.yml --limit 1`), that the book's introduction names the new
    version, and that the editor evaluates an example. If only the deployment failed, re-run it
    on the tag: `gh workflow run pages.yml --ref vX.Y.Z`.
+
+### Publishing the VS Code extension
+
+The `vscode` job of the `Release` workflow runs in the GitHub environment `vscode`, which holds
+what both registries need. Its deployment rules accept only `v*` tags. The publisher `thkprado`
+on the Marketplace and the namespace `thkprado` on Open VSX belong to the maintainer.
+
+The Marketplace is reached as a Microsoft Entra ID managed identity, without a secret: global
+Azure DevOps personal access tokens stop working on 2026-12-01. To set it up:
+
+1. In the Azure portal, create a user-assigned managed identity (it needs a subscription, but
+   costs nothing, and no role). Under **Federated credentials**, add one for the scenario
+   *GitHub Actions deploying Azure resources*: organization `thkprado`, repository `jlens`,
+   entity *Environment*, name `vscode` (subject `repo:thkprado/jlens:environment:vscode`).
+2. In the repository's environment `vscode`, set the variables `AZURE_CLIENT_ID` (the
+   identity's client ID) and `AZURE_TENANT_ID`.
+3. Only a workflow run can sign in as the identity, so its Marketplace ID is read by one: let
+   the environment accept the branch `main` too, run `gh workflow run marketplace-identity.yml`,
+   and read the ID in the log of its last step (`gh run view --log`). Then remove `main` from
+   the environment's rules.
+4. On <https://marketplace.visualstudio.com/manage/publishers/thkprado>, add that ID as a member
+   with the role **Contributor**.
+
+Nothing expires. If the environment, the repository or the publisher is renamed, change the
+federated credential, run step 3 again and replace the member.
+
+Open VSX publishes the first version of an extension only with an access token. Until then, the
+environment holds the secret `OVSX_PAT`: a token created under **Access Tokens** in the
+open-vsx.org settings of the account that owns the namespace. Once the extension is on Open VSX,
+replace it with trusted publishing: in the namespace's settings, register a trusted publisher
+for the repository `thkprado/jlens`, the workflow `release.yml` and the environment `vscode`;
+then delete the secret and the token. Without `OVSX_PAT`, `ovsx` exchanges the run's OIDC token
+for a token valid for a few minutes. If the workflow file or the environment is renamed, register
+the publisher again.
+
+To publish a release by hand, build its VSIX files on Linux or macOS (Windows loses the
+executable bit): `gh release download vX.Y.Z --dir dist`, `npm ci` in `editors/vscode`, then
+`cargo xtask vscode dist`, which writes them to `target/vscode`. Upload them on the publisher's
+page of the Marketplace, and publish them to Open VSX with
+`npx ovsx publish --skip-duplicate --packagePath target/vscode/*.vsix -p <token>`.
 
 ## License
 

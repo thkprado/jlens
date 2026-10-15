@@ -2,11 +2,13 @@ name: Release
 
 # When a version tag (v0.1.0, ...) is pushed, builds the jlens binaries (binaries.yml), then
 # publishes the crates to crates.io, and to npm the WebAssembly package and the packages of the
-# CLI (ADR 0012), and to ghcr.io the container image, then drafts the GitHub release from
-# CHANGELOG.md with the binaries attached. Nothing is published unless every binary builds. The
-# npm packages are published with provenance and the binary archives and the image get build
-# attestations, all signed through Sigstore with the run's OIDC token. Needs the repository
-# secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN; the image is pushed with the run's GITHUB_TOKEN.
+# CLI (ADR 0012), to ghcr.io the container image, and the VS Code extension to the Visual Studio
+# Marketplace and Open VSX (ADR 0013), then drafts the GitHub release from CHANGELOG.md with the
+# binaries attached. Nothing is published unless every binary builds. The npm packages are
+# published with provenance and the binary archives and the image get build attestations, all
+# signed through Sigstore with the run's OIDC token. Needs the repository secrets
+# CARGO_REGISTRY_TOKEN and NPM_TOKEN, and the environment vscode (CONTRIBUTING.md); the image is
+# pushed with the run's GITHUB_TOKEN.
 # Run by hand (workflow_dispatch) on an existing tag (gh workflow run release.yml --ref vX.Y.Z),
 # it publishes nothing: it builds the binaries of that tag, attests them and drafts its release,
 # for a release whose draft failed after publishing. It takes no ref as input: every job builds
@@ -214,10 +216,59 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
+  # The VS Code extension (ADR 0013) on the Visual Studio Marketplace and Open VSX: a VSIX per
+  # target holding the binary of its archive, and one for other platforms, which uses the jlens
+  # on the PATH. The Marketplace is reached as a Microsoft Entra ID managed identity, federated
+  # with the environment vscode; Open VSX with the token OVSX_PAT when the secret is set, and
+  # through trusted publishing (this run's OIDC token) otherwise. A VSIX whose version and target
+  # are already on a registry is skipped: re-running the job completes a release that failed
+  # halfway through.
+  vscode:
+    name: VS Code extension
+    needs: binaries
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: vscode
+    # id-token signs in to Microsoft Entra ID and to Open VSX.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: The tag matches the workspace version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          test "v$version" = "$TAG"
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - working-directory: editors/vscode
+        run: npm ci
+      - run: cargo xtask vscode dist
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      # vsce takes the Entra ID token of the Azure CLI, signed in by the previous step.
+      - name: Visual Studio Marketplace
+        run: >-
+          node editors/vscode/node_modules/@vscode/vsce/vsce publish --azure-credential
+          --skip-duplicate --packagePath target/vscode/*.vsix
+      - name: Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx --yes ovsx@1.2.0 publish --skip-duplicate --packagePath target/vscode/*.vsix
+
   github:
     name: GitHub release (draft)
-    needs: [crates, npm, npm-cli, container, binaries]
-    # crates, the npm jobs and container are skipped when the workflow is run by hand.
+    needs: [crates, npm, npm-cli, container, vscode, binaries]
+    # crates, the npm jobs, container and vscode are skipped when the workflow is run by hand.
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     # contents creates the release; the others sign and store the attestations.
