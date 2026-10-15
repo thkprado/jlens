@@ -1,0 +1,40 @@
+>"double" & 'single'
+#^ string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+# ^^^^^^ string.quoted.double.jsonata
+#       ^ string.quoted.double.jsonata punctuation.definition.string.end.jsonata
+#         ^ keyword.operator.concatenation.jsonata
+#           ^ string.quoted.single.jsonata punctuation.definition.string.begin.jsonata
+#            ^^^^^^ string.quoted.single.jsonata
+#                  ^ string.quoted.single.jsonata punctuation.definition.string.end.jsonata
+>"escapes: \" \\ \/ \b \f \n \r \t \u00e9"
+#^ string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+# ^^^^^^^^^ string.quoted.double.jsonata
+#          ^^ string.quoted.double.jsonata constant.character.escape.jsonata
+#            ^ string.quoted.double.jsonata
+#             ^^ string.quoted.double.jsonata constant.character.escape.jsonata
+#               ^ string.quoted.double.jsonata
+#                ^^ string.quoted.double.jsonata constant.character.escape.jsonata
+#                  ^ string.quoted.double.jsonata
+#                   ^^ string.quoted.double.jsonata constant.character.escape.jsonata
+#                     ^ string.quoted.double.jsonata
+#                      ^^ string.quoted.double.jsonata constant.character.escape.jsonata
+#                        ^ string.quoted.double.jsonata
+#                         ^^ string.quoted.double.jsonata constant.character.escape.jsonata
+#                           ^ string.quoted.double.jsonata
+#                            ^^ string.quoted.double.jsonata constant.character.escape.jsonata
+#                              ^ string.quoted.double.jsonata
+#                               ^^ string.quoted.double.jsonata constant.character.escape.jsonata
+#                                 ^ string.quoted.double.jsonata
+#                                  ^^^^^^ string.quoted.double.jsonata constant.character.escape.jsonata
+#                                        ^ string.quoted.double.jsonata punctuation.definition.string.end.jsonata
+>'not an escape: \q'
+#^ string.quoted.single.jsonata punctuation.definition.string.begin.jsonata
+# ^^^^^^^^^^^^^^^ string.quoted.single.jsonata
+#                ^^ string.quoted.single.jsonata invalid.illegal.escape.jsonata
+#                  ^ string.quoted.single.jsonata punctuation.definition.string.end.jsonata
+>"a string
+#^ string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+# ^^^^^^^^ string.quoted.double.jsonata
+>over two lines"
+#^^^^^^^^^^^^^^ string.quoted.double.jsonata
+#              ^ string.quoted.double.jsonata punctuation.definition.string.end.jsonata

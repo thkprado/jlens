@@ -1,0 +1,5 @@
+"double" & 'single'
+"escapes: \" \\ \/ \b \f \n \r \t \u00e9"
+'not an escape: \q'
+"a string
+over two lines"

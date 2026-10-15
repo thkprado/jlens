@@ -1,0 +1,11 @@
+a + b - c * d / e % f
+a = b and c != d or e < f and g <= h or i > j and k >= l
+"x" & "y"
+k in ["k", "v"]
+a ? b : c
+a ?: b
+a ?? b
+Account.Order@$o#$i.Product
+Order^(>Price, <Name)
+$ ~> |Account.Order|{"Total": Price * Quantity}, ["Price"]|
+!x ~y

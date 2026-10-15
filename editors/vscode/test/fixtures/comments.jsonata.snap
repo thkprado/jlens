@@ -1,0 +1,34 @@
+>/* A block comment */
+#^^ comment.block.jsonata punctuation.definition.comment.begin.jsonata
+#  ^^^^^^^^^^^^^^^^^ comment.block.jsonata
+#                   ^^ comment.block.jsonata punctuation.definition.comment.end.jsonata
+>/**
+#^^^ comment.block.documentation.jsonata punctuation.definition.comment.begin.jsonata
+> * @label "Large order"
+#^^^ comment.block.documentation.jsonata
+#   ^^^^^^ comment.block.documentation.jsonata keyword.other.documentation.tag.jsonata
+#         ^^^^^^^^^^^^^^ comment.block.documentation.jsonata
+> * @message "Orders above the limit need approval"
+#^^^ comment.block.documentation.jsonata
+#   ^^^^^^^^ comment.block.documentation.jsonata keyword.other.documentation.tag.jsonata
+#           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.block.documentation.jsonata
+> * @id "R-7"
+#^^^ comment.block.documentation.jsonata
+#   ^^^ comment.block.documentation.jsonata keyword.other.documentation.tag.jsonata
+#      ^^^^^^ comment.block.documentation.jsonata
+> */
+#^ comment.block.documentation.jsonata
+# ^^ comment.block.documentation.jsonata punctuation.definition.comment.end.jsonata
+>Order.Total > 1000 /**/ /* a comment
+#^^^^^ variable.other.member.jsonata
+#     ^ punctuation.accessor.jsonata
+#      ^^^^^ variable.other.member.jsonata
+#            ^ keyword.operator.comparison.jsonata
+#              ^^^^ constant.numeric.decimal.jsonata
+#                   ^^ comment.block.jsonata punctuation.definition.comment.begin.jsonata
+#                     ^^ comment.block.jsonata punctuation.definition.comment.end.jsonata
+#                        ^^ comment.block.jsonata punctuation.definition.comment.begin.jsonata
+#                          ^^^^^^^^^^ comment.block.jsonata
+>   over two lines */
+#^^^^^^^^^^^^^^^^^^ comment.block.jsonata
+#                  ^^ comment.block.jsonata punctuation.definition.comment.end.jsonata

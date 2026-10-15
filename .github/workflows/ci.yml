@@ -115,6 +115,18 @@ jobs:
       # Advisories, licenses, bans and sources, as deny.toml configures them.
       - uses: EmbarkStudios/cargo-deny-action@v2
 
+  vscode:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Grammar (snapshots, the suite's expressions and the book's examples)
+        working-directory: editors/vscode
+        run: npm ci && npm test
+
   wasm:
     name: Wasm (browser ESM)
     runs-on: ubuntu-latest

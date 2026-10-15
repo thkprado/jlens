@@ -1,0 +1,78 @@
+>Account.Order[0].`Product Name`.Price
+#^^^^^^^ variable.other.member.jsonata
+#       ^ punctuation.accessor.jsonata
+#        ^^^^^ variable.other.member.jsonata
+#             ^ punctuation.section.brackets.begin.jsonata
+#              ^ constant.numeric.decimal.jsonata
+#               ^ punctuation.section.brackets.end.jsonata
+#                ^ punctuation.accessor.jsonata
+#                 ^ variable.other.member.quoted.jsonata punctuation.definition.name.begin.jsonata
+#                  ^^^^^^^^^^^^ variable.other.member.quoted.jsonata
+#                              ^ variable.other.member.quoted.jsonata punctuation.definition.name.end.jsonata
+#                               ^ punctuation.accessor.jsonata
+#                                ^^^^^ variable.other.member.jsonata
+>$ ~> $.Account
+#^ variable.language.context.jsonata
+#  ^^ keyword.operator.chain.jsonata
+#     ^ variable.language.context.jsonata
+#      ^ punctuation.accessor.jsonata
+#       ^^^^^^^ variable.other.member.jsonata
+>$$.Account
+#^^ variable.language.root.jsonata
+#  ^ punctuation.accessor.jsonata
+#   ^^^^^^^ variable.other.member.jsonata
+>$total := $sum(Order.Price);
+#^^^^^^ variable.other.jsonata
+#       ^^ keyword.operator.assignment.jsonata
+#          ^^^^ support.function.builtin.jsonata
+#              ^ punctuation.section.parens.begin.jsonata
+#               ^^^^^ variable.other.member.jsonata
+#                    ^ punctuation.accessor.jsonata
+#                     ^^^^^ variable.other.member.jsonata
+#                          ^ punctuation.section.parens.end.jsonata
+#                           ^ punctuation.terminator.expression.jsonata
+>($double := function($x) { $x * 2 }; $double(21))
+#^ punctuation.section.parens.begin.jsonata
+# ^^^^^^^ variable.other.jsonata
+#         ^^ keyword.operator.assignment.jsonata
+#            ^^^^^^^^ storage.type.function.jsonata
+#                    ^ punctuation.section.parens.begin.jsonata
+#                     ^^ variable.other.jsonata
+#                       ^ punctuation.section.parens.end.jsonata
+#                         ^ punctuation.section.braces.begin.jsonata
+#                           ^^ variable.other.jsonata
+#                              ^ keyword.operator.arithmetic.jsonata
+#                                ^ constant.numeric.decimal.jsonata
+#                                  ^ punctuation.section.braces.end.jsonata
+#                                   ^ punctuation.terminator.expression.jsonata
+#                                     ^^^^^^^ entity.name.function.jsonata
+#                                            ^ punctuation.section.parens.begin.jsonata
+#                                             ^^ constant.numeric.decimal.jsonata
+#                                               ^ punctuation.section.parens.end.jsonata
+#                                                ^ punctuation.section.parens.end.jsonata
+>λ($x) { $x }
+#^ storage.type.function.jsonata
+# ^ punctuation.section.parens.begin.jsonata
+#  ^^ variable.other.jsonata
+#    ^ punctuation.section.parens.end.jsonata
+#      ^ punctuation.section.braces.begin.jsonata
+#        ^^ variable.other.jsonata
+#           ^ punctuation.section.braces.end.jsonata
+>$count($keys($))
+#^^^^^^ support.function.builtin.jsonata
+#      ^ punctuation.section.parens.begin.jsonata
+#       ^^^^^ support.function.builtin.jsonata
+#            ^ punctuation.section.parens.begin.jsonata
+#             ^ variable.language.context.jsonata
+#              ^ punctuation.section.parens.end.jsonata
+#               ^ punctuation.section.parens.end.jsonata
+>**.Price
+#^^ keyword.operator.descendants.jsonata
+#  ^ punctuation.accessor.jsonata
+#   ^^^^^ variable.other.member.jsonata
+>Account.*.Total
+#^^^^^^^ variable.other.member.jsonata
+#       ^ punctuation.accessor.jsonata
+#        ^ keyword.operator.wildcard.jsonata
+#         ^ punctuation.accessor.jsonata
+#          ^^^^^ variable.other.member.jsonata

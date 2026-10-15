@@ -1,0 +1,88 @@
+>$match(Name, /^[A-Z]\w+$/i)
+#^^^^^^ support.function.builtin.jsonata
+#      ^ punctuation.section.parens.begin.jsonata
+#       ^^^^ variable.other.member.jsonata
+#           ^ punctuation.separator.comma.jsonata
+#             ^ string.regexp.jsonata punctuation.definition.string.begin.jsonata
+#              ^ string.regexp.jsonata
+#               ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                ^^^ string.regexp.jsonata meta.group.regexp.jsonata
+#                   ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                    ^^ string.regexp.jsonata constant.character.escape.regexp.jsonata
+#                      ^^ string.regexp.jsonata
+#                        ^ string.regexp.jsonata punctuation.definition.string.end.jsonata
+#                         ^ string.regexp.jsonata keyword.other.flag.regexp.jsonata
+#                          ^ punctuation.section.parens.end.jsonata
+>$replace(Email, /@(.*)$/, "@example.com")
+#^^^^^^^^ support.function.builtin.jsonata
+#        ^ punctuation.section.parens.begin.jsonata
+#         ^^^^^ variable.other.member.jsonata
+#              ^ punctuation.separator.comma.jsonata
+#                ^ string.regexp.jsonata punctuation.definition.string.begin.jsonata
+#                 ^ string.regexp.jsonata
+#                  ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                   ^^ string.regexp.jsonata meta.group.regexp.jsonata
+#                     ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                      ^ string.regexp.jsonata
+#                       ^ string.regexp.jsonata punctuation.definition.string.end.jsonata
+#                        ^ punctuation.separator.comma.jsonata
+#                          ^ string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+#                           ^^^^^^^^^^^^ string.quoted.double.jsonata
+#                                       ^ string.quoted.double.jsonata punctuation.definition.string.end.jsonata
+#                                        ^ punctuation.section.parens.end.jsonata
+>Name ~> /a[/]b{2,3}(c|d)/m
+#^^^^ variable.other.member.jsonata
+#     ^^ keyword.operator.chain.jsonata
+#        ^ string.regexp.jsonata punctuation.definition.string.begin.jsonata
+#         ^ string.regexp.jsonata
+#          ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#           ^ string.regexp.jsonata meta.group.regexp.jsonata
+#            ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#             ^ string.regexp.jsonata
+#              ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#               ^^^ string.regexp.jsonata meta.group.regexp.jsonata
+#                  ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                   ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                    ^^^ string.regexp.jsonata meta.group.regexp.jsonata
+#                       ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                        ^ string.regexp.jsonata punctuation.definition.string.end.jsonata
+#                         ^ string.regexp.jsonata keyword.other.flag.regexp.jsonata
+>Price / 2 / Quantity
+#^^^^^ variable.other.member.jsonata
+#      ^ keyword.operator.arithmetic.jsonata
+#        ^ constant.numeric.decimal.jsonata
+#          ^ keyword.operator.arithmetic.jsonata
+#            ^^^^^^^^ variable.other.member.jsonata
+>($n := 10; $n / 2)
+#^ punctuation.section.parens.begin.jsonata
+# ^^ variable.other.jsonata
+#    ^^ keyword.operator.assignment.jsonata
+#       ^^ constant.numeric.decimal.jsonata
+#         ^ punctuation.terminator.expression.jsonata
+#           ^^ variable.other.jsonata
+#              ^ keyword.operator.arithmetic.jsonata
+#                ^ constant.numeric.decimal.jsonata
+#                 ^ punctuation.section.parens.end.jsonata
+>$split(Path,
+#^^^^^^ support.function.builtin.jsonata
+#      ^ punctuation.section.parens.begin.jsonata
+#       ^^^^ variable.other.member.jsonata
+#           ^ punctuation.separator.comma.jsonata
+>  /\//)
+#  ^ string.regexp.jsonata punctuation.definition.string.begin.jsonata
+#   ^^ string.regexp.jsonata constant.character.escape.regexp.jsonata
+#     ^ string.regexp.jsonata punctuation.definition.string.end.jsonata
+#      ^ punctuation.section.parens.end.jsonata
+>$contains(Name, /x/) and /y/
+#^^^^^^^^^ support.function.builtin.jsonata
+#         ^ punctuation.section.parens.begin.jsonata
+#          ^^^^ variable.other.member.jsonata
+#              ^ punctuation.separator.comma.jsonata
+#                ^ string.regexp.jsonata punctuation.definition.string.begin.jsonata
+#                 ^ string.regexp.jsonata
+#                  ^ string.regexp.jsonata punctuation.definition.string.end.jsonata
+#                   ^ punctuation.section.parens.end.jsonata
+#                     ^^^ keyword.operator.logical.jsonata
+#                         ^ string.regexp.jsonata punctuation.definition.string.begin.jsonata
+#                          ^ string.regexp.jsonata
+#                           ^ string.regexp.jsonata punctuation.definition.string.end.jsonata

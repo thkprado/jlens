@@ -1,0 +1,29 @@
+>[0, 42, 3.14, 1e10, 2.5E-3, -7]
+#^ punctuation.section.brackets.begin.jsonata
+# ^ constant.numeric.decimal.jsonata
+#  ^ punctuation.separator.comma.jsonata
+#    ^^ constant.numeric.decimal.jsonata
+#      ^ punctuation.separator.comma.jsonata
+#        ^^^^ constant.numeric.decimal.jsonata
+#            ^ punctuation.separator.comma.jsonata
+#              ^^^^ constant.numeric.decimal.jsonata
+#                  ^ punctuation.separator.comma.jsonata
+#                    ^^^^^^ constant.numeric.decimal.jsonata
+#                          ^ punctuation.separator.comma.jsonata
+#                            ^ keyword.operator.arithmetic.jsonata
+#                             ^ constant.numeric.decimal.jsonata
+#                              ^ punctuation.section.brackets.end.jsonata
+>[true, false, null]
+#^ punctuation.section.brackets.begin.jsonata
+# ^^^^ constant.language.boolean.jsonata
+#     ^ punctuation.separator.comma.jsonata
+#       ^^^^^ constant.language.boolean.jsonata
+#            ^ punctuation.separator.comma.jsonata
+#              ^^^^ constant.language.null.jsonata
+#                  ^ punctuation.section.brackets.end.jsonata
+>[1..5]
+#^ punctuation.section.brackets.begin.jsonata
+# ^ constant.numeric.decimal.jsonata
+#  ^^ keyword.operator.range.jsonata
+#    ^ constant.numeric.decimal.jsonata
+#     ^ punctuation.section.brackets.end.jsonata

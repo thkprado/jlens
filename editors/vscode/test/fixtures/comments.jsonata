@@ -1,0 +1,8 @@
+/* A block comment */
+/**
+ * @label "Large order"
+ * @message "Orders above the limit need approval"
+ * @id "R-7"
+ */
+Order.Total > 1000 /**/ /* a comment
+   over two lines */

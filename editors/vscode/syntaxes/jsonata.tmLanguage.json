@@ -1,0 +1,205 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "JSONata",
+  "scopeName": "source.jsonata",
+  "fileTypes": ["jsonata"],
+  "patterns": [{ "include": "#expression" }],
+  "repository": {
+    "expression": {
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#backtick-name" },
+        { "include": "#regex" },
+        { "include": "#number" },
+        { "include": "#variable" },
+        { "include": "#keyword" },
+        { "include": "#operator" },
+        { "include": "#punctuation" },
+        { "include": "#name" }
+      ]
+    },
+    "comment": {
+      "patterns": [
+        {
+          "name": "comment.block.documentation.jsonata",
+          "begin": "/\\*\\*(?!/)",
+          "end": "\\*/",
+          "beginCaptures": { "0": { "name": "punctuation.definition.comment.begin.jsonata" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.comment.end.jsonata" } },
+          "patterns": [
+            {
+              "name": "keyword.other.documentation.tag.jsonata",
+              "match": "@(?:label|message|id)\\b"
+            }
+          ]
+        },
+        {
+          "name": "comment.block.jsonata",
+          "begin": "/\\*",
+          "end": "\\*/",
+          "beginCaptures": { "0": { "name": "punctuation.definition.comment.begin.jsonata" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.comment.end.jsonata" } }
+        }
+      ]
+    },
+    "string": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.jsonata",
+          "begin": "\"",
+          "end": "\"",
+          "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.jsonata" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.string.end.jsonata" } },
+          "patterns": [{ "include": "#string-escape" }]
+        },
+        {
+          "name": "string.quoted.single.jsonata",
+          "begin": "'",
+          "end": "'",
+          "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.jsonata" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.string.end.jsonata" } },
+          "patterns": [{ "include": "#string-escape" }]
+        }
+      ]
+    },
+    "string-escape": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.jsonata",
+          "match": "\\\\(?:[\"\\\\/bfnrt]|u[0-9A-Fa-f]{4})"
+        },
+        {
+          "name": "invalid.illegal.escape.jsonata",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "backtick-name": {
+      "name": "variable.other.member.quoted.jsonata",
+      "begin": "`",
+      "end": "`",
+      "beginCaptures": { "0": { "name": "punctuation.definition.name.begin.jsonata" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.name.end.jsonata" } }
+    },
+    "regex": {
+      "comment": "A slash starts a regular expression where an operand is expected: at the start of a line, or after an operator, an opening bracket, a comma or a semicolon; elsewhere it is division. The expression must close on the same line. Like the lexer, an unescaped slash inside brackets does not close it.",
+      "contentName": "string.regexp.jsonata",
+      "begin": "(?:(?<=[\\[({,;:?=<>!+\\-*/%&|^~])|(?<=\\band|\\bor|\\bin)|^)\\s*(/)(?![*/])(?=(?:[^/\\\\\\[]|\\\\.|\\[(?:[^\\]\\\\]|\\\\.)*\\])+/)",
+      "end": "(/)([im]*)",
+      "beginCaptures": {
+        "1": { "name": "string.regexp.jsonata punctuation.definition.string.begin.jsonata" }
+      },
+      "endCaptures": {
+        "1": { "name": "string.regexp.jsonata punctuation.definition.string.end.jsonata" },
+        "2": { "name": "string.regexp.jsonata keyword.other.flag.regexp.jsonata" }
+      },
+      "patterns": [{ "include": "#regex-content" }]
+    },
+    "regex-content": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.regexp.jsonata",
+          "match": "\\\\."
+        },
+        {
+          "name": "meta.group.regexp.jsonata",
+          "begin": "[(\\[{]",
+          "end": "[)\\]}]",
+          "beginCaptures": { "0": { "name": "punctuation.definition.group.regexp.jsonata" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.group.regexp.jsonata" } },
+          "patterns": [{ "include": "#regex-content" }]
+        }
+      ]
+    },
+    "number": {
+      "name": "constant.numeric.decimal.jsonata",
+      "match": "(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?"
+    },
+    "variable": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.jsonata",
+          "match": "\\$(?:abs|append|assert|average|base64decode|base64encode|boolean|ceil|clone|contains|count|decodeUrl|decodeUrlComponent|distinct|each|encodeUrl|encodeUrlComponent|error|eval|exists|filter|floor|formatBase|formatInteger|formatNumber|fromMillis|join|keys|length|lookup|lowercase|map|match|max|merge|millis|min|not|now|number|pad|parseInteger|power|random|reduce|replace|reverse|round|shuffle|sift|single|sort|split|spread|sqrt|string|substring|substringAfter|substringBefore|sum|toMillis|trim|type|uppercase|zip)(?![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])"
+        },
+        {
+          "name": "entity.name.function.jsonata",
+          "match": "\\$[^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~]+(?=\\s*\\()"
+        },
+        {
+          "name": "variable.language.root.jsonata",
+          "match": "\\$\\$(?![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])"
+        },
+        {
+          "name": "variable.language.context.jsonata",
+          "match": "\\$(?![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])"
+        },
+        {
+          "name": "variable.other.jsonata",
+          "match": "\\$[^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~]+"
+        }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        {
+          "name": "storage.type.function.jsonata",
+          "match": "(?<![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])(?:function|λ)(?=\\s*\\()"
+        },
+        {
+          "name": "keyword.operator.logical.jsonata",
+          "match": "(?<![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])(?:and|or)(?![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])"
+        },
+        {
+          "name": "keyword.operator.in.jsonata",
+          "match": "(?<![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])in(?![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])"
+        },
+        {
+          "name": "constant.language.boolean.jsonata",
+          "match": "(?<![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])(?:true|false)(?![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])"
+        },
+        {
+          "name": "constant.language.null.jsonata",
+          "match": "(?<![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])null(?![^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~])"
+        }
+      ]
+    },
+    "operator": {
+      "patterns": [
+        { "name": "keyword.operator.assignment.jsonata", "match": ":=" },
+        { "name": "keyword.operator.chain.jsonata", "match": "~>" },
+        { "name": "keyword.operator.range.jsonata", "match": "\\.\\." },
+        { "name": "keyword.operator.comparison.jsonata", "match": "!=|<=|>=|=|<|>" },
+        { "name": "keyword.operator.descendants.jsonata", "match": "\\*\\*" },
+        { "name": "keyword.operator.coalescing.jsonata", "match": "\\?\\?" },
+        { "name": "keyword.operator.elvis.jsonata", "match": "\\?:" },
+        { "name": "keyword.operator.wildcard.jsonata", "match": "(?<=\\.)\\*|\\*(?=\\.)" },
+        { "name": "keyword.operator.arithmetic.jsonata", "match": "[-+*/%]" },
+        { "name": "keyword.operator.concatenation.jsonata", "match": "&" },
+        { "name": "keyword.operator.ternary.jsonata", "match": "[?:]" },
+        { "name": "keyword.operator.bind.context.jsonata", "match": "@" },
+        { "name": "keyword.operator.bind.position.jsonata", "match": "#" },
+        { "name": "keyword.operator.sort.jsonata", "match": "\\^" },
+        { "name": "keyword.operator.transform.jsonata", "match": "\\|" },
+        { "name": "punctuation.accessor.jsonata", "match": "\\." },
+        { "name": "invalid.illegal.operator.jsonata", "match": "[!~]" }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.separator.comma.jsonata", "match": "," },
+        { "name": "punctuation.terminator.expression.jsonata", "match": ";" },
+        { "name": "punctuation.section.parens.begin.jsonata", "match": "\\(" },
+        { "name": "punctuation.section.parens.end.jsonata", "match": "\\)" },
+        { "name": "punctuation.section.brackets.begin.jsonata", "match": "\\[" },
+        { "name": "punctuation.section.brackets.end.jsonata", "match": "\\]" },
+        { "name": "punctuation.section.braces.begin.jsonata", "match": "\\{" },
+        { "name": "punctuation.section.braces.end.jsonata", "match": "\\}" }
+      ]
+    },
+    "name": {
+      "name": "variable.other.member.jsonata",
+      "match": "[^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~\"'`$0-9][^\\s.\\[\\]{}(),@#;:?+\\-*/%|=<>^&!~]*"
+    }
+  }
+}

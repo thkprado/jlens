@@ -1,0 +1,9 @@
+Account.Order[0].`Product Name`.Price
+$ ~> $.Account
+$$.Account
+$total := $sum(Order.Price);
+($double := function($x) { $x * 2 }; $double(21))
+λ($x) { $x }
+$count($keys($))
+**.Price
+Account.*.Total

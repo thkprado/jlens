@@ -1,0 +1,119 @@
+>a + b - c * d / e % f
+#^ variable.other.member.jsonata
+#  ^ keyword.operator.arithmetic.jsonata
+#    ^ variable.other.member.jsonata
+#      ^ keyword.operator.arithmetic.jsonata
+#        ^ variable.other.member.jsonata
+#          ^ keyword.operator.arithmetic.jsonata
+#            ^ variable.other.member.jsonata
+#              ^ keyword.operator.arithmetic.jsonata
+#                ^ variable.other.member.jsonata
+#                  ^ keyword.operator.arithmetic.jsonata
+#                    ^ variable.other.member.jsonata
+>a = b and c != d or e < f and g <= h or i > j and k >= l
+#^ variable.other.member.jsonata
+#  ^ keyword.operator.comparison.jsonata
+#    ^ variable.other.member.jsonata
+#      ^^^ keyword.operator.logical.jsonata
+#          ^ variable.other.member.jsonata
+#            ^^ keyword.operator.comparison.jsonata
+#               ^ variable.other.member.jsonata
+#                 ^^ keyword.operator.logical.jsonata
+#                    ^ variable.other.member.jsonata
+#                      ^ keyword.operator.comparison.jsonata
+#                        ^ variable.other.member.jsonata
+#                          ^^^ keyword.operator.logical.jsonata
+#                              ^ variable.other.member.jsonata
+#                                ^^ keyword.operator.comparison.jsonata
+#                                   ^ variable.other.member.jsonata
+#                                     ^^ keyword.operator.logical.jsonata
+#                                        ^ variable.other.member.jsonata
+#                                          ^ keyword.operator.comparison.jsonata
+#                                            ^ variable.other.member.jsonata
+#                                              ^^^ keyword.operator.logical.jsonata
+#                                                  ^ variable.other.member.jsonata
+#                                                    ^^ keyword.operator.comparison.jsonata
+#                                                       ^ variable.other.member.jsonata
+>"x" & "y"
+#^ string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+# ^ string.quoted.double.jsonata
+#  ^ string.quoted.double.jsonata punctuation.definition.string.end.jsonata
+#    ^ keyword.operator.concatenation.jsonata
+#      ^ string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+#       ^ string.quoted.double.jsonata
+#        ^ string.quoted.double.jsonata punctuation.definition.string.end.jsonata
+>k in ["k", "v"]
+#^ variable.other.member.jsonata
+#  ^^ keyword.operator.in.jsonata
+#     ^ punctuation.section.brackets.begin.jsonata
+#      ^ string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+#       ^ string.quoted.double.jsonata
+#        ^ string.quoted.double.jsonata punctuation.definition.string.end.jsonata
+#         ^ punctuation.separator.comma.jsonata
+#           ^ string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+#            ^ string.quoted.double.jsonata
+#             ^ string.quoted.double.jsonata punctuation.definition.string.end.jsonata
+#              ^ punctuation.section.brackets.end.jsonata
+>a ? b : c
+#^ variable.other.member.jsonata
+#  ^ keyword.operator.ternary.jsonata
+#    ^ variable.other.member.jsonata
+#      ^ keyword.operator.ternary.jsonata
+#        ^ variable.other.member.jsonata
+>a ?: b
+#^ variable.other.member.jsonata
+#  ^^ keyword.operator.elvis.jsonata
+#     ^ variable.other.member.jsonata
+>a ?? b
+#^ variable.other.member.jsonata
+#  ^^ keyword.operator.coalescing.jsonata
+#     ^ variable.other.member.jsonata
+>Account.Order@$o#$i.Product
+#^^^^^^^ variable.other.member.jsonata
+#       ^ punctuation.accessor.jsonata
+#        ^^^^^ variable.other.member.jsonata
+#             ^ keyword.operator.bind.context.jsonata
+#              ^^ variable.other.jsonata
+#                ^ keyword.operator.bind.position.jsonata
+#                 ^^ variable.other.jsonata
+#                   ^ punctuation.accessor.jsonata
+#                    ^^^^^^^ variable.other.member.jsonata
+>Order^(>Price, <Name)
+#^^^^^ variable.other.member.jsonata
+#     ^ keyword.operator.sort.jsonata
+#      ^ punctuation.section.parens.begin.jsonata
+#       ^ keyword.operator.comparison.jsonata
+#        ^^^^^ variable.other.member.jsonata
+#             ^ punctuation.separator.comma.jsonata
+#               ^ keyword.operator.comparison.jsonata
+#                ^^^^ variable.other.member.jsonata
+#                    ^ punctuation.section.parens.end.jsonata
+>$ ~> |Account.Order|{"Total": Price * Quantity}, ["Price"]|
+#^ variable.language.context.jsonata
+#  ^^ keyword.operator.chain.jsonata
+#     ^ keyword.operator.transform.jsonata
+#      ^^^^^^^ variable.other.member.jsonata
+#             ^ punctuation.accessor.jsonata
+#              ^^^^^ variable.other.member.jsonata
+#                   ^ keyword.operator.transform.jsonata
+#                    ^ punctuation.section.braces.begin.jsonata
+#                     ^ string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+#                      ^^^^^ string.quoted.double.jsonata
+#                           ^ string.quoted.double.jsonata punctuation.definition.string.end.jsonata
+#                            ^ keyword.operator.ternary.jsonata
+#                              ^^^^^ variable.other.member.jsonata
+#                                    ^ keyword.operator.arithmetic.jsonata
+#                                      ^^^^^^^^ variable.other.member.jsonata
+#                                              ^ punctuation.section.braces.end.jsonata
+#                                               ^ punctuation.separator.comma.jsonata
+#                                                 ^ punctuation.section.brackets.begin.jsonata
+#                                                  ^ string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+#                                                   ^^^^^ string.quoted.double.jsonata
+#                                                        ^ string.quoted.double.jsonata punctuation.definition.string.end.jsonata
+#                                                         ^ punctuation.section.brackets.end.jsonata
+#                                                          ^ keyword.operator.transform.jsonata
+>!x ~y
+#^ invalid.illegal.operator.jsonata
+# ^ variable.other.member.jsonata
+#   ^ invalid.illegal.operator.jsonata
+#    ^ variable.other.member.jsonata

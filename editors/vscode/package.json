@@ -1,0 +1,45 @@
+{
+  "name": "jlens",
+  "displayName": "jlens — JSONata",
+  "description": "JSONata for VS Code: highlighting, and diagnostics, completion and hovers from the jlens language server",
+  "version": "0.14.0",
+  "publisher": "thkprado",
+  "license": "MIT",
+  "private": true,
+  "homepage": "https://thkprado.github.io/jlens/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thkprado/jlens",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": ["Programming Languages"],
+  "keywords": ["jsonata", "json", "query", "transform"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "jsonata",
+        "aliases": ["JSONata", "jsonata"],
+        "extensions": [".jsonata"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "jsonata",
+        "scopeName": "source.jsonata",
+        "path": "./syntaxes/jsonata.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/grammar.test.mjs"
+  },
+  "devDependencies": {
+    "jsonata": "2.2.2",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
+  }
+}

@@ -1,0 +1,8 @@
+$match(Name, /^[A-Z]\w+$/i)
+$replace(Email, /@(.*)$/, "@example.com")
+Name ~> /a[/]b{2,3}(c|d)/m
+Price / 2 / Quantity
+($n := 10; $n / 2)
+$split(Path,
+  /\//)
+$contains(Name, /x/) and /y/
