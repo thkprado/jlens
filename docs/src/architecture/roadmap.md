@@ -249,12 +249,30 @@ that cost from 350 to 106 ns for `1`, but a path still takes about seven times a
 | 4 | A name over many items. `items.code` takes about 110 ns per item, against about 65 ns in jsonata-core, and `$count(items)` 0.94 against 0.41 µs. Looking the field up without evaluating the step saves only 12%, so the cost is elsewhere. Exploration: count the allocations per item, then separate the cost of the call from the cost of the step | The cost cut and measured with `ab` (the cases that map a name faster, no other case slower), or what takes the time, and why it stays, recorded on the performance page | **done**: allocations were not the per-item cost; copies were. A field holding an array is returned as it is, a step passes its items to the next without copying them into a new sequence, and results with no array to flatten are not copied twice. New case names over items (`$sum(items.quantity)`) 28% faster with `ab --mode document`, shipping rule 8%, group-by 4%, nothing slower; `$count(items.code)` 9.8 to 7.0 µs (4.9 in jsonata-core), `$count(items)` 0.94 to 0.67 µs. The rest is on the performance page |
 | 5 | Release 0.16.0. Before the tag, the npm channel of the CLI (0.14 #7) is settled or left out of the release | The release checklist; the performance page shows the new numbers | **done**: the native, WebAssembly and allocator tables measured again, with the two new cases; the npm channel of the CLI is left out (0.14 #7) |
 
-## 0.17: an API to keep, toward 1.0
+## 0.17: a Python package
 
-After sixteen releases, nothing says which parts of jlens are meant to last. `cargo
+JSONata in Python has a pure-Python port, a wrapper of jsonata-js and a young Rust port of
+jsonata-java. jlens would bring its conformance, audits, schemas and speed to Python, where data
+pipelines and rules live, and more people using it would tell 0.18 which parts of the API to
+keep. The package follows the WebAssembly package: the same objects, the same errors, beta until
+1.0.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | ADR 0014, the Python package, after a spike: PyO3 and maturin under the workspace's `unsafe_code = "forbid"` (or why the binding crate opts out of it); the crate (`crates/jlens-python`), the PyPI name (`jlens`, free) and the module; the API, mirroring the Wasm package; how a Python value is read (one level at a time, as in Wasm through `Source`, against a JSON round trip, measured in the spike); `Document`, which is not `Send`, and free-threaded Python; abi3 wheels and the oldest Python supported | The ADR accepted, with the spike's measurements | |
+| 2 | The binding: `Expression` (compile, `evaluate` reading Python values as it goes, `evaluate_json`), `Document`, bindings, the options and limits (timeout, size caps, clock, seed), JSONata errors as an exception with `code`, `position` and `token`; type stubs (`.pyi`, `py.typed`) | A pytest suite in CI on Linux, macOS and Windows; deep or cyclic values fail cleanly, never crash | |
+| 3 | Host functions written in Python, with their signatures, calling the functions they receive (ADR 0011), and a Python exception carried through the evaluation; audits and explanations as Python values | pytest cases matching the host-function and audit cases of the Wasm suite | |
+| 4 | Wheels: abi3 wheels for the release targets and a source distribution, built in CI; each OS installs its wheel and runs the pytest suite on it | CI builds and tests every wheel | |
+| 5 | Publishing: `release.yml` publishes to PyPI through trusted publishing, with attestations, skipping a version already published; `CONTRIBUTING.md` says how it is set up | The release checklist installs the package from PyPI and checks its attestations | |
+| 6 | Documentation: a Python chapter in the book, the installation page and the README; its snippets run in CI; the performance page compares the package with the other Python implementations on `benches/` | `doc-check` green; the Python snippets run in CI | |
+| 7 | Release 0.17.0, with the Python package in beta | The release checklist, with the package installed from PyPI | |
+
+## 0.18: an API to keep, toward 1.0
+
+After seventeen releases, nothing says which parts of jlens are meant to last. `cargo
 semver-checks` runs in CI, but before 1.0 it only asks for a new minor version, and
 `jlens-core` exposes workspace plumbing (`stack`, `debug`, the AST's internals) next to its API.
-0.17 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
+0.18 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
 down. Applications built on jlens are separate projects: they use `jlens-core` as any
 application does, and what they lack comes back here as general features.
 
@@ -263,12 +281,12 @@ from what they needed, missed or worked around, not guessed beforehand.
 
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
-| 1 | ADR 0014, what 1.0 promises. Exploration: list the public items of `jlens-core`, `jlens-schema` and `jlens-lsp` (rustdoc JSON or `cargo public-api`) and the contracts outside Rust: the Wasm API (`types.d.ts`), the CLI (ADR 0008), the JSON of audits and explanations, `jlens.json`, the error codes. For each item: stable, hidden (`#[doc(hidden)]`, `pub(crate)`) or `#[non_exhaustive]` where it may grow. What semver covers and what it does not (messages, `Display`, `Debug`, performance, jsonata-js quirks), the MSRV policy, deprecations | The ADR accepted, with the list of changes that #2 to #4 make | |
-| 2 | `jlens-core` changes as ADR 0014 says, in one breaking batch | `cargo semver-checks` reports only the intended breaks; the changelog has a migration section; the crate guide's snippets updated | |
-| 3 | `jlens-schema` and `jlens-lsp` changes as ADR 0014 says | As #2 | |
-| 4 | The contracts outside Rust, as ADR 0014 says: the Wasm API, the JSON of audits and `jlens.json`; a test pins each, so that a change shows in review | Tests that fail on an unintended change of each contract | |
-| 5 | A stability page in the book, from ADR 0014, and the rules for changing a stable item in `CONTRIBUTING.md` | `doc-check` green; the page linked from the introduction | |
-| 6 | Release 0.17.0, the release that breaks once. 1.0.0 follows when ADR 0014's criterion is met | The release checklist, with the migration notes in the release notes | |
+| 1 | ADR 0015, what 1.0 promises. Exploration: list the public items of `jlens-core`, `jlens-schema` and `jlens-lsp` (rustdoc JSON or `cargo public-api`) and the contracts outside Rust: the Wasm API (`types.d.ts`), the Python package, the CLI (ADR 0008), the JSON of audits and explanations, `jlens.json`, the error codes. For each item: stable, hidden (`#[doc(hidden)]`, `pub(crate)`) or `#[non_exhaustive]` where it may grow. What semver covers and what it does not (messages, `Display`, `Debug`, performance, jsonata-js quirks), the MSRV policy, deprecations | The ADR accepted, with the list of changes that #2 to #4 make | |
+| 2 | `jlens-core` changes as ADR 0015 says, in one breaking batch | `cargo semver-checks` reports only the intended breaks; the changelog has a migration section; the crate guide's snippets updated | |
+| 3 | `jlens-schema` and `jlens-lsp` changes as ADR 0015 says | As #2 | |
+| 4 | The contracts outside Rust, as ADR 0015 says: the Wasm API, the Python package, the JSON of audits and `jlens.json`; a test pins each, so that a change shows in review | Tests that fail on an unintended change of each contract | |
+| 5 | A stability page in the book, from ADR 0015, and the rules for changing a stable item in `CONTRIBUTING.md` | `doc-check` green; the page linked from the introduction | |
+| 6 | Release 0.18.0, the release that breaks once. 1.0.0 follows when ADR 0015's criterion is met | The release checklist, with the migration notes in the release notes | |
 
 ## Not planned
 
