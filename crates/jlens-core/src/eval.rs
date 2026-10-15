@@ -657,18 +657,7 @@ impl<'a> Evaluator<'_, 'a> {
             NodeKind::Function { procedure, args } => {
                 self.call(expr, procedure, args, input, env, None)?
             }
-            NodeKind::Variable { name } => {
-                if name.is_empty() {
-                    match input {
-                        Value::Array(a) if a.has(OUTER_WRAPPER) => {
-                            a.items().first().cloned().unwrap_or_default()
-                        }
-                        other => other.clone(),
-                    }
-                } else {
-                    env.lookup(name)
-                }
-            }
+            NodeKind::Variable { name } => variable(name, input, env),
             NodeKind::Lambda(def) => Value::function(Function::Lambda(Lambda {
                 def: def.clone(),
                 params: None,
@@ -733,23 +722,38 @@ impl<'a> Evaluator<'_, 'a> {
         input: &Value<'a>,
         env: &Env<'a>,
     ) -> Result<Value<'a>> {
-        // A field of a single input: the general path would wrap the input and the field in
-        // sequences, then unwrap the singleton. An array field takes the general path, which
-        // flattens or keeps it. The step's depth is counted as if it were evaluated.
-        if let [step] = steps
-            && let NodeKind::Name { name } = &step.kind
-            && !keep_singleton_array
+        // Fields of a single input or variable (`a.b.c`, `$x.a.b`): the general path would wrap
+        // the input and each field in sequences, then unwrap the singleton. A field holding an
+        // array takes the general path, which flattens or keeps it. The steps' depth is
+        // counted as if they were evaluated.
+        let plain = !keep_singleton_array
             && !expr.attrs.keep_array
             && expr.attrs.group.is_none()
-            && !input.is_array()
             && self.tracer.is_none()
-            && self.depth < self.limits.max_depth
+            && self.depth < self.limits.max_depth;
+        // A single field, the commonest path, is tested first and on its own.
+        if plain
+            && let [step] = steps
+            && let NodeKind::Name { name } = &step.kind
+            && !input.is_array()
             && is_plain_step(step)
         {
             let value = functions::lookup(input, name);
             if !value.is_array() {
                 return Ok(value);
             }
+        } else if plain
+            && steps.iter().enumerate().all(|(ii, step)| {
+                is_plain_step(step)
+                    && match step.kind {
+                        NodeKind::Name { .. } => true,
+                        NodeKind::Variable { .. } => ii == 0,
+                        _ => false,
+                    }
+            })
+            && let Some(value) = plain_fields(steps, input, env)
+        {
+            return Ok(value);
         }
 
         // A path starting with a variable is absolute; otherwise an input array is iterated.
@@ -843,9 +847,32 @@ impl<'a> Evaluator<'_, 'a> {
             .as_array()
             .map(|a| a.items().clone())
             .unwrap_or_default();
+        // A plain field is looked up in each item without evaluating the step, unless the item
+        // or its field is an array, which the evaluation flattens or unwraps. The guardrails
+        // are still checked for each item, and its depth counted as if it were evaluated.
+        let field = match &step.kind {
+            NodeKind::Name { name }
+                if is_plain_step(step)
+                    && self.tracer.is_none()
+                    && self.depth < self.limits.max_depth =>
+            {
+                Some(name)
+            }
+            _ => None,
+        };
         let mut results = Vec::with_capacity(items.len());
         for item in &items {
-            let mut res = self.eval(step, item, env)?;
+            let direct = match field {
+                Some(name) if !item.is_array() => {
+                    self.guardrails()?;
+                    Some(functions::lookup(item, name)).filter(|v| !v.is_array())
+                }
+                _ => None,
+            };
+            let mut res = match direct {
+                Some(v) => v,
+                None => self.eval(step, item, env)?,
+            };
             for stage in &step.attrs.stages {
                 if let Stage::Filter { expr, .. } = stage {
                     res = self.filter(expr, res, env)?;
@@ -1818,6 +1845,47 @@ fn is_plain_step(step: &Node) -> bool {
         && a.focus.is_none()
         && a.index.is_none()
         && a.ancestor_label.is_none()
+}
+
+/// The value of a variable; `$` alone is the context value.
+fn variable<'a>(name: &str, input: &Value<'a>, env: &Env<'a>) -> Value<'a> {
+    if name.is_empty() {
+        match input {
+            Value::Array(a) if a.has(OUTER_WRAPPER) => {
+                a.items().first().cloned().unwrap_or_default()
+            }
+            other => other.clone(),
+        }
+    } else {
+        env.lookup(name)
+    }
+}
+
+/// The value of a path of field names on a single input, or on a variable when the path starts
+/// with one; `None` when the input, the variable or a field holds an array (which the general
+/// path iterates, flattens or keeps). An undefined field ends the path, as it does in the
+/// general path.
+fn plain_fields<'a>(steps: &[Node], input: &Value<'a>, env: &Env<'a>) -> Option<Value<'a>> {
+    let (mut value, names) = match &steps[0].kind {
+        NodeKind::Variable { name } => (variable(name, input, env), &steps[1..]),
+        _ => (input.clone(), steps),
+    };
+    if value.is_array() {
+        return None;
+    }
+    for step in names {
+        if value.is_undefined() {
+            break;
+        }
+        let NodeKind::Name { name } = &step.kind else {
+            return None;
+        };
+        value = functions::lookup(&value, name);
+        if value.is_array() {
+            return None;
+        }
+    }
+    Some(value)
 }
 
 /// The value of a string literal whose evaluation is the value alone.

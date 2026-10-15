@@ -43,6 +43,10 @@ fn valid() -> impl Strategy<Value = String> {
             "{}",
             "items.price",
             "a.b",
+            "o.p.r",
+            "o.p.r.z",
+            "$.o.p.q",
+            "$$.o.p",
             "$x[1]",
             "s",
             "$now()",
@@ -214,7 +218,8 @@ fn input() -> serde_json::Value {
     json!({
         "a": {"b": [1, 2, {"b": "x"}]},
         "items": [{"price": 2, "a": "p"}, {"price": 3.5, "a": null}, {"price": "4"}],
-        "s": "hello 𝄞"
+        "s": "hello 𝄞",
+        "o": {"p": {"q": [1], "r": "deep"}}
     })
 }
 
@@ -372,6 +377,55 @@ proptest! {
             if !timed_out(&plain) && !timed_out(&audited) {
                 prop_assert_eq!(format!("{plain:?}"), format!("{audited:?}"));
             }
+        }
+    }
+}
+
+/// Paths of field names take a fast path that falls back on the general one where an array is
+/// met; an audit takes the general path. The results and errors are the same, at any depth.
+#[test]
+fn field_paths_agree_with_an_audit() {
+    let input = json!({
+        "o": {"p": {"q": [1, [2]], "r": "deep", "s": {"t": null}}},
+        "l": [{"m": {"n": 1}}, {"m": [2, 3]}]
+    });
+    let bindings = Bindings::new()
+        .var("v", input.clone())
+        .var("w", json!([{"a": 1}]));
+    let sources = [
+        "o.p.r",
+        "o.p.q",
+        "o.p.s.t",
+        "o.x.y",
+        "o.p.r.z",
+        "$.o.p",
+        "$$.o.p.q",
+        "$v.o.p.r",
+        "$w.a",
+        "$u.a",
+        "l.m.n",
+        "l.m",
+        "$string.a",
+        "o.p.q[]",
+        "o.p.r[]",
+        "$.o.p.q[0]",
+    ];
+    for source in sources {
+        let expr = Expression::compile(source).unwrap();
+        for depth in [1, 2, 3, 4, 100] {
+            let options = Options::new().max_depth(depth);
+            let plain = expr.evaluate_with(Some(&input), &bindings, &options);
+            let (audited, _) = expr.evaluate_audited(
+                Some(&input),
+                &bindings,
+                &options,
+                &jlens_core::audit::AuditOptions::full(),
+            );
+            assert_eq!(
+                format!("{plain:?}"),
+                format!("{audited:?}"),
+                "{source} at depth {depth}"
+            );
         }
     }
 }

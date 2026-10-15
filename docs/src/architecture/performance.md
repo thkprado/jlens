@@ -230,9 +230,11 @@ Evaluations never modify a document, so one document serves any number of evalua
 - **Sequences.** Following jsonata-js, paths build sequences step by step and flatten them.
   Predicates evaluate per item, in a fresh frame.
 - **Shortcuts for common shapes.** Without a tracer, evaluation skips work that no result
-  depends on. A name evaluated on a single object, such as `price` in
-  `items.(price * quantity)`, looks the field up instead of building a path's sequences, unless
-  the field holds an array. `=` and `!=` with a string literal compare with the literal's text
+  depends on. A path of names evaluated on a single object, such as `price` in
+  `items.(price * quantity)` or `customer.name`, or starting with a variable, such as `$i.code`,
+  looks its fields up instead of building a path's sequences, unless one of them holds an
+  array. A name mapped over the items of a path (`code` in `items.code`) is looked up in each
+  item without evaluating the step for it. `=` and `!=` with a string literal compare with the literal's text
   instead of building a string; the literal's other uses (arguments, `&`, object values) still
   build one. With a tracer, evaluation takes the general path, so audits report every node; a
   property test checks that both paths give the same result.
@@ -240,7 +242,14 @@ Evaluations never modify a document, so one document serves any number of evalua
   binds one. The order-by operator (`^(...)`) evaluates each item's keys once, not at each
   comparison.
 - **Fixed cost.** An evaluation reads the clock only when it needs it (`$now`, `$millis`, the
-  seed of `$random`, a timeout), so `1` takes about 0.1 µs.
+  seed of `$random`, a timeout), so `1` takes about 0.12 µs, against 0.06 µs in jsonata-core.
+  `customer.name` takes 0.23 µs, against 0.14 µs: that fixed cost, the result converted to a
+  `serde_json::Value` (a new string; `'a'` alone takes 0.21 µs), and two lookups. Before 0.16 a
+  path of two names built a sequence for each step and took 0.69 µs; `$.customer.name` took
+  1 µs and now takes 0.24 µs.
+- **Names over many items.** `items.code` takes about 110 ns per item, against about 65 ns in
+  jsonata-core. Evaluating the step is not the cause: looking the field up directly saves only
+  12%. Where the rest goes has not been found yet.
 - **Converting the input.** `evaluate` converts the parts of the input that the expression
   reads, as it reads them ([ADR 0010](../adr/0010-lazy-input.md)). An expression that reads
   every item pays for converting them, and that is now most of its time: filter + aggregate
