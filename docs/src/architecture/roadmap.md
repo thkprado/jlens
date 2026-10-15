@@ -255,14 +255,17 @@ After sixteen releases, nothing says which parts of jlens are meant to last. `ca
 semver-checks` runs in CI, but before 1.0 it only asks for a new minor version, and
 `jlens-core` exposes workspace plumbing (`stack`, `debug`, the AST's internals) next to its API.
 0.17 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
-down. Applications built on jlens, such as a rules engine, are separate projects: they use
-`jlens-core` as any application does, and what they lack comes back here as general features.
+down. Applications built on jlens are separate projects: they use `jlens-core` as any
+application does, and what they lack comes back here as general features.
+
+**Deferred** until applications built on jlens have used it: what to keep stable is decided
+from what they needed, missed or worked around, not guessed beforehand.
 
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
 | 1 | ADR 0014, what 1.0 promises. Exploration: list the public items of `jlens-core`, `jlens-schema` and `jlens-lsp` (rustdoc JSON or `cargo public-api`) and the contracts outside Rust: the Wasm API (`types.d.ts`), the CLI (ADR 0008), the JSON of audits and explanations, `jlens.json`, the error codes. For each item: stable, hidden (`#[doc(hidden)]`, `pub(crate)`) or `#[non_exhaustive]` where it may grow. What semver covers and what it does not (messages, `Display`, `Debug`, performance, jsonata-js quirks), the MSRV policy, deprecations | The ADR accepted, with the list of changes that #2 to #4 make | |
 | 2 | `jlens-core` changes as ADR 0014 says, in one breaking batch | `cargo semver-checks` reports only the intended breaks; the changelog has a migration section; the crate guide's snippets updated | |
-| 3 | `jlens-schema` and `jlens-lsp` changes as ADR 0014 says; `jlens-lsp`, published since 0.3, joins the `semver` job of CI | As #2 | |
+| 3 | `jlens-schema` and `jlens-lsp` changes as ADR 0014 says | As #2 | |
 | 4 | The contracts outside Rust, as ADR 0014 says: the Wasm API, the JSON of audits and `jlens.json`; a test pins each, so that a change shows in review | Tests that fail on an unintended change of each contract | |
 | 5 | A stability page in the book, from ADR 0014, and the rules for changing a stable item in `CONTRIBUTING.md` | `doc-check` green; the page linked from the introduction | |
 | 6 | Release 0.17.0, the release that breaks once. 1.0.0 follows when ADR 0014's criterion is met | The release checklist, with the migration notes in the release notes | |

@@ -24,7 +24,7 @@ cargo test --workspace                         # includes the conformance baseli
 cargo xtask gen-docs --check                   # generated pages are up to date
 cargo xtask doc-check                          # the book's examples run, its links resolve
 cargo xtask wasm-test                          # the browser package, in Node.js and a browser
-cargo semver-checks -p jlens-core -p jlens-schema  # the API against the last release on crates.io
+cargo semver-checks -p jlens-core -p jlens-schema -p jlens-lsp  # the API against the last release on crates.io
 cargo +1.88 check --workspace --all-targets    # the minimum Rust version
 cargo deny check                               # advisories, licenses and sources of dependencies
 actionlint                                     # the workflows, with shellcheck on their scripts

@@ -90,11 +90,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # Compares the public API with the last release on crates.io. A breaking change needs a
-      # new minor version in Cargo.toml (see CONTRIBUTING.md). jlens-cli has no library, and
-      # jlens-lsp has not been released yet.
+      # new minor version in Cargo.toml (see CONTRIBUTING.md). jlens-cli has no library.
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
-          package: jlens-core, jlens-schema
+          package: jlens-core, jlens-schema, jlens-lsp
 
   msrv:
     name: Minimum Rust version
