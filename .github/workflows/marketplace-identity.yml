@@ -1,8 +1,8 @@
 name: Marketplace identity
 
-# Prints the Visual Studio Marketplace ID of the managed identity that publishes the VS Code
+# Prints the Visual Studio Marketplace ID of the Entra ID application that publishes the VS Code
 # extension (release.yml, job vscode), which the publisher thkprado takes as a member. Only a
-# workflow run can sign in as that identity, so its ID is read here, by hand, while setting it
+# workflow run can sign in as that application, so its ID is read here, by hand, while setting it
 # up: gh workflow run marketplace-identity.yml, with the environment vscode accepting the branch
 # main for that run. See CONTRIBUTING.md.
 

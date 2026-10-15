@@ -218,7 +218,7 @@ jobs:
 
   # The VS Code extension (ADR 0013) on the Visual Studio Marketplace and Open VSX: a VSIX per
   # target holding the binary of its archive, and one for other platforms, which uses the jlens
-  # on the PATH. The Marketplace is reached as a Microsoft Entra ID managed identity, federated
+  # on the PATH. The Marketplace is reached as a Microsoft Entra ID application, federated
   # with the environment vscode; Open VSX with the token OVSX_PAT when the secret is set, and
   # through trusted publishing (this run's OIDC token) otherwise. A VSIX whose version and target
   # are already on a registry is skipped: re-running the job completes a release that failed

@@ -175,23 +175,30 @@ The `vscode` job of the `Release` workflow runs in the GitHub environment `vscod
 what both registries need. Its deployment rules accept only `v*` tags. The publisher `thkprado`
 on the Marketplace and the namespace `thkprado` on Open VSX belong to the maintainer.
 
-The Marketplace is reached as a Microsoft Entra ID managed identity, without a secret: global
-Azure DevOps personal access tokens stop working on 2026-12-01. To set it up:
+The Marketplace is reached as a Microsoft Entra ID application, `jlens-release`, without a
+secret: global Azure DevOps personal access tokens stop working on 2026-12-01. It lives in the
+tenant `thkpradooutlook.onmicrosoft.com`, which the Azure sign-up of the maintainer's Microsoft
+account created (a personal account alone cannot register applications). An application needs
+no subscription and no role, so it keeps working whatever happens to the subscription. To set
+it up:
 
-1. In the Azure portal, create a user-assigned managed identity (it needs a subscription, but
-   costs nothing, and no role). Under **Federated credentials**, add one for the scenario
-   *GitHub Actions deploying Azure resources*: organization `thkprado`, repository `jlens`,
-   entity *Environment*, name `vscode` (subject `repo:thkprado/jlens:environment:vscode`).
+1. In the Azure portal, under **App registrations**, register an application for this tenant
+   only, without a redirect URI. Under **Certificates & secrets**, **Federated credentials**,
+   add one for the scenario *GitHub Actions deploying Azure resources*: organization `thkprado`
+   (ID 2347749), repository `jlens` (ID 1413211223), entity *Environment*, name `vscode`. The
+   repository's OIDC tokens carry immutable subjects
+   (`gh api repos/thkprado/jlens/actions/oidc/customization/sub`), so the subject is
+   `repo:thkprado@2347749/jlens@1413211223:environment:vscode`.
 2. In the repository's environment `vscode`, set the variables `AZURE_CLIENT_ID` (the
-   identity's client ID) and `AZURE_TENANT_ID`.
-3. Only a workflow run can sign in as the identity, so its Marketplace ID is read by one: let
+   application's client ID) and `AZURE_TENANT_ID`.
+3. Only a workflow run can sign in as the application, so its Marketplace ID is read by one: let
    the environment accept the branch `main` too, run `gh workflow run marketplace-identity.yml`,
    and read the ID in the log of its last step (`gh run view --log`). Then remove `main` from
    the environment's rules.
 4. On <https://marketplace.visualstudio.com/manage/publishers/thkprado>, add that ID as a member
    with the role **Contributor**.
 
-Nothing expires. If the environment, the repository or the publisher is renamed, change the
+Nothing expires. If the environment, the repository or the publisher is renamed or recreated, change the
 federated credential, run step 3 again and replace the member.
 
 Open VSX publishes the first version of an extension only with an access token. Until then, the

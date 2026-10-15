@@ -68,8 +68,9 @@ managed identity, which is an Azure resource and needs an Azure subscription.
   an Entra ID managed identity federated with the release workflow (no long-lived secret, but
   an Azure subscription); a personal access token, which works only until 2026-12-01; or no
   credential, with the maintainer uploading the VSIX files attached to the GitHub release.
-  *Chosen on 2026-10-14:* the managed identity, federated with the GitHub environment `vscode`
-  of the release job. Open VSX is published to with a token for the first version, which only
+  *Chosen on 2026-10-14:* an Entra ID identity federated with the GitHub environment `vscode`
+  of the release job. It became an application (a service principal) rather than a managed
+  identity: it needs no subscription, so it outlives a free one. Open VSX is published to with a token for the first version, which only
   a token can publish, then through trusted publishing (the run's OIDC token), so that neither
   registry keeps a long-lived secret. `CONTRIBUTING.md` says how to set both up.
 - **The code lives in `editors/vscode/`**, outside the Cargo workspace: `package.json`, the
@@ -89,9 +90,9 @@ managed identity, which is an Azure resource and needs an Azure subscription.
 - With another JSONata extension installed, VS Code uses both: two grammars for the same scope,
   of which one wins, and diagnostics from each server. The extension's README says to disable
   the other's language features.
-- The release needs an Azure subscription for the identity, which costs nothing, and a GitHub
-  environment whose rules accept only version tags. Only a workflow run can sign in as the
-  identity, so a small workflow (`marketplace-identity.yml`) reads the ID the publisher takes as
+- The release needs an Entra ID tenant for the application, which an Azure sign-up creates,
+  and a GitHub environment whose rules accept only version tags. Only a workflow run can sign
+  in as the application, so a small workflow (`marketplace-identity.yml`) reads the ID the publisher takes as
   a member.
 - VS Code for the Web (the `web` target) is left out. The [WebAssembly
   package](../guides/wasm.md#the-language-service) offers the same language service, and could
