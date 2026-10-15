@@ -232,6 +232,21 @@ Windows, `mimalloc` made every benchmark 20 to 45% faster, and Linux has not bee
 | 6 | The allocator of the CLI, measured on Linux: a `cargo xtask ab` run on a Linux runner, with and without `mimalloc` as the global allocator of `jlens` only; the library keeps leaving the choice to applications | If Linux gains about as much as Windows, `jlens` links `mimalloc` on every release target, `cargo-deny` accepts it, and the performance page shows both platforms; otherwise the measurement goes to the performance page and the item closes | **done**: on the same machine, `mimalloc` makes the Linux release binary (musl) 28 to 91% faster, Windows 14 to 56% and a glibc build up to 25%, so `jlens` uses it on every release target; `cargo xtask ab` gained `--b-allocator mimalloc` and `--target`, and the [performance page](performance.md#the-allocator-of-the-command) shows the three platforms |
 | 7 | Release 0.15.0. Before the tag, the npm channel of the CLI (0.14 #7) is settled or left out of the release | The release checklist, with the extension installed from both registries | **done**: the npm channel of the CLI is left out (0.14 #7) |
 
+## 0.16: the last gaps with jsonata-core, and string literals
+
+A new comparison with jsonata-core 2.2.11, after 0.15.0 and on the same cases as in 0.11, finds
+jlens ahead on seven of the ten. Of the three left, sort + map is close (638 against 577 µs), and
+two have a cause: group-by (375 against 119 µs), which copied each group at every item, and
+the path case (0.7 against 0.1 µs), where the fixed cost of an evaluation dominates. 0.11 #6 cut
+that cost from 350 to 106 ns for `1`, but a path still takes about seven times as long.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | Group-by joins each group once. `Evaluator::group` appends each item to its group with `functions::append`, which copies the group, so a group of k items costs O(k²): `items{"n": $count($)}` takes 153 µs, against 38 µs in jsonata-core | Each group collects its items and builds its value once, with the same rules (undefined skipped, a single item kept as it is, arrays flattened one level); unit tests for those rules; group-by faster with `ab` | **done**: group-by 64% faster with `ab`, and 108 against 119 µs in jsonata-core; a group of 200 items 8 times faster. Tuple streams are reduced the same way |
+| 2 | The fixed cost of a path. The path case takes 0.7 µs, against 0.1 µs in jsonata-core. Exploration: profile an evaluation of a short path on a `Document` and list what it sets up or allocates that no result depends on | The cost cut and measured with `ab` (the path case faster, no other case slower), or what takes the time, and why it stays, recorded on the performance page | pending |
+| 3 | String literals in arguments, `&` and object values do not allocate each time they are evaluated. 0.11 #4 removed the allocation only for `=` and `!=`; elsewhere a literal still builds a new string. Sharing one per evaluation needs a slot per literal, since the AST is `Send` and values use `Rc`. Exploration: measure its share of the time first, with cases added to `benches/` | Below about 5% of those cases, the share and the options recorded on the performance page; above it, the allocation gone and measured with `ab`, no other case slower | pending |
+| 4 | Release 0.16.0. Before the tag, the npm channel of the CLI (0.14 #7) is settled or left out of the release | The release checklist; the performance page shows the new numbers | pending |
+
 ## Later
 
 Not commitments, in order of priority:
@@ -239,8 +254,3 @@ Not commitments, in order of priority:
 - **Asynchronous functions**, as in jsonata-js, whose functions may return promises. This needs
   an evaluator that can suspend, and an ADR first. Until then, a host function that returns a
   promise fails with `U1002`.
-- **String literals in arguments, `&` and object values** still build a string each time they
-  are evaluated: 0.11 #4 removed it only for `=` and `!=`. Sharing one per evaluation needs a
-  slot per literal, since the AST is `Send` and values use `Rc`. Measure its share of the time
-  first, with cases added to `benches/`; below about 5%, record it on the performance page and
-  close the item.
