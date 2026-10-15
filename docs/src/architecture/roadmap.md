@@ -270,14 +270,11 @@ from what they needed, missed or worked around, not guessed beforehand.
 | 5 | A stability page in the book, from ADR 0014, and the rules for changing a stable item in `CONTRIBUTING.md` | `doc-check` green; the page linked from the introduction | |
 | 6 | Release 0.17.0, the release that breaks once. 1.0.0 follows when ADR 0014's criterion is met | The release checklist, with the migration notes in the release notes | |
 
-## Later
+## Not planned
 
-Not commitments, in order of priority:
-
-- **Asynchronous functions**, as in jsonata-js, whose functions may return promises. This needs
-  an evaluator that can suspend, and an ADR first. Until then, a host function that returns a
-  promise fails with `U1002`. It matters only in WebAssembly, since a Rust host function can
-  block, and nobody has asked for it yet. A cheaper way, should someone ask: an
-  `evaluateAsync` that stops at the first promise, awaits the pending ones and evaluates again
-  with their results, which suits deterministic functions such as lookups, without touching
-  the evaluator.
+- **Asynchronous functions.** A host function that returns a promise fails with `U1002`, and
+  jlens does not plan to change that. Supporting it needs an evaluator that can suspend, which
+  would slow down every evaluation, and only WebAssembly would gain from it: a Rust host
+  function can block. An application can fetch what its functions need before evaluating.
+  Should real use call for it, the cheaper way is an `evaluateAsync` that stops at the first
+  promise, awaits the pending ones and evaluates again with their results.
