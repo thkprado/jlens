@@ -1246,8 +1246,9 @@ impl<'a> Evaluator<'_, 'a> {
             items.push(Value::Undefined);
         }
 
-        // key -> (data, index of the key/value pair that produced it)
-        let mut groups: IndexMap<Rc<str>, (Value<'a>, usize)> = IndexMap::new();
+        // key -> (items, index of the key/value pair that produced it); the items are joined once
+        // at the end, as jsonata-js's repeated `fn.append` would join them
+        let mut groups: IndexMap<Rc<str>, (Vec<Value<'a>>, usize)> = IndexMap::new();
         for item in &items {
             let frame = if reduce {
                 self.frame_from_tuple(env, item)
@@ -1271,10 +1272,10 @@ impl<'a> Evaluator<'_, 'a> {
                         if *index != pair_index {
                             return Err(err_at("D1009", expr).with("value", key.as_ref()));
                         }
-                        *data = functions::append(std::mem::take(data), item.clone());
+                        data.push(item.clone());
                     }
                     None => {
-                        groups.insert(key, (item.clone(), pair_index));
+                        groups.insert(key, (vec![item.clone()], pair_index));
                     }
                 }
             }
@@ -1282,6 +1283,7 @@ impl<'a> Evaluator<'_, 'a> {
 
         let mut result = Map::default();
         for (key, (data, pair_index)) in groups {
+            let data = join_group(data);
             let (context, frame) = if reduce {
                 let mut tuple = reduce_tuple_stream(&data);
                 let context = tuple.shift_remove("@").unwrap_or_default();
@@ -2015,15 +2017,37 @@ fn reduce_tuple_stream<'a>(stream: &Value<'a>) -> Map<'a> {
     let Value::Array(a) = stream else {
         return tuple_map(stream);
     };
-    let mut result = a.items().first().map(tuple_map).unwrap_or_default();
-    for tuple in a.items().iter().skip(1) {
+    let mut fields: IndexMap<Rc<str>, Vec<Value<'a>>> = IndexMap::new();
+    for tuple in a.items() {
         for (k, v) in tuple_map(tuple) {
-            let entry = result.entry(k).or_default();
-            let existing = std::mem::take(entry);
-            *entry = functions::append(existing, v);
+            fields.entry(k).or_default().push(v);
         }
     }
-    result
+    fields
+        .into_iter()
+        .map(|(k, v)| (k, join_group(v)))
+        .collect()
+}
+
+/// Joins values as successive `functions::append` calls would, without copying the sequence
+/// at each step: undefined values are skipped, a single value is kept as it is, and arrays are
+/// flattened one level.
+fn join_group<'a>(values: Vec<Value<'a>>) -> Value<'a> {
+    let mut values: Vec<Value<'a>> = values.into_iter().filter(|v| !v.is_undefined()).collect();
+    match values.len() {
+        0 => Value::Undefined,
+        1 => values.pop().unwrap_or_default(),
+        _ => {
+            let mut items = Vec::with_capacity(values.len());
+            for v in values {
+                match v {
+                    Value::Array(arr) => items.extend(arr.items().iter().cloned()),
+                    other => items.push(other),
+                }
+            }
+            Value::array(items, 0)
+        }
+    }
 }
 
 /// Whether `object` can be reached from `value` (or is `value`). Shared substructures are

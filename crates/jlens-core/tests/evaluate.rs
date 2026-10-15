@@ -310,6 +310,39 @@ fn order_by_raises_the_first_error_jsonata_js_raises() {
 }
 
 #[test]
+fn group_by_joins_each_group_as_jsonata_js_appends_it() {
+    // The results of jsonata-js 2.2.2: a group of one item keeps it as it is, and the arrays
+    // of a larger group are flattened one level.
+    let tuples = json!({"items": [{"t": "a", "c": 1}, {"t": "b", "c": 2}, {"t": "a", "c": 3}]});
+    for (expr, input, expected) in [
+        (
+            r#"${"x": $}"#,
+            json!([[1, 2], [3]]),
+            json!({"x": [1, 2, 3]}),
+        ),
+        (r#"${"x": $}"#, json!([[1, 2]]), json!({"x": [1, 2]})),
+        (
+            r#"${"x": $count($)}"#,
+            json!([[1, 2], [3], 4]),
+            json!({"x": 4}),
+        ),
+        (
+            "items@$i{$i.t: $i.c}",
+            tuples.clone(),
+            json!({"a": [1, 3], "b": 2}),
+        ),
+        ("items#$p{t: $p}", tuples, json!({"a": [0, 2], "b": 1})),
+        (
+            "items@$i{$i.t: $i}",
+            json!({"items": [{"t": "a", "c": [1, 2]}, {"t": "a", "c": 3}]}),
+            json!({"a": [{"t": "a", "c": [1, 2]}, {"t": "a", "c": 3}]}),
+        ),
+    ] {
+        assert_eq!(eval(expr, input), Some(expected), "{expr}");
+    }
+}
+
+#[test]
 fn blocks_scope_the_variables_they_bind() {
     // Results from jsonata-js 2.2.2. A block binds in a frame of its own only when it may
     // bind; these check that the others still see, and never leak, the variables around them.
