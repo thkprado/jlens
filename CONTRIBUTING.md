@@ -193,13 +193,14 @@ it up:
    application's client ID) and `AZURE_TENANT_ID`.
 3. Only a workflow run can sign in as the application, so its Marketplace ID is read by one: let
    the environment accept the branch `main` too, run `gh workflow run marketplace-identity.yml`,
-   and read the ID in the log of its last step (`gh run view --log`). Then remove `main` from
-   the environment's rules.
+   and read the ID in the log of its `az rest` step (`gh run view --log`). Remove `main` from
+   the environment's rules after step 4.
 4. On <https://marketplace.visualstudio.com/manage/publishers/thkprado>, add that ID as a member
-   with the role **Contributor**.
+   with the role **Contributor**. The member list shows it as `<tenant ID>\<object ID>`. Run
+   the workflow again: its last step (`vsce verify-pat --azure-credential thkprado`) now passes.
 
-Nothing expires. If the environment, the repository or the publisher is renamed or recreated, change the
-federated credential, run step 3 again and replace the member.
+Nothing expires. If the environment, the repository or the publisher is renamed or recreated,
+change the federated credential, run step 3 again and replace the member.
 
 Open VSX publishes the first version of an extension only with an access token. Until then, the
 environment holds the secret `OVSX_PAT`: a token created under **Access Tokens** in the

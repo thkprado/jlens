@@ -1,7 +1,8 @@
 name: Marketplace identity
 
 # Prints the Visual Studio Marketplace ID of the Entra ID application that publishes the VS Code
-# extension (release.yml, job vscode), which the publisher thkprado takes as a member. Only a
+# extension (release.yml, job vscode), which the publisher thkprado takes as a member, then
+# checks that the application may publish there (it fails until it is a member). Only a
 # workflow run can sign in as that application, so its ID is read here, by hand, while setting it
 # up: gh workflow run marketplace-identity.yml, with the environment vscode accepting the branch
 # main for that run. See CONTRIBUTING.md.
@@ -34,3 +35,5 @@ jobs:
           az rest --uri https://app.vssps.visualstudio.com/_apis/connectionData
           --resource 499b84ac-1321-427f-aa17-267ca6975798 --query authenticatedUser.id
           --output tsv
+      - name: The application may publish as thkprado
+        run: npx --yes @vscode/vsce@4.0.0 verify-pat --azure-credential thkprado
