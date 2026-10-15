@@ -2,6 +2,7 @@
   "input": "orders-200.json",
   "cases": [
     { "name": "path", "expr": "customer.name" },
+    { "name": "names over items", "expr": "$sum(items.quantity)" },
     { "name": "filter + aggregate", "expr": "$sum(items[type = 'electronic' and quantity > 1].(unitPrice * quantity))" },
     { "name": "group-by", "expr": "items{type: {'total': $sum($.(unitPrice * quantity)), 'n': $count($)}}" },
     { "name": "sort + map", "expr": "$map(items^(>tax, code), function($i){ $i.code & ':' & $string($i.tax) })" },

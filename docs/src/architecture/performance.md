@@ -7,8 +7,8 @@ performance is measured, what the numbers are, and how to use the API to get the
 
 The workload is in `benches/` at the repository root. It is shared by the native benchmarks and
 by the comparison with jsonata-js:
-- `benches/cases.json` lists eleven expressions: path navigation, filters with aggregation,
-  grouping, sorting, string and regex functions, number formatting, an object constructor, a
+- `benches/cases.json` lists twelve expressions: path navigation, a name mapped over the
+  items, filters with aggregation, grouping, sorting, string and regex functions, number formatting, an object constructor, a
   transform, a recursive function, and the shipping rule from the guides.
 - `benches/orders-200.json` is a 24 KB store order with 200 items.
 
@@ -232,8 +232,8 @@ Evaluations never modify a document, so one document serves any number of evalua
 - **Shortcuts for common shapes.** Without a tracer, evaluation skips work that no result
   depends on. A path of names evaluated on a single object, such as `price` in
   `items.(price * quantity)` or `customer.name`, or starting with a variable, such as `$i.code`,
-  looks its fields up instead of building a path's sequences, unless one of them holds an
-  array. A name mapped over the items of a path (`code` in `items.code`) is looked up in each
+  looks its fields up instead of building a path's sequences, unless a field before the last
+  holds an array. A name mapped over the items of a path (`code` in `items.code`) is looked up in each
   item without evaluating the step for it.
 - **String literals.** `=` and `!=` with a string literal compare with the literal's text
   instead of building a string, and so does a grouping with a literal key, which finds its group
@@ -254,9 +254,14 @@ Evaluations never modify a document, so one document serves any number of evalua
   `serde_json::Value` (a new string; `'a'` alone takes 0.21 µs), and two lookups. Before 0.16 a
   path of two names built a sequence for each step and took 0.69 µs; `$.customer.name` took
   1 µs and now takes 0.24 µs.
-- **Names over many items.** `items.code` takes about 110 ns per item, against about 65 ns in
-  jsonata-core. Evaluating the step is not the cause: looking the field up directly saves only
-  12%. Where the rest goes has not been found yet.
+- **Names over many items.** A path step that reads an array passes it on as it is: `items`
+  returns the input's array, and the step after it maps over that array's items instead of a
+  copy of them. A step whose results hold no array to flatten makes them its sequence without
+  copying them again. Before 0.16, `$count(items.code)` took 9.8 µs and now takes 7.0 µs,
+  against 4.9 µs in jsonata-core; `$count(items)` went from 0.94 to 0.67 µs (0.39 µs). Looking
+  the field up is not what remains: `$count(items.nope)` takes 4.9 µs, against 5.7 µs. A field
+  found costs about 10 ns more per item, to keep the value, and `items.code` takes 20 µs,
+  against 14 µs, most of it converting the 200 strings of its result.
 - **Converting the input.** `evaluate` converts the parts of the input that the expression
   reads, as it reads them ([ADR 0010](../adr/0010-lazy-input.md)). An expression that reads
   every item pays for converting them, and that is now most of its time: filter + aggregate

@@ -723,9 +723,10 @@ impl<'a> Evaluator<'_, 'a> {
         env: &Env<'a>,
     ) -> Result<Value<'a>> {
         // Fields of a single input or variable (`a.b.c`, `$x.a.b`): the general path would wrap
-        // the input and each field in sequences, then unwrap the singleton. A field holding an
-        // array takes the general path, which flattens or keeps it. The steps' depth is
-        // counted as if they were evaluated.
+        // the input and each field in sequences, then unwrap the singleton. The last field may
+        // hold an array, which the general path returns as it is unless it is a sequence; an
+        // array met before the last field takes the general path, which iterates it. The
+        // steps' depth is counted as if they were evaluated.
         let plain = !keep_singleton_array
             && !expr.attrs.keep_array
             && expr.attrs.group.is_none()
@@ -739,7 +740,7 @@ impl<'a> Evaluator<'_, 'a> {
             && is_plain_step(step)
         {
             let value = functions::lookup(input, name);
-            if !value.is_array() {
+            if !is_sequence(&value) {
                 return Ok(value);
             }
         } else if plain
@@ -779,7 +780,11 @@ impl<'a> Evaluator<'_, 'a> {
                 tuple_bindings =
                     Some(self.tuple_step(step, &input_seq, tuple_bindings.as_ref(), env)?);
             } else {
-                result_seq = self.step(step, &input_seq, env, ii == last)?;
+                // A sort or a tuple step reads the sequence; any other step only its items.
+                let items_only = steps
+                    .get(ii + 1)
+                    .is_some_and(|n| !n.attrs.tuple && !matches!(n.kind, NodeKind::Sort { .. }));
+                result_seq = self.step(step, &input_seq, env, ii == last, items_only)?;
             }
             if !is_tuple
                 && (result_seq.is_undefined()
@@ -838,15 +843,13 @@ impl<'a> Evaluator<'_, 'a> {
         input: &Value<'a>,
         env: &Env<'a>,
         last: bool,
+        items_only: bool,
     ) -> Result<Value<'a>> {
         if let NodeKind::Sort { terms } = &step.kind {
             let sorted = self.sort(step, terms, input, env)?;
             return self.stages(&step.attrs.stages, sorted, env);
         }
-        let items: Vec<Value<'a>> = input
-            .as_array()
-            .map(|a| a.items().clone())
-            .unwrap_or_default();
+        let items: &[Value<'a>] = input.as_array().map_or(&[], |a| a.items());
         // A plain field is looked up in each item without evaluating the step, unless the item
         // or its field is an array, which the evaluation flattens or unwraps. The guardrails
         // are still checked for each item, and its depth counted as if it were evaluated.
@@ -861,7 +864,8 @@ impl<'a> Evaluator<'_, 'a> {
             _ => None,
         };
         let mut results = Vec::with_capacity(items.len());
-        for item in &items {
+        let mut arrays = false;
+        for item in items {
             let direct = match field {
                 Some(name) if !item.is_array() => {
                     self.guardrails()?;
@@ -879,12 +883,25 @@ impl<'a> Evaluator<'_, 'a> {
                 }
             }
             if !res.is_undefined() {
+                arrays |= res.is_array();
                 results.push(res);
             }
         }
 
-        if last && results.len() == 1 && results[0].as_array().is_some_and(|a| !a.is_sequence()) {
+        // A single array is returned as it is by the last step, and by a step whose result only
+        // gives its items to the next step when the sequence built from it would hold the same
+        // items (it is not empty, which ends the path, nor an array constructor, kept whole).
+        if results.len() == 1
+            && let Some(a) = results[0].as_array()
+            && !a.is_sequence()
+            && (last || items_only && !a.has(CONS) && !a.items().is_empty())
+        {
             return Ok(results.pop().unwrap_or_default());
+        }
+        // Without arrays to flatten, the results are the sequence.
+        if !arrays {
+            self.check_array(results.len())?;
+            return Ok(Value::sequence(results));
         }
         let mut out = Vec::with_capacity(results.len());
         for res in results {
@@ -1884,7 +1901,8 @@ fn plain_fields<'a>(steps: &[Node], input: &Value<'a>, env: &Env<'a>) -> Option<
     if value.is_array() {
         return None;
     }
-    for step in names {
+    let last = names.len().checked_sub(1);
+    for (ii, step) in names.iter().enumerate() {
         if value.is_undefined() {
             break;
         }
@@ -1892,11 +1910,15 @@ fn plain_fields<'a>(steps: &[Node], input: &Value<'a>, env: &Env<'a>) -> Option<
             return None;
         };
         value = functions::lookup(&value, name);
-        if value.is_array() {
+        if value.is_array() && (Some(ii) != last || is_sequence(&value)) {
             return None;
         }
     }
     Some(value)
+}
+
+fn is_sequence(value: &Value) -> bool {
+    value.as_array().is_some_and(|a| a.is_sequence())
 }
 
 /// The value of a string literal whose evaluation is the value alone.
