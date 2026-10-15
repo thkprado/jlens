@@ -18,3 +18,4 @@ earlier one instead.
 | [0010](0010-lazy-input.md) | Input documents converted lazily, one level at a time | Accepted |
 | [0011](0011-host-callbacks.md) | Host functions call the functions they receive, through a handle that borrows the call | Accepted |
 | [0012](0012-npm-distribution.md) | The CLI on npm: a launcher package and one package per platform | Accepted |
+| [0013](0013-vscode-extension.md) | The VS Code extension: one package per platform with the release binary | Accepted |
