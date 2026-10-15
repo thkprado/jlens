@@ -72,14 +72,11 @@ pub fn build(archives: &Path) -> Result<()> {
     let mut manifest: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(source.join("package.json"))?)?;
     manifest["version"] = version.clone().into();
-    fs::write(
-        stage.join("package.json"),
-        serde_json::to_string_pretty(&manifest)? + "\n",
-    )?;
 
     if cfg!(windows) {
         eprintln!(
-            "warning: packed on Windows, the Linux and macOS binaries are not executable:              pack them on Linux or macOS"
+            "warning: packed on Windows, the Linux and macOS binaries are not executable: \
+             pack them on Linux or macOS"
         );
     }
     let server = stage.join("server");
@@ -100,15 +97,11 @@ pub fn build(archives: &Path) -> Result<()> {
         fs::create_dir_all(&server)?;
         write_executable(&server.join(exe), &binary)?;
         let vsix = out.join(format!("jlens-{vscode_target}-{version}.vsix"));
-        pack(&vsce, &stage, &vsix, Some(vscode_target))?;
+        pack(&vsce, &stage, &manifest, &vsix, Some(vscode_target))?;
     }
     fs::remove_dir_all(&server)?;
-    pack(
-        &vsce,
-        &stage,
-        &out.join(format!("jlens-{version}.vsix")),
-        None,
-    )?;
+    let vsix = out.join(format!("jlens-{version}.vsix"));
+    pack(&vsce, &stage, &manifest, &vsix, None)?;
     fs::remove_dir_all(&stage)?;
     println!("VS Code packages of jlens {version} in {}", out.display());
     Ok(())
@@ -117,7 +110,26 @@ pub fn build(archives: &Path) -> Result<()> {
 /// Packs the staged extension with vsce. The client is bundled, so the packages need no
 /// `node_modules`. vsce keeps the file mode of the binary, which VS Code restores when it
 /// installs the package: the Unix binaries are executable only when packed on Linux or macOS.
-fn pack(vsce: &Path, stage: &Path, vsix: &Path, target: Option<&str>) -> Result<()> {
+fn pack(
+    vsce: &Path,
+    stage: &Path,
+    manifest: &serde_json::Value,
+    vsix: &Path,
+    target: Option<&str>,
+) -> Result<()> {
+    // vsce rejects a `files` pattern that matches nothing: only a package with a binary lists
+    // `server/`.
+    let mut manifest = manifest.clone();
+    if target.is_some() {
+        manifest["files"]
+            .as_array_mut()
+            .context("no files in package.json")?
+            .push("server/".into());
+    }
+    fs::write(
+        stage.join("package.json"),
+        serde_json::to_string_pretty(&manifest)? + "\n",
+    )?;
     let mut cmd = Command::new("node");
     cmd.arg(vsce)
         .args(["package", "--no-dependencies", "--out"])

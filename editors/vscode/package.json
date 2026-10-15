@@ -26,10 +26,10 @@
   ],
   "main": "./dist/extension.js",
   "files": [
+    "LICENSE",
     "dist/",
     "language-configuration.json",
     "schemas/",
-    "server/",
     "syntaxes/"
   ],
   "activationEvents": [
