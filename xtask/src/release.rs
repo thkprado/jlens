@@ -18,15 +18,16 @@ cargo install jlens-cli                 # the jlens command, including jlens lsp
 brew install thkprado/jlens/jlens       # the same, with Homebrew (macOS, Linux)
 scoop bucket add jlens https://github.com/thkprado/scoop-jlens
 scoop install jlens/jlens               # the same, with Scoop (Windows)
-npx jlens-cli --version                 # the same, from npm
 docker run --rm -i ghcr.io/thkprado/jlens --version   # the same, as a container
+code --install-extension thkprado.jlens # the VS Code extension, with the same binary
 cargo add jlens-core jlens-schema       # the Rust crates
 npm install jlens-wasm                  # the browser ES module
 ```
 
 - crates.io: [jlens-core](https://crates.io/crates/jlens-core), [jlens-schema](https://crates.io/crates/jlens-schema), [jlens-lsp](https://crates.io/crates/jlens-lsp), [jlens-cli](https://crates.io/crates/jlens-cli)
-- npm: [jlens-wasm](https://www.npmjs.com/package/jlens-wasm), [jlens-cli](https://www.npmjs.com/package/jlens-cli)
+- npm: [jlens-wasm](https://www.npmjs.com/package/jlens-wasm)
 - Container: [ghcr.io/thkprado/jlens](https://github.com/thkprado/jlens/pkgs/container/jlens)
+- VS Code: [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=thkprado.jlens), [Open VSX](https://open-vsx.org/extension/thkprado/jlens)
 - Every way to install: [installation](https://thkprado.github.io/jlens/getting-started/installation.html)
 - API reference: [docs.rs/jlens-core](https://docs.rs/jlens-core), [docs.rs/jlens-schema](https://docs.rs/jlens-schema), [docs.rs/jlens-lsp](https://docs.rs/jlens-lsp)
 ";

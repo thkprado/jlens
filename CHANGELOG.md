@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.15.0]
+
+jlens comes to VS Code: an extension on the Visual Studio Marketplace and Open VSX highlights
+JSONata and runs the language server from the bundled release binary. The `jlens` command
+itself is faster, with mimalloc as its allocator. The CLI is still not on npm (see 0.14.0).
+
 ### Added
 
 - A VS Code extension, `thkprado.jlens` on the Visual Studio Marketplace and Open VSX
@@ -18,9 +24,10 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
-- The `jlens` command uses mimalloc as its global allocator on every platform. Evaluations that allocate run
-  28 to 91% faster with the Linux release binaries, which are static musl binaries, and 14 to
-  56% faster on Windows. The library still leaves the choice of allocator to applications.
+- The `jlens` command uses mimalloc as its global allocator on every platform. Evaluations that
+  allocate run 28 to 91% faster with the Linux release binaries, which are static musl
+  binaries, and 14 to 56% faster on Windows. The library still leaves the choice of allocator
+  to applications.
 
 ## [0.14.0]
 
@@ -508,7 +515,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/thkprado/jlens/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/thkprado/jlens/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/thkprado/jlens/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/thkprado/jlens/compare/v0.11.1...v0.12.0

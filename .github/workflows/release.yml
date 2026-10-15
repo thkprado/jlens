@@ -108,11 +108,13 @@ jobs:
   # The CLI on npm (ADR 0012): a package per platform holding the binary of its archive, then
   # jlens-cli, which depends on them, so that a published jlens-cli never points to a missing
   # package. A package whose version is already on npm is skipped: re-running the job completes
-  # a release that failed halfway through.
+  # a release that failed halfway through. It runs only when the repository variable
+  # PUBLISH_NPM_CLI is true: npm held back the name jlens-cli-win32-x64 at 0.14.0 (roadmap 0.14
+  # #7), and until it is allowed the job would fail, and the draft with it.
   npm-cli:
     name: npm (CLI)
     needs: binaries
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && vars.PUBLISH_NPM_CLI == 'true'
     runs-on: ubuntu-latest
     # id-token signs the provenance statements of the packages.
     permissions:
