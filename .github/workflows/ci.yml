@@ -246,6 +246,67 @@ jobs:
           npx jlens eval 2> /dev/null || code=$?
           test "$code" = 2
 
+  # The VS Code extension's packages (ADR 0013), one per target with its binary from those
+  # archives and one without, packed on Linux so that the Unix binaries stay executable. Each
+  # OS then installs the package of its platform in VS Code and runs the extension test on it.
+  vscode-package:
+    name: VS Code packages
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - working-directory: editors/vscode
+        run: npm ci
+      - run: cargo xtask vscode dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vscode
+          path: target/vscode/*.vsix
+          if-no-files-found: error
+
+  vscode-install:
+    name: VS Code package (${{ matrix.os }})
+    needs: vscode-package
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - working-directory: editors/vscode
+        run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: vscode
+          path: packed
+      - name: Install the package of the runner's platform and run the extension test
+        working-directory: editors/vscode
+        run: |
+          platform=$(node -p 'process.platform + "-" + process.arch')
+          JLENS_VSIX=$(echo ../../packed/jlens-"$platform"-*.vsix)
+          export JLENS_VSIX
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a node test/run-extension.mjs
+          else
+            node test/run-extension.mjs
+          fi
+
   # The Homebrew formula, written as the Homebrew workflow writes it but pointing at the CI
   # archives (put in /tmp/jlens-dist by the install job), then installed and tested by brew on
   # Linux and macOS from a local tap.

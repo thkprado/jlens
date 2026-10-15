@@ -1,0 +1,10 @@
+{
+  "name": "jlens-test-host",
+  "description": "The development extension that runs the tests when the extension under test is an installed VSIX",
+  "version": "0.0.0",
+  "publisher": "jlens-test",
+  "private": true,
+  "engines": {
+    "vscode": "^1.91.0"
+  }
+}

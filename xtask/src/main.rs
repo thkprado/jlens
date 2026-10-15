@@ -18,6 +18,7 @@ mod npm;
 mod release;
 mod scoop;
 mod site;
+mod vscode;
 mod wasm;
 
 const USAGE: &str = "\
@@ -45,6 +46,9 @@ commands:
                                     print the Scoop manifest of the CLI, for the Windows archive
                                     listed in a release's SHA256SUMS, downloaded from the
                                     GitHub release or from <base>
+  vscode <archives directory>       build the VS Code extension's packages (one VSIX per target
+                                    with its binary, and one that uses the PATH) from the
+                                    release archives, into target/vscode
   wasm [--dev]                      build the browser package in crates/jlens-wasm/pkg
   wasm-test [--require-browser] [--example]
                                     build the package and test it in Node.js and a headless browser;
@@ -100,6 +104,14 @@ fn main() -> Result<()> {
             ),
             None => bail!(
                 "scoop needs the path of a SHA256SUMS file
+
+{USAGE}"
+            ),
+        },
+        Some("vscode") => match args.get(1) {
+            Some(dir) => vscode::build(Path::new(dir)),
+            None => bail!(
+                "vscode needs the directory of the release archives
 
 {USAGE}"
             ),

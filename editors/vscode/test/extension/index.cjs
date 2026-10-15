@@ -120,11 +120,23 @@ const tests = {
   },
 };
 
+if (process.env.JLENS_VSIX) {
+  tests["the installed package bundles an executable server"] = async () => {
+    const extension = vscode.extensions.getExtension("thkprado.jlens");
+    assert.ok(extension, "the extension is installed");
+    const exe = process.platform === "win32" ? "jlens.exe" : "jlens";
+    // VS Code keeps the mode that `cargo xtask vscode` packed.
+    fs.accessSync(path.join(extension.extensionPath, "server", exe), fs.constants.X_OK);
+  };
+}
+
 exports.run = async function run() {
-  // The setting has the `machine` scope: only user settings can give it.
+  // The setting has the `machine` scope: only user settings can give it. An installed package
+  // runs without it, with its bundled server.
+  const server = process.env.JLENS_VSIX ? undefined : process.env.JLENS_SERVER;
   await vscode.workspace
     .getConfiguration("jlens")
-    .update("server.path", process.env.JLENS_SERVER, vscode.ConfigurationTarget.Global);
+    .update("server.path", server, vscode.ConfigurationTarget.Global);
   const failures = [];
   for (const [name, test] of Object.entries(tests)) {
     try {

@@ -138,7 +138,7 @@ pub fn build(archives: &Path) -> Result<()> {
     Ok(())
 }
 
-fn npm() -> Command {
+pub fn npm() -> Command {
     // npm is a batch file on Windows, which only cmd runs.
     if cfg!(windows) {
         let mut cmd = Command::new("cmd");
@@ -149,7 +149,7 @@ fn npm() -> Command {
     }
 }
 
-fn find_archive(dir: &Path, target: &str) -> Result<PathBuf> {
+pub fn find_archive(dir: &Path, target: &str) -> Result<PathBuf> {
     let suffixes = [format!("-{target}.tar.gz"), format!("-{target}.zip")];
     let mut found = Vec::new();
     for entry in fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
@@ -166,7 +166,7 @@ fn find_archive(dir: &Path, target: &str) -> Result<PathBuf> {
     }
 }
 
-fn write_executable(path: &Path, bytes: &[u8]) -> Result<()> {
+pub fn write_executable(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::write(path, bytes)?;
     #[cfg(unix)]
     {
@@ -178,7 +178,7 @@ fn write_executable(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// The content of the regular file `<dir>/<file>` of a gzipped tar archive (ustar or GNU, as
 /// `tar czf` writes them; names are short, so no long-name records).
-fn tar_gz_entry(bytes: &[u8], file: &str) -> Result<Vec<u8>> {
+pub fn tar_gz_entry(bytes: &[u8], file: &str) -> Result<Vec<u8>> {
     let mut tar = Vec::new();
     flate2::read::GzDecoder::new(bytes).read_to_end(&mut tar)?;
     let mut at = 0;
@@ -209,7 +209,7 @@ fn tar_gz_entry(bytes: &[u8], file: &str) -> Result<Vec<u8>> {
 
 /// The content of `<dir>/<file>` in a zip archive, stored or deflated, found through its
 /// central directory.
-fn zip_entry(bytes: &[u8], file: &str) -> Result<Vec<u8>> {
+pub fn zip_entry(bytes: &[u8], file: &str) -> Result<Vec<u8>> {
     let u16_at = |at: usize| -> Result<usize> {
         let b = bytes.get(at..at + 2).context("truncated zip archive")?;
         Ok(u16::from_le_bytes([b[0], b[1]]) as usize)
