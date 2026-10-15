@@ -105,7 +105,43 @@ conversion is not the cause:
   one of these cases runs in about half the time.
 
 An application that calls `evaluate` on whole documents can set a faster global allocator;
-the library leaves that choice to it.
+the library leaves that choice to it. The `jlens` command sets one.
+
+### The allocator of the command
+
+Evaluation allocates for most of its work, so the allocator sets much of its speed. The `jlens`
+command uses [mimalloc](https://github.com/microsoft/mimalloc) as its global allocator on every
+release target. `cargo xtask ab . . --b-allocator mimalloc` measures the allocator alone: B is
+the same revision with `mimalloc`. `--target x86_64-unknown-linux-musl` builds both programs
+for musl, as the Linux release binaries are.
+
+Measured for 0.15 (1d1a079) with `evaluate`, the median of ten rounds, on the machine above;
+Linux is Ubuntu 26.04 under WSL 2, on the same machine:
+
+| Case | Windows | + mimalloc | Linux, glibc | + mimalloc | Linux, musl | + mimalloc |
+|---|---:|---:|---:|---:|---:|---:|
+| path | 1.69 µs | 899 ns | 726 ns | 782 ns | 13.1 µs | 12.3 µs |
+| filter + aggregate | 194 µs | 109 µs | 117 µs | 94 µs | 361 µs | 122 µs |
+| group-by | 687 µs | 301 µs | 356 µs | 267 µs | 3.52 ms | 314 µs |
+| sort + map | 740 µs | 446 µs | 418 µs | 376 µs | 962 µs | 413 µs |
+| strings | 199 µs | 127 µs | 138 µs | 110 µs | 423 µs | 142 µs |
+| regex | 291 µs | 171 µs | 180 µs | 152 µs | 561 µs | 177 µs |
+| number formatting | 213 µs | 149 µs | 145 µs | 132 µs | 303 µs | 159 µs |
+| transform | 933 µs | 589 µs | 668 µs | 543 µs | 1.84 ms | 612 µs |
+| recursion | 1.01 ms | 870 µs | 743 µs | 762 µs | 1.02 ms | 730 µs |
+| shipping rule | 235 µs | 191 µs | 190 µs | 167 µs | 457 µs | 192 µs |
+
+- musl's own allocator is the slowest of the three: with it, the release binary for Linux took
+  up to ten times as long as a glibc build (`group-by`). `mimalloc` makes it 28 to 91% faster,
+  and within 30% of glibc with `mimalloc`, except on `path`.
+- On Windows, `mimalloc` saves 14 to 56%.
+- glibc's allocator is the fastest of the three. `mimalloc` still saves 9 to 25% on eight cases;
+  `path` takes 56 ns more, and `recursion` is within the noise.
+- `path` costs about 12 µs more on musl with either allocator: a fixed cost of each evaluation
+  there, which the allocator does not explain. A command evaluates once, so its start-up hides
+  it.
+- macOS was not measured. Its binaries use `mimalloc` too, so that every platform runs the same
+  allocator.
 
 ### WebAssembly against jsonata-js (Node.js)
 

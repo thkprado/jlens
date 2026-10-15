@@ -23,6 +23,11 @@ use jlens_lsp::config;
 use jlens_schema::LanguageService;
 use serde_json::Value;
 
+// Evaluation allocates for most of its work. The default allocators of musl (the Linux release
+// binaries) and Windows make it up to 11 and 2 times slower; see the performance chapter.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// Evaluate, check and explain JSONata expressions.
 #[derive(Parser)]
 #[command(

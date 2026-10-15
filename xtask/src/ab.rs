@@ -18,6 +18,10 @@
 //! `target/ab/run-<process id>`, removed when it ends; Cargo's lock on the shared target
 //! directory takes their builds one at a time, and a program reaches `target/ab/bin` by a
 //! rename, so a run sees either no program or a whole one.
+//!
+//! `--b-allocator mimalloc` makes `mimalloc` the global allocator of B's program, so that
+//! `ab . . --b-allocator mimalloc` measures the allocator alone. `--target` builds both programs
+//! for another target that runs here, such as `x86_64-unknown-linux-musl` on Linux.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -48,16 +52,26 @@ path = "main.rs"
 [dependencies]
 jlens-core = { path = "{core}" }
 serde_json = "1"
+{extra}
 
 [profile.release]
 lto = true
 codegen-units = 1
 "#;
 
+/// Makes `mimalloc` the global allocator of the probe; appended, as the probe starts with its
+/// inner doc comment.
+const MIMALLOC: &str = "
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+";
+
 pub fn run(args: &[String]) -> Result<()> {
     let mut positional = Vec::new();
     let mut cases = Vec::new();
     let mut mode = "evaluate".to_owned();
+    let mut b_allocator = "system".to_owned();
+    let mut target = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -70,6 +84,17 @@ pub fn run(args: &[String]) -> Result<()> {
                 cases.push(args.get(i + 1).context("--case needs a value")?.clone());
                 i += 1;
             }
+            "--b-allocator" => {
+                b_allocator = args
+                    .get(i + 1)
+                    .context("--b-allocator needs a value")?
+                    .clone();
+                i += 1;
+            }
+            "--target" => {
+                target = Some(args.get(i + 1).context("--target needs a value")?.clone());
+                i += 1;
+            }
             arg => positional.push(arg.to_owned()),
         }
         i += 1;
@@ -80,11 +105,17 @@ pub fn run(args: &[String]) -> Result<()> {
     if mode != "evaluate" && mode != "document" {
         bail!("--mode is `evaluate` or `document`, not {mode:?}");
     }
+    if b_allocator != "system" && b_allocator != "mimalloc" {
+        bail!("--b-allocator is `system` or `mimalloc`, not {b_allocator:?}");
+    }
     let rounds = flag(args, "--rounds")?.unwrap_or(10).max(1);
     let sample_ms = flag(args, "--sample-ms")?.unwrap_or(10).max(1);
 
-    let work = Work::new()?;
-    let programs = [work.build(a)?, work.build(b)?];
+    let work = Work::new(target)?;
+    let programs = [
+        work.build(a, false)?,
+        work.build(b, b_allocator == "mimalloc")?,
+    ];
     let benches = root().join("benches");
     let mut times: [BTreeMap<String, Vec<u128>>; 2] = Default::default();
     let mut order = Vec::new();
@@ -146,7 +177,12 @@ pub fn run(args: &[String]) -> Result<()> {
     }
     println!(
         "
-A is {a}, B is {b}"
+A is {a}, B is {b}{}",
+        if b_allocator == "mimalloc" {
+            " with mimalloc"
+        } else {
+            ""
+        }
     );
     Ok(())
 }
@@ -154,10 +190,12 @@ A is {a}, B is {b}"
 /// The directory of one run, `target/ab/run-<process id>`, removed when the run ends.
 struct Work {
     dir: PathBuf,
+    /// The target the programs are built for, when not the host.
+    target: Option<String>,
 }
 
 impl Work {
-    fn new() -> Result<Work> {
+    fn new(target: Option<String>) -> Result<Work> {
         let ab = root().join("target/ab");
         fs::create_dir_all(ab.join("bin"))?;
         // Directories of interrupted runs: the one with this process id cannot belong to a live
@@ -180,30 +218,39 @@ impl Work {
         }
         let dir = ab.join(format!("run-{}", std::process::id()));
         fs::create_dir_all(&dir)?;
-        Ok(Work { dir })
+        Ok(Work { dir, target })
     }
 
-    /// Builds the probe against the `jlens-core` of `rev`, and returns the path of the program.
-    fn build(&self, rev: &str) -> Result<PathBuf> {
+    /// Builds the probe against the `jlens-core` of `rev`, with `mimalloc` as its global
+    /// allocator if asked, and returns the path of the program.
+    fn build(&self, rev: &str, mimalloc: bool) -> Result<PathBuf> {
+        // Programs that differ in allocator or target are kept apart.
+        let mut variant = String::new();
+        if mimalloc {
+            variant.push_str("-mimalloc");
+        }
+        if let Some(target) = &self.target {
+            variant.push_str(&format!("-{target}"));
+        }
         if rev == "." {
-            let program = self
-                .dir
-                .join(format!("worktree{}", env::consts::EXE_SUFFIX));
-            self.compile(rev, &root(), "worktree", &program)?;
+            let name = format!("worktree{variant}");
+            let program = self.dir.join(format!("{name}{}", env::consts::EXE_SUFFIX));
+            self.compile(rev, &root(), &name, mimalloc, &program)?;
             return Ok(program);
         }
 
         let commit = git(&["rev-parse", "--verify", &format!("{rev}^{{commit}}")])
             .with_context(|| format!("{rev:?} is not a revision"))?;
         let short = &commit[..12];
-        let file = format!("{short}{}", env::consts::EXE_SUFFIX);
+        let file = format!("{short}{variant}{}", env::consts::EXE_SUFFIX);
         let program = root().join("target/ab/bin").join(&file);
         if program.is_file() {
             return Ok(program);
         }
         let source = self.dir.join(format!("src-{short}"));
         git(&["worktree", "add", "--detach", &path(&source), &commit])?;
-        let built = self.compile(rev, &source, short, &self.dir.join(&file));
+        let name = format!("{short}{variant}");
+        let built = self.compile(rev, &source, &name, mimalloc, &self.dir.join(&file));
         git(&["worktree", "remove", "--force", &path(&source)])?;
         built?;
         // Another run may have published the same program meanwhile; on Windows the rename then
@@ -219,7 +266,14 @@ impl Work {
     /// Builds the probe crate `probe-{name}` against the `jlens-core` of the checkout at
     /// `checkout`, with the versions of that checkout's lock file, and copies the program to
     /// `program`.
-    fn compile(&self, rev: &str, checkout: &Path, name: &str, program: &Path) -> Result<()> {
+    fn compile(
+        &self,
+        rev: &str,
+        checkout: &Path,
+        name: &str,
+        mimalloc: bool,
+        program: &Path,
+    ) -> Result<()> {
         let crate_dir = self.dir.join(format!("probe-{name}"));
         fs::create_dir_all(&crate_dir)?;
         let core = path(&checkout.join("crates/jlens-core"));
@@ -228,22 +282,35 @@ impl Work {
         let bin = format!("probe-{}", std::process::id());
         fs::write(
             crate_dir.join("Cargo.toml"),
-            MANIFEST.replace("{core}", &core).replace("{bin}", &bin),
+            MANIFEST
+                .replace("{core}", &core)
+                .replace("{bin}", &bin)
+                .replace("{extra}", if mimalloc { "mimalloc = \"0.1\"" } else { "" }),
         )?;
-        fs::write(crate_dir.join("main.rs"), PROBE)?;
+        let source = if mimalloc {
+            format!("{PROBE}{MIMALLOC}")
+        } else {
+            PROBE.to_owned()
+        };
+        fs::write(crate_dir.join("main.rs"), source)?;
         fs::copy(checkout.join("Cargo.lock"), crate_dir.join("Cargo.lock"))?;
         let target = root().join("target/ab/target");
         eprintln!("building the probe of {rev}");
-        let status = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+        let mut cargo = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
+        cargo
             .current_dir(&crate_dir)
             .args(["build", "--quiet", "--release"])
-            .env("CARGO_TARGET_DIR", &target)
-            .status()
-            .context("running cargo build")?;
+            .env("CARGO_TARGET_DIR", &target);
+        let mut release = target.clone();
+        if let Some(triple) = &self.target {
+            cargo.args(["--target", triple]);
+            release.push(triple);
+        }
+        let status = cargo.status().context("running cargo build")?;
         if !status.success() {
             bail!("building the probe of {rev} failed");
         }
-        let built = target.join(format!("release/{bin}{}", env::consts::EXE_SUFFIX));
+        let built = release.join(format!("release/{bin}{}", env::consts::EXE_SUFFIX));
         fs::copy(&built, program).with_context(|| format!("copying {}", built.display()))?;
         let _ = fs::remove_file(&built);
         Ok(())

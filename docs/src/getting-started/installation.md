@@ -20,7 +20,7 @@ workflow of this repository built it, from which commit. Check one with the GitH
 gh attestation verify jlens-0.14.0-x86_64-unknown-linux-musl.tar.gz --repo thkprado/jlens
 ```
 
-Elsewhere, build it from source with Rust 1.88 or later:
+Elsewhere, build it from source with Rust 1.88 or later and a C compiler:
 
 ```sh
 cargo install jlens-cli                          # from crates.io

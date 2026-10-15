@@ -13,6 +13,14 @@ All notable changes are recorded here. The format follows
   `jlens lsp`, which it starts from the release binary bundled in the package of each release
   platform, from `jlens.server.path`, or from the `PATH`. VS Code checks `jlens.json` against
   its JSON Schema as it is edited. Each release publishes the extension with the same version.
+- `cargo xtask ab --b-allocator mimalloc` measures the allocator alone, and `--target` builds
+  for another local target, such as musl.
+
+### Changed
+
+- The `jlens` command uses mimalloc as its global allocator on every platform. Evaluations that allocate run
+  28 to 91% faster with the Linux release binaries, which are static musl binaries, and 14 to
+  56% faster on Windows. The library still leaves the choice of allocator to applications.
 
 ## [0.14.0]
 

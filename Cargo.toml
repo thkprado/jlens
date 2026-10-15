@@ -44,6 +44,8 @@ tracing = "0.1"
 lsp-server = "0.10"
 lsp-types = "0.97"
 url = "2"
+# The global allocator of the CLI only; the library leaves the choice to applications.
+mimalloc = "0.1.52"
 
 [workspace.lints.rust]
 missing_docs = "warn"

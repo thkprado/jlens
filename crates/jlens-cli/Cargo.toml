@@ -38,6 +38,7 @@ serde_json.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 clap.workspace = true
+mimalloc.workspace = true
 
 [lints]
 workspace = true
