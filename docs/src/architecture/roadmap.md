@@ -213,7 +213,7 @@ and attested, never rebuilt, and each one stays only if it updates without manua
 | 4 | Windows: a Scoop bucket, `thkprado/scoop-jlens`, with a manifest that updates itself from the GitHub releases (`checkver`, `autoupdate`). winget is left out for now: each version is a pull request that Microsoft reviews | `scoop install jlens` works after adding the bucket; the installation page | **done**: `cargo xtask scoop` writes the manifest from `SHA256SUMS`, with a `checkver` and an `autoupdate` that Scoop's `checkver.ps1` turns into the same manifest; the `Scoop` workflow commits it to the bucket when a release is published, and CI installs the manifest with the CI archive on Windows. `scoop install` is checked with the 0.14.0 release (#6) |
 | 5 | A container image, `ghcr.io/thkprado/jlens`: `FROM scratch` with the static Linux binaries (x86-64 and ARM64), built from the release archives and attested | `docker run --rm -i ghcr.io/thkprado/jlens eval '...'` works on both architectures; the installation page | **done**: `crates/jlens-cli/Dockerfile` unpacks the musl archive of the platform being built into a `scratch` image, so the multi-platform build runs no emulated step; `release.yml` pushes it with the run's token, tagged `X.Y.Z`, `X.Y` and `latest`, and attests it; CI builds it from its own archives and runs it on x86-64 and ARM64 runners. The pull from ghcr.io is checked with the 0.14.0 release (#6) |
 | 6 | Release 0.14.0 | The release checklist, with a check of each channel after the release | **done**, except npm: Homebrew, Scoop, the container image and the archives checked; npm refused `jlens-cli-win32-x64` ("Package name triggered spam detection"), so `jlens-cli` was not published (#7) |
-| 7 | The CLI on npm, after #6. The four other platform packages are on npm at 0.14.0; a support ticket asks npm to allow the name. Without an answer by 2026-10-20, the platform packages move to a scope (`@jlens/cli-<os>-<cpu>`), which changes ADR 0012. Before the next release tag, either the name is allowed, the packages are renamed, or the npm job of the CLI is left out of that release | `npx jlens-cli --version` works; the installation page and the release notes show the npm channel again | pending: left out of 0.15.0 and 0.16.0, as `release.yml` publishes the CLI to npm only when the repository variable `PUBLISH_NPM_CLI` is `true` |
+| 7 | The CLI on npm, after #6. The four other platform packages are on npm at 0.14.0; a support ticket asks npm to allow the name. Without an answer by 2026-10-20, the platform packages move to a scope (`@jlens/cli-<os>-<cpu>`), which changes ADR 0012. Before the next release tag, either the name is allowed, the packages are renamed, or the npm job of the CLI is left out of that release | `npx jlens-cli --version` works; the installation page and the release notes show the npm channel again | pending: left out of 0.15.0 and 0.16.0, as `release.yml` publishes the CLI to npm only when the repository variable `PUBLISH_NPM_CLI` is `true`. No longer planned: the 2026-10-20 deadline is dropped, the job stays off until npm answers, and the scope remains the way out |
 
 ## 0.15: jlens in VS Code, and a faster CLI allocator
 
@@ -249,10 +249,32 @@ that cost from 350 to 106 ns for `1`, but a path still takes about seven times a
 | 4 | A name over many items. `items.code` takes about 110 ns per item, against about 65 ns in jsonata-core, and `$count(items)` 0.94 against 0.41 µs. Looking the field up without evaluating the step saves only 12%, so the cost is elsewhere. Exploration: count the allocations per item, then separate the cost of the call from the cost of the step | The cost cut and measured with `ab` (the cases that map a name faster, no other case slower), or what takes the time, and why it stays, recorded on the performance page | **done**: allocations were not the per-item cost; copies were. A field holding an array is returned as it is, a step passes its items to the next without copying them into a new sequence, and results with no array to flatten are not copied twice. New case names over items (`$sum(items.quantity)`) 28% faster with `ab --mode document`, shipping rule 8%, group-by 4%, nothing slower; `$count(items.code)` 9.8 to 7.0 µs (4.9 in jsonata-core), `$count(items)` 0.94 to 0.67 µs. The rest is on the performance page |
 | 5 | Release 0.16.0. Before the tag, the npm channel of the CLI (0.14 #7) is settled or left out of the release | The release checklist; the performance page shows the new numbers | **done**: the native, WebAssembly and allocator tables measured again, with the two new cases; the npm channel of the CLI is left out (0.14 #7) |
 
+## 0.17: an API to keep, toward 1.0
+
+After sixteen releases, nothing says which parts of jlens are meant to last. `cargo
+semver-checks` runs in CI, but before 1.0 it only asks for a new minor version, and
+`jlens-core` exposes workspace plumbing (`stack`, `debug`, the AST's internals) next to its API.
+0.17 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
+down. Applications built on jlens, such as a rules engine, are separate projects: they use
+`jlens-core` as any application does, and what they lack comes back here as general features.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | ADR 0014, what 1.0 promises. Exploration: list the public items of `jlens-core`, `jlens-schema` and `jlens-lsp` (rustdoc JSON or `cargo public-api`) and the contracts outside Rust: the Wasm API (`types.d.ts`), the CLI (ADR 0008), the JSON of audits and explanations, `jlens.json`, the error codes. For each item: stable, hidden (`#[doc(hidden)]`, `pub(crate)`) or `#[non_exhaustive]` where it may grow. What semver covers and what it does not (messages, `Display`, `Debug`, performance, jsonata-js quirks), the MSRV policy, deprecations | The ADR accepted, with the list of changes that #2 to #4 make | |
+| 2 | `jlens-core` changes as ADR 0014 says, in one breaking batch | `cargo semver-checks` reports only the intended breaks; the changelog has a migration section; the crate guide's snippets updated | |
+| 3 | `jlens-schema` and `jlens-lsp` changes as ADR 0014 says; `jlens-lsp`, published since 0.3, joins the `semver` job of CI | As #2 | |
+| 4 | The contracts outside Rust, as ADR 0014 says: the Wasm API, the JSON of audits and `jlens.json`; a test pins each, so that a change shows in review | Tests that fail on an unintended change of each contract | |
+| 5 | A stability page in the book, from ADR 0014, and the rules for changing a stable item in `CONTRIBUTING.md` | `doc-check` green; the page linked from the introduction | |
+| 6 | Release 0.17.0, the release that breaks once. 1.0.0 follows when ADR 0014's criterion is met | The release checklist, with the migration notes in the release notes | |
+
 ## Later
 
 Not commitments, in order of priority:
 
 - **Asynchronous functions**, as in jsonata-js, whose functions may return promises. This needs
   an evaluator that can suspend, and an ADR first. Until then, a host function that returns a
-  promise fails with `U1002`.
+  promise fails with `U1002`. It matters only in WebAssembly, since a Rust host function can
+  block, and nobody has asked for it yet. A cheaper way, should someone ask: an
+  `evaluateAsync` that stops at the first promise, awaits the pending ones and evaluates again
+  with their results, which suits deterministic functions such as lookups, without touching
+  the evaluator.
