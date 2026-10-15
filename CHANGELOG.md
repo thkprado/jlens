@@ -6,11 +6,25 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.16.0]
+
+jlens closes its last speed gaps with jsonata-core, another JSONata engine in Rust: group-by is
+no longer quadratic in the size of a group, and paths of names and names mapped over many
+items take a fraction of the time they did. The CLI is still not on npm (see 0.14.0).
+
 ### Changed
 
 - Group-by (`items{type: ...}`) joins the items of each group once, instead of copying the
   group at every item, which made it quadratic in the size of the group. The group-by case of
   the benchmark runs 64% faster, and a group of 200 items 8 times faster.
+- A path of names, such as `customer.name` or `$i.code`, looks its fields up directly while no
+  array is met, instead of building a sequence at each step: the path case of the benchmark
+  runs 67% faster (0.68 to 0.23 µs), sort + map 33%.
+- A grouping with a literal key, such as `'total'` in `items{type: {'total': ...}}`, finds its
+  group by the literal's text instead of building a string per item: group-by runs 12% faster.
+- A path step that reads an array passes it on without copying it, and the step after it maps
+  over its items in place: `$sum(items.quantity)` runs 28% faster, `$count(items)` 29%.
+- The benchmark has two new cases: a name mapped over the items, and an object constructor.
 
 ## [0.15.0]
 
@@ -521,7 +535,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/thkprado/jlens/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/thkprado/jlens/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/thkprado/jlens/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/thkprado/jlens/compare/v0.12.0...v0.13.0
