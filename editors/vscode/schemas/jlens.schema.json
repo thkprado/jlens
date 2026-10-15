@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "jlens.json",
+  "description": "Which schema, variables and host functions apply to which JSONata files. Keys are glob patterns, relative to the folder of jlens.json; the first matching pattern applies.",
+  "type": "object",
+  "additionalProperties": {
+    "type": "object",
+    "description": "The settings of the files that match this pattern.",
+    "additionalProperties": false,
+    "properties": {
+      "schema": {
+        "type": "string",
+        "description": "A JSON Schema of the input documents, relative to the folder of jlens.json."
+      },
+      "variables": {
+        "type": "object",
+        "description": "The variables the expressions are evaluated with: a JSON Schema of each value, or null when the shape is unknown. Names can start with $.",
+        "additionalProperties": {
+          "type": ["object", "boolean", "null"]
+        }
+      },
+      "functions": {
+        "type": "array",
+        "description": "The host functions the expressions are evaluated with.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The name, with or without the leading $."
+            },
+            "signature": {
+              "type": "string",
+              "description": "The signature, such as <n-n?:n>."
+            },
+            "params": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "Parameter names, shown by signature help."
+            },
+            "summary": {
+              "type": "string",
+              "description": "One-line description, shown by completion and hover."
+            }
+          }
+        }
+      }
+    }
+  }
+}

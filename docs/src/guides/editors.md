@@ -102,10 +102,29 @@ With Eglot (built into Emacs 29):
 
 ## Visual Studio Code
 
-VS Code starts language servers from extensions, and jlens does not publish one yet. An
-extension that starts `jlens lsp` with `vscode-languageclient` for the `jsonata` language is
-enough. In the browser, the [WebAssembly package](wasm.md#the-language-service) offers the
-same service to CodeMirror and Monaco.
+The jlens extension (`thkprado.jlens`, from 0.15) highlights JSONata and starts `jlens lsp` for
+the `jsonata` language, in files ending in `.jsonata`. It looks for the server in this order:
+
+1. the setting `jlens.server.path`, the path of a `jlens` program;
+2. the `jlens` binary bundled with the extension, in its packages for Linux, macOS and Windows on
+   x86-64, and Linux and macOS on ARM64;
+3. `jlens` on the `PATH`, on other platforms.
+
+When it finds none, it says so, and highlighting keeps working. `jlens.server.path` is read
+from user settings only, never from a workspace's: a repository cannot choose which program
+runs. The command **jlens: Restart Language Server** starts the server again, after an update
+of `jlens` for example, and changing the setting does too.
+
+The **jlens** output channel shows the server's version and path, and its messages. The setting
+`jlens.trace.server` (`messages` or `verbose`) adds the protocol's messages to it.
+
+The extension also checks `jlens.json` as it is edited, with a JSON Schema: unknown settings,
+misspelled ones and wrong types are underlined, and hovers describe each setting.
+
+If another JSONata extension is installed, VS Code uses both: disable the other's language
+features, or you get the diagnostics of both. In the browser, the
+[WebAssembly package](wasm.md#the-language-service) offers the same service to CodeMirror and
+Monaco.
 
 ## Positions
 

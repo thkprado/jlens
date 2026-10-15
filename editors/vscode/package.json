@@ -13,16 +13,41 @@
     "directory": "editors/vscode"
   },
   "engines": {
-    "vscode": "^1.82.0"
+    "vscode": "^1.91.0"
   },
-  "categories": ["Programming Languages"],
-  "keywords": ["jsonata", "json", "query", "transform"],
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "jsonata",
+    "json",
+    "query",
+    "transform"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:jsonata"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "The setting jlens.server.path is read from user settings only, so that a workspace cannot choose which program runs.",
+      "restrictedConfigurations": [
+        "jlens.server.path"
+      ]
+    }
+  },
   "contributes": {
     "languages": [
       {
         "id": "jsonata",
-        "aliases": ["JSONata", "jsonata"],
-        "extensions": [".jsonata"],
+        "aliases": [
+          "JSONata",
+          "jsonata"
+        ],
+        "extensions": [
+          ".jsonata"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -32,14 +57,57 @@
         "scopeName": "source.jsonata",
         "path": "./syntaxes/jsonata.tmLanguage.json"
       }
+    ],
+    "commands": [
+      {
+        "command": "jlens.restartServer",
+        "title": "Restart Language Server",
+        "category": "jlens"
+      }
+    ],
+    "configuration": {
+      "title": "jlens",
+      "properties": {
+        "jlens.server.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "The `jlens` program that runs the language server (`jlens lsp`). When empty, the extension uses the binary it bundles, or else `jlens` on the `PATH`."
+        },
+        "jlens.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Logs the messages between VS Code and the language server in the jlens output channel."
+        }
+      }
+    },
+    "jsonValidation": [
+      {
+        "fileMatch": "jlens.json",
+        "url": "./schemas/jlens.schema.json"
+      }
     ]
   },
   "scripts": {
-    "test": "node --test test/grammar.test.mjs"
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --minify",
+    "check": "tsc --noEmit",
+    "test": "node --test test/grammar.test.mjs",
+    "test:extension": "npm run build && node test/run-extension.mjs"
   },
   "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/vscode": "1.91.0",
+    "@vscode/test-electron": "3.1.0",
+    "esbuild": "0.28.2",
     "jsonata": "2.2.2",
     "vscode-oniguruma": "2.0.1",
-    "vscode-textmate": "9.3.2"
+    "vscode-textmate": "9.3.2",
+    "typescript": "5.9.3",
+    "vscode-languageclient": "10.1.2"
   }
 }

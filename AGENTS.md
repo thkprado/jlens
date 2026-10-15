@@ -18,7 +18,7 @@ in `docs/`.
 | `docs/src` | the book; `language/functions.md` and `language/errors.md` are generated |
 | `xtask/src` | `cargo xtask` commands: conformance, gen-docs, doc-check, differential, fuzz-seed, fuzz-replay, homebrew, npm-cli, wasm, wasm-test, serve, site, ab |
 | `benches/` | the benchmark workload; `cargo xtask ab` compares two revisions; `benches/compare` compares jlens with jsonata-js (npm): speed, the book's examples, and `cargo xtask differential` |
-| `editors/vscode` | the VS Code extension (ADR 0013; outside the Cargo workspace): the TextMate grammar in `syntaxes/`, `language-configuration.json`, and `test/grammar.test.mjs`, which compares `test/fixtures/*.jsonata` with their `.snap` files (`npm test -- --update` rewrites them) and tokenizes the suite and the book |
+| `editors/vscode` | the VS Code extension (ADR 0013; outside the Cargo workspace): the client in `src/extension.ts` (bundled by esbuild, `npm run build`; `npm run check` type-checks it), the `jlens.json` schema in `schemas/`, the TextMate grammar in `syntaxes/`, `language-configuration.json`; `test/grammar.test.mjs` compares `test/fixtures/*.jsonata` with their `.snap` files (`npm test -- --update` rewrites them) and tokenizes the suite and the book; `npm run test:extension` runs `test/extension/` in VS Code on `fixtures/workspace`, with `target/debug/jlens` (`cargo build -p jlens-cli` first) or `JLENS_SERVER` |
 | `fuzz/` | cargo-fuzz targets (nightly, Linux; outside the workspace), their bodies in `src/targets.rs`; corpora seeded by `cargo xtask fuzz-seed`, run weekly by `.github/workflows/fuzz.yml`; `cargo xtask fuzz-replay` reruns saved inputs on any platform |
 
 ## Before you finish a change

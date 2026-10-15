@@ -116,16 +116,40 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   vscode:
-    name: VS Code extension
-    runs-on: ubuntu-latest
+    name: VS Code extension (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      - name: Build the language server
+        run: cargo build -p jlens-cli
+      - working-directory: editors/vscode
+        run: npm ci
       - name: Grammar (snapshots, the suite's expressions and the book's examples)
         working-directory: editors/vscode
-        run: npm ci && npm test
+        run: npm test
+      - name: Type-check the client
+        working-directory: editors/vscode
+        run: npm run check
+      - name: Extension test (diagnostics, completion and hover from the server)
+        working-directory: editors/vscode
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a npm run test:extension
+          else
+            npm run test:extension
+          fi
 
   wasm:
     name: Wasm (browser ESM)
