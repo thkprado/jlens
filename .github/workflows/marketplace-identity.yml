@@ -27,7 +27,10 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
-      # 499b84ac-... is the resource of Azure DevOps and the Marketplace.
+      # 499b84ac-... is the resource of Azure DevOps and the Marketplace. An application has no
+      # profile (profiles/me, which Microsoft's guide reads for a managed identity, answers
+      # VSS011031), but connectionData names its Azure DevOps identity.
       - run: >-
-          az rest --uri https://app.vssps.visualstudio.com/_apis/profile/profiles/me
-          --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id --output tsv
+          az rest --uri https://app.vssps.visualstudio.com/_apis/connectionData
+          --resource 499b84ac-1321-427f-aa17-267ca6975798 --query authenticatedUser.id
+          --output tsv
