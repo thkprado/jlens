@@ -64,3 +64,4 @@
   - [0011 Host callbacks](adr/0011-host-callbacks.md)
   - [0012 The CLI on npm](adr/0012-npm-distribution.md)
   - [0013 The VS Code extension](adr/0013-vscode-extension.md)
+  - [0014 The Python package](adr/0014-python-package.md)
