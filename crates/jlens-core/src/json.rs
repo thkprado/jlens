@@ -2,7 +2,7 @@
 
 use serde_json::Value as JsonValue;
 
-use crate::value::{js_number, write_json_string};
+use crate::value::{js_number, nest, write_json_string};
 
 /// Serializes a result as JSON text the way JavaScript's `JSON.stringify` would. Numbers use
 /// JavaScript's formatting, so `2432902008176640000` stays an integer and `1e21` prints as
@@ -47,7 +47,7 @@ fn write(out: &mut String, value: &JsonValue, pretty: bool, depth: usize) {
                     out.push(',');
                 }
                 newline(out, depth + 1);
-                write(out, item, pretty, depth + 1);
+                nest(depth + 1, || write(out, item, pretty, depth + 1));
             }
             newline(out, depth);
             out.push(']');
@@ -68,7 +68,7 @@ fn write(out: &mut String, value: &JsonValue, pretty: bool, depth: usize) {
                 if pretty {
                     out.push(' ');
                 }
-                write(out, v, pretty, depth + 1);
+                nest(depth + 1, || write(out, v, pretty, depth + 1));
             }
             newline(out, depth);
             out.push('}');

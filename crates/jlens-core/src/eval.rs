@@ -253,13 +253,12 @@ impl crate::host::Caller for HostCaller<'_, '_, '_> {
             .collect();
         let result = ev.callback(&func, args, self.env)?;
         let limit = ev.limits.max_result_size;
-        let json = result.to_json_within(limit).map_err(|_| {
-            Error::new("U1001").with(
-                "message",
+        let json = result.to_json_within(limit).map_err(|e| {
+            e.error(|| {
                 format!(
                     "The result of a function called by a host function would exceed the size limit of {limit} bytes"
-                ),
-            )
+                )
+            })
         })?;
         // Converting the result reads it, as converting the arguments of a host call does.
         ev.read_failure()?;
@@ -327,11 +326,8 @@ pub(crate) fn evaluate<'a, 'v>(
     }
     let result = ev.eval(&ast.root, &input, &env).and_then(|v| {
         let limit = ev.limits.max_result_size;
-        let json = v.to_json_within(limit).map_err(|_| {
-            Error::new("U1001").with(
-                "message",
-                format!("The result would exceed the size limit of {limit} bytes"),
-            )
+        let json = v.to_json_within(limit).map_err(|e| {
+            e.error(|| format!("The result would exceed the size limit of {limit} bytes"))
         })?;
         Ok((v, json))
     });
@@ -1219,7 +1215,7 @@ impl<'a> Evaluator<'_, 'a> {
             BinaryOp::Eq | BinaryOp::Ne => Ok(if lhs.is_undefined() || rhs.is_undefined() {
                 Value::Bool(false)
             } else {
-                Value::Bool(lhs.deep_eq(&rhs) == (op == BinaryOp::Eq))
+                Value::Bool(lhs.deep_eq(&rhs)? == (op == BinaryOp::Eq))
             }),
             BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => comparison(&lhs, &rhs, op),
             BinaryOp::Concat => {
@@ -2070,7 +2066,9 @@ fn wildcard<'a>(input: &Value<'a>, max: usize) -> Result<Value<'a>> {
 /// itself flattens to far more items than it holds.
 fn flatten<'a>(v: &Value<'a>, out: &mut Vec<Value<'a>>, max: usize) -> Result<()> {
     match v {
-        Value::Array(a) => a.items().iter().try_for_each(|i| flatten(i, out, max)),
+        Value::Array(a) => {
+            value::for_each_leaf(a.items(), |item| push_within(out, item.clone(), max))
+        }
         other => push_within(out, other.clone(), max),
     }
 }
@@ -2089,7 +2087,7 @@ fn descendants<'a>(input: &Value<'a>, max: usize) -> Result<Value<'a>> {
         return Ok(Value::Undefined);
     }
     let mut out = Vec::new();
-    recurse_descendants(input, &mut out, max)?;
+    recurse_descendants(input, &mut out, max, 0)?;
     Ok(if out.len() == 1 {
         out.pop().unwrap_or_default()
     } else {
@@ -2097,17 +2095,25 @@ fn descendants<'a>(input: &Value<'a>, max: usize) -> Result<Value<'a>> {
     })
 }
 
-fn recurse_descendants<'a>(input: &Value<'a>, out: &mut Vec<Value<'a>>, max: usize) -> Result<()> {
+/// The descendants of a value nested in `depth` arrays and objects, failing beyond the nesting
+/// limit.
+fn recurse_descendants<'a>(
+    input: &Value<'a>,
+    out: &mut Vec<Value<'a>>,
+    max: usize,
+    depth: usize,
+) -> Result<()> {
+    if matches!(input, Value::Array(_) | Value::Object(_)) && depth >= value::MAX_NESTING {
+        return Err(value::too_deep());
+    }
+    let nested = |v: &Value<'a>, out: &mut Vec<Value<'a>>| {
+        value::nest(depth + 1, || recurse_descendants(v, out, max, depth + 1))
+    };
     match input {
-        Value::Array(a) => a
-            .items()
-            .iter()
-            .try_for_each(|i| recurse_descendants(i, out, max)),
+        Value::Array(a) => a.items().iter().try_for_each(|i| nested(i, out)),
         Value::Object(o) => {
             push_within(out, input.clone(), max)?;
-            o.borrow()
-                .values()
-                .try_for_each(|v| recurse_descendants(v, out, max))
+            o.borrow().values().try_for_each(|v| nested(v, out))
         }
         other => push_within(out, other.clone(), max),
     }

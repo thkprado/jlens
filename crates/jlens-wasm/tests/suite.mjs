@@ -203,6 +203,19 @@ export const cases = [
     // Each level of nesting is a level of evaluation too, beyond the default depth of 500.
     equal(new j.Expression(ok999).evaluate(undefined, null, { maxDepth: 1000 }), 1, "999 levels");
     equal(j.parseRecover(nested).diagnostics[0].code, "U1001", "recovering parse");
+    // Values nested more than 1,000 levels deep, in the input or built by a tail-recursive
+    // function, fail with U1001 where they are converted, compared or serialized.
+    let input = 1;
+    for (let i = 0; i < 100000; i++) input = [input];
+    for (const source of ["$", "$string($)", "$count(**)", "[$, $] ~> $distinct"]) {
+      throws(() => new j.Expression(source).evaluate(input), (e) => equal(e.code, "U1001", source));
+    }
+    equal(new j.Expression("$count($)").evaluate(input), 1, "a level of the input");
+    equal(new j.Expression("$ = $").evaluate(input), true, "the same input");
+    const build = "$build := function($n, $acc) { $n = 0 ? $acc : $build($n - 1, {'a': $acc}) }";
+    throws(() => new j.Expression(`(${build}; $build(100000, 1))`).evaluate(), (e) => equal(e.code, "U1001"));
+    equal(new j.Expression(`(${build}; $count([$build(100000, 1)]))`).evaluate(), 1, "dropped");
+    equal(new j.Expression(`(${build}; $build(1000, 1) = $build(1000, 1))`).evaluate(), true, "1,000 levels");
     equal(new j.Expression("1 + 1").evaluate(), 2, "still usable");
   }],
 

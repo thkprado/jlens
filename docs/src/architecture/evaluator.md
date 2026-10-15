@@ -97,6 +97,7 @@ clears those frames when the evaluation ends.
 | Wall-clock time | `Options::timeout` | `D1012` | none |
 | Cancellation from another thread | `Options::cancel_token` | `U1003` | none |
 | Expression nesting | (fixed) | `U1001` | 1,000 levels of syntax tree, checked by the parser |
+| Value nesting | (fixed) | `U1001` | 1,000 levels of arrays and objects, checked where a value is converted to JSON, compared or serialized |
 | Length of a built string | `Options::max_string_length` | `U1001` | 256 MiB (in bytes of UTF-8) |
 | Items of a built array | `Options::max_array_length` | `U1001` | 16,777,216 |
 | Size of the result, and of the arguments of a host function | `Options::max_result_size` | `U1001` | 256 MiB (in bytes of compact JSON) |
@@ -127,6 +128,25 @@ not grow the stack, such as cloning and dropping it. Both nested subexpressions 
 of a chain count: `1 + 2 + 3` is a tree two levels deep, built by a loop rather than by
 recursion. 1,000 levels is far more than any hand-written expression uses.
 
+Values can nest much deeper than expressions: an input read from a `Source` (or from JavaScript
+in Wasm) has no depth limit, and a tail-recursive function can wrap a value in an object at each
+of its steps, without deepening the evaluation. So the walks over values are bounded in three
+ways:
+
+- **Walks that only enter arrays** (`**`'s and `*`'s flattening, field lookups across nested
+  arrays, `$boolean`, `$keys`, `$spread`) keep their own stack, and walk any depth.
+- **Walks that enter objects too** fail with `U1001` beyond 1,000 levels of arrays and objects:
+  converting the result or a host function's arguments to JSON, `=` and `$distinct`, `**`,
+  `$string` and `$clone`. They also grow the stack natively. The limit protects the caller as
+  well: the JSON returned is dropped and printed by recursive code (`serde_json`), and in Wasm
+  the walks run on the JavaScript engine's stack. jsonata-js works at 2,000 levels and raises a
+  `RangeError` before 5,000. Audits truncate the values they capture at the same depth.
+- **Dropping** counts how deep the drops of arrays and objects nest. Past 100 levels, the
+  arrays and objects that only the dropped one holds are emptied from a list, instead of each
+  inside the drop of its parent. Those that hold no array or object of their own, most of them,
+  skip the count.
+- **Recursive walks** grow the stack natively every 16 levels rather than at each value.
+
 The size limits stop an expression that doubles a string or an array on each step, or a path
 whose steps multiply the length of a sequence, before it runs out of memory, which would abort
 the process. They are checked by the operators that build strings and arrays (`&`, ranges,
@@ -141,11 +161,11 @@ that object twice, and so on. Thirty such steps stand for about a billion copies
 using little memory, until something writes them all out. So everything that writes a value
 out is limited too:
 
-- **The result**, which becomes JSON when the evaluation ends, is measured first: its size is
-  the length of its compact JSON text, counting a shared value each time it appears. The walk
-  stops once the size passes `Options::max_result_size`, and the evaluation fails with
-  `U1001`, before anything is converted. Escaped characters count as one byte, so the size is
-  slightly below the length of the text that `format_json` prints.
+- **The result**, which becomes JSON when the evaluation ends, is measured as it is converted:
+  its size is the length of its compact JSON text, counting a shared value each time it
+  appears. The conversion stops once the size passes `Options::max_result_size`, and the
+  evaluation fails with `U1001`. Escaped characters count as one byte, so the size is slightly
+  below the length of the text that `format_json` prints.
 - **The arguments of a host function** are measured together in the same way, and so is its
   context value (`HostCall::input`).
 - **`$string`, `$clone`** (and the transform operator, which clones its input) and `&` write

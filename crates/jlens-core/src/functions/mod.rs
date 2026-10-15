@@ -283,21 +283,24 @@ pub(crate) fn native_value<'a>(name: &str) -> Option<Value<'a>> {
 
 /// The effective boolean value (`$boolean`); `None` for undefined.
 pub(crate) fn boolean<'a>(v: &Value<'a>) -> Result<Option<bool>> {
+    // An array of one item has the value of its item.
+    let mut v = v;
+    while let Value::Array(a) = v
+        && a.items().len() == 1
+    {
+        v = &a.items()[0];
+    }
     Ok(Some(match v {
         Value::Undefined => return Ok(None),
-        Value::Array(a) => match a.items().len() {
-            0 => false,
-            1 => return boolean(&a.items()[0]),
-            _ => {
-                let mut any = false;
-                for item in a.items() {
-                    if boolean(item)? == Some(true) {
-                        any = true;
-                    }
-                }
-                any
-            }
-        },
+        // Whether any item is true, the items of nested arrays included, all of them checked.
+        Value::Array(a) => {
+            let mut any = false;
+            value::for_each_leaf(a.items(), |item| {
+                any |= boolean(item)? == Some(true);
+                Ok::<_, Error>(())
+            })?;
+            any
+        }
         Value::String(s) => !s.is_empty(),
         Value::Number(n) => v.is_numeric()? && *n != 0.0,
         Value::Object(o) => !o.borrow().is_empty(),
@@ -311,13 +314,14 @@ pub(crate) fn lookup<'a>(input: &Value<'a>, key: &str) -> Value<'a> {
     match input {
         Value::Array(a) => {
             let mut out = Vec::new();
-            for item in a.items() {
+            let Ok(()) = value::for_each_leaf(a.items(), |item| {
                 match lookup(item, key) {
                     Value::Undefined => {}
                     Value::Array(inner) => out.extend(inner.items().iter().cloned()),
                     other => out.push(other),
                 }
-            }
+                Ok::<_, std::convert::Infallible>(())
+            });
             Value::sequence(out)
         }
         Value::Object(o) => o.borrow().get(key).cloned().unwrap_or_default(),

@@ -1,6 +1,6 @@
 //! Higher-order, array, object and miscellaneous functions.
 
-use super::{Call, append, arg, boolean, hof_args, merge_sort, text};
+use super::{Call, arg, boolean, hof_args, merge_sort, text};
 use std::rc::Rc;
 
 use crate::error::{Error, Result};
@@ -166,28 +166,23 @@ fn entries<'a>(v: &Value<'a>) -> Vec<(Rc<str>, Value<'a>)> {
     }
 }
 
+/// The keys of an object, or of the objects in an array and in the arrays nested in it, each
+/// once, in the order they first appear.
 fn keys_of<'a>(v: &Value<'a>, out: &mut Vec<Rc<str>>) {
-    match v {
-        Value::Array(a) => {
-            let mut merged = Vec::new();
-            for item in a.items() {
-                keys_of(item, &mut merged);
-            }
-            for k in merged {
-                if !out.contains(&k) {
-                    out.push(k);
-                }
-            }
-        }
-        Value::Object(o) => {
+    let mut object_keys = |v: &Value<'a>| {
+        if let Value::Object(o) = v {
             for k in o.borrow().keys() {
                 if !out.contains(k) {
                     out.push(k.clone());
                 }
             }
         }
-        _ => {}
-    }
+        Ok::<_, std::convert::Infallible>(())
+    };
+    let Ok(()) = match v {
+        Value::Array(a) => value::for_each_leaf(a.items(), object_keys),
+        v => object_keys(v),
+    };
 }
 
 pub(super) fn keys<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
@@ -204,25 +199,37 @@ pub(super) fn spread<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<
 
 fn spread_value<'a>(v: &Value<'a>) -> Value<'a> {
     match v {
+        // The items spread, those of nested arrays included. jsonata-js appends each item's
+        // result to an empty sequence with `$append`, which makes it a plain array as soon as
+        // an item is defined.
         Value::Array(arr) => {
-            let mut result = Value::sequence(vec![]);
-            for item in arr.items() {
-                result = append(result, spread_value(item));
-            }
-            result
+            let mut items = Vec::new();
+            let Ok(()) = value::for_each_leaf(arr.items(), |item| {
+                match item {
+                    Value::Object(o) => items.extend(field_objects(o)),
+                    Value::Undefined => {}
+                    other => items.push(other.clone()),
+                }
+                Ok::<_, std::convert::Infallible>(())
+            });
+            let plain = arr.items().iter().any(|item| !item.is_undefined());
+            Value::array(items, if plain { 0 } else { SEQUENCE })
         }
-        Value::Object(o) => Value::sequence(
-            o.borrow()
-                .iter()
-                .map(|(k, v)| {
-                    let mut m = Map::default();
-                    m.insert(k.clone(), v.clone());
-                    Value::object(m)
-                })
-                .collect(),
-        ),
+        Value::Object(o) => Value::sequence(field_objects(o)),
         other => other.clone(),
     }
+}
+
+/// An object for each field of `o`, holding that field alone.
+fn field_objects<'a>(o: &value::Object<'a>) -> Vec<Value<'a>> {
+    o.borrow()
+        .iter()
+        .map(|(k, v)| {
+            let mut m = Map::default();
+            m.insert(k.clone(), v.clone());
+            Value::object(m)
+        })
+        .collect()
 }
 
 pub(super) fn merge<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
@@ -346,7 +353,14 @@ pub(super) fn distinct<'a>(
     }
     let mut out: Vec<Value<'a>> = Vec::new();
     for v in items.items() {
-        if !out.iter().any(|seen| v.deep_eq(seen)) {
+        let mut seen = false;
+        for earlier in &out {
+            if v.deep_eq(earlier)? {
+                seen = true;
+                break;
+            }
+        }
+        if !seen {
             out.push(v.clone());
         }
     }

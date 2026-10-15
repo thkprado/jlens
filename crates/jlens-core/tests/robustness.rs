@@ -764,3 +764,97 @@ fn fuzz_crashes_stay_fixed() {
         assert_eq!(&got, expected, "{source}");
     }
 }
+
+/// Arrays nested `.0` levels deep around a number, read one level at a time.
+struct Nested(usize);
+
+impl<'a> Source<'a> for Nested {
+    fn read(&self, sink: &mut Sink<'_, 'a>) -> Result<(), String> {
+        match self.0 {
+            0 => sink.number(1.0),
+            n => sink.array(Nested(n - 1)),
+        }
+        Ok(())
+    }
+}
+
+/// Values nested 100,000 levels deep (5,000 where that is enough), read from a source or built
+/// by a tail-recursive function, give a result or fail with `U1001` beyond the nesting limit:
+/// nothing overflows the stack, dropping them included.
+#[test]
+fn deep_values_fail_cleanly() {
+    let run = || {
+        let bindings = Bindings::new()
+            .function("arg", HostFunction::new(1, |args, _| Ok(args[0].clone())))
+            .function("input", HostFunction::new(0, |_, call| Ok(call.input())));
+        let from_source = [
+            ("$", Err("U1001")),
+            ("$[0]", Err("U1001")),
+            ("$string($)", Err("U1001")),
+            ("$clone($)", Err("U1001")),
+            ("[$, $] ~> $distinct", Err("U1001")),
+            ("$arg($)", Err("U1001")),
+            ("$.$input()", Err("U1001")),
+            ("$count(**)", Err("U1001")),
+            ("$count($)", Ok(json!(1))),
+            ("$ = $", Ok(json!(true))),
+            ("$boolean($)", Ok(json!(true))),
+            ("$count($keys($))", Ok(json!(0))),
+            ("$spread($)", Ok(json!([1]))),
+            ("*", Ok(json!([1]))),
+            // Undefined.
+            ("$.a", Ok(json!(null))),
+        ];
+        let deep = Nested(100_000);
+        for (source, expected) in from_source {
+            let expr = Expression::compile(source).unwrap();
+            let result = expr.evaluate_source(&deep, &bindings, &Options::new());
+            let got = result.map(|v| v.unwrap_or_default());
+            match expected {
+                Ok(value) => assert_eq!(got.unwrap(), value, "{source}"),
+                Err(code) => assert_eq!(got.unwrap_err().code(), code, "{source}"),
+            }
+        }
+        let build = "$build := function($n, $acc) { $n = 0 ? $acc : $build($n - 1, {'a': $acc}) }";
+        let built = [
+            ("$build(100000, 1)", Err("U1001")),
+            ("$string($build(5000, 1))", Err("U1001")),
+            ("$build(5000, 1) = $build(5000, 1)", Err("U1001")),
+            ("$count([$build(100000, 1)])", Ok(json!(1))),
+            ("$count($build(5000, 1).**)", Err("U1001")),
+            // Up to the limit, the value is whole.
+            ("$build(1000, 1) = $build(1000, 1)", Ok(json!(true))),
+            ("$build(1001, 1) = $build(1001, 1)", Err("U1001")),
+            ("$length($string($build(1000, 1)))", Ok(json!(1000 * 6 + 1))),
+        ];
+        for (source, expected) in built {
+            let source = format!("({build}; {source})");
+            let expr = Expression::compile(&source).unwrap();
+            let result = expr.evaluate(None, &Bindings::new());
+            match expected {
+                Ok(value) => assert_eq!(result.unwrap(), Some(value), "{source}"),
+                Err(code) => assert_eq!(result.unwrap_err().code(), code, "{source}"),
+            }
+        }
+        // An audit keeps the values it captures within the limit, whatever depth it asks for.
+        let expr = Expression::compile(&format!("({build}; $build(1100, 1))")).unwrap();
+        let mut audit = jlens_core::audit::AuditOptions::default();
+        audit.limits.max_depth = usize::MAX;
+        let (result, tree) = expr.evaluate_audited(None, &Bindings::new(), &Options::new(), &audit);
+        assert_eq!(result.unwrap_err().code(), "U1001");
+        drop(tree);
+        // Up to the limit, a source's value is returned whole.
+        let expr = Expression::compile("$").unwrap();
+        let options = Options::new();
+        let result = expr.evaluate_source(&Nested(1_000), &Bindings::new(), &options);
+        assert!(result.unwrap().is_some());
+        let result = expr.evaluate_source(&Nested(1_001), &Bindings::new(), &options);
+        assert_eq!(result.unwrap_err().code(), "U1001");
+    };
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(run)
+        .unwrap()
+        .join()
+        .unwrap();
+}

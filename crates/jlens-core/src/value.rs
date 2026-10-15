@@ -300,6 +300,120 @@ impl<'a> Object<'a> {
     }
 }
 
+// Arrays and objects nested deeper than the native stack allows (built by a tail-recursive
+// function, or read from a `Source`) must be dropped too. The drops of those that hold arrays
+// or objects of their own count how deep they are nested in one another, and past
+// `DROP_DEPTH` levels, the arrays and objects inside are dropped without recursion. The others,
+// most of them, drop as usual.
+impl Drop for Array<'_> {
+    fn drop(&mut self) {
+        let lazy = self.lazy.as_mut().and_then(|lazy| lazy.items.take());
+        let read = lazy.as_deref().unwrap_or_default();
+        if !self.items.iter().chain(read).any(owned) {
+            return;
+        }
+        let items = std::mem::take(&mut self.items);
+        nested_drop(|deep| {
+            if deep {
+                release(items.into_iter().chain(lazy.into_iter().flatten()));
+            } else {
+                drop((items, lazy));
+            }
+        });
+    }
+}
+
+impl Drop for Object<'_> {
+    fn drop(&mut self) {
+        let map = self.map.get_mut();
+        if !map.values().any(owned) {
+            return;
+        }
+        // Moved out with the same hasher, which costs no allocation; clearing it in place would
+        // reset its table first.
+        let map = std::mem::replace(map, Map::with_hasher(map.hasher().clone()));
+        nested_drop(|deep| {
+            if deep {
+                release(map.into_values());
+            } else {
+                drop(map);
+            }
+        });
+    }
+}
+
+/// Whether a value is an array or object that nothing else holds, which dropping it drops.
+fn owned(v: &Value<'_>) -> bool {
+    match v {
+        Value::Array(a) => Rc::strong_count(a) == 1,
+        Value::Object(o) => Rc::strong_count(o) == 1,
+        _ => false,
+    }
+}
+
+/// How deep drops nest before the values inside are released from a list instead.
+const DROP_DEPTH: usize = 100;
+
+thread_local! {
+    static DROPS: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Runs `drop`, a level deeper in the drops of arrays and objects; it is told whether that is
+/// past [`DROP_DEPTH`].
+fn nested_drop(drop: impl FnOnce(bool)) {
+    DROPS.with(|drops| {
+        let depth = drops.get();
+        drops.set(depth + 1);
+        drop(depth >= DROP_DEPTH);
+        drops.set(depth);
+    });
+}
+
+/// Calls `f` with each value of `items` that is not an array, in order, entering the arrays
+/// nested in them. The walk keeps its own stack, so arrays nested at any depth are walked.
+pub(crate) fn for_each_leaf<'v, 'a, E>(
+    items: &'v [Value<'a>],
+    mut f: impl FnMut(&'v Value<'a>) -> std::result::Result<(), E>,
+) -> std::result::Result<(), E> {
+    let mut outer = Vec::new();
+    let mut iter = items.iter();
+    loop {
+        match iter.next() {
+            Some(Value::Array(a)) => outer.push(std::mem::replace(&mut iter, a.items().iter())),
+            Some(leaf) => f(leaf)?,
+            None => match outer.pop() {
+                Some(rest) => iter = rest,
+                None => return Ok(()),
+            },
+        }
+    }
+}
+
+/// Drops values, emptying the arrays and objects that only they hold one at a time, from a
+/// list of their own, rather than each inside the drop of its parent.
+fn release<'a>(values: impl IntoIterator<Item = Value<'a>>) {
+    let mut pending: Vec<Value<'a>> = values.into_iter().filter(owned).collect();
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Array(a) => {
+                if let Some(mut a) = Rc::into_inner(a) {
+                    pending.extend(std::mem::take(&mut a.items).into_iter().filter(owned));
+                    if let Some(items) = a.lazy.as_mut().and_then(|lazy| lazy.items.take()) {
+                        pending.extend(items.into_iter().filter(owned));
+                    }
+                }
+            }
+            Value::Object(o) => {
+                if let Some(mut o) = Rc::into_inner(o) {
+                    let fields = std::mem::take(o.map.get_mut()).into_values();
+                    pending.extend(fields.filter(owned));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// A function value.
 pub(crate) enum Function<'a> {
     /// A JSONata `function(...)`, or a tail-call thunk.
@@ -500,33 +614,62 @@ impl<'a> Value<'a> {
         }
     }
 
-    /// Deep equality (jsonata-js `isDeepEqual`), used by `=` and `!=`.
-    pub fn deep_eq(&self, other: &Value<'a>) -> bool {
+    /// Deep equality (jsonata-js `isDeepEqual`), used by `=` and `!=`. Values nested more than
+    /// [`MAX_NESTING`] levels deep are not compared: `U1001`.
+    pub fn deep_eq(&self, other: &Value<'a>) -> Result<bool> {
+        self.deep_eq_at(other, 0)
+    }
+
+    /// [`Value::deep_eq`] for values nested in `depth` arrays and objects.
+    fn deep_eq_at(&self, other: &Value<'a>, depth: usize) -> Result<bool> {
+        let nested = |x: &Value<'a>, y: &Value<'a>| nest(depth + 1, || x.deep_eq_at(y, depth + 1));
         match (self, other) {
+            (Value::Array(_), Value::Array(_)) | (Value::Object(_), Value::Object(_))
+                if depth >= MAX_NESTING =>
+            {
+                Err(too_deep())
+            }
             (Value::Array(a), Value::Array(b)) => {
-                Rc::ptr_eq(a, b)
-                    || (a.items().len() == b.items().len()
-                        && a.items().iter().zip(b.items()).all(|(x, y)| x.deep_eq(y)))
+                if Rc::ptr_eq(a, b) {
+                    return Ok(true);
+                }
+                if a.items().len() != b.items().len() {
+                    return Ok(false);
+                }
+                for (x, y) in a.items().iter().zip(b.items()) {
+                    if !nested(x, y)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
             }
             (Value::Object(a), Value::Object(b)) => {
                 if Rc::ptr_eq(a, b) {
-                    return true;
+                    return Ok(true);
                 }
                 let (a, b) = (a.borrow(), b.borrow());
-                a.len() == b.len()
-                    && a.iter()
-                        .all(|(k, v)| b.get(k).is_some_and(|w| v.deep_eq(w)))
+                if a.len() != b.len() {
+                    return Ok(false);
+                }
+                for (k, v) in a.iter() {
+                    match b.get(k) {
+                        Some(w) if nested(v, w)? => {}
+                        _ => return Ok(false),
+                    }
+                }
+                Ok(true)
             }
-            _ => self.strict_eq(other),
+            _ => Ok(self.strict_eq(other)),
         }
     }
 
     /// Converts input JSON into a value.
     pub fn from_json(json: &JsonValue) -> Value<'a> {
-        Value::from_json_with(json, &mut Keys::default())
+        Value::from_json_with(json, &mut Keys::default(), 0)
     }
 
-    fn from_json_with(json: &JsonValue, keys: &mut Keys) -> Value<'a> {
+    /// [`Value::from_json`] for JSON nested in `depth` arrays and objects.
+    fn from_json_with(json: &JsonValue, keys: &mut Keys, depth: usize) -> Value<'a> {
         match json {
             JsonValue::Null => Value::Null,
             JsonValue::Bool(b) => Value::Bool(*b),
@@ -535,14 +678,15 @@ impl<'a> Value<'a> {
             JsonValue::Array(items) => Value::array(
                 items
                     .iter()
-                    .map(|v| Value::from_json_with(v, keys))
+                    .map(|v| nest(depth + 1, || Value::from_json_with(v, keys, depth + 1)))
                     .collect(),
                 0,
             ),
             JsonValue::Object(map) => {
                 let mut out = Map::with_capacity_and_hasher(map.len(), Default::default());
                 for (k, v) in map {
-                    out.insert(keys.get(k), Value::from_json_with(v, keys));
+                    let v = nest(depth + 1, || Value::from_json_with(v, keys, depth + 1));
+                    out.insert(keys.get(k), v);
                 }
                 Value::object(out)
             }
@@ -613,10 +757,16 @@ impl<'a> Value<'a> {
     }
 
     /// Converts a result into JSON, following `JSON.stringify`: undefined and functions are
-    /// dropped from objects and become `null` in arrays; a top-level one yields `None`.
+    /// dropped from objects and become `null` in arrays; a top-level one yields `None`. It has
+    /// no nesting limit: it converts documents, whose depth their JSON bounds.
     pub fn to_json(&self) -> Option<JsonValue> {
+        self.to_json_at(0)
+    }
+
+    /// [`Value::to_json`] for a value nested in `depth` arrays and objects.
+    fn to_json_at(&self, depth: usize) -> Option<JsonValue> {
         if let Some(json) = self.unread() {
-            return Some(copy_json(json));
+            return Some(copy_json(json, depth));
         }
         Some(match self {
             Value::Undefined | Value::Function(_) => return None,
@@ -627,37 +777,47 @@ impl<'a> Value<'a> {
             Value::Array(a) => JsonValue::Array(
                 a.items()
                     .iter()
-                    .map(|v| v.to_json().unwrap_or(JsonValue::Null))
+                    .map(|v| nest(depth + 1, || v.to_json_at(depth + 1)).unwrap_or(JsonValue::Null))
                     .collect(),
             ),
             Value::Object(o) => JsonValue::Object(
                 o.borrow()
                     .iter()
-                    .filter_map(|(k, v)| v.to_json().map(|j| (k.to_string(), j)))
+                    .filter_map(|(k, v)| {
+                        nest(depth + 1, || v.to_json_at(depth + 1)).map(|j| (k.to_string(), j))
+                    })
                     .collect(),
             ),
         })
     }
 
     /// Converts a value into JSON like [`Value::to_json`], failing when its compact JSON text
-    /// would be longer than `limit` bytes (see [`Value::json_fits`]). The size is counted while
-    /// converting, which stops as soon as it is exceeded.
+    /// would be longer than `limit` bytes, or when it is nested more than [`MAX_NESTING`]
+    /// levels deep. The size is counted while converting, which stops as soon as it is
+    /// exceeded.
     pub(crate) fn to_json_within(
         &self,
         limit: usize,
     ) -> std::result::Result<Option<JsonValue>, TooLarge> {
         let mut budget = limit;
-        self.to_json_spending(&mut budget)
+        self.to_json_spending(&mut budget, 0)
     }
 
-    /// [`Value::to_json`], spending the length of the text from `budget` as
-    /// [`Value::json_fits`] does.
-    fn to_json_spending(
+    /// [`Value::to_json`] for a value nested in `depth` arrays and objects, spending the length
+    /// of its compact JSON text from `budget`. Escaped characters count as one byte, and
+    /// numbers about as many bytes as JavaScript prints. A value that appears several times (an
+    /// object bound to a variable and nested in itself, say) counts each time, as it does in
+    /// the text.
+    pub(crate) fn to_json_spending(
         &self,
         budget: &mut usize,
+        depth: usize,
     ) -> std::result::Result<Option<JsonValue>, TooLarge> {
         if let Some(json) = self.unread() {
-            return copy_json_within(json, budget).map(Some);
+            return copy_json_within(json, budget, depth).map(Some);
+        }
+        if matches!(self, Value::Array(_) | Value::Object(_)) && depth >= MAX_NESTING {
+            return Err(TooLarge::Nesting);
         }
         Ok(Some(match self {
             Value::Undefined | Value::Function(_) => return Ok(None),
@@ -687,7 +847,8 @@ impl<'a> Value<'a> {
                             charge(budget, 4)?;
                             JsonValue::Null
                         }
-                        v => v.to_json_spending(budget)?.unwrap_or(JsonValue::Null),
+                        v => nest(depth + 1, || v.to_json_spending(budget, depth + 1))?
+                            .unwrap_or(JsonValue::Null),
                     });
                 }
                 JsonValue::Array(out)
@@ -701,7 +862,7 @@ impl<'a> Value<'a> {
                         Value::Undefined | Value::Function(_) => None,
                         v => {
                             charge(budget, k.len() + 4)?;
-                            v.to_json_spending(budget)?
+                            nest(depth + 1, || v.to_json_spending(budget, depth + 1))?
                         }
                     } {
                         out.insert(k.to_string(), json);
@@ -717,42 +878,6 @@ impl<'a> Value<'a> {
     pub(crate) fn to_json_detail(&self) -> Option<JsonValue> {
         self.to_json_within(crate::eval::DEFAULT_MAX_RESULT_SIZE)
             .unwrap_or(None)
-    }
-
-    /// Spends the length of the value's compact JSON text from `budget`, and tells whether it
-    /// fitted. A value that appears several times (an object bound to a variable and nested in
-    /// itself, say) counts each time, as it does in the text, but the walk stops as soon as the
-    /// budget runs out. Escaped characters count as one byte, and numbers about as many bytes as
-    /// JavaScript prints.
-    pub(crate) fn json_fits(&self, budget: &mut usize) -> bool {
-        if let Some(json) = self.unread() {
-            return json_text_fits(json, budget);
-        }
-        match self {
-            Value::Undefined | Value::Function(_) => true,
-            Value::Null => spend(budget, 4),
-            Value::Bool(b) => spend(budget, if *b { 4 } else { 5 }),
-            Value::Number(n) => spend(budget, number_len(*n)),
-            Value::String(s) => spend(budget, s.len() + 2),
-            Value::Array(a) => {
-                // The brackets and the commas; an undefined item or a function becomes `null`.
-                spend(budget, 1 + a.items().len().max(1))
-                    && a.items().iter().all(|v| match v {
-                        Value::Undefined | Value::Function(_) => spend(budget, 4),
-                        v => v.json_fits(budget),
-                    })
-            }
-            Value::Object(o) => {
-                let o = o.borrow();
-                // The opening brace, then for each member its quoted key, the colon, and the
-                // comma or closing brace after it.
-                spend(budget, if o.is_empty() { 2 } else { 1 })
-                    && o.iter().all(|(k, v)| match v {
-                        Value::Undefined | Value::Function(_) => true,
-                        v => spend(budget, k.len() + 4) && v.json_fits(budget),
-                    })
-            }
-        }
     }
 }
 
@@ -840,11 +965,11 @@ impl<'a> Sink<'_, 'a> {
                 .map_err(|e| e.to_string())?;
         match (value, &mut self.level) {
             (Value::Array(array), Level::Items(items)) => match Rc::try_unwrap(array) {
-                Ok(array) => items.extend(array.items),
+                Ok(mut array) => items.extend(std::mem::take(&mut array.items)),
                 Err(array) => items.extend(array.items().iter().cloned()),
             },
             (Value::Object(object), Level::Fields(map)) => match Rc::try_unwrap(object) {
-                Ok(object) => map.extend(object.map.into_inner()),
+                Ok(object) => map.extend(object.map.take()),
                 Err(object) => {
                     map.extend(object.borrow().iter().map(|(k, v)| (k.clone(), v.clone())))
                 }
@@ -886,27 +1011,38 @@ impl<'a> Sink<'_, 'a> {
     }
 }
 
-/// A copy of input JSON with its numbers as [`Value::to_json`] writes them: what converting it
-/// to a value and back gives, without building the value.
-fn copy_json(json: &JsonValue) -> JsonValue {
+/// A copy of input JSON, nested in `depth` arrays and objects, with its numbers as
+/// [`Value::to_json`] writes them: what converting it to a value and back gives, without
+/// building the value.
+fn copy_json(json: &JsonValue, depth: usize) -> JsonValue {
     match json {
         JsonValue::Number(n) => json_number(n.as_f64().unwrap_or(f64::NAN)),
-        JsonValue::Array(items) => JsonValue::Array(items.iter().map(copy_json).collect()),
+        JsonValue::Array(items) => JsonValue::Array(
+            items
+                .iter()
+                .map(|v| nest(depth + 1, || copy_json(v, depth + 1)))
+                .collect(),
+        ),
         JsonValue::Object(fields) => JsonValue::Object(
             fields
                 .iter()
-                .map(|(k, v)| (k.clone(), copy_json(v)))
+                .map(|(k, v)| (k.clone(), nest(depth + 1, || copy_json(v, depth + 1))))
                 .collect(),
         ),
         other => other.clone(),
     }
 }
 
-/// [`copy_json`], spending the length of the text from `budget` as [`json_text_fits`] does.
+/// [`copy_json`] for JSON nested in `depth` arrays and objects, spending the length of the text
+/// from `budget` as [`Value::to_json_spending`] does.
 fn copy_json_within(
     json: &JsonValue,
     budget: &mut usize,
+    depth: usize,
 ) -> std::result::Result<JsonValue, TooLarge> {
+    if matches!(json, JsonValue::Array(_) | JsonValue::Object(_)) && depth >= MAX_NESTING {
+        return Err(TooLarge::Nesting);
+    }
     Ok(match json {
         JsonValue::Null => {
             charge(budget, 4)?;
@@ -930,7 +1066,7 @@ fn copy_json_within(
             JsonValue::Array(
                 items
                     .iter()
-                    .map(|v| copy_json_within(v, budget))
+                    .map(|v| nest(depth + 1, || copy_json_within(v, budget, depth + 1)))
                     .collect::<std::result::Result<_, _>>()?,
             )
         }
@@ -939,30 +1075,12 @@ fn copy_json_within(
             let mut out = serde_json::Map::with_capacity(fields.len());
             for (k, v) in fields {
                 charge(budget, k.len() + 4)?;
-                out.insert(k.clone(), copy_json_within(v, budget)?);
+                let v = nest(depth + 1, || copy_json_within(v, budget, depth + 1))?;
+                out.insert(k.clone(), v);
             }
             JsonValue::Object(out)
         }
     })
-}
-
-/// [`Value::json_fits`] for input JSON.
-fn json_text_fits(json: &JsonValue, budget: &mut usize) -> bool {
-    match json {
-        JsonValue::Null => spend(budget, 4),
-        JsonValue::Bool(b) => spend(budget, if *b { 4 } else { 5 }),
-        JsonValue::Number(n) => spend(budget, number_len(n.as_f64().unwrap_or(f64::NAN))),
-        JsonValue::String(s) => spend(budget, s.len() + 2),
-        JsonValue::Array(items) => {
-            spend(budget, 1 + items.len().max(1)) && items.iter().all(|v| json_text_fits(v, budget))
-        }
-        JsonValue::Object(fields) => {
-            spend(budget, if fields.is_empty() { 2 } else { 1 })
-                && fields
-                    .iter()
-                    .all(|(k, v)| spend(budget, k.len() + 4) && json_text_fits(v, budget))
-        }
-    }
 }
 
 /// A value of any evaluation behind a trait object, whatever the lifetime of its input. Public
@@ -978,7 +1096,9 @@ pub(crate) trait Inspect: std::fmt::Debug {
 
 impl Inspect for Value<'_> {
     fn to_json(&self) -> Option<JsonValue> {
-        Value::to_json(self)
+        // Within the nesting limit: a tracer may keep the JSON, and a deeper one would
+        // overflow the stack when dropped.
+        Value::to_json_within(self, usize::MAX).unwrap_or(None)
     }
 
     fn to_json_within(&self, limit: usize) -> std::result::Result<Option<JsonValue>, TooLarge> {
@@ -1001,29 +1121,53 @@ impl Inspect for Value<'_> {
     }
 }
 
-/// Takes `bytes` from `budget`; false when there are not enough left.
-/// [`spend`], failing when the bytes do not fit.
+/// Takes `bytes` from `budget`, failing when there are not enough left.
 fn charge(budget: &mut usize, bytes: usize) -> std::result::Result<(), TooLarge> {
-    if spend(budget, bytes) {
-        Ok(())
+    *budget = budget.checked_sub(bytes).ok_or(TooLarge::Size)?;
+    Ok(())
+}
+
+/// The deepest arrays and objects may nest in a value that is converted to JSON, compared or
+/// serialized. jsonata-js is limited by the JavaScript stack; jlens fails cleanly instead, and
+/// the JSON it returns can then be dropped or serialized by recursive code (`serde_json`).
+pub(crate) const MAX_NESTING: usize = 1_000;
+
+/// Runs the step of a recursive walk over values that enters level `depth`, growing the stack
+/// natively every 16 levels: the red zone of [`crate::stack::grow`] covers the frames between,
+/// and checking at each value would slow the walks down.
+#[inline]
+pub(crate) fn nest<R>(depth: usize, step: impl FnOnce() -> R) -> R {
+    if depth.is_multiple_of(16) {
+        crate::stack::grow(step)
     } else {
-        Err(TooLarge)
+        step()
     }
 }
 
-fn spend(budget: &mut usize, bytes: usize) -> bool {
-    match budget.checked_sub(bytes) {
-        Some(rest) => {
-            *budget = rest;
-            true
+/// The error of a value nested more than [`MAX_NESTING`] levels deep.
+pub(crate) fn too_deep() -> Error {
+    Error::new("U1001").with(
+        "message",
+        format!("A value is nested more than {MAX_NESTING} levels deep"),
+    )
+}
+
+/// A value whose JSON text would exceed a size limit, or the nesting limit.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum TooLarge {
+    Size,
+    Nesting,
+}
+
+impl TooLarge {
+    /// The `U1001` error, whose message is `size` for a value too large.
+    pub(crate) fn error(self, size: impl FnOnce() -> String) -> Error {
+        match self {
+            TooLarge::Size => Error::new("U1001").with("message", size()),
+            TooLarge::Nesting => too_deep(),
         }
-        None => false,
     }
 }
-
-/// A value whose JSON text would exceed a size limit.
-#[derive(Debug)]
-pub(crate) struct TooLarge;
 
 /// The length of a number in JSON text: its digits for an integer, about as many as
 /// JavaScript prints otherwise, and 4 for `null` (a number that is not finite).
@@ -1150,6 +1294,7 @@ fn write_json<'a>(
         }
         Value::String(s) => write_json_string(out, s),
         Value::Function(_) => out.push_str("\"\""),
+        Value::Array(_) | Value::Object(_) if depth >= MAX_NESTING => return Err(too_deep()),
         Value::Array(a) => {
             if a.items().is_empty() {
                 out.push_str("[]");
@@ -1161,7 +1306,9 @@ fn write_json<'a>(
                     out.push(',');
                 }
                 newline(out, depth + 1);
-                write_json(out, item, pretty, depth + 1, limit)?;
+                nest(depth + 1, || {
+                    write_json(out, item, pretty, depth + 1, limit)
+                })?;
             }
             newline(out, depth);
             out.push(']');
@@ -1184,7 +1331,7 @@ fn write_json<'a>(
                 if pretty {
                     out.push(' ');
                 }
-                write_json(out, v, pretty, depth + 1, limit)?;
+                nest(depth + 1, || write_json(out, v, pretty, depth + 1, limit))?;
             }
             if !first {
                 newline(out, depth);
@@ -1256,7 +1403,7 @@ mod tests {
     fn equality() {
         let a = Value::from_json(&serde_json::json!({"x": [1, {"y": 2}]}));
         let b = Value::from_json(&serde_json::json!({"x": [1.0, {"y": 2}]}));
-        assert!(a.deep_eq(&b));
+        assert!(a.deep_eq(&b).unwrap());
         assert!(!a.strict_eq(&b));
         assert_eq!(js_string_cmp("a", "b"), Ordering::Less);
     }

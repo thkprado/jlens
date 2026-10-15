@@ -385,6 +385,7 @@ monaco.languages.registerCompletionItemProvider("jsonata", {
 | Items of an array built (`maxArrayLength`) | 16,777,216 | `U1001` |
 | Size of the result as JSON text (`maxResultSize`, bytes) | 256 MiB | `U1001` |
 | Expression nesting | 1,000 levels | `U1001` |
+| Nesting of arrays and objects in a value that is returned, compared or serialized | 1,000 levels | `U1001` |
 
 The size of the result counts a value each time it appears, as the JSON text does, and also
 limits the arguments passed to a host function. Wasm evaluations are synchronous, so there is

@@ -42,7 +42,7 @@ use serde_json::Value as JsonValue;
 
 use crate::ast::{Node, NodeId, Span};
 use crate::error::Error;
-use crate::value::{Inspect, Value};
+use crate::value::{Inspect, MAX_NESTING, Value, nest};
 
 /// Receives evaluation events. Every method has an empty default implementation.
 ///
@@ -110,7 +110,8 @@ pub struct EvalInfo<'a> {
 pub struct ValueRef<'a>(pub(crate) &'a dyn Inspect);
 
 impl ValueRef<'_> {
-    /// The value as JSON (`None` for undefined and functions).
+    /// The value as JSON (`None` for undefined and functions, and for a value nested more than
+    /// 1,000 levels deep).
     pub fn to_json(&self) -> Option<JsonValue> {
         self.0.to_json()
     }
@@ -418,7 +419,7 @@ pub(crate) fn capture(v: &Value<'_>, limits: &CaptureLimits, depth: usize) -> Op
                 JsonValue::String(s.to_string())
             }
         }
-        Value::Array(_) | Value::Object(_) if depth >= limits.max_depth => {
+        Value::Array(_) | Value::Object(_) if depth >= limits.max_depth.min(MAX_NESTING) => {
             JsonValue::String("…".into())
         }
         Value::Array(a) => {
@@ -426,7 +427,9 @@ pub(crate) fn capture(v: &Value<'_>, limits: &CaptureLimits, depth: usize) -> Op
                 .items()
                 .iter()
                 .take(limits.max_items)
-                .map(|i| capture(i, limits, depth + 1).unwrap_or(JsonValue::Null))
+                .map(|i| {
+                    nest(depth + 1, || capture(i, limits, depth + 1)).unwrap_or(JsonValue::Null)
+                })
                 .collect();
             if a.items().len() > limits.max_items {
                 items.push(JsonValue::String(format!(
@@ -440,7 +443,7 @@ pub(crate) fn capture(v: &Value<'_>, limits: &CaptureLimits, depth: usize) -> Op
             let o = o.borrow();
             let mut map = serde_json::Map::new();
             for (k, v) in o.iter().take(limits.max_items) {
-                if let Some(j) = capture(v, limits, depth + 1) {
+                if let Some(j) = nest(depth + 1, || capture(v, limits, depth + 1)) {
                     map.insert(k.to_string(), j);
                 }
             }
