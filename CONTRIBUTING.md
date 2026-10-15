@@ -207,14 +207,14 @@ it up:
 Nothing expires. If the environment, the repository or the publisher is renamed or recreated,
 change the federated credential, run step 3 again and replace the member.
 
-Open VSX publishes the first version of an extension only with an access token. Until then, the
-environment holds the secret `OVSX_PAT`: a token created under **Access Tokens** in the
-open-vsx.org settings of the account that owns the namespace. Once the extension is on Open VSX,
-replace it with trusted publishing: in the namespace's settings, register a trusted publisher
-for the repository `thkprado/jlens`, the workflow `release.yml` and the environment `vscode`;
-then delete the secret and the token. Without `OVSX_PAT`, `ovsx` exchanges the run's OIDC token
-for a token valid for a few minutes. If the workflow file or the environment is renamed, register
-the publisher again.
+Open VSX is reached through trusted publishing: the namespace `thkprado`, which the account
+`thkprado` owns, registers a trusted publisher for the repository `thkprado/jlens`, the workflow
+`release.yml` and the environment `vscode` (in the open-vsx.org settings, under the namespace).
+With the secret `OVSX_PAT` unset, `ovsx` exchanges the run's OIDC token for a token valid for a
+few minutes. If the workflow file or the environment is renamed, register the publisher again.
+Open VSX publishes the first version of a new extension only with an access token: create one
+under **Access Tokens**, set it as the environment's secret `OVSX_PAT` for that release, then
+delete the secret and the token.
 
 To publish a release by hand, build its VSIX files on Linux or macOS (Windows loses the
 executable bit): `gh release download vX.Y.Z --dir dist`, `npm ci` in `editors/vscode`, then
