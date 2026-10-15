@@ -154,11 +154,14 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    gh attestation verify oci://ghcr.io/thkprado/jlens:X.Y.Z --repo thkprado/jlens
    code --install-extension thkprado.jlens --force   # from the Marketplace, then open a .jsonata file
    node editors/vscode/node_modules/@vscode/vsce/vsce show thkprado.jlens   # the Marketplace's version
-   curl -s https://open-vsx.org/api/thkprado/jlens/X.Y.Z | jq '{version, targets: (.downloads | keys)}'
+   curl -s "https://open-vsx.org/api/-/query?extensionId=thkprado.jlens&extensionVersion=X.Y.Z" | jq '[.extensions[].targetPlatform]'
    ```
 
-   Open VSX lists eight targets: the seven platforms and `universal`. The extension's
-   **jlens** output channel shows the version of the server it started.
+   Open VSX lists eight targets: the seven platforms and `universal`. The Marketplace serves
+   each package only after checking it, a few minutes after `vsce` publishes it; until then,
+   `code --install-extension` may install the package without a binary (its folder has no
+   `-win32-x64`, say, suffix). The extension's **jlens** output channel shows the version of
+   the server it started.
 
    The first push of the image creates the package `jlens` on GitHub, private: make it public
    once, in its Package settings (Change visibility), so that `docker pull` needs no login.
