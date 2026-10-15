@@ -8,6 +8,7 @@
     { "name": "strings", "expr": "$join(items[type = 'electronic'].$uppercase(color & '-' & code), ',')" },
     { "name": "regex", "expr": "$count(items[$contains(code, /^1[0-9]$/)])" },
     { "name": "number formatting", "expr": "items[[0..19]].$formatNumber(unitPrice * quantity, '#,##0.00')" },
+    { "name": "object constructor", "expr": "items.{'code': code, 'kind': 'item', 'total': unitPrice * quantity}" },
     { "name": "transform", "expr": "$ ~> |items|{'total': unitPrice * quantity}, ['tax']|" },
     { "name": "recursion", "expr": "($f := function($n){ $n <= 1 ? $n : $f($n - 1) + $f($n - 2) }; $f(15))" },
     { "name": "shipping rule", "file": "../fixtures/shipping-rule.jsonata" }

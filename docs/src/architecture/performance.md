@@ -7,9 +7,9 @@ performance is measured, what the numbers are, and how to use the API to get the
 
 The workload is in `benches/` at the repository root. It is shared by the native benchmarks and
 by the comparison with jsonata-js:
-- `benches/cases.json` lists ten expressions: path navigation, filters with aggregation,
-  grouping, sorting, string and regex functions, number formatting, a transform, a recursive
-  function, and the shipping rule from the guides.
+- `benches/cases.json` lists eleven expressions: path navigation, filters with aggregation,
+  grouping, sorting, string and regex functions, number formatting, an object constructor, a
+  transform, a recursive function, and the shipping rule from the guides.
 - `benches/orders-200.json` is a 24 KB store order with 200 items.
 
 ```sh
@@ -234,9 +234,16 @@ Evaluations never modify a document, so one document serves any number of evalua
   `items.(price * quantity)` or `customer.name`, or starting with a variable, such as `$i.code`,
   looks its fields up instead of building a path's sequences, unless one of them holds an
   array. A name mapped over the items of a path (`code` in `items.code`) is looked up in each
-  item without evaluating the step for it. `=` and `!=` with a string literal compare with the literal's text
-  instead of building a string; the literal's other uses (arguments, `&`, object values) still
-  build one. With a tracer, evaluation takes the general path, so audits report every node; a
+  item without evaluating the step for it.
+- **String literals.** `=` and `!=` with a string literal compare with the literal's text
+  instead of building a string, and so does a grouping with a literal key, which finds its group
+  by the text: in `items{type: {'total': ..., 'n': ...}}`, `'total'` and `'n'` are built once
+  per group instead of once per item (group-by took 12% less time). The
+  literal's other uses (arguments, `&`, object values) still build one each time. In 0.16 that
+  was measured at about 3% of expressions that use a literal once per item, such as
+  `items.(code & '-' & type)` or `items.$pad(code, 8, '0')`: too little for a slot per literal
+  in each evaluation, which the AST needs because it is `Send` while values use `Rc`.
+- **Tracing.** With a tracer, evaluation takes the general path, so audits report every node; a
   property test checks that both paths give the same result.
 - **Blocks and sorting.** A block (`(...)`) creates a frame for its variables only when it
   binds one. The order-by operator (`^(...)`) evaluates each item's keys once, not at each

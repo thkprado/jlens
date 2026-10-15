@@ -1288,20 +1288,31 @@ impl<'a> Evaluator<'_, 'a> {
                 item.clone()
             };
             for (pair_index, (key_expr, _)) in pairs.iter().enumerate() {
-                let key = self.eval(key_expr, &context, &frame)?;
-                let key = match key {
-                    Value::Undefined => continue,
-                    Value::String(s) => s,
-                    other => return Err(err_at("T1003", expr).with_value("value", &other)),
+                // A literal key is looked up by its text: evaluating it would build a string
+                // per item, only to find the group already there.
+                let literal = string_literal(key_expr)
+                    .filter(|_| self.tracer.is_none() && self.depth < self.limits.max_depth);
+                let mut evaluated: Option<Rc<str>> = None;
+                let key = match literal {
+                    Some(text) => text,
+                    None => match self.eval(key_expr, &context, &frame)? {
+                        Value::Undefined => continue,
+                        Value::String(s) => {
+                            evaluated = Some(s);
+                            evaluated.as_deref().unwrap_or_default()
+                        }
+                        other => return Err(err_at("T1003", expr).with_value("value", &other)),
+                    },
                 };
-                match groups.get_mut(key.as_ref()) {
+                match groups.get_mut(key) {
                     Some((data, index)) => {
                         if *index != pair_index {
-                            return Err(err_at("D1009", expr).with("value", key.as_ref()));
+                            return Err(err_at("D1009", expr).with("value", key));
                         }
                         data.push(item.clone());
                     }
                     None => {
+                        let key = evaluated.clone().unwrap_or_else(|| Rc::from(key));
                         groups.insert(key, (vec![item.clone()], pair_index));
                     }
                 }
