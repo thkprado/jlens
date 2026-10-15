@@ -51,6 +51,9 @@ if (isMainThread) {
       const hung = () => {
         clearTimeout(timer);
         worker.removeAllListeners();
+        // A worker near its memory limit may still run out of memory while it stops; the error
+        // would be unhandled and end the runner.
+        worker.on("error", () => {});
         worker.terminate();
         outcomes.push({ hung: true });
         resolve();
