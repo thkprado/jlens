@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `evaluateWithAudit` in the Wasm package converts to UTF-16 only the spans of the audit's
+  nodes: a captured value with a `span` or `range` field (`{start, end}`) was rewritten too
+  when the expression held non-ASCII text.
+
 ## [0.16.0]
 
 jlens closes its last speed gaps with jsonata-core, another JSONata engine in Rust: group-by is

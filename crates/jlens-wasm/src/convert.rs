@@ -93,6 +93,30 @@ impl Offsets {
             _ => {}
         }
     }
+
+    /// Rewrites the spans of the nodes of `tree`, an audit tree, from byte offsets to UTF-16
+    /// offsets. Only the nodes are walked: a captured value may have a field named `span` too.
+    pub fn convert_audit_spans(&self, tree: &mut Value) {
+        fn walk(offsets: &Offsets, node: &mut Value) {
+            jlens_core::stack::grow(|| {
+                if let Some(Value::Object(span)) = node.get_mut("span") {
+                    for bound in ["start", "end"] {
+                        if let Some(n) = span.get(bound).and_then(Value::as_u64) {
+                            span.insert(bound.into(), offsets.to_utf16(n as usize).into());
+                        }
+                    }
+                }
+                if let Some(Value::Array(children)) = node.get_mut("children") {
+                    children.iter_mut().for_each(|child| walk(offsets, child));
+                }
+            })
+        }
+        if self.table.is_some()
+            && let Some(root) = tree.get_mut("root")
+        {
+            walk(self, root);
+        }
+    }
 }
 
 /// Converts a JS value to JSON, through `JSON.stringify`. `undefined` (and values that

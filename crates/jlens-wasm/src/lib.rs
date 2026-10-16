@@ -205,7 +205,7 @@ impl Expression {
             }
         }
         let mut tree = serde_json::to_value(&tree).expect("serializable");
-        self.offsets.convert_spans(&mut tree);
+        self.offsets.convert_audit_spans(&mut tree);
         out.insert("audit".into(), tree);
         out.insert("explanationText".into(), explanation.to_string().into());
         out.insert(

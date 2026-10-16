@@ -395,6 +395,13 @@ export const cases = [
     walk(audit.audit.root);
     const eq = spans.find(([s]) => s === "'𝄞' = 'x'");
     equal(eq.slice(1), [0, 10], "span of the comparison");
+    // A captured value's own `span` and `range` fields are data, left as they are.
+    const value = { span: { start: 4, end: 9 }, range: { start: 9, end: 9 } };
+    const full = new j.Expression("($e := 'é'; $x)").evaluateWithAudit(undefined, { x: value }, { level: "full" });
+    const outputs = [];
+    const collect = (n) => { if (n.source === "$x") outputs.push(n.output); (n.children || []).forEach(collect); };
+    collect(full.audit.root);
+    equal(outputs, [value], "captured value");
   }],
 
   ["ast and parseRecover", (j) => {
