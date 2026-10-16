@@ -265,7 +265,10 @@ rendering in a user interface. The input is converted whole first, as for a `Doc
 The size of the result counts a value each time it appears, as the JSON text does, and also
 limits the arguments passed to a host function. The stack grows as needed, so the depth limit is
 that of the native targets; see the [evaluator chapter](../architecture/evaluator.md#guardrails).
-There is no cancellation from another thread: use `timeout`.
+There is no cancellation from another thread: use `timeout`. The
+[performance chapter](../architecture/performance.md#python-against-the-other-implementations)
+compares the package's speed and its behaviour at these limits with the other JSONata packages
+for Python.
 
 ## Typing
 
