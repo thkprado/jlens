@@ -2,7 +2,7 @@
   "name": "jlens",
   "displayName": "jlens — JSONata",
   "description": "JSONata for VS Code: highlighting, and diagnostics, completion and hovers from the jlens language server",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "publisher": "thkprado",
   "license": "MIT",
   "private": true,

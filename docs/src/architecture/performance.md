@@ -50,7 +50,7 @@ Comparing a revision with itself shows the noise. On the machine below, with ten
 medians of most cases agree within 1%, and a few cases (`group-by`) within 3%.
 
 The numbers below were measured on an AMD Ryzen 7 3700X under Windows 11, with Rust 1.99 and
-Node.js 24, for jlens 0.16.0. They are meant
+Node.js 24, for jlens 0.17.0. They are meant
 for comparing alternatives on one machine. They are not guarantees, and your hardware will give
 different absolute values.
 
@@ -62,38 +62,40 @@ evaluates against a [`Document`](#reusing-documents) converted beforehand.
 
 | Case | `evaluate` | `evaluate_document` |
 |---|---:|---:|
-| path (`customer.name`) | 1.2 µs | 0.24 µs |
-| names over items (`$sum(items.quantity)`) | 114 µs | 7.5 µs |
-| filter + aggregate | 153 µs | 48 µs |
-| group-by | 193 µs | 88 µs |
-| sort + map | 549 µs | 476 µs |
-| strings | 202 µs | 102 µs |
-| regex | 294 µs | 178 µs |
-| number formatting | 213 µs | 182 µs |
-| object constructor | 449 µs | 328 µs |
-| transform | 989 µs | 852 µs |
-| recursion (`$f(15)`, Fibonacci) | 1.03 ms | 1.02 ms |
-| shipping rule | 224 µs | 114 µs |
+| path (`customer.name`) | 0.62 µs | 0.23 µs |
+| names over items (`$sum(items.quantity)`) | 18.8 µs | 6.9 µs |
+| filter + aggregate | 80 µs | 44 µs |
+| group-by | 101 µs | 80 µs |
+| sort + map | 463 µs | 429 µs |
+| strings | 119 µs | 94 µs |
+| regex | 206 µs | 178 µs |
+| number formatting | 206 µs | 191 µs |
+| object constructor | 361 µs | 324 µs |
+| transform | 979 µs | 849 µs |
+| recursion (`$f(15)`, Fibonacci) | 1.01 ms | 1.02 ms |
+| shipping rule | 149 µs | 111 µs |
 
 | Other measurements | Time |
 |---|---:|
 | Compile `customer.name` | 1.1 µs |
-| Compile the shipping rule (30 lines) | 42 µs |
-| `Document::parse` of the 24 KB document | 168 µs |
+| Compile the shipping rule (30 lines) | 40 µs |
+| `Document::parse` of the 24 KB document | 165 µs |
 | `Document::new` from a `serde_json::Value` | 108 µs |
-| `serde_json::from_str` of the same text, for reference | 230 µs |
-| Shipping rule, audit level `decisions` | 1.92 ms (7.8× without a tracer) |
-| Shipping rule, audit level `full` | 9.17 ms (37× without a tracer) |
+| `serde_json::from_str` of the same text, for reference | 213 µs |
+| Shipping rule, audit level `decisions` | 1.77 ms (12× without a tracer) |
+| Shipping rule, audit level `full` | 8.30 ms (55× without a tracer) |
 
-An audit costs about what it did in 0.8 (1.95 ms and 7.56 ms; level `full` 21% more), but the
-ratios have doubled: without a tracer, evaluation takes the shortcuts described under
+An audit costs about what it did in 0.8 (1.95 ms and 7.56 ms; level `full` 10% more), but the
+ratios are much larger: without a tracer, evaluation takes the shortcuts described under
 [Where the time goes](#where-the-time-goes), and with one it takes the general path, so that
 the audit reports every node.
 
-The path case reads two objects of the input, the document and its `customer`: `evaluate`
-takes 1.2 µs, where converting the whole input first took 115 µs (91 µs to convert, 17 µs to
-drop, 0.9 µs to evaluate). An expression that reads every item pays for converting them, as
-before.
+The path case reads one field of the input, `customer`, and one of that object, `name`:
+`evaluate` takes 0.62 µs, where converting the whole input first took 115 µs (91 µs to
+convert, 17 µs to drop, 0.9 µs to evaluate). A path step reads only the field it looks up
+([ADR 0010, amended](../adr/0010-lazy-input.md#amendment-one-field-at-a-time-017)), so
+`names over items` reads one field of each item and takes 18.8 µs, against 114 µs in 0.16. An
+expression that reads whole items pays for converting them, as before.
 
 When measured for 0.8, on this machine, such an expression cost more with lazy input than it did when `evaluate`
 converted the whole input first: measured with `cargo xtask ab` against the revision before
@@ -118,32 +120,33 @@ release target. `cargo xtask ab . . --b-allocator mimalloc` measures the allocat
 the same revision with `mimalloc`. `--target x86_64-unknown-linux-musl` builds both programs
 for musl, as the Linux release binaries are.
 
-Measured for 0.16 (2f069f7) with `evaluate`, the median of ten rounds, on the machine above;
+Measured for 0.17 (0ba8143) with `evaluate`, the median of ten rounds, on the machine above;
 Linux is Ubuntu 26.04 under WSL 2, on the same machine:
 
 | Case | Windows | + mimalloc | Linux, glibc | + mimalloc | Linux, musl | + mimalloc |
 |---|---:|---:|---:|---:|---:|---:|
-| path | 1.21 µs | 698 ns | 573 ns | 611 ns | 12.5 µs | 12.1 µs |
-| names over items | 156 µs | 69 µs | 79 µs | 60 µs | 285 µs | 83 µs |
-| filter + aggregate | 194 µs | 106 µs | 114 µs | 94 µs | 350 µs | 120 µs |
-| group-by | 213 µs | 137 µs | 151 µs | 125 µs | 500 µs | 151 µs |
-| sort + map | 553 µs | 351 µs | 338 µs | 303 µs | 845 µs | 346 µs |
-| strings | 204 µs | 123 µs | 132 µs | 109 µs | 419 µs | 140 µs |
-| regex | 294 µs | 168 µs | 176 µs | 151 µs | 527 µs | 179 µs |
-| number formatting | 210 µs | 145 µs | 149 µs | 131 µs | 382 µs | 157 µs |
-| object constructor | 443 µs | 254 µs | 362 µs | 234 µs | 890 µs | 265 µs |
-| transform | 1.01 ms | 595 µs | 681 µs | 548 µs | 1.88 ms | 606 µs |
-| recursion | 1.01 ms | 867 µs | 738 µs | 775 µs | 1.03 ms | 726 µs |
-| shipping rule | 220 µs | 174 µs | 178 µs | 153 µs | 393 µs | 180 µs |
+| path | 597 ns | 348 ns | 290 ns | 315 ns | 11.7 µs | 11.7 µs |
+| names over items | 18.5 µs | 13.1 µs | 14.0 µs | 12.1 µs | 77.8 µs | 26.3 µs |
+| filter + aggregate | 64.1 µs | 52.5 µs | 48.3 µs | 46.3 µs | 139 µs | 64.9 µs |
+| group-by | 100 µs | 83.5 µs | 81.1 µs | 78.5 µs | 294 µs | 97.8 µs |
+| sort + map | 464 µs | 296 µs | 274 µs | 255 µs | 662 µs | 292 µs |
+| strings | 118 µs | 70.6 µs | 75.3 µs | 61.0 µs | 207 µs | 85.6 µs |
+| regex | 195 µs | 113 µs | 102 µs | 99.3 µs | 261 µs | 121 µs |
+| number formatting | 204 µs | 145 µs | 138 µs | 133 µs | 259 µs | 156 µs |
+| object constructor | 410 µs | 198 µs | 234 µs | 187 µs | 670 µs | 218 µs |
+| transform | 1.18 ms | 604 µs | 685 µs | 554 µs | 1.84 ms | 618 µs |
+| recursion | 1.07 ms | 869 µs | 723 µs | 767 µs | 1.02 ms | 738 µs |
+| shipping rule | 150 µs | 122 µs | 116 µs | 105 µs | 212 µs | 131 µs |
 
 - musl's own allocator is the slowest of the three: with it, the release binary for Linux takes
-  up to 3.6 times as long as a glibc build (`names over items`), and took ten times as long on
+  up to 5.6 times as long as a glibc build (`names over items`), and took ten times as long on
   `group-by` in 0.15, when that case copied each group at every item. On every case but `path`,
-  `mimalloc` makes it 30 to 71% faster, and within 40% of glibc with `mimalloc`.
-- On Windows, `mimalloc` saves 14 to 56%.
-- glibc's allocator is the fastest of the three. `mimalloc` still saves 10 to 36% on ten cases;
-  `path` takes 38 ns more, and `recursion` 5% more.
-- `path` costs about 12 µs more on musl with either allocator: a fixed cost of each evaluation
+  `mimalloc` makes it 28 to 67% faster, and within 40% of glibc with `mimalloc`, except
+  `names over items`, whose 12 µs of work the fixed cost below about doubles.
+- On Windows, `mimalloc` saves 17 to 52%.
+- glibc's allocator is the fastest of the three. `mimalloc` still saves 3 to 20% on ten cases;
+  `path` takes 25 ns more, and `recursion` 6% more.
+- `path` costs about 11 µs more on musl with either allocator: a fixed cost of each evaluation
   there, which the allocator does not explain. A command evaluates once, so its start-up hides
   it.
 - macOS was not measured. Its binaries use `mimalloc` too, so that every platform runs the same
@@ -158,37 +161,39 @@ that its asynchronous `evaluate` requires.
 
 | Case | jsonata-js 2.2.2 | jlens-wasm `evaluate` | jlens-wasm `evaluateDocument` |
 |---|---:|---:|---:|
-| path | 2.4 µs | 7.3 µs | 1.7 µs |
-| names over items | 70 µs | 355 µs | 16 µs |
-| filter + aggregate | 682 µs | 389 µs | 55 µs |
-| group-by | 1.11 ms | 453 µs | 109 µs |
-| sort + map | 5.33 ms | 864 µs | 528 µs |
-| strings | 599 µs | 422 µs | 100 µs |
-| regex | 641 µs | 518 µs | 206 µs |
-| number formatting | 563 µs | 591 µs | 262 µs |
-| object constructor | 1.22 ms | 805 µs | 484 µs |
-| transform | 1.37 ms | 1.60 ms | 1.24 ms |
-| recursion | 7.90 ms | 1.04 ms | 1.03 ms |
-| shipping rule | 1.66 ms | 469 µs | 148 µs |
+| path | 2.1 µs | 6.8 µs | 1.5 µs |
+| names over items | 65 µs | 331 µs | 15 µs |
+| filter + aggregate | 613 µs | 364 µs | 50 µs |
+| group-by | 998 µs | 422 µs | 101 µs |
+| sort + map | 4.74 ms | 804 µs | 485 µs |
+| strings | 574 µs | 417 µs | 101 µs |
+| regex | 626 µs | 524 µs | 205 µs |
+| number formatting | 547 µs | 591 µs | 266 µs |
+| object constructor | 1.18 ms | 798 µs | 479 µs |
+| transform | 1.34 ms | 1.60 ms | 1.26 ms |
+| recursion | 7.59 ms | 1.03 ms | 1.03 ms |
+| shipping rule | 1.61 ms | 466 µs | 146 µs |
 
 jsonata-js works on the JavaScript objects it is given, so it never pays for converting the
 input. jlens-wasm `evaluate` reads the input object as the expression reaches it: an object or
 array of up to 16 values through one call to a JavaScript helper, a larger one whole, through
 `JSON.stringify` and a parse into jlens's representation. The path case reads two small
 objects. An expression that reads every item pays what converting the whole input does:
-`JSON.stringify` of the input takes 49 µs, and parsing that text 263 µs.
+`JSON.stringify` of the input takes 41 µs, and parsing that text 265 µs. Unlike the native
+and Python inputs, a JavaScript object is still read a whole level at a time: a path step does
+not read its one field alone, so `names over items` converts every item.
 
-`evaluate` is faster than jsonata-js on eight of the twelve cases, by up to 7.6× on recursion.
+`evaluate` is faster than jsonata-js on eight of the twelve cases, by up to 7.4× on recursion.
 It is slower on four:
 - `path`, which does almost no work, so the overhead of calling into WebAssembly dominates;
 - `names over items`, by 5.1×: it reads every item and does little with each, so converting
   the input is nearly all of its time;
-- `number formatting`, by 5%, because it reads every item;
+- `number formatting`, by 8%, because it reads every item;
 - `transform`, whose deep copy of the document is the job V8's own JSON round trip does best.
 
 Against a `Document` converted once, jlens-wasm is faster on all twelve cases, by up to 12× on
 filter + aggregate, 11× on the shipping rule and 10× on group-by and on sort + map. On
-`transform` its lead is 10%.
+`transform` its lead is 6%.
 
 ### Python against the other implementations
 
@@ -363,20 +368,22 @@ Evaluations never modify a document, so one document serves any number of evalua
 - **Fixed cost.** An evaluation reads the clock only when it needs it (`$now`, `$millis`, the
   seed of `$random`, a timeout), so `1` takes about 0.12 µs, against 0.06 µs in jsonata-core.
   `customer.name` takes 0.23 µs, against 0.14 µs: that fixed cost, the result converted to a
-  `serde_json::Value` (a new string; `'a'` alone takes 0.21 µs), and two lookups. Before 0.16 a
+  `serde_json::Value` (a new string; `'a'` alone takes 0.20 µs), and two lookups. Before 0.16 a
   path of two names built a sequence for each step and took 0.69 µs; `$.customer.name` took
   1 µs and now takes 0.24 µs.
 - **Names over many items.** A path step that reads an array passes it on as it is: `items`
   returns the input's array, and the step after it maps over that array's items instead of a
   copy of them. A step whose results hold no array to flatten makes them its sequence without
   copying them again. Before 0.16, `$count(items.code)` took 9.8 µs and now takes 7.0 µs,
-  against 4.9 µs in jsonata-core; `$count(items)` went from 0.94 to 0.67 µs (0.39 µs). Looking
-  the field up is not what remains: `$count(items.nope)` takes 4.9 µs, against 5.7 µs. A field
-  found costs about 10 ns more per item, to keep the value, and `items.code` takes 20 µs,
+  against 4.6 µs in jsonata-core; `$count(items)` went from 0.94 to 0.67 µs (0.39 µs). Looking
+  the field up is not what remains: `$count(items.nope)` takes 4.9 µs, against 5.6 µs. A field
+  found costs about 10 ns more per item, to keep the value, and `items.code` takes 22 µs,
   against 14 µs, most of it converting the 200 strings of its result.
 - **Converting the input.** `evaluate` converts the parts of the input that the expression
-  reads, as it reads them ([ADR 0010](../adr/0010-lazy-input.md)). An expression that reads
-  every item pays for converting them, and that is now most of its time: filter + aggregate
-  takes 153 µs with `evaluate` and 48 µs against a `Document`.
+  reads, as it reads them ([ADR 0010](../adr/0010-lazy-input.md)), and a path step reads only
+  the field it looks up. An expression that reads a few fields of each item pays for those:
+  filter + aggregate takes 80 µs with `evaluate` and 44 µs against a `Document`, against
+  153 µs and 48 µs in 0.16. One that reads whole items, such as an object built from each, pays
+  for converting them.
 - **Deep copies.** A transform (`|...|`) copies its input with `$clone` before changing it, as
   jsonata-js does. That makes transforms of large documents comparatively expensive.

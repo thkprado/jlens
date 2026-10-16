@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.17.0]
+
+jlens comes to Python: the package `jlens` on PyPI evaluates expressions against Python values,
+reading only what the expression reaches. A path step now reads its one field of an input object
+instead of the whole object, and values nested thousands of levels deep no longer overflow the
+stack. The CLI is still not on npm (see 0.14.0).
+
 ### Added
 
 - The Python package `jlens` on PyPI (ADR 0014): `Expression` compiles an expression and
@@ -30,7 +37,6 @@ All notable changes are recorded here. The format follows
 - Values nested thousands of levels deep, read from the input or built by a tail-recursive
   function, no longer overflow the stack. Returning, comparing, serializing, cloning or passing
   one to a host function fails with `U1001` beyond 1,000 levels; dropping one never fails.
-
 - `evaluateWithAudit` in the Wasm package converts to UTF-16 only the spans of the audit's
   nodes: a captured value with a `span` or `range` field (`{start, end}`) was rewritten too
   when the expression held non-ASCII text.
@@ -564,7 +570,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/thkprado/jlens/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/thkprado/jlens/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/thkprado/jlens/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/thkprado/jlens/compare/v0.13.0...v0.14.0
