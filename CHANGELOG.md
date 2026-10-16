@@ -39,6 +39,9 @@ All notable changes are recorded here. The format follows
 
 - `$formatNumber` with a `zero-digit` just below U+D800, whose digits would be lone
   surrogates, panicked; those digits are now U+FFFD, as a lone surrogate in a string literal is.
+- `$fromMillis` fails with `D1001` for NaN, which `$toMillis` returns for a date that does not
+  exist (`$fromMillis($toMillis('2024-13-01'))`), as for a date beyond JavaScript's range. It
+  wrote the epoch, "1970-01-01T00:00:00.000Z"; jsonata-js writes "NaN" in every component.
 
 ## [0.18.0]
 

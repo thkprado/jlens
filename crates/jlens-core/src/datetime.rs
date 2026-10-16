@@ -1076,8 +1076,9 @@ fn apply_case(s: &str, case: Option<Case>) -> String {
 }
 
 /// `$fromMillis` / `$now`: formats a timestamp. Fails with `U1001` when a width modifier
-/// (`[Y,1000000000]`) asks for more than `max_len` digits, and with `D3150` when the timezone
-/// does not start with a number (jsonata-js writes every component as "NaN").
+/// (`[Y,1000000000]`) asks for more than `max_len` digits, with `D3150` when the timezone
+/// does not start with a number, and with `D1001` for NaN or a date beyond the range
+/// (jsonata-js writes every component as "NaN" in these cases).
 pub(crate) fn from_millis(
     millis: f64,
     picture: Option<&str>,
@@ -1097,9 +1098,10 @@ pub(crate) fn from_millis(
         picture.unwrap_or("[Y0001]-[M01]-[D01]T[H01]:[m01]:[s01].[f001][Z01:01t]"),
     )?;
     let offset_millis = (60.0 * offset_hours + offset_minutes) * 60_000.0;
-    // jsonata-js writes every component of a date beyond the range as "NaN".
+    // jsonata-js writes every component of NaN, which `$toMillis` gives for a date that does
+    // not exist, or of a date beyond the range as "NaN".
     let local = millis + offset_millis;
-    if local.abs() > MAX_MILLIS {
+    if local.is_nan() || local.abs() > MAX_MILLIS {
         return Err(Error::new("D1001").with("value", crate::value::json_number(millis)));
     }
     let date = fields(local);

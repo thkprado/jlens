@@ -151,8 +151,9 @@ pub fn run(args: &[String]) -> Result<()> {
         } else if actual["error"] == "D1001" {
             // jlens raises D1001 where a number overflows to infinity (`1 / 0`), which
             // jsonata-js passes on: to its result, where JSON writes `null`, or to an operator
-            // that raises D1001 or another error later. `$fromMillis` raises it for a date
-            // beyond JavaScript's range, which jsonata-js writes as "NaN".
+            // that raises D1001 or another error later. `$fromMillis` raises it for NaN (from
+            // `$toMillis` given a date that does not exist) and for a date beyond JavaScript's
+            // range, which jsonata-js writes as "NaN".
             overflowed += 1;
         } else if actual["error"] == "D3150" {
             // jlens raises D3150 where `$fromMillis` or `$now` is given a timezone that is not a

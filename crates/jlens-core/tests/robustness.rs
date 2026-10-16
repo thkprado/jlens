@@ -1044,6 +1044,16 @@ fn fuzz_crashes_stay_fixed() {
         ("$fromMillis(8.64e15 + 1)", Err("D1001")),
         ("$fromMillis(8.64e15, '[Y]', '+0100')", Err("D1001")),
         ("$fromMillis(8.64e15, '[Y]', '-0100')", Ok(json!("275760"))),
+        // So does NaN, which `$toMillis` gives for a date that does not exist. It used to be
+        // written as the epoch.
+        ("$toMillis('2024-13-01')", Ok(json!(null))),
+        ("$fromMillis($toMillis('2024-13-01'))", Err("D1001")),
+        (
+            "$fromMillis($toMillis('2024-13-01'), '[H01]', '+0100')",
+            Err("D1001"),
+        ),
+        ("$fromMillis(0 / 0, '[Y]')", Err("D1001")),
+        ("$fromMillis(0 / 0, '[Y]', 'two')", Err("D3150")),
         // Within the range every component is exact, also where the day of the year or the week
         // counts from a date beyond it (jsonata-js: "-271821 NaN NaN NaN").
         (
