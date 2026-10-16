@@ -202,58 +202,62 @@ fourth package, `jsonata`, which runs jsonata-js in the Duktape JavaScript inter
 out: it has had no release since 2023, its module cannot load jsonata-js on Windows, and it
 compiles the expression at each call, taking up to 3.5 s on these cases.
 
-Measured for 0.17 (22c2e66) on Python 3.14.8, under Linux: Ubuntu 26.04 under WSL 2, on the
+Measured for 0.17 (c76a814) on Python 3.14.8, under Linux: Ubuntu 26.04 under WSL 2, on the
 machine above. `jsonatapy` has wheels up to Python 3.13 and was built from its source
 distribution. The input is the document as Python values; for jlens and `jsonatapy`, also an
 input converted once (`Document`, `JsonataData`):
 
 | Case | jsonata-python 0.7.1 | jsonata-rs 0.1.4 | jsonatapy 2.2.11 | jsonatapy, `JsonataData` | jlens `evaluate` | jlens `evaluate_document` |
 |---|---:|---:|---:|---:|---:|---:|
-| path | 1.52 ms | 213 µs | 0.7 µs | 0.4 µs | 1.5 µs | 0.5 µs |
-| names over items | 2.00 ms | 242 µs | 25 µs | 4.9 µs | 138 µs | 6.3 µs |
-| filter + aggregate | 4.63 ms | 402 µs | 118 µs | 89 µs | 174 µs | 41 µs |
-| group-by | 6.11 ms | 864 µs | 163 µs | 109 µs | 214 µs | 73 µs |
-| sort + map | 24.5 ms | 1.88 ms | 467 µs | 402 µs | 421 µs | 276 µs |
-| strings | 4.48 ms | 458 µs | 165 µs | 137 µs | 197 µs | 67 µs |
-| regex | 5.15 ms | 3.91 ms | 2.71 ms | 2.66 ms | 250 µs | 121 µs |
-| number formatting | 4.18 ms | 431 µs | 155 µs | 144 µs | 176 µs | 134 µs |
-| object constructor | 6.07 ms | 820 µs | 182 µs | 141 µs | 425 µs | 288 µs |
-| transform | 5.98 ms | 1.80 ms | 1.02 ms | 891 µs | 875 µs | 739 µs |
-| recursion | 41.1 ms | 2.29 ms | 763 µs | 863 µs | 693 µs | 689 µs |
-| shipping rule | 9.54 ms | 685 µs | 330 µs | 241 µs | 247 µs | 102 µs |
+| path | 1.50 ms | 212 µs | 0.7 µs | 0.4 µs | 1.0 µs | 0.5 µs |
+| names over items | 1.97 ms | 245 µs | 24 µs | 4.7 µs | 37 µs | 6.3 µs |
+| filter + aggregate | 4.63 ms | 403 µs | 122 µs | 88 µs | 89 µs | 42 µs |
+| group-by | 6.10 ms | 843 µs | 167 µs | 108 µs | 138 µs | 74 µs |
+| sort + map | 24.5 ms | 1.88 ms | 459 µs | 395 µs | 383 µs | 279 µs |
+| strings | 4.46 ms | 454 µs | 167 µs | 136 µs | 113 µs | 67 µs |
+| regex | 5.09 ms | 3.87 ms | 2.69 ms | 2.68 ms | 137 µs | 107 µs |
+| number formatting | 4.17 ms | 437 µs | 154 µs | 145 µs | 167 µs | 140 µs |
+| object constructor | 5.99 ms | 815 µs | 181 µs | 140 µs | 357 µs | 287 µs |
+| transform | 5.86 ms | 1.81 ms | 1.01 ms | 881 µs | 868 µs | 721 µs |
+| recursion | 41.0 ms | 2.28 ms | 731 µs | 834 µs | 700 µs | 698 µs |
+| shipping rule | 9.53 ms | 689 µs | 347 µs | 238 µs | 230 µs | 101 µs |
 
-- With Python values in, `jsonatapy` is the fastest on seven cases and jlens on five. jlens
-  reads the input more slowly: `names over items`, which reads every item and does little with
-  each, takes 138 µs, against 25 µs, and 6.3 µs once the input is converted. Where the
-  evaluation itself dominates, jlens leads: by 11 times on `regex`, 34% on the shipping rule.
+- With Python values in, jlens is the fastest on eight cases, by 20 times on `regex` and 51%
+  on the shipping rule; `jsonatapy` on four: `path`, `names over items` (24 µs against 37 µs),
+  number formatting and the object constructor. Before a path step read its one field of a
+  `dict` (see below), jlens took 138 µs on `names over items` and 177 µs on `filter +
+  aggregate`, and was the fastest on five cases.
 - With the input converted once, jlens is the fastest on nine cases, by up to 2.4 times on the
-  shipping rule and 22 times on `regex`; `jsonatapy` on `path`, `names over items` and the
+  shipping rule and 25 times on `regex`; `jsonatapy` on `path`, `names over items` and the
   object constructor, which takes it half the time.
-- On every case but `path`, jlens `evaluate` takes 1.8 (`names over items`) to 16 times
-  (`regex`) less time than `jsonata-rs`, and 7 to 59 times less than `jsonata-python`. Both read
-  the whole input before evaluating: on `path` they take 0.2 and 1.5 ms where jlens takes
-  1.5 µs.
+- On every case but `path`, jlens `evaluate` takes 2.1 (transform) to 28 times (`regex`) less
+  time than `jsonata-rs`, and 7 to 64 times less than `jsonata-python`. Both read the whole
+  input before evaluating: on `path` they take 0.2 and 1.5 ms where jlens takes 1.0 µs.
 
 What reading Python values costs, per value, measured with inputs that each exercise one step
-and the time of the same evaluation against a `Document` taken off. "Before" is c4ba685, whose
-`evaluate` took 156 µs on `names over items`:
+and the time of the same evaluation against a `Document` taken off. The first column is
+c4ba685, whose `evaluate` took 156 µs on `names over items`; the second 22c2e66 (138 µs); the
+third c76a814, where a path step reads one field (37 µs):
 
-| Step | jlens, before | jlens | jsonatapy |
-|---|---:|---:|---:|
-| An `int` in a `list` | 21 ns | 20 ns | 14 ns |
-| A `str` in a `list` | 61 ns | 52 ns | 20 ns |
-| A `dict` in a `list`, not read | 116 ns | 90 ns | 30 ns |
-| A `dict` in a `list`, read for one of its six `int` fields | 593 ns | 534 ns | 66 ns |
+| Step | jlens, c4ba685 | jlens, 22c2e66 | jlens | jsonatapy |
+|---|---:|---:|---:|---:|
+| An `int` in a `list` | 21 ns | 20 ns | 17 ns | 14 ns |
+| A `str` in a `list` | 61 ns | 52 ns | 50 ns | 20 ns |
+| A `dict` in a `list`, not read | 116 ns | 90 ns | 86 ns | 30 ns |
+| A `dict` in a `list`, read for one of its six `int` fields | 593 ns | 534 ns | 116 ns | 65 ns |
 
-- The gain came from two changes. Each value's type is first compared with the built-in
+- 22c2e66 gained from two changes. Each value's type is first compared with the built-in
   types, before the tests that also accept subclasses, which call into Python to read the type's
   flags. The node that lets a level detect cycles is made once per level read, when the level
   holds an array or an object, rather than once for each of them.
-- What remains is reading a whole level to use one of its fields. On the last line, inserting
-  the six fields into the object's map takes 20% of the time, sharing their keys between objects
-  11%, allocating and freeing 17%, and the calls into Python 16%. `jsonatapy` reads only the
-  field asked for, looking it up in the `dict`: jlens could do the same by letting a source read
-  one field of an object not read yet (the roadmap's next item).
+- It still read a whole level to use one of its fields. On the last line, inserting the six
+  fields into the object's map took 20% of the time, sharing their keys between objects 11%,
+  allocating and freeing 17%, and the calls into Python 16%. `jsonatapy` reads only the field
+  asked for, looking it up in the `dict`, and so does jlens since c76a814: a source can read one
+  field of an object not read yet, and the object keeps it only when it is an array or an
+  object ([ADR 0010, amended](../adr/0010-lazy-input.md#amendment-one-field-at-a-time-017)).
+  The same change serves `evaluate` on a `serde_json::Value`: natively, `names over items`
+  went from 152 to 18.5 µs with `cargo xtask ab --mode evaluate`, and no case was slower.
 - `jsonatapy` also reads items through borrowed pointers, without changing their reference
   counts and without locking a `list` while it reads it. That takes `unsafe` code, which jlens
   forbids, and is not safe under free-threaded Python, where another thread can change the list.
