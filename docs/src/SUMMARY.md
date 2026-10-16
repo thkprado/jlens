@@ -67,3 +67,4 @@
   - [0013 The VS Code extension](adr/0013-vscode-extension.md)
   - [0014 The Python package](adr/0014-python-package.md)
   - [0016 The fields an expression reads](adr/0016-fields-read.md)
+  - [0017 Results in another representation](adr/0017-result-builder.md)

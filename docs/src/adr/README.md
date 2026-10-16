@@ -21,3 +21,4 @@ earlier one instead.
 | [0013](0013-vscode-extension.md) | The VS Code extension: one package per platform with the release binary | Accepted |
 | [0014](0014-python-package.md) | The Python package: PyO3 bindings that mirror the WebAssembly package | Accepted |
 | [0016](0016-fields-read.md) | The fields an expression reads: an abstract evaluation that gives an upper bound, and its union | Accepted |
+| [0017](0017-result-builder.md) | Results written straight into another representation, through a builder the core walks | Accepted |

@@ -181,6 +181,15 @@ representation looks up one field for less than it reads a whole object. The doc
 example. A level that the source fails to read stops the evaluation with `U1004`. The
 WebAssembly package reads JavaScript objects this way.
 
+A result can be written into another representation the same way, without building a
+`serde_json::Value` first ([ADR 0017](../adr/0017-result-builder.md)). Implement
+[`output::Builder`](https://docs.rs/jlens-core/latest/jlens_core/output/trait.Builder.html), and
+evaluate with `Expression::evaluate_source_to` or `evaluate_document_to`: they give the result to
+a closure, which writes it with the builder, within the size limit of a result. The
+documentation of the
+[`output`](https://docs.rs/jlens-core/latest/jlens_core/output/index.html) module has an
+example.
+
 ## The fields an expression reads
 
 `Expression::reads` tells which fields of its input and of each binding an expression may read,

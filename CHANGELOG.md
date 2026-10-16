@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Results written straight into another representation (ADR 0017): implement
+  `output::Builder`, and evaluate with `Expression::evaluate_source_to` or
+  `evaluate_document_to`, whose closure writes the result with it, within the size limit of a
+  result. `evaluate` and the other entry points write their `serde_json` result through the same
+  walk, which makes the object constructor case about 6% faster natively.
+
 ## [0.18.0]
 
 jlens tells an application which fields an expression reads, worked out from the expression

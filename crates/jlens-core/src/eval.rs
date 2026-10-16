@@ -17,6 +17,7 @@ use crate::ast::{Ast, BinaryOp, FallbackOp, Node, NodeKind, SortTerm, Stage, Tra
 use crate::audit::{Branch, EvalInfo, Outcome, Tracer, ValueRef};
 use crate::error::{Error, Result};
 use crate::functions::{self, Call, boolean};
+use crate::output::Output;
 use crate::regex::Regex;
 use crate::signature::Signature;
 use crate::value::{
@@ -266,8 +267,10 @@ impl crate::host::Caller for HostCaller<'_, '_, '_> {
     }
 }
 
-/// Evaluates a parsed expression. This is the entry point used by `Expression::evaluate_with`.
-pub(crate) fn evaluate<'a, 'v>(
+/// Evaluates a parsed expression, and gives its result to `finish` (ADR 0017), which converts
+/// it. This is the entry point used by `Expression::evaluate_with`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn evaluate<'a, 'v, R>(
     ast: &Ast,
     input: Value<'a>,
     variables: impl Iterator<Item = (&'v str, Value<'a>)>,
@@ -275,7 +278,8 @@ pub(crate) fn evaluate<'a, 'v>(
     limits: Limits,
     tracer: Option<&mut dyn Tracer>,
     source: Option<Rc<Shared>>,
-) -> Result<Option<serde_json::Value>> {
+    finish: impl FnOnce(Output<'_, 'a>) -> Result<R>,
+) -> Result<R> {
     if ast.has_errors() {
         return Err(Error::new("S0500").at(Default::default(), 0));
     }
@@ -325,11 +329,15 @@ pub(crate) fn evaluate<'a, 'v>(
         }
     }
     let result = ev.eval(&ast.root, &input, &env).and_then(|v| {
-        let limit = ev.limits.max_result_size;
-        let json = v.to_json_within(limit).map_err(|e| {
-            e.error(|| format!("The result would exceed the size limit of {limit} bytes"))
-        })?;
-        Ok((v, json))
+        // A level that could not be read fails the evaluation before its result is written.
+        ev.read_failure()?;
+        let output = Output {
+            value: &v,
+            limit: ev.limits.max_result_size,
+            shared: ev.source.as_deref(),
+        };
+        let out = finish(output)?;
+        Ok((v, out))
     });
     // A level of the input that could not be read fails the evaluation, whatever it gave.
     let result = match ev.read_failure() {

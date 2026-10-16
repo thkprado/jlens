@@ -21,6 +21,7 @@ use crate::error::{Error, Result};
 use crate::eval::Env;
 use crate::functions::Native;
 use crate::host::HostFunction;
+use crate::output::Builder;
 use crate::regex::Regex;
 
 /// The fields of an object, in insertion order. Keys are shared: the objects of a converted
@@ -908,8 +909,19 @@ impl<'a> Value<'a> {
         budget: &mut usize,
         depth: usize,
     ) -> std::result::Result<Option<JsonValue>, TooLarge> {
+        self.write_spending(&mut JsonBuilder, budget, depth)
+    }
+
+    /// Writes a value with `builder` (ADR 0017), as [`Value::to_json_spending`] converts it,
+    /// spending the length of its compact JSON text from `budget`.
+    pub(crate) fn write_spending<B: Builder>(
+        &self,
+        builder: &mut B,
+        budget: &mut usize,
+        depth: usize,
+    ) -> std::result::Result<Option<B::Value>, TooLarge> {
         if let Some(json) = self.unread() {
-            return copy_json_within(json, budget, depth).map(Some);
+            return write_json_within(json, builder, budget, depth).map(Some);
         }
         if matches!(self, Value::Array(_) | Value::Object(_)) && depth >= MAX_NESTING {
             return Err(TooLarge::Nesting);
@@ -918,52 +930,58 @@ impl<'a> Value<'a> {
             Value::Undefined | Value::Function(_) => return Ok(None),
             Value::Null => {
                 charge(budget, 4)?;
-                JsonValue::Null
+                builder.null()
             }
             Value::Bool(b) => {
                 charge(budget, if *b { 4 } else { 5 })?;
-                JsonValue::Bool(*b)
+                builder.bool(*b)
             }
             Value::Number(n) => {
                 charge(budget, number_len(*n))?;
-                json_number(*n)
+                write_number(builder, *n)
             }
             Value::String(s) => {
                 charge(budget, s.len() + 2)?;
-                JsonValue::String(s.to_string())
+                builder.string(s)
             }
             Value::Array(a) => {
                 let items = a.items();
                 charge(budget, 1 + items.len().max(1))?;
-                let mut out = Vec::with_capacity(items.len());
+                let mut out = builder.array(items.len());
                 for v in items.iter() {
-                    out.push(match v {
+                    let item = match v {
                         Value::Undefined | Value::Function(_) => {
                             charge(budget, 4)?;
-                            JsonValue::Null
+                            builder.null()
                         }
-                        v => nest(depth + 1, || v.to_json_spending(budget, depth + 1))?
-                            .unwrap_or(JsonValue::Null),
-                    });
+                        v => {
+                            match nest(depth + 1, || v.write_spending(builder, budget, depth + 1))?
+                            {
+                                Some(item) => item,
+                                None => builder.null(),
+                            }
+                        }
+                    };
+                    builder.push(&mut out, item);
                 }
-                JsonValue::Array(out)
+                builder.end_array(out)
             }
             Value::Object(o) => {
                 let o = o.borrow();
                 charge(budget, if o.is_empty() { 2 } else { 1 })?;
-                let mut out = serde_json::Map::with_capacity(o.len());
+                let mut out = builder.object(o.len());
                 for (k, v) in o.iter() {
-                    if let Some(json) = match v {
+                    if let Some(value) = match v {
                         Value::Undefined | Value::Function(_) => None,
                         v => {
                             charge(budget, k.len() + 4)?;
-                            nest(depth + 1, || v.to_json_spending(budget, depth + 1))?
+                            nest(depth + 1, || v.write_spending(builder, budget, depth + 1))?
                         }
                     } {
-                        out.insert(k.to_string(), json);
+                        builder.insert(&mut out, k, value);
                     }
                 }
-                JsonValue::Object(out)
+                builder.end_object(out)
             }
         }))
     }
@@ -1152,54 +1170,124 @@ fn copy_json(json: &JsonValue, depth: usize) -> JsonValue {
     }
 }
 
-/// [`copy_json`] for JSON nested in `depth` arrays and objects, spending the length of the text
-/// from `budget` as [`Value::to_json_spending`] does.
-fn copy_json_within(
+/// Writes input JSON nested in `depth` arrays and objects with `builder`, as [`copy_json`] copies
+/// it, spending the length of the text from `budget` as [`Value::to_json_spending`] does.
+fn write_json_within<B: Builder>(
     json: &JsonValue,
+    builder: &mut B,
     budget: &mut usize,
     depth: usize,
-) -> std::result::Result<JsonValue, TooLarge> {
+) -> std::result::Result<B::Value, TooLarge> {
     if matches!(json, JsonValue::Array(_) | JsonValue::Object(_)) && depth >= MAX_NESTING {
         return Err(TooLarge::Nesting);
     }
     Ok(match json {
         JsonValue::Null => {
             charge(budget, 4)?;
-            JsonValue::Null
+            builder.null()
         }
         JsonValue::Bool(b) => {
             charge(budget, if *b { 4 } else { 5 })?;
-            JsonValue::Bool(*b)
+            builder.bool(*b)
         }
         JsonValue::Number(n) => {
             let n = n.as_f64().unwrap_or(f64::NAN);
             charge(budget, number_len(n))?;
-            json_number(n)
+            write_number(builder, n)
         }
         JsonValue::String(s) => {
             charge(budget, s.len() + 2)?;
-            JsonValue::String(s.clone())
+            builder.string(s)
         }
         JsonValue::Array(items) => {
             charge(budget, 1 + items.len().max(1))?;
-            JsonValue::Array(
-                items
-                    .iter()
-                    .map(|v| nest(depth + 1, || copy_json_within(v, budget, depth + 1)))
-                    .collect::<std::result::Result<_, _>>()?,
-            )
+            let mut out = builder.array(items.len());
+            for v in items {
+                let item = nest(depth + 1, || {
+                    write_json_within(v, builder, budget, depth + 1)
+                })?;
+                builder.push(&mut out, item);
+            }
+            builder.end_array(out)
         }
         JsonValue::Object(fields) => {
             charge(budget, if fields.is_empty() { 2 } else { 1 })?;
-            let mut out = serde_json::Map::with_capacity(fields.len());
+            let mut out = builder.object(fields.len());
             for (k, v) in fields {
                 charge(budget, k.len() + 4)?;
-                let v = nest(depth + 1, || copy_json_within(v, budget, depth + 1))?;
-                out.insert(k.clone(), v);
+                let v = nest(depth + 1, || {
+                    write_json_within(v, builder, budget, depth + 1)
+                })?;
+                builder.insert(&mut out, k, v);
             }
-            JsonValue::Object(out)
+            builder.end_object(out)
         }
     })
+}
+
+/// Writes a number, or `null` for one that is not finite.
+#[inline]
+fn write_number<B: Builder>(builder: &mut B, n: f64) -> B::Value {
+    if n.is_finite() {
+        builder.number(n)
+    } else {
+        builder.null()
+    }
+}
+
+/// Builds `serde_json` values: the result of [`Value::to_json_within`].
+pub(crate) struct JsonBuilder;
+
+impl Builder for JsonBuilder {
+    type Value = JsonValue;
+    type Array = Vec<JsonValue>;
+    type Object = serde_json::Map<String, JsonValue>;
+
+    fn null(&mut self) -> JsonValue {
+        JsonValue::Null
+    }
+
+    fn bool(&mut self, value: bool) -> JsonValue {
+        JsonValue::Bool(value)
+    }
+
+    #[inline]
+    fn number(&mut self, value: f64) -> JsonValue {
+        json_number(value)
+    }
+
+    fn string(&mut self, value: &str) -> JsonValue {
+        JsonValue::String(value.to_owned())
+    }
+
+    fn array(&mut self, len: usize) -> Vec<JsonValue> {
+        Vec::with_capacity(len)
+    }
+
+    fn push(&mut self, array: &mut Vec<JsonValue>, item: JsonValue) {
+        array.push(item);
+    }
+
+    fn end_array(&mut self, array: Vec<JsonValue>) -> JsonValue {
+        JsonValue::Array(array)
+    }
+
+    fn object(&mut self, len: usize) -> serde_json::Map<String, JsonValue> {
+        serde_json::Map::with_capacity(len)
+    }
+
+    fn insert(
+        &mut self,
+        object: &mut serde_json::Map<String, JsonValue>,
+        key: &str,
+        value: JsonValue,
+    ) {
+        object.insert(key.to_owned(), value);
+    }
+
+    fn end_object(&mut self, object: serde_json::Map<String, JsonValue>) -> JsonValue {
+        JsonValue::Object(object)
+    }
 }
 
 /// A value of any evaluation behind a trait object, whatever the lifetime of its input. Public

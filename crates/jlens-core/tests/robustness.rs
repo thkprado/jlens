@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use jlens_core::input::{Sink, Source};
+use jlens_core::output::Builder;
 use jlens_core::reads::{Read, Reads};
 use jlens_core::{Bindings, CancelToken, Document, Error, Expression, HostFunction, Options};
 use proptest::prelude::*;
@@ -403,6 +404,42 @@ proptest! {
             }
             if !timed_out(&fields) && !timed_out(&document) {
                 prop_assert_eq!(format!("{fields:?}"), format!("{document:?}"));
+            }
+        }
+    }
+
+    /// A result written with a [`Builder`] (ADR 0017) is the one `evaluate` returns, and fails
+    /// the same way, within a size limit or not.
+    #[test]
+    fn a_builder_writes_what_evaluate_returns(source in expression()) {
+        if let Ok(expr) = Expression::compile(&source) {
+            let options = Options::new()
+                .timeout(Duration::from_millis(50))
+                .max_depth(300)
+                .now(0)
+                .seed(1);
+            let input = input();
+            let bindings = bindings();
+            let document = Document::new(&input);
+            let timed_out = |r: &Result<Option<serde_json::Value>, Error>| {
+                r.as_ref().is_err_and(|e| e.code() == "D1012")
+            };
+            for options in [options.clone(), options.max_result_size(16)] {
+                let json = expr.evaluate_document(&document, &bindings, &options);
+                let built = expr.evaluate_document_to(&document, &bindings, &options, |out| {
+                    out.write(&mut Rebuilt)
+                });
+                if !timed_out(&json) && !timed_out(&built) {
+                    prop_assert_eq!(format!("{built:?}"), format!("{json:?}"));
+                }
+                let source = JsonSource::root(&input, true);
+                let json = expr.evaluate_source(&source, &bindings, &options);
+                let built = expr.evaluate_source_to(&source, &bindings, &options, |out| {
+                    out.write(&mut Rebuilt)
+                });
+                if !timed_out(&json) && !timed_out(&built) {
+                    prop_assert_eq!(format!("{built:?}"), format!("{json:?}"));
+                }
             }
         }
     }
@@ -860,6 +897,131 @@ fn fuzz_crashes_stay_fixed() {
         };
         assert_eq!(&got, expected, "{source}");
     }
+}
+
+/// Builds `serde_json` values, as `evaluate` returns them, counting the values it builds.
+struct Rebuilt;
+
+thread_local! {
+    static BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl Rebuilt {
+    fn built<T>(value: T) -> T {
+        BUILT.with(|built| built.set(built.get() + 1));
+        value
+    }
+}
+
+impl Builder for Rebuilt {
+    type Value = serde_json::Value;
+    type Array = Vec<serde_json::Value>;
+    type Object = serde_json::Map<String, serde_json::Value>;
+
+    fn null(&mut self) -> serde_json::Value {
+        Rebuilt::built(serde_json::Value::Null)
+    }
+    fn bool(&mut self, value: bool) -> serde_json::Value {
+        Rebuilt::built(value.into())
+    }
+    fn number(&mut self, value: f64) -> serde_json::Value {
+        assert!(value.is_finite());
+        Rebuilt::built(if value.fract() == 0.0 && value.abs() < 2f64.powi(53) {
+            (value as i64).into()
+        } else {
+            value.into()
+        })
+    }
+    fn string(&mut self, value: &str) -> serde_json::Value {
+        Rebuilt::built(value.into())
+    }
+    fn array(&mut self, len: usize) -> Vec<serde_json::Value> {
+        Vec::with_capacity(len)
+    }
+    fn push(&mut self, array: &mut Vec<serde_json::Value>, item: serde_json::Value) {
+        array.push(item);
+    }
+    fn end_array(&mut self, array: Vec<serde_json::Value>) -> serde_json::Value {
+        Rebuilt::built(array.into())
+    }
+    fn object(&mut self, len: usize) -> serde_json::Map<String, serde_json::Value> {
+        serde_json::Map::with_capacity(len)
+    }
+    fn insert(
+        &mut self,
+        object: &mut serde_json::Map<String, serde_json::Value>,
+        key: &str,
+        value: serde_json::Value,
+    ) {
+        assert!(object.insert(key.into(), value).is_none(), "{key} twice");
+    }
+    fn end_object(
+        &mut self,
+        object: serde_json::Map<String, serde_json::Value>,
+    ) -> serde_json::Value {
+        Rebuilt::built(object.into())
+    }
+}
+
+/// A builder stops at the size and nesting limits of a result, writing reads what the evaluation
+/// left unread, and the closure that writes is called only on success (ADR 0017).
+#[test]
+fn a_builder_stops_at_the_limits() {
+    let write = |source: &str, options: &Options| {
+        BUILT.with(|built| built.set(0));
+        let expr = Expression::compile(source).unwrap();
+        let document = Document::new(&json!({"a": [1, 2, 3]}));
+        let result = expr.evaluate_document_to(&document, &Bindings::new(), options, |out| {
+            out.write(&mut Rebuilt)
+        });
+        (result, BUILT.with(|built| built.get()))
+    };
+    let small = Options::new().max_result_size(10);
+    assert_eq!(write("a", &small), (Ok(Some(json!([1, 2, 3]))), 4));
+    // Writing stops at the limit: a few values of the thousand.
+    let (result, built) = write("[1..1000]", &small);
+    assert_eq!(result.unwrap_err().code(), "U1001");
+    assert!(built < 10, "{built}");
+    let build = "$build := function($n, $acc) { $n = 0 ? $acc : $build($n - 1, {'a': $acc}) }";
+    let (result, built) = write(&format!("({build}; $build(1000, 1))"), &Options::new());
+    assert_eq!((result.is_ok(), built), (true, 1001));
+    let (result, _) = write(&format!("({build}; $build(1001, 1))"), &Options::new());
+    assert_eq!(result.unwrap_err().code(), "U1001");
+    // Undefined.
+    assert_eq!(write("b", &Options::new()), (Ok(None), 0));
+
+    // Deep input read from a source.
+    let expr = Expression::compile("$").unwrap();
+    let deep = Nested(100_000);
+    let result = expr.evaluate_source_to(&deep, &Bindings::new(), &Options::new(), |out| {
+        out.write(&mut Rebuilt)
+    });
+    assert_eq!(result.unwrap_err().code(), "U1001");
+
+    // A level read only when the result is written, and that fails.
+    let input = json!({"bad": {"fails": true}, "ok": 1});
+    let mut called = false;
+    let expr = Expression::compile("bad").unwrap();
+    let source = JsonSource::root(&input, false);
+    let result = expr.evaluate_source_to(&source, &Bindings::new(), &Options::new(), |out| {
+        called = true;
+        out.write(&mut Rebuilt)
+    });
+    assert_eq!(result.unwrap_err().code(), "U1004");
+    assert!(called);
+    // An evaluation that fails does not call the closure.
+    let mut called = false;
+    let expr = Expression::compile("$error('no')").unwrap();
+    let result = expr.evaluate_source_to(&source, &Bindings::new(), &Options::new(), |out| {
+        called = true;
+        out.write(&mut Rebuilt)
+    });
+    assert_eq!(result.unwrap_err().code(), "D3137");
+    assert!(!called);
+    // What the closure returns is returned.
+    let expr = Expression::compile("ok").unwrap();
+    let result = expr.evaluate_source_to(&source, &Bindings::new(), &Options::new(), |_| Ok(7));
+    assert_eq!(result.unwrap(), 7);
 }
 
 /// Arrays nested `.0` levels deep around a number, read one level at a time.

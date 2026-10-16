@@ -46,6 +46,7 @@ mod host;
 pub mod input;
 mod json;
 mod lexer;
+pub mod output;
 mod parser;
 mod process;
 pub mod reads;
@@ -200,6 +201,7 @@ impl Expression {
             limits(options),
             None,
             None,
+            to_json,
         )
     }
 
@@ -215,6 +217,20 @@ impl Expression {
         bindings: &'a Bindings,
         options: &Options,
     ) -> Result<Option<JsonValue>> {
+        self.evaluate_source_to(input, bindings, options, to_json)
+    }
+
+    /// Evaluates the expression like [`evaluate_source`](Expression::evaluate_source), and
+    /// gives its result to `write`, which writes it in another representation with an
+    /// [`output::Builder`] (ADR 0017). `write` is called only when the evaluation succeeds,
+    /// and what it returns is returned. See the [`output`] module.
+    pub fn evaluate_source_to<'a, R>(
+        &self,
+        input: &dyn input::Source<'a>,
+        bindings: &'a Bindings,
+        options: &Options,
+        write: impl FnOnce(output::Output<'_, '_>) -> Result<R>,
+    ) -> Result<R> {
         let shared = value::Shared::new();
         eval::evaluate(
             &self.ast,
@@ -226,6 +242,7 @@ impl Expression {
             limits(options),
             None,
             Some(shared.clone()),
+            write,
         )
     }
 
@@ -238,6 +255,19 @@ impl Expression {
         bindings: &Bindings,
         options: &Options,
     ) -> Result<Option<JsonValue>> {
+        self.evaluate_document_to(document, bindings, options, to_json)
+    }
+
+    /// Evaluates the expression like [`evaluate_document`](Expression::evaluate_document), and
+    /// gives its result to `write`, as [`evaluate_source_to`](Expression::evaluate_source_to)
+    /// does.
+    pub fn evaluate_document_to<R>(
+        &self,
+        document: &Document,
+        bindings: &Bindings,
+        options: &Options,
+        write: impl FnOnce(output::Output<'_, '_>) -> Result<R>,
+    ) -> Result<R> {
         eval::evaluate(
             &self.ast,
             document.value().clone(),
@@ -248,6 +278,7 @@ impl Expression {
             limits(options),
             None,
             None,
+            write,
         )
     }
 
@@ -274,6 +305,7 @@ impl Expression {
             limits(options),
             Some(tracer),
             None,
+            to_json,
         )
     }
 
@@ -304,6 +336,11 @@ impl Expression {
         let result = self.evaluate_traced(input, bindings, options, &mut collector);
         (result, collector.finish())
     }
+}
+
+/// Writes a result as a `serde_json::Value`.
+fn to_json(output: output::Output<'_, '_>) -> Result<Option<JsonValue>> {
+    output.write(&mut value::JsonBuilder)
 }
 
 fn limits(options: &Options) -> eval::Limits {
