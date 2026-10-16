@@ -1,12 +1,12 @@
 """Compares jlens with the other JSONata implementations for Python, on ../cases.json.
 
-Three of the packages install a module named `jsonata`, so each package lives in a virtual
+Two of the packages install a module named `jsonata`, so each package lives in a virtual
 environment of its own; this script runs in each of them:
 
     python python.py speed  jlens=<python> jsonatapy=<python> jsonata-python=<python> ...
     python python.py limits jlens=<python> jsonatapy=<python> jsonata-python=<python> ...
 
-where each name is a key of IMPLEMENTATIONS (`jlens`, `jsonatapy`, `jsonata-python`, `jsonata`,
+where each name is a key of IMPLEMENTATIONS (`jlens`, `jsonatapy`, `jsonata-python`,
 `jsonata-rs`), and <python> the interpreter of the environment that holds that package. Only the
 standard library is needed.
 
@@ -113,33 +113,6 @@ class JsonataPython:
         return None
 
 
-class JsonataWrapper:
-    """jsonata, which runs jsonata-js in the Duktape JavaScript engine."""
-
-    def __init__(self):
-        import jsonata
-
-        self.context = jsonata.Context()
-        self.version = _version("jsonata")
-
-    def compile(self, source):
-        # It pastes the expression into JavaScript source between single quotes.
-        return source.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "")
-
-    def evaluate(self, compiled, input, timeout=None, max_depth=None):
-        if timeout is not None or max_depth is not None:
-            raise Unsupported
-        return self.context(compiled, input)
-
-    def error(self, error):
-        if isinstance(error, ValueError) and '"code"' in str(error):
-            try:
-                return f"`{json.loads(str(error))['code']}`"
-            except (ValueError, KeyError):
-                return None
-        return None
-
-
 class JsonataRs:
     """jsonata-rs, a port of jsonata-java in Rust."""
 
@@ -171,7 +144,6 @@ IMPLEMENTATIONS = {
     "jlens": Jlens,
     "jsonatapy": Jsonatapy,
     "jsonata-python": JsonataPython,
-    "jsonata": JsonataWrapper,
     "jsonata-rs": JsonataRs,
 }
 
