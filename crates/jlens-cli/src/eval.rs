@@ -9,7 +9,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use jlens_core::audit::{self, Tracer};
-use jlens_core::{Bindings, Diagnostic, Expression, Options};
+use jlens_core::reads;
+use jlens_core::{Bindings, Diagnostic, Document, Expression, Options};
 use serde_json::Value;
 
 use crate::output::{self, Format, truthy};
@@ -165,7 +166,7 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
     let input = if args.no_input {
         None
     } else {
-        let (text, name) = match &args.input {
+        Some(match &args.input {
             Some(path) => (
                 fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?,
                 path.display().to_string(),
@@ -177,38 +178,54 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
                     .context("reading stdin")?;
                 (text, "stdin".to_owned())
             }
-        };
-        match serde_json::from_str(&text) {
-            Ok(doc) => Some(doc),
-            Err(e) => {
-                // Still exit code 2, but the envelope reports it too (ADR 0008).
-                if args.json {
-                    output::line(&output::error_envelope(&invalid_input(&e), &source, None))?;
-                }
-                return Err(anyhow::Error::new(e).context(format!("parsing {name}")));
-            }
+        })
+    };
+    let invalid = |e: serde_json::Error, name: &str| -> Result<ExitCode> {
+        // Still exit code 2, but the envelope reports it too (ADR 0008).
+        if args.json {
+            output::line(&output::error_envelope(&invalid_input(&e), &source, None))?;
         }
+        Err(anyhow::Error::new(e).context(format!("parsing {name}")))
     };
 
     let auditing = args.explain || args.audit.is_some();
     let result = if auditing || args.trace_log.is_some() {
-        match traced(&args, &expr, input.as_ref(), &bindings, &options, auditing)? {
+        // The audit and the trace log record input values: parse the whole document.
+        let doc = match &input {
+            Some((text, name)) => match serde_json::from_str(text) {
+                Ok(doc) => Some(doc),
+                Err(e) => return invalid(e, name),
+            },
+            None => None,
+        };
+        match traced(&args, &expr, doc.as_ref(), &bindings, &options, auditing)? {
             Traced::Printed(code) => return Ok(code),
             Traced::Result(r) => r,
         }
     } else {
-        expr.evaluate_with(input.as_ref(), &bindings, &options)
+        match &input {
+            Some((text, name)) => match Document::parse_cut(text, &input_read(&expr)) {
+                Ok(doc) => expr.evaluate_document(&doc, &bindings, &options),
+                Err(e) => return invalid(e, name),
+            },
+            None => expr.evaluate_with(None, &bindings, &options),
+        }
     };
     match result {
         Ok(value) => {
             if args.filter {
                 if truthy(value.as_ref())
-                    && let Some(doc) = &input
+                    && let Some((text, name)) = &input
                 {
+                    // The document was parsed without the fields the expression does not read.
+                    let doc: Value = match serde_json::from_str(text) {
+                        Ok(doc) => doc,
+                        Err(e) => return invalid(e, name),
+                    };
                     output::line(&if args.json {
-                        output::ok_envelope(Some(doc), None)
+                        output::ok_envelope(Some(&doc), None)
                     } else {
-                        format.render(doc)
+                        format.render(&doc)
                     })?;
                 }
             } else if args.json {
@@ -246,6 +263,20 @@ fn ndjson(
     };
     let mut out = BufWriter::new(std::io::stdout().lock());
     let mut failures = 0usize;
+    let invalid = |out: &mut BufWriter<_>, e: serde_json::Error, number| -> Result<()> {
+        if args.json {
+            let err = invalid_input(&e);
+            writeln!(
+                out,
+                "{}",
+                output::error_envelope(&err, source, Some(number))
+            )?;
+        } else {
+            eprintln!("line {number}: invalid JSON: {e}");
+        }
+        Ok(())
+    };
+    let read = input_read(expr);
     for (index, line) in reader.lines().enumerate() {
         let number = index + 1;
         let line = line.context("reading input")?;
@@ -253,26 +284,26 @@ fn ndjson(
         if text.is_empty() {
             continue;
         }
-        let doc: Value = match serde_json::from_str(text) {
+        let doc = match Document::parse_cut(text, &read) {
             Ok(doc) => doc,
             Err(e) => {
                 failures += 1;
-                if args.json {
-                    let err = invalid_input(&e);
-                    writeln!(
-                        out,
-                        "{}",
-                        output::error_envelope(&err, source, Some(number))
-                    )?;
-                } else {
-                    eprintln!("line {number}: invalid JSON: {e}");
-                }
+                invalid(&mut out, e, number)?;
                 continue;
             }
         };
-        match expr.evaluate_with(Some(&doc), bindings, options) {
+        match expr.evaluate_document(&doc, bindings, options) {
             Ok(value) if args.filter => {
                 if truthy(value.as_ref()) {
+                    // The line was parsed without the fields the expression does not read.
+                    let doc: Value = match serde_json::from_str(text) {
+                        Ok(doc) => doc,
+                        Err(e) => {
+                            failures += 1;
+                            invalid(&mut out, e, number)?;
+                            continue;
+                        }
+                    };
                     if args.json {
                         writeln!(out, "{}", output::ok_envelope(Some(&doc), Some(number)))?;
                     } else {
@@ -313,6 +344,15 @@ fn guard_terminal(reads_stdin: bool, stdin_is_terminal: bool) -> Result<()> {
         bail!("standard input is a terminal: pass the input with -i FILE, or use --no-input");
     }
     Ok(())
+}
+
+/// What the expression reads of its input (ADR 0016): the input is parsed without the other
+/// fields. An expression that does not read its input needs none of its fields.
+fn input_read(expr: &Expression) -> reads::Read {
+    expr.reads()
+        .input()
+        .cloned()
+        .unwrap_or_else(|| reads::Read::Fields(Default::default()))
 }
 
 /// The error (`U2001`) of an input document that is not valid JSON.

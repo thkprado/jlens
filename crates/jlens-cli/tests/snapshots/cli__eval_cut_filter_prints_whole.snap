@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"-c\", \"--filter\", \"a > 1\"],\nSome(r#\"{\"a\":2,\"b\":[1,{\"c\":\"x\"}]}\"#))"
+---
+exit: 0
+--- stdout
+{"a":2,"b":[1,{"c":"x"}]}
+--- stderr

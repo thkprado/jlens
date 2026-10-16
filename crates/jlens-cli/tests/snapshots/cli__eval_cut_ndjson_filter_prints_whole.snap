@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--ndjson\", \"--filter\", \"a > 1\"],\nSome(\"{\\\"a\\\":2,\\\"b\\\":{\\\"c\\\":[true]}}\\n{\\\"a\\\":1,\\\"b\\\":null}\\n\"))"
+---
+exit: 0
+--- stdout
+{"a":2,"b":{"c":[true]}}
+--- stderr

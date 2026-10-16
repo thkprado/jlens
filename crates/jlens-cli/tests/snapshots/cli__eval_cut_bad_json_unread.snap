@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"a\"], Some(r#\"{\"a\":2,\"b\":[1,}\"#))"
+---
+exit: 2
+--- stdout
+--- stderr
+error: parsing stdin: expected value at line 1 column 15

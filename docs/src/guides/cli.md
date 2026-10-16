@@ -95,6 +95,13 @@ $ jlens eval -f fixtures/shipping-rule.jsonata -i fixtures/online-store-order.js
 Results are printed the way JavaScript prints JSON, so they match jsonata-js output: `2^64` prints
 as `18446744073709552000` and `1e21` as `1e+21`.
 
+`eval` parses the input without the fields the expression does not read (what
+[`jlens reads`](#jlens-reads) prints), so a rule that reads a few fields of a large document
+skips the rest of it. The skipped fields are still checked as JSON syntax, but a number too large
+for a float, or a lone surrogate escape such as `"\ud800"`, passes there. `--filter` parses a
+matching document again, whole, to print it; `--explain`, `--audit` and `--trace-log` show input
+values, and parse the input whole.
+
 ### Machine output: `--json`
 
 With `--json`, every outcome is one compact JSON object, the *envelope*, on one line of

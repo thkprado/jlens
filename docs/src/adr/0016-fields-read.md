@@ -248,7 +248,9 @@ each record parses four times as fast. The fields it skips are checked as JSON s
 a number too large for a float or a lone surrogate escape passes there, where `parse` rejects
 it. In the WebAssembly and Python packages, `Document.fromJson` and `Document.from_json` take
 a `Read`, and `evaluateJson` and `evaluate_json` parse their input cut by the expression's own
-`reads()`, without bindings, which reads at least what it reads with any.*
+`reads()`, without bindings, which reads at least what it reads with any. So does `jlens eval`,
+except with `--explain`, `--audit` or `--trace-log`, which show input values; with `--filter`, it
+parses a matching document again, whole, to print it.*
 
 ## Alternatives not taken
 

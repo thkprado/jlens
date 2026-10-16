@@ -357,6 +357,19 @@ take a `Read`, and `evaluateJson` and `evaluate_json` cut their input by what th
 reads. In Python, 1,000 records of 40 fields (790 KB) parse in 5.5 ms whole and 1.6 ms cut by
 the rule above, and `evaluate_json` evaluates it on them in 1.6 ms in all.
 
+`jlens eval` parses its input this way too, by what the expression reads. Measured end to end,
+process start included, before and after:
+
+| `jlens eval` | Parsed whole | Parsed cut |
+|---|---:|---:|
+| `$sum(items.price)` on 30,000 items of 5 fields (10 MB) | 76 ms | 27 ms |
+| `$count(items)` on the same | 73 ms | 21 ms |
+| `--ndjson --filter '$sum(items.price) > 470'` on 20,000 lines of 5 items (34 MB) | 175 ms | 95 ms |
+| `$length($string($))` on the 10 MB document, which reads it whole | 159 ms | 107 ms |
+
+The last row gains too: the input used to be parsed into a `serde_json::Value` and converted,
+where it is now parsed straight into a `Document`.
+
 ## Where the time goes
 
 - **Allocation.** Values are reference-counted (`Rc`). Objects are `IndexMap`s that keep

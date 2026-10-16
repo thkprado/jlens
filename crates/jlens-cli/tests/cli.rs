@@ -163,6 +163,26 @@ fn eval_json() {
     );
 }
 
+/// The input is parsed without the fields the expression does not read (ADR 0016).
+#[test]
+fn eval_cut_input() {
+    snapshot!(
+        "eval_cut_filter_prints_whole",
+        &["eval", "-c", "--filter", "a > 1"],
+        r#"{"a":2,"b":[1,{"c":"x"}]}"#
+    );
+    snapshot!(
+        "eval_cut_bad_json_unread",
+        &["eval", "a"],
+        r#"{"a":2,"b":[1,}"#
+    );
+    snapshot!(
+        "eval_cut_ndjson_filter_prints_whole",
+        &["eval", "--ndjson", "--filter", "a > 1"],
+        "{\"a\":2,\"b\":{\"c\":[true]}}\n{\"a\":1,\"b\":null}\n"
+    );
+}
+
 #[test]
 fn eval_ndjson() {
     let args = ["eval", "--ndjson", "-i", "fixtures/orders.ndjson"];
