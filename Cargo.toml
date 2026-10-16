@@ -41,6 +41,9 @@ regress = { package = "jlens-regress", path = "crates/jlens-regress", version = 
 web-time = "1"
 stacker = "0.1"
 tracing = "0.1"
+# The Python package (ADR 0014): the stable ABI from Python 3.10.
+pyo3 = { version = "0.30.1", features = ["abi3-py310"] }
+pyo3-build-config = "0.30.1"
 lsp-server = "0.10"
 lsp-types = "0.97"
 url = "2"

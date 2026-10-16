@@ -1,0 +1,7 @@
+# Written by `maturin develop` and pytest.
+/python/jlens/_jlens.*
+!/python/jlens/_jlens.pyi
+__pycache__/
+/.pytest_cache/
+/.venv/
+/.mypy_cache/

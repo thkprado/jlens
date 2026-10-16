@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --quiet --package xtask --"
+
+[env]
+# Cargo builds the Python extension module (crates/jlens-python) as maturin does, without
+# linking libpython, which a machine may lack: Python provides it when it loads the module.
+PYO3_BUILD_EXTENSION_MODULE = "1"

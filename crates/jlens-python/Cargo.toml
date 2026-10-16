@@ -1,0 +1,32 @@
+[package]
+name = "jlens-python"
+description = "Python bindings for jlens (the `jlens` package on PyPI)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["api-bindings", "encoding"]
+publish = false
+
+[lib]
+name = "_jlens"
+crate-type = ["cdylib", "rlib"]
+# The code calls the Python interpreter, which a Rust test binary does not load: the package is
+# tested with pytest (`tests/`).
+test = false
+doctest = false
+
+[dependencies]
+jlens-core.workspace = true
+serde_json.workspace = true
+pyo3.workspace = true
+
+[build-dependencies]
+pyo3-build-config.workspace = true
+
+[lints]
+workspace = true
