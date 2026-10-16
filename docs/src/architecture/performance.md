@@ -352,6 +352,11 @@ the narrower the reads, the faster the parse, on this machine:
 A rule that reads a document whole leaves nothing to skip, and then `parse_cut` costs what
 `parse` does.
 
+The WebAssembly and Python packages parse this way: `Document.fromJson` and `Document.from_json`
+take a `Read`, and `evaluateJson` and `evaluate_json` cut their input by what the expression
+reads. In Python, 1,000 records of 40 fields (790 KB) parse in 5.5 ms whole and 1.6 ms cut by
+the rule above, and `evaluate_json` evaluates it on them in 1.6 ms in all.
+
 ## Where the time goes
 
 - **Allocation.** Values are reference-counted (`Rc`). Objects are `IndexMap`s that keep

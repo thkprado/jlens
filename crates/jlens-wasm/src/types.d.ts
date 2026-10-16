@@ -378,7 +378,8 @@ export class Expression {
   evaluate(input?: unknown, bindings?: Bindings | null, options?: EvaluateOptions): unknown;
   /**
    * Like `evaluate`, with the input document and the result as JSON text. This avoids
-   * converting large documents to and from JavaScript objects.
+   * converting large documents to and from JavaScript objects. The fields of the input that the
+   * expression does not read (`reads()`) are skipped while parsing, checked as JSON syntax only.
    */
   evaluateJson(
     input?: string | null,
@@ -423,8 +424,12 @@ export class Expression {
 export class Document {
   /** Converts a JSON-compatible value. */
   constructor(input: unknown);
-  /** Parses JSON text. Throws a `TypeError` when it is not valid JSON. */
-  static fromJson(text: string): Document;
+  /**
+   * Parses JSON text. Throws a `TypeError` when it is not valid JSON. With `read` (the `input`
+   * of `reads()` or of `unionReads()`), the fields it leaves out are skipped, checked as JSON
+   * syntax only, and the document serves the expressions it comes from as the whole one would.
+   */
+  static fromJson(text: string, read?: Read | null): Document;
   free(): void;
   [Symbol.dispose](): void;
 }

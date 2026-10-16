@@ -22,8 +22,9 @@ mod source;
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, RwLock, Weak};
+use std::sync::{Arc, OnceLock, RwLock, Weak};
 
+use jlens_core::reads::Read;
 use jlens_core::{Bindings, Options, audit};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::gc::{PyTraverseError, PyVisit};
@@ -44,6 +45,9 @@ pub struct Expression {
     /// The source, shared with the [`Host`]s of the evaluations.
     source: Arc<str>,
     registered: RwLock<Vec<Registered>>,
+    /// What the expression reads of its input, which cuts the input of `evaluate_json`; worked
+    /// out on the first call.
+    input_read: OnceLock<Read>,
 }
 
 /// Why `evaluate_json` and `evaluate_document` failed, carried out of the code that runs
@@ -64,6 +68,7 @@ impl Expression {
             inner,
             source: source.into(),
             registered: RwLock::default(),
+            input_read: OnceLock::new(),
         })
     }
 
@@ -140,8 +145,9 @@ impl Expression {
     }
 
     /// Like `evaluate`, with the input document and the result as JSON text: `None` for an
-    /// undefined result, `"null"` for `null`. The evaluation lets other Python threads run, and
-    /// attaches again to call a host function written in Python.
+    /// undefined result, `"null"` for `null`. The fields of the input that the expression does
+    /// not read (`reads()`, without bindings) are skipped while parsing. The evaluation lets
+    /// other Python threads run, and attaches again to call a host function written in Python.
     #[pyo3(signature = (input=None, bindings=None, **options))]
     fn evaluate_json(
         &self,
@@ -155,7 +161,7 @@ impl Expression {
         let result = py.detach(|| {
             let document = match input {
                 Some(text) => Some(
-                    jlens_core::Document::parse(text)
+                    jlens_core::Document::parse_cut(text, self.input_read())
                         .map_err(|e| Failure::Input(format!("input is not valid JSON: {e}")))?,
                 ),
                 None => None,
@@ -178,9 +184,13 @@ impl Expression {
     ) -> PyResult<Bound<'py, PyAny>> {
         let (bindings, host) = self.bindings(py, bindings)?;
         let options = convert::options(options)?;
-        let json = &document.get().json;
+        let source = &document.get().source;
         let result = py
-            .detach(|| self.run(Some(&converted(json)), &bindings, &options))
+            .detach(|| {
+                let document = converted(source)
+                    .map_err(|e| Failure::Input(format!("the document is not valid JSON: {e}")))?;
+                self.run(Some(&document), &bindings, &options)
+            })
             .map_err(|e| self.failure(py, e, host.as_deref()))?;
         match result {
             Some(value) => to_py(py, &value),
@@ -272,6 +282,18 @@ fn json_error(e: serde_json::Error) -> PyErr {
 }
 
 impl Expression {
+    /// What the expression reads of its input, without bindings: a superset of what it reads
+    /// with any bindings. An expression that does not read its input needs none of its fields.
+    fn input_read(&self) -> &Read {
+        self.input_read.get_or_init(|| {
+            self.inner
+                .reads()
+                .input()
+                .cloned()
+                .unwrap_or_else(|| Read::Fields(Default::default()))
+        })
+    }
+
     fn run(
         &self,
         document: Option<&jlens_core::Document>,
@@ -328,7 +350,25 @@ impl Expression {
 /// document lives.
 #[pyclass(frozen, module = "jlens")]
 pub struct Document {
-    json: Arc<Json>,
+    source: Arc<Source>,
+}
+
+/// What a `Document` is made of, which each thread converts.
+enum Source {
+    /// A Python value, converted to JSON.
+    Json(Json),
+    /// JSON text, parsed once when the document was made, and the `Read` that cuts it.
+    Text(String, Option<Read>),
+}
+
+impl Source {
+    fn convert(&self) -> serde_json::Result<jlens_core::Document> {
+        match self {
+            Source::Json(json) => Ok(jlens_core::Document::new(json)),
+            Source::Text(text, None) => jlens_core::Document::parse(text),
+            Source::Text(text, Some(read)) => jlens_core::Document::parse_cut(text, read),
+        }
+    }
 }
 
 #[pymethods]
@@ -337,42 +377,50 @@ impl Document {
     #[new]
     fn new(value: &Bound<'_, PyAny>) -> PyResult<Self> {
         Ok(Document {
-            json: Arc::new(convert::to_json(value, "the document")?),
+            source: Arc::new(Source::Json(convert::to_json(value, "the document")?)),
         })
     }
 
-    /// Parses JSON text.
+    /// Parses JSON text. With `read` (the `"input"` of `reads()` or of `union_reads()`), the
+    /// fields it leaves out are skipped: they are checked as JSON syntax only.
     #[staticmethod]
-    fn from_json(py: Python<'_>, text: &str) -> PyResult<Self> {
-        let json = py
-            .detach(|| serde_json::from_str(text))
+    #[pyo3(signature = (text, read=None))]
+    fn from_json(py: Python<'_>, text: &str, read: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        let read = match read.filter(|read| !read.is_none()) {
+            Some(read) => Some(
+                serde_json::from_value::<Read>(convert::to_json(read, "read")?)
+                    .map_err(|e| PyValueError::new_err(format!("invalid read: {e}")))?,
+            ),
+            None => None,
+        };
+        let source = Arc::new(Source::Text(text.to_owned(), read));
+        // Parsed now, to raise on invalid JSON; this thread keeps the conversion.
+        py.detach(|| converted(&source).map(drop))
             .map_err(|e| PyValueError::new_err(format!("the document is not valid JSON: {e}")))?;
-        Ok(Document {
-            json: Arc::new(json),
-        })
+        Ok(Document { source })
     }
 }
 
 thread_local! {
-    /// The documents this thread has converted, each with a weak reference to its JSON.
-    static CONVERTED: RefCell<Vec<(Weak<Json>, Rc<jlens_core::Document>)>> =
+    /// The documents this thread has converted, each with a weak reference to its source.
+    static CONVERTED: RefCell<Vec<(Weak<Source>, Rc<jlens_core::Document>)>> =
         const { RefCell::new(Vec::new()) };
 }
 
-/// This thread's conversion of `json`, made on its first use. Conversions whose documents are
-/// gone are dropped first.
-fn converted(json: &Arc<Json>) -> Rc<jlens_core::Document> {
+/// This thread's conversion of `source`, made on its first use. Conversions whose documents
+/// are gone are dropped first.
+fn converted(source: &Arc<Source>) -> serde_json::Result<Rc<jlens_core::Document>> {
     CONVERTED.with_borrow_mut(|cache| {
         cache.retain(|(weak, _)| weak.strong_count() > 0);
         if let Some((_, document)) = cache
             .iter()
-            .find(|(weak, _)| std::ptr::eq(weak.as_ptr(), Arc::as_ptr(json)))
+            .find(|(weak, _)| std::ptr::eq(weak.as_ptr(), Arc::as_ptr(source)))
         {
-            return document.clone();
+            return Ok(document.clone());
         }
-        let document = Rc::new(jlens_core::Document::new(json));
-        cache.push((Arc::downgrade(json), document.clone()));
-        document
+        let document = Rc::new(source.convert()?);
+        cache.push((Arc::downgrade(source), document.clone()));
+        Ok(document)
     })
 }
 

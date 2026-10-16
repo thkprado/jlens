@@ -704,3 +704,36 @@ def test_reads_and_union_reads():
             jlens.union_reads(bad)
     with pytest.raises(TypeError):
         Expression("a").reads([])
+
+
+def test_from_json_and_evaluate_json_skip_the_fields_not_read():
+    text = '{"a": {"b": 1, "c": 2}, "d": [{"e": 1, "f": 2}], "g": "x"}'
+    whole = Expression("$")
+    cut = Document.from_json(text, {"a": {"b": True}, "d": {"e": True}})
+    assert whole.evaluate_document(cut) == {"a": {"b": 1}, "d": [{"e": 1}]}
+    counted = Document.from_json(text, Expression("$count(d)").reads()["input"])
+    assert whole.evaluate_document(counted) == {"d": [{}]}
+    for read in [True, None]:
+        assert whole.evaluate_document(Document.from_json(text, read)) == json.loads(text)
+    # Another thread parses the text again, cut the same way.
+    with ThreadPoolExecutor(1) as pool:
+        assert pool.submit(whole.evaluate_document, cut).result() == {"a": {"b": 1}, "d": [{"e": 1}]}
+    with pytest.raises(ValueError):
+        Document.from_json(text, {"a": False})
+    # Skipped fields are checked as JSON syntax only.
+    with pytest.raises(ValueError):
+        Document.from_json('{"a": 1, "z": [}', {"a": True})
+    assert whole.evaluate_document(Document.from_json('{"a": 1, "z": 1e400}', {"a": True})) == {
+        "a": 1
+    }
+    with pytest.raises(ValueError):
+        Document.from_json('{"a": 1, "z": 1e400}')
+
+    # evaluate_json cuts its input by the expression's reads().
+    assert Expression("a.b").evaluate_json('{"a": {"b": 1}, "z": 1e400}') == "1"
+    with pytest.raises(ValueError):
+        Expression("$keys($)").evaluate_json('{"z": 1e400}')
+    constant = Expression("1 + 1")
+    assert constant.evaluate_json('{"z": 1e400}') == "2"
+    with pytest.raises(ValueError):
+        constant.evaluate_json("[1,")

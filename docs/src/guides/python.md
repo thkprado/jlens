@@ -114,7 +114,8 @@ becomes U+FFFD.
 
 `evaluate_json` takes the input as JSON text and returns the result as JSON text. For a document
 you already have as text, such as an HTTP response body, it avoids building Python objects only
-to read them:
+to read them. While it parses, it skips the fields the expression does not
+[read](#the-fields-an-expression-reads), checking them as JSON syntax only:
 
 ```python
 {{#include ../../../crates/jlens-python/tests/guide/json_text.py}}
@@ -257,6 +258,18 @@ expressions.
   keep them all. The keys are those of the JSON form, which the other packages and the CLI share.
 - **A binding named after a built-in function** shadows it during the evaluation, but the
   analysis takes the name as the built-in's: such an application cannot cut its input by it.
+
+`Document.from_json(text, read)` parses JSON text cut by a `Read`, the `"input"` of `reads()` or
+of `union_reads()`. It skips the fields the `Read` leaves out, which on a wide document is
+several times faster ([Performance](../architecture/performance.md)), and the document serves
+each expression that went into the union as the whole one would:
+
+```python
+{{#include ../../../crates/jlens-python/tests/guide/reads.py:document}}
+```
+
+The fields skipped are checked as JSON syntax only: a number too large for a float, which a full
+parse rejects, passes there.
 
 ## Explaining results
 

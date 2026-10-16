@@ -83,6 +83,28 @@ export const cases = [
     throws(() => expr.evaluateJson("{not json"), (e) => ok(e instanceof TypeError, "TypeError"));
   }],
 
+  ["fromJson and evaluateJson skip the fields not read", (j) => {
+    const text = '{"a": {"b": 1, "c": 2}, "d": [{"e": 1, "f": 2}], "g": "x"}';
+    const whole = (doc) => new j.Expression("$").evaluateDocument(doc);
+    equal(whole(j.Document.fromJson(text, { a: { b: true }, d: { e: true } })), { a: { b: 1 }, d: [{ e: 1 }] });
+    equal(whole(j.Document.fromJson(text, new j.Expression("$count(d)").reads().input)), { d: [{}] }, "count");
+    for (const read of [true, null, undefined]) {
+      equal(whole(j.Document.fromJson(text, read)), JSON.parse(text), `read ${read}`);
+    }
+    throws(() => j.Document.fromJson(text, { a: false }), (e) => ok(e instanceof TypeError, "bad read"));
+    // Skipped fields are checked as JSON syntax only.
+    throws(() => j.Document.fromJson('{"a": 1, "z": [}', { a: true }), (e) => ok(e instanceof TypeError, "syntax"));
+    equal(whole(j.Document.fromJson('{"a": 1, "z": 1e400}', { a: true })), { a: 1 }, "skipped number");
+    throws(() => j.Document.fromJson('{"a": 1, "z": 1e400}'), (e) => ok(e instanceof TypeError, "number"));
+
+    // evaluateJson cuts its input by the expression's reads().
+    equal(new j.Expression("a.b").evaluateJson('{"a": {"b": 1}, "z": 1e400}'), "1", "cut");
+    throws(() => new j.Expression("$keys($)").evaluateJson('{"z": 1e400}'), (e) => ok(e instanceof TypeError, "whole"));
+    const constant = new j.Expression("1 + 1");
+    equal(constant.evaluateJson('{"z": 1e400}'), "2", "input not read");
+    throws(() => constant.evaluateJson("[1,"), (e) => ok(e instanceof TypeError, "not read, still parsed"));
+  }],
+
   ["evaluate reads the input like JSON.stringify, one level at a time", (j) => {
     const value = (source, input) => new j.Expression(source).evaluate(input);
     const input = {

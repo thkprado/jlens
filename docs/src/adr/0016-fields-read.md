@@ -246,7 +246,9 @@ outcome either way.
 and `Document::parse_cut` takes the `Read`. It is kept: a 1 MB document cut to two fields of
 each record parses four times as fast. The fields it skips are checked as JSON syntax only, so
 a number too large for a float or a lone surrogate escape passes there, where `parse` rejects
-it.*
+it. In the WebAssembly and Python packages, `Document.fromJson` and `Document.from_json` take
+a `Read`, and `evaluateJson` and `evaluate_json` parse their input cut by the expression's own
+`reads()`, without bindings, which reads at least what it reads with any.*
 
 ## Alternatives not taken
 

@@ -99,7 +99,8 @@ expr.free();                                 // release it (or let the garbage c
 
 `evaluateJson` takes the input as JSON text and returns the result as JSON text. For large
 documents that you already have as text, such as a `fetch` response body, it avoids converting
-the document to JavaScript objects and back.
+the document to JavaScript objects and back. While it parses, it skips the fields the expression
+does not [read](#the-fields-an-expression-reads), checking them as JSON syntax only.
 
 ### How the input is read
 
@@ -119,7 +120,8 @@ Two consequences follow:
   modifies the input object can change what the rest of the evaluation reads. Copy the input
   first if a function must modify it.
 
-`evaluateJson`, `evaluateWithAudit` and `Document` convert their whole input first.
+`evaluateJson` converts the fields the expression reads first; `evaluateWithAudit` and
+`Document` convert their whole input first.
 
 ### Reusing a document
 
@@ -264,6 +266,21 @@ unionReads([expr.reads({ rate }), new Expression("customer.name").reads()]);
   them all.
 - **A binding named after a built-in function** shadows it during the evaluation, but the
   analysis takes the name as the built-in's: such an application cannot cut its input by it.
+
+`Document.fromJson(text, read)` parses JSON text cut by a `Read`, the `input` of `reads()` or
+of `unionReads()`. It skips the fields the `Read` leaves out, which on a wide document is several
+times faster ([Performance](../architecture/performance.md)), and the document serves each
+expression that went into the union as the whole one would:
+
+```js
+const rules = sources.map((source) => new Expression(source));
+const { input } = unionReads(rules.map((rule) => rule.reads(bindings)));
+const doc = Document.fromJson(text, input);
+const results = rules.map((rule) => rule.evaluateDocument(doc, bindings));
+```
+
+The fields skipped are checked as JSON syntax only: a number too large for a float, which a full
+parse rejects, passes there.
 
 ## Explaining results
 

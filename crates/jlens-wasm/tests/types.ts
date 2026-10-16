@@ -44,6 +44,8 @@ export async function check(): Promise<void> {
   const root = audit.audit.root;
   const start: number | undefined = root?.span.start;
   const doc = Document.fromJson("{}");
+  const cut = Document.fromJson('{"a": 1}', expr.reads().input);
+  cut.free();
   const r4: unknown = expr.evaluateDocument(new Document({ items: [] }), { limit: 1 });
   const r5: unknown = expr.evaluateDocument(doc);
   doc.free();

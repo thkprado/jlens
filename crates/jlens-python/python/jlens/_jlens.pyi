@@ -4,7 +4,7 @@ from typing import Any, Literal, final
 
 from typing_extensions import Self
 
-from ._types import AuditResult, CaptureLimits, Reads
+from ._types import AuditResult, CaptureLimits, Read, Reads
 
 __all__ = [
     "Document",
@@ -66,8 +66,9 @@ class Expression:
         seed: int | None = None,
     ) -> str | None:
         """Like `evaluate`, with the input document and the result as JSON text: `None` for an
-        undefined result, `"null"` for `null`. Other Python threads run during the
-        evaluation."""
+        undefined result, `"null"` for `null`. The fields of the input that the expression does
+        not read (`reads()`) are skipped while parsing, checked as JSON syntax only. Other
+        Python threads run during the evaluation."""
 
     def evaluate_document(
         self,
@@ -132,8 +133,11 @@ class Document:
         """Converts a Python value, with the rules of `Expression.evaluate`'s input."""
 
     @staticmethod
-    def from_json(text: str) -> Document:
-        """Parses JSON text."""
+    def from_json(text: str, read: Read | None = None) -> Document:
+        """Parses JSON text. Raises a `ValueError` when it is not valid JSON. With `read` (the
+        `"input"` of `reads()` or of `union_reads()`), the fields it leaves out are skipped,
+        checked as JSON syntax only, and the document serves the expressions it comes from as
+        the whole one would."""
 
 @final
 class Function:

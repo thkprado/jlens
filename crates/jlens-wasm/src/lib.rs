@@ -24,11 +24,13 @@ mod host;
 mod service;
 mod source;
 
+use std::cell::OnceCell;
 use std::rc::Rc;
 
 pub use service::{LanguageService, functions, infer_schema};
 
 use jlens_core::audit::{self, AuditOptions, CaptureLimits};
+use jlens_core::reads::Read;
 use jlens_core::{Bindings, Options};
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
@@ -55,6 +57,9 @@ pub struct Expression {
     inner: jlens_core::Expression,
     offsets: Rc<Offsets>,
     registered: Vec<Registered>,
+    /// What the expression reads of its input, which cuts the input of `evaluateJson`; worked
+    /// out on the first call.
+    input_read: OnceCell<Read>,
 }
 
 #[wasm_bindgen]
@@ -69,6 +74,7 @@ impl Expression {
             inner,
             offsets: Rc::new(offsets),
             registered: Vec::new(),
+            input_read: OnceCell::new(),
         })
     }
 
@@ -137,7 +143,8 @@ impl Expression {
     }
 
     /// Like `evaluate`, with the input document and the result as JSON text. This avoids
-    /// converting large documents to and from JavaScript objects.
+    /// converting large documents to and from JavaScript objects. The fields of the input that
+    /// the expression does not read (`reads()`, without bindings) are skipped while parsing.
     #[wasm_bindgen(js_name = evaluateJson, skip_typescript)]
     pub fn evaluate_json(
         &self,
@@ -147,7 +154,7 @@ impl Expression {
     ) -> Result<Option<String>, JsValue> {
         let document = match &input {
             Some(text) => Some(
-                jlens_core::Document::parse(text)
+                jlens_core::Document::parse_cut(text, self.input_read())
                     .map_err(|e| type_error(&format!("input is not valid JSON: {e}")))?,
             ),
             None => None,
@@ -226,6 +233,18 @@ impl Expression {
         let scope = Scope::enter(&self.offsets);
         let (bindings, _) = self.arguments(&scope, bindings, None)?;
         Ok(ser_to_js(&self.inner.reads_with(&bindings)))
+    }
+
+    /// What the expression reads of its input, without bindings: a superset of what it reads
+    /// with any bindings. An expression that does not read its input needs none of its fields.
+    fn input_read(&self) -> &Read {
+        self.input_read.get_or_init(|| {
+            self.inner
+                .reads()
+                .input()
+                .cloned()
+                .unwrap_or_else(|| Read::Fields(Default::default()))
+        })
     }
 
     /// The processed syntax tree, as plain objects (spans in UTF-16 code units).
@@ -323,12 +342,27 @@ impl Document {
         }
     }
 
-    /// Parses JSON text.
+    /// Parses JSON text. With `read` (the `input` of a `reads()`, or of a `unionReads()`), the
+    /// fields it leaves out are skipped: they are checked as JSON syntax only.
     #[wasm_bindgen(js_name = fromJson, skip_typescript)]
-    pub fn from_json(text: &str) -> Result<Document, JsValue> {
+    pub fn from_json(text: &str, read: Option<JsValue>) -> Result<Document, JsValue> {
         convert::install_hooks();
-        let inner = jlens_core::Document::parse(text)
-            .map_err(|e| type_error(&format!("the document is not valid JSON: {e}")))?;
+        let read = match read
+            .map(|read| from_js(&read, "read"))
+            .transpose()?
+            .flatten()
+        {
+            None | Some(Value::Null) => None,
+            Some(read) => Some(
+                serde_json::from_value::<Read>(read)
+                    .map_err(|e| type_error(&format!("invalid read: {e}")))?,
+            ),
+        };
+        let inner = match &read {
+            Some(read) => jlens_core::Document::parse_cut(text, read),
+            None => jlens_core::Document::parse(text),
+        }
+        .map_err(|e| type_error(&format!("the document is not valid JSON: {e}")))?;
         Ok(Document { inner })
     }
 }
