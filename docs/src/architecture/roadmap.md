@@ -265,7 +265,7 @@ keep. The package follows the WebAssembly package: the same objects, the same er
 | 4 | Host functions written in Python, with their signatures, calling the functions they receive (ADR 0011), and a Python exception carried through the evaluation; audits and explanations as Python values | pytest cases matching the host-function and audit cases of the Wasm suite | |
 | 5 | Wheels: `abi3` and `abi3t` wheels for the release targets (ADR 0014) and a source distribution, built in CI; each OS installs its wheel and runs the pytest suite on it | CI builds and tests every wheel | |
 | 6 | Publishing: `release.yml` publishes to PyPI through trusted publishing, with attestations, skipping a version already published; `CONTRIBUTING.md` says how it is set up | The release checklist installs the package from PyPI and checks its attestations | |
-| 7 | Documentation: a Python chapter in the book, the installation page and the README; its snippets run in CI; the performance page compares the package with the other Python implementations on `benches/` | `doc-check` green; the Python snippets run in CI | |
+| 7 | Documentation: a Python chapter in the book, the installation page and the README; its snippets run in CI; the performance page compares the package with the other Python implementations on `benches/`, and, in a separate table next to the timings, how each one behaves at the limits: input nested deeply, cyclic values, and an evaluation that runs too long | `doc-check` green; the Python snippets run in CI; the limits table is measured, not assumed | |
 | 8 | Release 0.17.0, with the Python package in beta | The release checklist, with the package installed from PyPI | |
 
 ## 0.18: an API to keep, toward 1.0
