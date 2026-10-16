@@ -11,12 +11,15 @@ import init, {
   type HostFunction,
   type JlensError,
   type JsonSchema,
+  type Read,
+  type Reads,
   Document,
   Expression,
   LanguageService,
   functions,
   inferSchema,
   parseRecover,
+  unionReads,
   version,
 } from "../pkg/jlens.js";
 
@@ -50,6 +53,10 @@ export async function check(): Promise<void> {
   const r7: unknown = expr.evaluate({}, { apply });
   expr.registerFunction("tax", (amount: number) => amount * 0.2, "<n:n>");
   expr.registerFunction("now", () => 0);
+  const reads: Reads = expr.reads({ add });
+  const input: Read | undefined = reads.input;
+  const every: true | undefined = unionReads([reads, expr.reads()]).everyBinding;
+  const fields = input === true ? [] : Object.keys(input ?? {});
   const type: string = expr.ast().type;
   expr.free();
 
@@ -74,5 +81,5 @@ export async function check(): Promise<void> {
   const hover = service.hover("a", 0)?.contents;
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();
-  console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, text, failed, start, type, ast.id, d, kinds, hover, help, catalog);
+  console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, every, fields, text, failed, start, type, ast.id, d, kinds, hover, help, catalog);
 }

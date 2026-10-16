@@ -216,6 +216,26 @@ export interface ExplanationLine {
 }
 
 // ---------------------------------------------------------------------------------------------
+// The fields an expression reads
+
+/**
+ * What an expression reads of a value: `true` for the whole value; an object for only the fields
+ * it lists, each with its own `Read` (of an array, its items, each read the same way; of a
+ * scalar, the scalar). An empty object needs the value but none of its fields, as `$count` does.
+ */
+export type Read = true | { [field: string]: Read };
+
+/** What an expression reads of its input and of its bindings, given by `Expression.reads()`. */
+export interface Reads {
+  /** Absent when the expression does not read its input. */
+  input?: Read;
+  /** The bindings the expression reads, by name (without the `$`). */
+  bindings: Record<string, Read>;
+  /** Set when the expression may read any binding whole, as `$eval` can: keep all bindings. */
+  everyBinding?: true;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Parsing
 
 /** A node of the processed syntax tree. The `type` field tells the kind of node. */
@@ -383,6 +403,12 @@ export class Expression {
    * `JlensError` when the signature is invalid.
    */
   registerFunction(name: string, implementation: HostFunction, signature?: string): void;
+  /**
+   * The fields of the input and of the bindings the expression reads: an input cut down to them
+   * gives the same result. The functions in `bindings`, and those registered on the expression,
+   * read only their arguments; a call to a function it does not know reads its context whole.
+   */
+  reads(bindings?: Bindings | null): Reads;
   /** The processed syntax tree, as plain objects. */
   ast(): AstNode;
   /** Releases the compiled expression. */
@@ -430,6 +456,12 @@ export class LanguageService {
   free(): void;
   [Symbol.dispose](): void;
 }
+
+/**
+ * What any of several expressions reads: an input cut down to the union gives each of them its
+ * result. Throws a `TypeError` when an item is not in the form `reads()` returns.
+ */
+export function unionReads(reads: Reads[]): Reads;
 
 /**
  * Infers a JSON Schema (2020-12, with `x-jlens-*` annotations) from sample documents.

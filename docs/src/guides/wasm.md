@@ -232,6 +232,39 @@ number). Invalid arguments, such as bindings that are not an object or malformed
 `evaluateJson`, throw a `TypeError` instead. The [error reference](../language/errors.md) lists
 every code.
 
+## The fields an expression reads
+
+`reads()` tells which fields of its input and of each binding an expression may read, without
+evaluating it ([ADR 0016](../adr/0016-fields-read.md)): an application can fetch only those from
+a database, or know which rules depend on a field. `unionReads` combines the answers of several
+expressions.
+
+```js
+const expr = new Expression("$sum(items[type = $kind].(price * quantity)) * $rate(country)");
+expr.reads({ rate: (country) => rates[country] });
+// {input: {country: true, items: {price: true, quantity: true, type: true}},
+//  bindings: {kind: true, rate: true}}
+
+unionReads([expr.reads({ rate }), new Expression("customer.name").reads()]);
+// {input: {country: true, customer: {name: true}, items: {...}}, bindings: {...}}
+```
+
+- **The answer is an upper bound.** `true` reads the value whole; an object reads only the
+  fields it lists, of an object, or of each item of an array; an empty object needs the value
+  but none of its fields, as `$count` does. On its input and bindings cut down that way, an
+  expression gives the same result, or fails with the same error code. Where the analysis cannot
+  follow a value, under `*` or `**`, in a constructed object or in the result, it reads the
+  value whole.
+- **Pass the bindings** the expression will be evaluated with. A JavaScript function cannot
+  read the context of its call (`this` is `undefined`), so a call to one in the bindings, or
+  registered on the expression, reads only its arguments, and the context a `-` parameter may
+  take. A call to a function the analysis does not know may read its context: the whole input,
+  at the top of an expression.
+- **`everyBinding: true`** says the expression may read any binding whole, as `$eval` can: keep
+  them all.
+- **A binding named after a built-in function** shadows it during the evaluation, but the
+  analysis takes the name as the built-in's: such an application cannot cut its input by it.
+
 ## Explaining results
 
 `evaluateWithAudit` evaluates and records how the result was reached; see the

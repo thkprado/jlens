@@ -948,9 +948,15 @@ impl<'n> Analysis<'n> {
                 None => reads_context = true,
             }
         }
+        // `$name(...)`, naming a marked function that no variable hides, cannot call an escaped
+        // binding.
+        let direct = matches!(&procedure.kind, NodeKind::Variable { name }
+            if is_plain(procedure)
+                && self.marked.contains_key(name.as_str())
+                && !self.lookup(name, scope).1);
         if reads_context {
             self.use_whole(context);
-        } else {
+        } else if !direct {
             self.calls.push(context.to_vec());
         }
         for arg in &args {
@@ -1326,6 +1332,9 @@ mod tests {
         assert_eq!(input("$rate(country)"), json!({"country": true}));
         assert_eq!(reads("$rate(country)")["input"], json!(true));
         assert_eq!(input("$rate(country) + $plain(1)"), json!(true));
+        // A binding used as a value may be a host function, called through a variable.
+        assert_eq!(input("$rate(country) + $kind"), json!({"country": true}));
+        assert_eq!(input("($f := $kind; $rate(country) + $f())"), json!(true));
         // Taken as a value, a marked function still reads only its arguments.
         assert_eq!(input("($f := $rate; $f(price))"), json!({"price": true}));
         // The context a signature may take: a scalar here.

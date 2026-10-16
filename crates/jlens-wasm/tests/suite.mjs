@@ -413,6 +413,38 @@ export const cases = [
     ok(parsed.ast, "a partial tree");
   }],
 
+  ["reads and unionReads", (j) => {
+    const expr = new j.Expression("$sum(items[type = $kind].(unitPrice * quantity))");
+    equal(expr.reads(), {
+      input: { items: { quantity: true, type: true, unitPrice: true } },
+      bindings: { kind: true },
+    });
+    // A function the analysis does not know may read the context of its call: the whole input.
+    const priced = new j.Expression("price * $rate(country)");
+    equal(priced.reads().input, true, "unknown function");
+    // A JavaScript function cannot: given the bindings, the call reads only its arguments.
+    equal(priced.reads({ rate: () => 0.1 }).input, { country: true, price: true }, "binding");
+    // Even when a binding the analysis does not know is used as a value.
+    equal(new j.Expression("$rate(country) + $kind").reads({ rate: () => 0.1 }), {
+      input: { country: true },
+      bindings: { kind: true, rate: true },
+    }, "escaped binding");
+    priced.registerFunction("rate", () => 0.1);
+    equal(priced.reads().input, { country: true, price: true }, "registered");
+    equal(new j.Expression("$eval(rule)").reads().everyBinding, true, "everyBinding");
+
+    const union = j.unionReads([
+      new j.Expression("a.b + $x.y").reads(),
+      new j.Expression("$count(c) + $exists(a)").reads(),
+    ]);
+    equal(union, { input: { a: { b: true }, c: {} }, bindings: { x: { y: true } } });
+    equal(j.unionReads([{ input: { a: { b: true } }, bindings: {} }, { input: true }]).input, true);
+    equal(j.unionReads([]), { bindings: {} }, "empty union");
+    for (const bad of [{}, [{ input: false }], [{ inputs: true }]]) {
+      throws(() => j.unionReads(bad), (e) => ok(e instanceof TypeError, "a TypeError"));
+    }
+  }],
+
   ["inferSchema with overrides", (j) => {
     const schema = j.inferSchema([order], {
       "items[].type": { description: "Product category", enum: ["apparel", "electronic", "toy"] },

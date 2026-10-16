@@ -214,9 +214,13 @@ to keep all its bindings.
   `union` on both; `Read::cut` on a `serde_json::Value`; accessors for the input, a binding and
   the flag; `Serialize` and `Deserialize` to the JSON form. The exact names are settled with
   the implementation, and `cargo-semver-checks` reviews them.
-- **WebAssembly:** `Expression.reads(): Reads` and `unionReads(reads: Reads[]): Reads`, with
-  `type Read = true | { [field: string]: Read }` and `interface Reads { input?: Read; bindings:
-  Record<string, Read>; everyBinding?: true }`.
+- **WebAssembly:** `Expression.reads(bindings?): Reads` and `unionReads(reads: Reads[]): Reads`,
+  with `type Read = true | { [field: string]: Read }` and `interface Reads { input?: Read;
+  bindings: Record<string, Read>; everyBinding?: true }`. A JavaScript function cannot read the
+  context of its call (`this` is `undefined`), so the package marks every one, and `reads` takes
+  the bindings, as `reads_with` does.
+
+  *Amended with the implementation (roadmap 0.18, item 3): `reads` takes the bindings.*
 - **Python:** `Expression.reads()`, a `dict` in the JSON form, and `jlens.union_reads(reads)`,
   with the stubs typing both.
 - **CLI:** `jlens reads`, given an expression or one or more `--file`s, prints the JSON form on

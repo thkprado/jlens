@@ -85,7 +85,8 @@ impl Scope {
     }
 
     /// A host function that calls `function`, bound as `$name`. Without a signature, its arity
-    /// is the function's `length`.
+    /// is the function's `length`. It is marked as not reading the context of its call, which a
+    /// JavaScript function cannot read (`this` is `undefined`), for `Expression.reads`.
     pub fn function(
         &self,
         name: &str,
@@ -102,10 +103,11 @@ impl Scope {
         let imp = move |args: &[Option<Value>], host: &HostCall<'_>| {
             call(frame, index, &name, args, host)
         };
-        match signature {
-            Some(signature) => HostFunction::with_signature(signature, imp),
-            None => Ok(HostFunction::new(arity, imp)),
-        }
+        let function = match signature {
+            Some(signature) => HostFunction::with_signature(signature, imp)?,
+            None => HostFunction::new(arity, imp),
+        };
+        Ok(function.without_input())
     }
 
     /// The JavaScript exception that caused `err`, if a function of this scope threw it.

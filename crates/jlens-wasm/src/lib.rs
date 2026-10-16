@@ -6,6 +6,8 @@
 //! * [`Expression`] compiles an expression once; `evaluate`, `evaluateJson` and
 //!   `evaluateWithAudit` run it against any number of documents. JavaScript functions in the
 //!   bindings, or registered with `registerFunction`, are called as host functions.
+//! * `Expression.reads` tells which fields of the input and the bindings an expression reads,
+//!   and [`union_reads`] unites what several expressions read (ADR 0016).
 //! * [`parse_recover`] parses with error recovery, for tooling.
 //! * [`LanguageService`] offers completion, diagnostics, hover and signature help over a
 //!   JSON Schema, and [`infer_schema`] infers one from sample documents.
@@ -31,7 +33,7 @@ use jlens_core::{Bindings, Options};
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
-use convert::{Offsets, Registered, error_json, from_js, js_error, to_js, type_error};
+use convert::{Offsets, Registered, error_json, from_js, js_error, ser_to_js, to_js, type_error};
 use host::Scope;
 
 #[wasm_bindgen(typescript_custom_section)]
@@ -215,6 +217,17 @@ impl Expression {
         Ok(to_js(&Value::Object(out)))
     }
 
+    /// The fields of the input and of the bindings the expression reads (ADR 0016). The
+    /// functions in `bindings`, and those registered on the expression, read only their
+    /// arguments, since a JavaScript function cannot read the context of its call; a call to a
+    /// function the analysis does not know reads its context whole.
+    #[wasm_bindgen(skip_typescript)]
+    pub fn reads(&self, bindings: Option<JsValue>) -> Result<JsValue, JsValue> {
+        let scope = Scope::enter(&self.offsets);
+        let (bindings, _) = self.arguments(&scope, bindings, None)?;
+        Ok(ser_to_js(&self.inner.reads_with(&bindings)))
+    }
+
     /// The processed syntax tree, as plain objects (spans in UTF-16 code units).
     #[wasm_bindgen(skip_typescript)]
     pub fn ast(&self) -> JsValue {
@@ -347,6 +360,23 @@ fn audit_options(options: Option<&Value>) -> Result<AuditOptions, JsValue> {
             .map_err(|e| type_error(&format!("invalid capture limits: {e}")))?;
     }
     Ok(out)
+}
+
+/// What any of several expressions reads: the union of their `reads()`. Throws a `TypeError`
+/// when an item is not in the form `reads()` returns.
+#[wasm_bindgen(js_name = unionReads, skip_typescript)]
+pub fn union_reads(reads: JsValue) -> Result<JsValue, JsValue> {
+    convert::install_hooks();
+    let Some(Value::Array(items)) = from_js(&reads, "reads")? else {
+        return Err(type_error("reads must be an array"));
+    };
+    let mut union = jlens_core::reads::Reads::default();
+    for item in items {
+        let item: jlens_core::reads::Reads =
+            serde_json::from_value(item).map_err(|e| type_error(&format!("invalid reads: {e}")))?;
+        union = union.union(&item);
+    }
+    Ok(ser_to_js(&union))
 }
 
 /// Parses an expression, recovering from syntax errors: returns the (partial) syntax tree and
