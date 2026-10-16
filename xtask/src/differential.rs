@@ -353,14 +353,14 @@ fn dropped_quirk(expr: &str) -> bool {
 
 /// Whether jlens wrote the digits of a large number where jsonata-js did not. `$formatNumber`
 /// from 1e21 writes JavaScript's exponent notation through the picture, so jsonata-js's result
-/// has an `e` and a `+` with at most a separator between them (`1e,+21.00`). `$formatBase` from
+/// has an `e` and a `+` with at most a separator between them (`1e,+21.00`), percent-encoded
+/// when the result went through `$encodeUrlComponent` (`1e%2C%2B21.00`). `$formatBase` from
 /// 2^53 writes zeros below the number's precision in a radix that is not a power of two, so the
 /// results differ only where jsonata-js has a zero.
 fn exact_digits(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
     let (jlens, js) = (actual.to_string(), expected.to_string());
     let calls = |name: &str| expr.contains(&format!("${name}("));
-    let exponent = js
-        .as_bytes()
+    let exponent = percent_decoded(&js)
         .windows(3)
         .any(|w| w[0] == b'e' && (w[1] == b'+' || w[2] == b'+'));
     let zeros = jlens.len() == js.len()
@@ -369,6 +369,27 @@ fn exact_digits(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
             .zip(js.bytes())
             .all(|(a, b)| a == b || b == b'0');
     (calls("formatNumber") && exponent) || (calls("formatBase") && zeros)
+}
+
+/// The bytes of `text` with each `%XX` escape replaced by the byte it encodes.
+fn percent_decoded(text: &str) -> Vec<u8> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let escape = bytes.get(i + 1..i + 3).filter(|_| bytes[i] == b'%');
+        match escape.and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()) {
+            Some(byte) => {
+                out.push(byte);
+                i += 3;
+            }
+            None => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    out
 }
 
 /// Whether the integer part of a sub-picture of `picture` has groups of different sizes after
