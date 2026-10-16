@@ -166,6 +166,10 @@ counts them apart:
   half of a character outside the Basic Multilingual Plane, which a jlens string cannot hold. A
   JavaScript regular expression without the `u` flag matches UTF-16 code units, so
   `$match('a𝄞', /[^a]/)` matches the first half of `𝄞`; jlens matches the whole character.
+  The halves need not reach the result (`$replace('𝄞', /[^a]/, '-')` is `--` in jsonata-js,
+  `-` in jlens), so a case whose outcomes differ counts here too when it has such a character,
+  in its expression or input, and a pattern that may match half of one: a negated class, `.`,
+  `\S`, `\W`, `\D`, `\B`, or a quantifier that may match the empty string.
 - **Regex left of `??` or `?:`**: the outcomes differ, and the expression has a regular
   expression literal on the left of `??` or `?:`. The jsonata-js parser copies that side through
   JSON, which turns the regex into `{}`, so the expression hangs (counted above) or gives another
@@ -178,11 +182,13 @@ counts them apart:
   the evaluation (a group-by on an empty array adds an item to it), and the outcomes differ.
 - **Wildcard over a sequence**: the expression has a wildcard, and the jsonata-js result is
   jlens's with `true` items added. An array that jsonata-js builds from a path carries an own
-  property `sequence: true`, which its wildcard enumerates with the items. Without an input, the
+  property `sequence: true`, which its wildcard enumerates with the items. Without a context, the
   flag can change a result without appearing in it: a path whose first step is an array
   constructor evaluates it on the sequence `[undefined]`, so `[*].price` is `undefined` in
-  jsonata-js, which went on with `[undefined, true]`, and `[]` in jlens. A case without input
-  whose expression has such a path counts here whatever the outcomes.
+  jsonata-js, which went on with `[undefined, true]`, and `[]` in jlens. The context is undefined
+  without an input, and with one in a predicate on nothing, which both engines evaluate once
+  (`nothing[1 * [*].price]`). A case whose expression has such a path counts here whatever the
+  outcomes.
 - **Dropped quirk**: the expression may meet a jsonata-js quirk that jlens does not reproduce:
   a regular expression literal applied with `~>` to anything but a string literal,
   `$formatNumber` with a literal picture whose integer part has irregular grouping
@@ -192,7 +198,9 @@ counts them apart:
   overflows to infinity (`1 / 0`). jsonata-js passes the infinity on, to its result or to an
   operator that fails later.
 - **Exact digits of a large number**: `$formatNumber` from 1e21, where jsonata-js writes
-  JavaScript's exponent notation through the picture (`1e,+21.00`), and `$formatBase` from 2^53
+  JavaScript's exponent notation through the picture (`1e,+21.00`): a case that calls it on a
+  literal from 1e18 (which `‰` scales to 1e21) counts whatever the outcomes, since a result
+  computed from the string need not show the notation; and `$formatBase` from 2^53
   in a radix that is not a power of two, where jsonata-js writes zeros for the digits below the
   number's precision.
 

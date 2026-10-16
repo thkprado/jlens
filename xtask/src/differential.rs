@@ -9,7 +9,8 @@
 //! Ten kinds of disagreement are not divergences, and are counted apart (see "Differential
 //! testing" in `docs/src/architecture/conformance.md`): a JavaScript exception inside jsonata-js,
 //! which has no error code to compare; a case jsonata-js never finished; a jsonata-js result
-//! with half of a character, which a jlens string cannot hold; an expression with a
+//! with half of a character, which a jlens string cannot hold, or computed from a regular
+//! expression match on such a half; an expression with a
 //! regular expression literal on the left of `??` or `?:`, which the jsonata-js parser mangles;
 //! different error codes from an expression whose array or object constructors jsonata-js
 //! evaluates concurrently; an evaluation in which jsonata-js changed its input document; a
@@ -133,13 +134,15 @@ pub fn run(args: &[String]) -> Result<()> {
             crashed += 1;
         } else if same(&actual, expected) {
             agreed += 1;
+        } else if splitting_regex(expr, input.map(|i| &inputs[i])) {
+            split += 1;
         } else if regex_before_default(expr) {
             mangled += 1;
         } else if actual["error"].is_string() && expected["error"].is_string() && concurrent(expr) {
             raced += 1;
         } else if changed_input {
             mutated += 1;
-        } else if sequence_flag(expr, input.is_none(), &actual, expected) {
+        } else if sequence_flag(expr, &actual, expected) {
             flagged += 1;
         } else if dropped_quirk(expr) {
             dropped += 1;
@@ -229,6 +232,39 @@ fn is_limit(outcome: &JsonValue) -> bool {
         .is_some_and(|code| LIMIT_CODES.contains(&code))
 }
 
+/// Whether `expr` has a regular expression literal that may match half of a character outside
+/// the BMP, and such a character is in `expr` or `input`. A jsonata-js pattern matches UTF-16
+/// code units, so a negated class, `.`, `\S`, `\W`, `\D`, `\B` or a match of the empty string
+/// can stop inside `𝄞`, where jlens's matches whole characters. The runner sees the difference only when
+/// a lone surrogate reaches the result; here it need not (`$replace('𝄞', /[^a]/, '-')` is `--`
+/// in jsonata-js, `-` in jlens).
+fn splitting_regex(expr: &str, input: Option<&JsonValue>) -> bool {
+    let astral = |text: &str| text.chars().any(|c| c > '\u{FFFF}');
+    if !astral(expr) && !input.is_some_and(|i| astral(&i.to_string())) {
+        return false;
+    }
+    let Ok(compiled) = Expression::compile(expr) else {
+        return false;
+    };
+    let mut found = false;
+    compiled.ast().root.walk(&mut |node: &Node| {
+        if let NodeKind::Regex { pattern, .. } = &node.kind {
+            let mut escaped = false;
+            let mut previous = '\0';
+            for c in pattern.chars() {
+                found |= if escaped {
+                    matches!(c, 'S' | 'W' | 'D' | 'B')
+                } else {
+                    matches!(c, '.' | '?' | '*') || (c == '^' && previous == '[')
+                };
+                escaped = !escaped && c == '\\';
+                previous = c;
+            }
+        }
+    });
+    found
+}
+
 /// Whether `expr` has a regular expression literal on the left of `??` or `?:`. The jsonata-js
 /// parser copies that side through JSON, which turns the regex into `{}`: the expression then
 /// hangs (counted as such) or gives another result.
@@ -270,12 +306,14 @@ fn concurrent(expr: &str) -> bool {
 /// wildcard enumerates the properties of an array item, flag included
 /// (`$map([1, 2], function($e){ items.$ }).*`).
 ///
-/// Without an input, the flag need not reach the result: a path whose first step is an array
+/// Without a context, the flag need not reach the result: a path whose first step is an array
 /// constructor evaluates it on the sequence `[undefined]`, so a wildcard in it gives
 /// `[undefined, true]`, and the path goes on where jlens's stops at `[]` (`[*].price` is
-/// `undefined` in jsonata-js, `[]` in jlens). Such a case counts too, whatever the outcomes.
-fn sequence_flag(expr: &str, no_input: bool, actual: &JsonValue, expected: &JsonValue) -> bool {
-    if no_input && wildcard_first(expr) {
+/// `undefined` in jsonata-js, `[]` in jlens). The context is undefined without an input, and
+/// with one in a predicate on nothing, which both engines evaluate once on `undefined`
+/// (`nothing[1 * [*].price]`). Such a case counts too, whatever the outcomes.
+fn sequence_flag(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
+    if wildcard_first(expr) {
         return true;
     }
     let (Some(actual), Some(expected)) = (actual["value"].as_array(), expected["value"].as_array())
@@ -354,21 +392,42 @@ fn dropped_quirk(expr: &str) -> bool {
 /// Whether jlens wrote the digits of a large number where jsonata-js did not. `$formatNumber`
 /// from 1e21 writes JavaScript's exponent notation through the picture, so jsonata-js's result
 /// has an `e` and a `+` with at most a separator between them (`1e,+21.00`), percent-encoded
-/// when the result went through `$encodeUrlComponent` (`1e%2C%2B21.00`). `$formatBase` from
-/// 2^53 writes zeros below the number's precision in a radix that is not a power of two, so the
-/// results differ only where jsonata-js has a zero.
+/// when the result went through `$encodeUrlComponent` (`1e%2C%2B21.00`). A result computed from
+/// that string (`$contains($formatNumber(1e21, '#'), /e/)`) need not show it, so a call on a
+/// literal that `%` or `‰` can scale to 1e21 counts too, whatever the outcomes. `$formatBase`
+/// from 2^53 writes zeros below the number's precision in a radix that is not a power of two,
+/// so the results differ only where jsonata-js has a zero.
 fn exact_digits(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
     let (jlens, js) = (actual.to_string(), expected.to_string());
     let calls = |name: &str| expr.contains(&format!("${name}("));
     let exponent = percent_decoded(&js)
         .windows(3)
-        .any(|w| w[0] == b'e' && (w[1] == b'+' || w[2] == b'+'));
+        .any(|w| w[0] == b'e' && (w[1] == b'+' || w[2] == b'+'))
+        || large_format_number(expr);
     let zeros = jlens.len() == js.len()
         && jlens
             .bytes()
             .zip(js.bytes())
             .all(|(a, b)| a == b || b == b'0');
     (calls("formatNumber") && exponent) || (calls("formatBase") && zeros)
+}
+
+/// Whether `expr` calls `$formatNumber` on a number literal from 1e18, which `‰` scales to 1e21.
+fn large_format_number(expr: &str) -> bool {
+    let Ok(compiled) = Expression::compile(expr) else {
+        return false;
+    };
+    let mut found = false;
+    compiled.ast().root.walk(&mut |node: &Node| {
+        if let NodeKind::Function { procedure, args } = &node.kind
+            && matches!(&procedure.kind, NodeKind::Variable { name } if name == "formatNumber")
+        {
+            found |= args.first().is_some_and(
+                |a| matches!(a.kind, NodeKind::Number { value } if value.abs() >= 1e18),
+            );
+        }
+    });
+    found
 }
 
 /// The bytes of `text` with each `%XX` escape replaced by the byte it encodes.
