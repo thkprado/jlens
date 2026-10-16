@@ -13,6 +13,9 @@ All notable changes are recorded here. The format follows
   `evaluate_document_to`, whose closure writes the result with it, within the size limit of a
   result. `evaluate` and the other entry points write their `serde_json` result through the same
   walk, which makes the object constructor case about 6% faster natively.
+- `input::Sources`, with `Sink::array_of` and `Sink::object_of`: a source can write the
+  arrays and objects of a level as members of one value, so that each costs one allocation
+  instead of two (ADR 0010, amended).
 
 ### Changed
 
@@ -20,6 +23,8 @@ All notable changes are recorded here. The format follows
   without a `serde_json` value in between, and create each key once per result. The object
   constructor case of `benches/compare/python.py` takes 27% less time (31% against a
   `Document`), the transform 14% (24%).
+- Python: the arrays and objects of a level read from Python values cost one allocation each
+  instead of two: `$count(items)` over 200 `dict`s takes 19% less time, names over items 6%.
 
 ## [0.18.0]
 

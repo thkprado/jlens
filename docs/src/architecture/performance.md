@@ -299,6 +299,25 @@ third c76a814, where a path step reads one field (37 µs):
   counts and without locking a `list` while it reads it. That takes `unsafe` code, which jlens
   forbids, and is not safe under free-threaded Python, where another thread can change the list.
 
+From 0.19 on, the arrays and objects of a level cost one allocation each, not two: the source
+writes them as members of one value it allocates for the level, which holds their Python
+values (`input::Sources`, [ADR 0010, amended](../adr/0010-lazy-input.md#amendment-one-allocation-per-member-019)),
+instead of boxing a source for each. A level that holds a single array or object keeps it
+inline, so it allocates no more than before. Measured before and after on the same system,
+with Python values in, the median of three alternated runs; `rows` is a `list` of 200 `list`s
+`[i, [i]]`:
+
+| Expression | Before | After |
+|---|---:|---:|
+| `$count(items)` | 19.0 µs | 15.4 µs |
+| `$sum(items.quantity)` (names over items) | 37.4 µs | 35.1 µs |
+| `$count(rows)` | 23.6 µs | 20.2 µs |
+| `$count(rows.*)` | 116 µs | 112 µs |
+
+Natively, `cargo xtask ab --mode evaluate` over 20 rounds finds no case slower but group-by,
+by 2%. A first version made each lazy object 16 bytes larger, to hold the member's index, and
+names over items 17% slower; the index now sits in room the layout of an object left free.
+
 How each behaves at the limits, measured by `python.py limits` on the same system. Each case
 runs in a process of its own, killed after 30 seconds. `$string($)` reads the whole input, and
 the cyclic input is `{"n": 1, "child": {"parent": <the input>}}`:

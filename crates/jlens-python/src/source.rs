@@ -6,121 +6,130 @@
 //! Python code runs while a level is read, and a `dict` or `list` is locked while it is read,
 //! so that another thread of free-threaded Python cannot change it halfway.
 //!
+//! The arrays and objects of a level are written as members of one [`Level`], so that each
+//! costs the core one allocation, not two.
+//!
 //! A path step looks its one field up in a `dict` not read whole yet (`read_field`). That
 //! lookup can call the `__eq__` of a key that is not a `str`, whose hash collides with the
 //! key's; such a `dict` fails when it is read whole.
 
-use std::rc::Rc;
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 
-use jlens_core::input::{Sink, Source};
+use jlens_core::input::{Sink, Source, Sources};
 use pyo3::prelude::*;
 use pyo3::sync::critical_section::with_critical_section;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use crate::convert::{self, Scalar};
 
-/// A level of a Python value.
-pub enum PySource<'py> {
-    /// The input itself, the only value of its level.
-    Input(Bound<'py, PyAny>),
-    /// An array or an object, with its ancestors.
-    Level(Node<'py>),
+/// The input itself, the only value of its level.
+pub struct PySource<'py>(pub Bound<'py, PyAny>);
+
+/// A level that holds arrays or objects: its value, the chain of its ancestors, to detect cycles
+/// as `json.dumps` does, and its arrays and objects, the members the core reads.
+struct Level<'py> {
+    /// The array or object; none for the level of the input.
+    value: Option<Bound<'py, PyAny>>,
+    /// The level whose member `value` is.
+    up: Option<Rc<Level<'py>>>,
+    /// The first member, the level made for it, and the others: a level holding one array or
+    /// object allocates nothing more.
+    first: Bound<'py, PyAny>,
+    others: RefCell<Vec<Bound<'py, PyAny>>>,
+    /// This level, so that its members' levels can point to it.
+    this: Weak<Level<'py>>,
 }
 
-/// An array or an object, and the chain of its ancestors, to detect cycles as `json.dumps` does.
-pub struct Node<'py> {
-    value: Bound<'py, PyAny>,
-    up: Option<Rc<Node<'py>>>,
-}
-
-/// The ancestors of the values of a level being read: the level, and its own ancestors. They
-/// are shared by the arrays and objects of the level, made when the first one is met.
-struct Ancestors<'n, 'py> {
-    level: Option<&'n Node<'py>>,
-    shared: Option<Rc<Node<'py>>>,
-}
-
-impl<'py> Ancestors<'_, 'py> {
-    /// The ancestors of `value`, or the message of a cycle when it is one of them.
-    fn of(&mut self, value: &Bound<'py, PyAny>) -> Result<Option<Rc<Node<'py>>>, String> {
-        let Some(level) = self.level else {
-            return Ok(None);
-        };
-        let mut ancestor = Some(level);
-        while let Some(node) = ancestor {
-            if node.value.is(value) {
-                return Err(convert::CIRCULAR.into());
-            }
-            ancestor = node.up.as_deref();
+impl<'py> Level<'py> {
+    /// Calls `f` with the member at `index`.
+    fn with<R>(&self, index: u32, f: impl FnOnce(&Bound<'py, PyAny>) -> R) -> R {
+        match index.checked_sub(1) {
+            None => f(&self.first),
+            Some(i) => f(&self.others.borrow()[i as usize]),
         }
-        let shared = self.shared.get_or_insert_with(|| {
-            Rc::new(Node {
-                value: level.value.clone(),
-                up: level.up.clone(),
-            })
-        });
-        Ok(Some(shared.clone()))
     }
 }
 
-impl<'py> PySource<'py> {
-    /// Writes `value`, a value of the level whose ancestors are `ancestors`.
-    fn put<'a>(
-        sink: &mut Sink<'_, 'a>,
-        value: &Bound<'py, PyAny>,
-        ancestors: &mut Ancestors<'_, 'py>,
-    ) -> Result<(), String>
+/// Writes the values of a level being read, `value` (none for the input), a member of `up`.
+struct Writer<'l, 'py> {
+    value: Option<&'l Bound<'py, PyAny>>,
+    up: Option<&'l Rc<Level<'py>>>,
+    /// The level of the arrays and objects written, made when the first one is met.
+    level: Option<Rc<Level<'py>>>,
+}
+
+impl<'l, 'py> Writer<'l, 'py> {
+    fn new(value: Option<&'l Bound<'py, PyAny>>, up: Option<&'l Rc<Level<'py>>>) -> Self {
+        Writer {
+            value,
+            up,
+            level: None,
+        }
+    }
+
+    /// Writes `item`, a value of the level.
+    fn put<'a>(&mut self, sink: &mut Sink<'_, 'a>, item: &Bound<'py, PyAny>) -> Result<(), String>
     where
         'py: 'a,
     {
-        match convert::scalar(value)? {
+        match convert::scalar(item)? {
             Some(Scalar::Null) => sink.null(),
             Some(Scalar::Bool(b)) => sink.bool(b),
             Some(Scalar::Int(n)) => sink.number(n as f64),
             Some(Scalar::Float(n)) => sink.number(n),
             Some(Scalar::String(s)) => sink.string(&s),
             None => {
-                let node = PySource::Level(Node {
-                    value: value.clone(),
-                    up: ancestors.of(value)?,
+                let mut up = self.up.map(|up| &**up);
+                let mut ancestor = self.value;
+                while let Some(value) = ancestor {
+                    if value.is(item) {
+                        return Err(convert::CIRCULAR.into());
+                    }
+                    ancestor = up.and_then(|level| level.value.as_ref());
+                    up = up.and_then(|level| level.up.as_deref());
+                }
+                let mut made = false;
+                let level = self.level.get_or_insert_with(|| {
+                    made = true;
+                    Rc::new_cyclic(|this| Level {
+                        value: self.value.cloned(),
+                        up: self.up.cloned(),
+                        first: item.clone(),
+                        others: RefCell::default(),
+                        this: this.clone(),
+                    })
                 });
-                if value.is_exact_instance_of::<PyDict>() || value.is_instance_of::<PyDict>() {
-                    sink.object(node);
+                let index = match made {
+                    true => 0,
+                    false => {
+                        let mut others = level.others.borrow_mut();
+                        others.push(item.clone());
+                        u32::try_from(others.len())
+                            .map_err(|_| "too many lists and dicts in one level".to_owned())?
+                    }
+                };
+                if item.is_exact_instance_of::<PyDict>() || item.is_instance_of::<PyDict>() {
+                    sink.object_of(level, index);
                 } else {
-                    sink.array(node);
+                    sink.array_of(level, index);
                 }
             }
         }
         Ok(())
     }
-}
 
-impl<'py, 'a> Source<'a> for PySource<'py>
-where
-    'py: 'a,
-{
-    fn read(&self, sink: &mut Sink<'_, 'a>) -> Result<(), String> {
-        let node = match self {
-            PySource::Input(value) => {
-                let mut none = Ancestors {
-                    level: None,
-                    shared: None,
-                };
-                return Self::put(sink, value, &mut none);
-            }
-            PySource::Level(node) => node,
-        };
-        let mut ancestors = Ancestors {
-            level: Some(node),
-            shared: None,
-        };
-        let value = &node.value;
+    /// Writes the items of the array, or the fields of the object, `value`.
+    fn read<'a>(mut self, value: &Bound<'py, PyAny>, sink: &mut Sink<'_, 'a>) -> Result<(), String>
+    where
+        'py: 'a,
+    {
         if let Ok(dict) = value.cast::<PyDict>() {
             with_critical_section(value, || {
                 sink.reserve(dict.len());
                 for (key, item) in dict.iter() {
                     sink.key(&convert::key(&key)?);
-                    Self::put(sink, &item, &mut ancestors)?;
+                    self.put(sink, &item)?;
                 }
                 Ok(())
             })
@@ -130,7 +139,7 @@ where
                 sink.reserve(len);
                 for i in 0..len {
                     let item = list.get_item(i).map_err(|e| e.to_string())?;
-                    Self::put(sink, &item, &mut ancestors)?;
+                    self.put(sink, &item)?;
                 }
                 Ok(())
             })
@@ -138,26 +147,43 @@ where
             let tuple = value.cast::<PyTuple>().map_err(|e| e.to_string())?;
             sink.reserve(tuple.len());
             for item in tuple.iter() {
-                Self::put(sink, &item, &mut ancestors)?;
+                self.put(sink, &item)?;
             }
             Ok(())
         }
     }
+}
 
-    fn read_field(&self, key: &str, sink: &mut Sink<'_, 'a>) -> Result<bool, String> {
-        let PySource::Level(node) = self else {
-            return Ok(false);
-        };
-        let Ok(dict) = node.value.cast::<PyDict>() else {
-            return Ok(false);
-        };
-        if let Some(item) = dict.get_item(key).map_err(|e| e.to_string())? {
-            let mut ancestors = Ancestors {
-                level: Some(node),
-                shared: None,
+impl<'py, 'a> Source<'a> for PySource<'py>
+where
+    'py: 'a,
+{
+    fn read(&self, sink: &mut Sink<'_, 'a>) -> Result<(), String> {
+        Writer::new(None, None).put(sink, &self.0)
+    }
+}
+
+impl<'py, 'a> Sources<'a> for Level<'py>
+where
+    'py: 'a,
+{
+    fn read(&self, index: u32, sink: &mut Sink<'_, 'a>) -> Result<(), String> {
+        let this = self.this.upgrade();
+        self.with(index, |member| {
+            Writer::new(Some(member), this.as_ref()).read(member, sink)
+        })
+    }
+
+    fn read_field(&self, index: u32, key: &str, sink: &mut Sink<'_, 'a>) -> Result<bool, String> {
+        self.with(index, |member| {
+            let Ok(dict) = member.cast::<PyDict>() else {
+                return Ok(false);
             };
-            Self::put(sink, &item, &mut ancestors)?;
-        }
-        Ok(true)
+            if let Some(item) = dict.get_item(key).map_err(|e| e.to_string())? {
+                let this = self.this.upgrade();
+                Writer::new(Some(member), this.as_ref()).put(sink, &item)?;
+            }
+            Ok(true)
+        })
     }
 }

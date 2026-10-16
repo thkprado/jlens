@@ -136,7 +136,7 @@ impl Expression {
         let write = |out: jlens_core::output::Output<'_, '_>| out.write(&mut builder);
         let written = match input.filter(|input| !input.is_none()) {
             Some(input) => {
-                let source = PySource::Input(input.clone());
+                let source = PySource(input.clone());
                 self.inner
                     .evaluate_source_to(&source, &bindings, &options, write)
             }

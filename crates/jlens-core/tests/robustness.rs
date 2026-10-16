@@ -1,9 +1,10 @@
 //! Property tests: no input, however malformed, makes the parser or the evaluator panic.
 
 use std::collections::BTreeMap;
+use std::rc::Rc;
 use std::time::Duration;
 
-use jlens_core::input::{Sink, Source};
+use jlens_core::input::{Sink, Source, Sources};
 use jlens_core::output::Builder;
 use jlens_core::reads::{Read, Reads};
 use jlens_core::{Bindings, CancelToken, Document, Error, Expression, HostFunction, Options};
@@ -183,12 +184,31 @@ fn functions() -> Bindings {
 
 /// JSON read through the [`Source`] trait, one level at a time, and one field at a time when
 /// `fields` is set. An object with a field named `fails` cannot be read, whole or one field.
+/// With `members` set, the arrays and objects of a level are written as members of one
+/// [`Members`].
 #[derive(Clone, Copy)]
 struct JsonSource<'j> {
     json: &'j serde_json::Value,
     /// Whether this is the input itself, the only value of its level.
     root: bool,
     fields: bool,
+    members: bool,
+}
+
+/// The sources of the arrays and objects of a level, held together.
+#[derive(Default)]
+struct Members<'j>(std::cell::RefCell<Vec<JsonSource<'j>>>);
+
+impl<'j> Sources<'j> for Members<'j> {
+    fn read(&self, index: u32, sink: &mut Sink<'_, 'j>) -> Result<(), String> {
+        let member = self.0.borrow()[index as usize];
+        member.read(sink)
+    }
+
+    fn read_field(&self, index: u32, key: &str, sink: &mut Sink<'_, 'j>) -> Result<bool, String> {
+        let member = self.0.borrow()[index as usize];
+        member.read_field(key, sink)
+    }
 }
 
 thread_local! {
@@ -202,20 +222,43 @@ impl<'j> JsonSource<'j> {
             json,
             root: true,
             fields,
+            members: false,
         }
     }
 
-    fn write(&self, sink: &mut Sink<'_, 'j>, json: &'j serde_json::Value) {
+    /// The input, read one field at a time, its arrays and objects written as members.
+    fn members(json: &'j serde_json::Value) -> Self {
+        JsonSource {
+            members: true,
+            ..JsonSource::root(json, true)
+        }
+    }
+
+    fn write(
+        &self,
+        sink: &mut Sink<'_, 'j>,
+        json: &'j serde_json::Value,
+        members: &Rc<Members<'j>>,
+    ) {
         let level = JsonSource {
             json,
             root: false,
-            fields: self.fields,
+            ..*self
         };
+        let index = members.0.borrow().len() as u32;
         match json {
             serde_json::Value::Null => sink.null(),
             serde_json::Value::Bool(b) => sink.bool(*b),
             serde_json::Value::Number(n) => sink.number(n.as_f64().unwrap_or(f64::NAN)),
             serde_json::Value::String(s) => sink.string(s),
+            serde_json::Value::Array(_) if self.members => {
+                members.0.borrow_mut().push(level);
+                sink.array_of(members, index);
+            }
+            serde_json::Value::Object(_) if self.members => {
+                members.0.borrow_mut().push(level);
+                sink.object_of(members, index);
+            }
             serde_json::Value::Array(_) => sink.array(level),
             serde_json::Value::Object(_) => sink.object(level),
         }
@@ -225,12 +268,15 @@ impl<'j> JsonSource<'j> {
 impl<'j> Source<'j> for JsonSource<'j> {
     fn read(&self, sink: &mut Sink<'_, 'j>) -> Result<(), String> {
         READS.with(|reads| reads.set((reads.get().0 + 1, reads.get().1)));
+        let members = Rc::default();
         if self.root {
-            self.write(sink, self.json);
+            self.write(sink, self.json, &members);
             return Ok(());
         }
         match self.json {
-            serde_json::Value::Array(items) => items.iter().for_each(|item| self.write(sink, item)),
+            serde_json::Value::Array(items) => items
+                .iter()
+                .for_each(|item| self.write(sink, item, &members)),
             serde_json::Value::Object(fields) => {
                 if fields.contains_key("fails") {
                     // Half a level, then a failure: the level is left empty.
@@ -240,7 +286,7 @@ impl<'j> Source<'j> for JsonSource<'j> {
                 }
                 for (key, value) in fields {
                     sink.key(key);
-                    self.write(sink, value);
+                    self.write(sink, value, &members);
                 }
             }
             _ => {}
@@ -260,7 +306,7 @@ impl<'j> Source<'j> for JsonSource<'j> {
             return Err("bad field".into());
         }
         if let Some(value) = fields.get(key) {
-            self.write(sink, value);
+            self.write(sink, value, &Rc::default());
         }
         Ok(true)
     }
@@ -393,6 +439,7 @@ proptest! {
             let document = expr.evaluate_document(&Document::new(&input), &bindings, &options);
             let source = expr.evaluate_source(&JsonSource::root(&input, false), &bindings, &options);
             let fields = expr.evaluate_source(&JsonSource::root(&input, true), &bindings, &options);
+            let members = expr.evaluate_source(&JsonSource::members(&input), &bindings, &options);
             let timed_out = |r: &Result<Option<serde_json::Value>, Error>| {
                 r.as_ref().is_err_and(|e| e.code() == "D1012")
             };
@@ -404,6 +451,9 @@ proptest! {
             }
             if !timed_out(&fields) && !timed_out(&document) {
                 prop_assert_eq!(format!("{fields:?}"), format!("{document:?}"));
+            }
+            if !timed_out(&members) && !timed_out(&document) {
+                prop_assert_eq!(format!("{members:?}"), format!("{document:?}"));
             }
         }
     }
@@ -615,11 +665,15 @@ fn a_level_that_cannot_be_read_fails_the_evaluation() {
             Ok(args[0].clone())
         }),
     );
-    // Levels read whole, then one field at a time: a field that cannot be read fails the same way.
-    for fields in [false, true] {
+    // Levels read whole, then one field at a time, then as members: a field that cannot be read
+    // fails the same way.
+    for (fields, members) in [(false, false), (true, false), (true, true)] {
         let evaluate = |source: &str| {
             let expr = Expression::compile(source).unwrap();
-            let input = JsonSource::root(&input, fields);
+            let input = JsonSource {
+                members,
+                ..JsonSource::root(&input, fields)
+            };
             expr.evaluate_source(&input, &bindings, &Options::default())
         };
         // The levels an expression does not reach are never read.
@@ -650,6 +704,7 @@ fn a_level_that_cannot_be_read_fails_the_evaluation() {
         json: &null,
         root: false,
         fields: false,
+        members: false,
     };
     let result = expr.evaluate_source(&nothing, &Bindings::new(), &Options::default());
     assert_eq!(result.unwrap(), None);

@@ -94,7 +94,28 @@ struct Pending<'a> {
 
 enum Origin<'a> {
     Json(&'a JsonValue),
-    Source(Box<dyn Source<'a> + 'a>),
+    /// A member of sources held together, or a source alone (an [`Only`]). The member's index
+    /// is kept by its array or object, in room their layout leaves free, so that a lazy value
+    /// stays as small as one over JSON.
+    Source(Rc<dyn Sources<'a> + 'a>),
+}
+
+/// A source written alone, with [`Sink::array`] or [`Sink::object`]: the only member, at index 0.
+struct Only<S>(S);
+
+impl<'a, S: Source<'a>> Sources<'a> for Only<S> {
+    fn read(&self, _: u32, sink: &mut Sink<'_, 'a>) -> std::result::Result<(), String> {
+        self.0.read(sink)
+    }
+
+    fn read_field(
+        &self,
+        _: u32,
+        key: &str,
+        sink: &mut Sink<'_, 'a>,
+    ) -> std::result::Result<bool, String> {
+        self.0.read_field(key, sink)
+    }
 }
 
 impl<'a> Pending<'a> {
@@ -106,15 +127,16 @@ impl<'a> Pending<'a> {
         }
     }
 
-    /// Reads a level from a source into `level`. A source that fails leaves the level empty,
-    /// and its error is recorded for the evaluation (ADR 0010, decision 6).
-    fn read_source(&self, source: &dyn Source<'a>, level: Level<'_, 'a>) {
+    /// Reads the level of the member `member` of `sources` into `level`. A source that fails
+    /// leaves the level empty, and its error is recorded for the evaluation (ADR 0010,
+    /// decision 6).
+    fn read_source(&self, sources: &dyn Sources<'a>, member: u32, level: Level<'_, 'a>) {
         let mut sink = Sink {
             level,
             shared: &self.shared,
             key: None,
         };
-        if let Err(message) = source.read(&mut sink) {
+        if let Err(message) = sources.read(member, &mut sink) {
             self.shared.fail(message);
             match sink.level {
                 Level::Items(items) => items.clear(),
@@ -127,14 +149,19 @@ impl<'a> Pending<'a> {
     /// Reads the field `key` from a source: `None` when the source reads its object whole only,
     /// undefined when the object has no such field or the source failed (its error is then
     /// recorded, as for a level).
-    fn read_source_field(&self, source: &dyn Source<'a>, key: &str) -> Option<Value<'a>> {
+    fn read_source_field(
+        &self,
+        sources: &dyn Sources<'a>,
+        member: u32,
+        key: &str,
+    ) -> Option<Value<'a>> {
         let mut value = Value::Undefined;
         let mut sink = Sink {
             level: Level::Field(&mut value),
             shared: &self.shared,
             key: None,
         };
-        match source.read_field(key, &mut sink) {
+        match sources.read_field(member, key, &mut sink) {
             Ok(true) => Some(value),
             Ok(false) => None,
             Err(message) => {
@@ -178,6 +205,8 @@ pub(crate) struct Array<'a> {
 
 struct LazyItems<'a> {
     pending: Pending<'a>,
+    /// The array's index among sources held together.
+    member: u32,
     items: OnceCell<Vec<Value<'a>>>,
 }
 
@@ -192,9 +221,9 @@ impl<'a> LazyItems<'a> {
                 .map(|v| Value::lazy(v, &pending.shared))
                 .collect(),
             Origin::Json(_) => Vec::new(),
-            Origin::Source(source) => {
+            Origin::Source(sources) => {
                 let mut items = Vec::new();
-                pending.read_source(&**source, Level::Items(&mut items));
+                pending.read_source(&**sources, self.member, Level::Items(&mut items));
                 items
             }
         })
@@ -260,6 +289,8 @@ pub(crate) struct Object<'a> {
     /// cost one test of it.
     pending: Option<Pending<'a>>,
     read: Cell<Read>,
+    /// The index of a lazy object that is a member of sources held together.
+    member: u32,
 }
 
 /// How much of a lazy object has been read into its map.
@@ -308,7 +339,9 @@ impl<'a> Object<'a> {
                 }
             }
             Origin::Json(_) => {}
-            Origin::Source(source) => pending.read_source(&**source, Level::Fields(&mut map)),
+            Origin::Source(sources) => {
+                pending.read_source(&**sources, self.member, Level::Fields(&mut map))
+            }
         }
         if before == Read::Fields {
             for (key, value) in alone {
@@ -352,11 +385,13 @@ impl<'a> Object<'a> {
                 Value::lazy(json, &pending.shared)
             }
             Origin::Json(_) => return Value::Undefined,
-            Origin::Source(source) => match pending.read_source_field(&**source, key) {
-                Some(Value::Undefined) => return Value::Undefined,
-                Some(value) => value,
-                None => return self.borrow().get(key).cloned().unwrap_or_default(),
-            },
+            Origin::Source(sources) => {
+                match pending.read_source_field(&**sources, self.member, key) {
+                    Some(Value::Undefined) => return Value::Undefined,
+                    Some(value) => value,
+                    None => return self.borrow().get(key).cloned().unwrap_or_default(),
+                }
+            }
         };
         // Only arrays and objects are kept: they are the values whose identity shows (the
         // transform changes them in place), and keeping a scalar would cost more than reading
@@ -593,6 +628,7 @@ impl<'a> Value<'a> {
             map: RefCell::new(map),
             pending: None,
             read: Cell::new(Read::Whole),
+            member: 0,
         }))
     }
 
@@ -798,8 +834,8 @@ impl<'a> Value<'a> {
             shared: shared.clone(),
         };
         match json {
-            JsonValue::Array(items) if !items.is_empty() => Value::lazy_array(pending()),
-            JsonValue::Object(fields) if !fields.is_empty() => Value::lazy_object(pending()),
+            JsonValue::Array(items) if !items.is_empty() => Value::lazy_array(pending(), 0),
+            JsonValue::Object(fields) if !fields.is_empty() => Value::lazy_object(pending(), 0),
             JsonValue::Null => Value::Null,
             JsonValue::Bool(b) => Value::Bool(*b),
             JsonValue::Number(n) => Value::Number(n.as_f64().unwrap_or(f64::NAN)),
@@ -809,22 +845,24 @@ impl<'a> Value<'a> {
         }
     }
 
-    fn lazy_array(pending: Pending<'a>) -> Value<'a> {
+    fn lazy_array(pending: Pending<'a>, member: u32) -> Value<'a> {
         Value::Array(Rc::new(Array {
             items: Vec::new(),
             flags: Cell::new(0),
             lazy: Some(Box::new(LazyItems {
                 pending,
+                member,
                 items: OnceCell::new(),
             })),
         }))
     }
 
-    fn lazy_object(pending: Pending<'a>) -> Value<'a> {
+    fn lazy_object(pending: Pending<'a>, member: u32) -> Value<'a> {
         Value::Object(Rc::new(Object {
             map: RefCell::new(Map::default()),
             pending: Some(pending),
             read: Cell::new(Read::Nothing),
+            member,
         }))
     }
 
@@ -1027,6 +1065,29 @@ pub trait Source<'a> {
     }
 }
 
+/// The sources of several arrays and objects, held together: each is a member, known by its
+/// index. [`Sink::array`] and [`Sink::object`] allocate each source they are given, besides
+/// the array or object itself; [`Sink::array_of`] and [`Sink::object_of`] share one value of
+/// this trait instead, so that the arrays and objects of a level cost one allocation each.
+///
+/// A member is read as a [`Source`] is, by the method of the same name, given its index.
+pub trait Sources<'a> {
+    /// Writes the values of the member at `index` to `sink`, as [`Source::read`] does.
+    fn read(&self, index: u32, sink: &mut Sink<'_, 'a>) -> std::result::Result<(), String>;
+
+    /// Writes the value of the field `key` of the member at `index`, as [`Source::read_field`]
+    /// does. A member read whole only returns `false`, writing nothing; that is the default.
+    fn read_field(
+        &self,
+        index: u32,
+        key: &str,
+        sink: &mut Sink<'_, 'a>,
+    ) -> std::result::Result<bool, String> {
+        let _ = (index, key, sink);
+        Ok(false)
+    }
+}
+
 /// Where a [`Source`] writes the values of a level.
 pub struct Sink<'s, 'a> {
     level: Level<'s, 'a>,
@@ -1114,19 +1175,33 @@ impl<'a> Sink<'_, 'a> {
 
     /// Writes an array, read from `source` when the evaluation reaches it.
     pub fn array(&mut self, source: impl Source<'a> + 'a) {
-        let pending = self.pending(Box::new(source));
-        self.push(Value::lazy_array(pending));
+        let pending = self.pending(Rc::new(Only(source)));
+        self.push(Value::lazy_array(pending, 0));
     }
 
     /// Writes an object, read from `source` when the evaluation reaches it.
     pub fn object(&mut self, source: impl Source<'a> + 'a) {
-        let pending = self.pending(Box::new(source));
-        self.push(Value::lazy_object(pending));
+        let pending = self.pending(Rc::new(Only(source)));
+        self.push(Value::lazy_object(pending, 0));
     }
 
-    fn pending(&self, source: Box<dyn Source<'a> + 'a>) -> Pending<'a> {
+    /// Writes an array, the member at `index` of `sources`, read when the evaluation reaches
+    /// it.
+    pub fn array_of<S: Sources<'a> + 'a>(&mut self, sources: &Rc<S>, index: u32) {
+        let pending = self.pending(sources.clone());
+        self.push(Value::lazy_array(pending, index));
+    }
+
+    /// Writes an object, the member at `index` of `sources`, read when the evaluation reaches
+    /// it.
+    pub fn object_of<S: Sources<'a> + 'a>(&mut self, sources: &Rc<S>, index: u32) {
+        let pending = self.pending(sources.clone());
+        self.push(Value::lazy_object(pending, index));
+    }
+
+    fn pending(&self, sources: Rc<dyn Sources<'a> + 'a>) -> Pending<'a> {
         Pending {
-            origin: Origin::Source(source),
+            origin: Origin::Source(sources),
             shared: self.shared.clone(),
         }
     }

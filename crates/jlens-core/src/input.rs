@@ -7,7 +7,9 @@
 //! same way, without being converted to `serde_json` first. The WebAssembly package reads
 //! JavaScript objects this way. A source that looks up one field for less than it reads its
 //! object whole also implements [`Source::read_field`], which a path step uses; the Python
-//! package reads its dictionaries this way.
+//! package reads its dictionaries this way. A source can also write the arrays and objects of a
+//! level as members of one [`Sources`], so that each costs one allocation instead of two; the
+//! Python package does.
 //!
 //! ```
 //! use jlens_core::input::{Sink, Source};
@@ -52,4 +54,4 @@
 //! assert_eq!(result.unwrap(), Some(serde_json::json!(5.5)));
 //! ```
 
-pub use crate::value::{Sink, Source};
+pub use crate::value::{Sink, Source, Sources};

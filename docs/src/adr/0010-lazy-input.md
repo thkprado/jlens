@@ -2,7 +2,8 @@
 
 **Status:** Accepted. Amends [ADR 0003](0003-value-model.md), whose consequences left room for a
 borrowed view of the input. Amended in 0.17: a path step reads one field of an object that has
-not been read ([below](#amendment-one-field-at-a-time-017)).
+not been read ([below](#amendment-one-field-at-a-time-017)). Amended in 0.19: the arrays and
+objects of a level can share one source ([below](#amendment-one-allocation-per-member-019)).
 
 ## Context
 
@@ -234,3 +235,46 @@ every field of its object, strings included, to use one.
 - A Python key's `__eq__` can run during a lookup, when a `dict` has a key that is not a `str`
   and whose hash collides with the key looked up. Such a `dict` fails when it is read whole.
 - `Object` gains no field: its `read` flag becomes a state of three values.
+
+## Amendment: one allocation per member (0.19)
+
+### Context
+
+Roadmap 0.19, item 3. Each `dict` of a `list` that an evaluation does not read cost jlens 98 ns,
+against 30 ns in `jsonatapy`, and about 40% of it was `malloc` and `free`: `Sink::array` and
+`Sink::object` box the source they are given, besides allocating the array or object itself
+(an array also allocates the part that holds its lazy items). `Sink` takes any type of source,
+so it cannot keep the sources of a level together without boxing each, or erasing their type
+with `unsafe`, which jlens forbids.
+
+### Decision
+
+1. **A new trait, `input::Sources`.** A value of it holds the sources of several arrays and
+   objects, its *members*, and reads the member at an index as a `Source` reads itself:
+   `read(index, sink)`, and optionally `read_field(index, key, sink)`.
+2. **`Sink::array_of(&sources, index)` and `Sink::object_of(&sources, index)`** write a member,
+   taking a reference to an `Rc` of the sources: the array or object holds that `Rc` and the
+   index (a `u32`), and allocates nothing more. `Sink::array` and `Sink::object` stay, for
+   sources that prefer them: they put their source in an `Rc` of its own, the only member, one
+   allocation as the box was.
+3. **A lazy value stays as large as before.** The origin of a lazy array or object is either
+   JSON or an `Rc` of sources, 16 bytes as the boxed source was. An object keeps its index in
+   room its layout left free; an array, in the part that holds its lazy items, which only lazy
+   arrays allocate.
+4. **The Python source writes a level's arrays and objects as members.** One value per level,
+   made at its first array or object, holds the level's Python value and its ancestors (the
+   chain that detects cycles, which it replaces) and the members' Python values, the first one
+   inline, so that a level holding a single array or object allocates no more than before.
+5. **What does not change.** Cycles and deep input fail with `U1004` and `U1001`; a member keeps
+   its Python value, so a host function that changes the input between two reads does not
+   change which value a member stands for; free-threaded Python is supported as before (no Python
+   code runs while a level is read, and a `dict` or `list` is locked while it is).
+
+### Consequences
+
+- With Python values in, `$count(items)` takes 15.4 against 19.0 µs and names over items 35.1
+  against 37.4 µs ([performance](../architecture/performance.md)).
+- A first version added the index to the origin, which made every lazy object 16 bytes larger,
+  those over `serde_json` too: names over items took 17% longer with `cargo xtask ab --mode
+  evaluate`. With decision 3, no case is slower but group-by, by 2%.
+- The WebAssembly source still boxes each source: it has not been measured with members.
