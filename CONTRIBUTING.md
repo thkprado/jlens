@@ -88,11 +88,14 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    (cd crates/jlens-wasm/pkg && npm pack --dry-run)
    ```
 
-4. Commit, tag `vX.Y.Z`, and push the tag. The `Release` workflow first builds the `jlens`
-   binaries for Linux, macOS and Windows and the Python wheels and source distribution, each
-   tested on its platform (CI builds both on each push to `main` too), then
-   publishes `jlens-regress`, `jlens-core`, `jlens-schema`, `jlens-lsp` and `jlens-cli` to
-   crates.io, in that order, and to npm with provenance `jlens-wasm` and the packages of the
+4. Commit, push the commit to `main`, tag it `vX.Y.Z`, and push the tag. The `Release` workflow
+   first builds the `jlens` binaries for Linux, macOS and Windows and the Python wheels and
+   source distribution, each tested on its platform (CI builds both on each push to `main`
+   too), and waits for the CI run of the tagged commit on `main`: nothing is published unless
+   it passed, and a tag on a commit not pushed to `main` publishes nothing. When that CI run
+   failed for a reason outside the code and passes when run again, "Re-run failed jobs" on the
+   `Release` run resumes it. Then the workflow publishes `jlens-regress`, `jlens-core`,
+   `jlens-schema`, `jlens-lsp` and `jlens-cli` to crates.io, in that order, and to npm with provenance `jlens-wasm` and the packages of the
    CLI (ADR 0012: the five `jlens-cli-<os>-<cpu>` packages built by `cargo xtask npm-cli` from
    the archives, then `jlens-cli`; only when the repository variable `PUBLISH_NPM_CLI` is
    `true`, which waits for npm to allow the name `jlens-cli-win32-x64`), and to PyPI the Python

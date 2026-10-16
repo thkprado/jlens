@@ -5,10 +5,10 @@ name: Release
 # package and the packages of the CLI (ADR 0012), to PyPI the Python package (ADR 0014), to
 # ghcr.io the container image, and the VS Code extension to the Visual Studio Marketplace and
 # Open VSX (ADR 0013), then drafts the GitHub release from CHANGELOG.md with the binaries
-# attached. Nothing is published unless every binary and every wheel builds. The npm packages
-# are published with provenance, the Python files with PEP 740 attestations, and the binary
-# archives and the image get build attestations, all signed through Sigstore with the run's
-# OIDC token. Needs the repository secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN, and the
+# attached. Nothing is published unless every binary and every wheel builds and the CI run of
+# the tagged commit on main passed. The npm packages are published with provenance, the Python
+# files with PEP 740 attestations, and the binary archives and the image get build
+# attestations, all signed through Sigstore with the run's OIDC token. Needs the repository secrets CARGO_REGISTRY_TOKEN and NPM_TOKEN, and the
 # environments pypi and vscode (CONTRIBUTING.md); the image is pushed with the run's
 # GITHUB_TOKEN.
 # Run by hand (workflow_dispatch) on an existing tag (gh workflow run release.yml --ref vX.Y.Z),
@@ -56,9 +56,48 @@ jobs:
     with:
       upload: true
 
+  # Nothing is published from a commit whose CI failed: CI checks what the release does not,
+  # such as the lints and the docs. The tag is usually pushed with main, so the job waits for the CI run
+  # of the commit to finish, while the binaries and the wheels build. A tag on a commit never
+  # pushed to main has no CI run and fails here. After a CI run that failed and passed when run
+  # again, "Re-run failed jobs" resumes the release.
+  ci:
+    name: CI passed on the tagged commit
+    needs: tag
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          missing=0
+          while true; do
+            run=$(gh run list --workflow ci.yml --branch main --event push --commit "$GITHUB_SHA" \
+              --limit 1 --json status,conclusion,url --jq '.[0] // empty')
+            if [[ -z "$run" ]]; then
+              if (( ++missing > 20 )); then
+                echo "::error::No CI run on main for $GITHUB_SHA: tag a commit pushed to main"
+                exit 1
+              fi
+            elif [[ $(jq -r .status <<< "$run") == completed ]]; then
+              url=$(jq -r .url <<< "$run")
+              if [[ $(jq -r .conclusion <<< "$run") == success ]]; then
+                echo "CI passed: $url"
+                exit 0
+              fi
+              echo "::error::CI did not pass on $GITHUB_SHA: $url"
+              exit 1
+            fi
+            sleep 30
+          done
+
   crates:
     name: crates.io
-    needs: [binaries, wheels]
+    needs: [binaries, wheels, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
@@ -88,7 +127,7 @@ jobs:
 
   npm:
     name: npm
-    needs: [binaries, wheels]
+    needs: [binaries, wheels, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     # id-token signs the provenance statement of the package.
@@ -123,7 +162,7 @@ jobs:
   # #7), and until it is allowed the job would fail, and the draft with it.
   npm-cli:
     name: npm (CLI)
-    needs: [binaries, wheels]
+    needs: [binaries, wheels, ci]
     if: github.event_name == 'push' && vars.PUBLISH_NPM_CLI == 'true'
     runs-on: ubuntu-latest
     # id-token signs the provenance statements of the packages.
@@ -168,7 +207,7 @@ jobs:
   # replaces its tags.
   container:
     name: Container image
-    needs: [binaries, wheels]
+    needs: [binaries, wheels, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     # packages pushes the image; the others sign and store the attestation.
@@ -238,7 +277,7 @@ jobs:
   # halfway through.
   vscode:
     name: VS Code extension
-    needs: [binaries, wheels]
+    needs: [binaries, wheels, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: vscode
@@ -285,7 +324,7 @@ jobs:
   # skipped: re-running the job completes a release that failed halfway through.
   pypi:
     name: PyPI
-    needs: [binaries, wheels]
+    needs: [binaries, wheels, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:
