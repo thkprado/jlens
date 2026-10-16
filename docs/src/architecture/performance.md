@@ -247,6 +247,21 @@ input converted once (`Document`, `JsonataData`):
   time than `jsonata-rs`, and 7 to 64 times less than `jsonata-python`. Both read the whole
   input before evaluating: on `path` they take 0.2 and 1.5 ms where jlens takes 1.0 µs.
 
+Since then, the Python package builds a result as Python objects directly (ADR 0017), without a
+`serde_json` value in between, and creates each key of the result once, so that a key repeated
+in every object is created and hashed once. Measured before and after on the same system, with
+Python values in and against a `Document`:
+
+| Case | Before | After | Before, `Document` | After, `Document` |
+|---|---:|---:|---:|---:|
+| object constructor | 351 µs | 255 µs | 281 µs | 193 µs |
+| transform | 886 µs | 759 µs | 733 µs | 559 µs |
+| sort + map | 392 µs | 360 µs | 287 µs | 266 µs |
+| names over items | 38.9 µs | 37.5 µs | 6.6 µs | 6.8 µs |
+
+The object constructor still takes `jsonatapy` 182 µs: the rest of the gap is the evaluation
+(roadmap 0.19).
+
 What reading Python values costs, per value, measured with inputs that each exercise one step
 and the time of the same evaluation against a `Document` taken off. The first column is
 c4ba685, whose `evaluate` took 156 µs on `names over items`; the second 22c2e66 (138 µs); the

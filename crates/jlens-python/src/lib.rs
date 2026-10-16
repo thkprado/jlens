@@ -18,6 +18,7 @@
 
 mod convert;
 mod host;
+mod output;
 mod source;
 
 use std::cell::RefCell;
@@ -34,6 +35,7 @@ use serde_json::Value as Json;
 
 use convert::{JlensError, Registered, to_py};
 use host::{Function, Host};
+use output::{NoInput, PyBuilder};
 use source::PySource;
 
 /// A compiled JSONata expression.
@@ -130,18 +132,20 @@ impl Expression {
     ) -> PyResult<Bound<'py, PyAny>> {
         let (bindings, host) = self.bindings(py, bindings)?;
         let options = convert::options(options)?;
-        let result = match input.filter(|input| !input.is_none()) {
+        let mut builder = PyBuilder::new(py);
+        let write = |out: jlens_core::output::Output<'_, '_>| out.write(&mut builder);
+        let written = match input.filter(|input| !input.is_none()) {
             Some(input) => {
                 let source = PySource::Input(input.clone());
-                self.inner.evaluate_source(&source, &bindings, &options)
+                self.inner
+                    .evaluate_source_to(&source, &bindings, &options, write)
             }
-            None => self.inner.evaluate_with(None, &bindings, &options),
+            None => self
+                .inner
+                .evaluate_source_to(&NoInput, &bindings, &options, write),
         }
         .map_err(|e| self.error(py, &e, host.as_deref()))?;
-        match result {
-            Some(value) => to_py(py, &value),
-            None => Ok(py.None().into_bound(py)),
-        }
+        builder.finish(written)
     }
 
     /// Like `evaluate`, with the input document and the result as JSON text: `None` for an
@@ -185,17 +189,23 @@ impl Expression {
         let (bindings, host) = self.bindings(py, bindings)?;
         let options = convert::options(options)?;
         let source = &document.get().source;
+        // The result is written attached again, once the evaluation has succeeded.
         let result = py
             .detach(|| {
                 let document = converted(source)
                     .map_err(|e| Failure::Input(format!("the document is not valid JSON: {e}")))?;
-                self.run(Some(&document), &bindings, &options)
+                self.inner
+                    .evaluate_document_to(&document, &bindings, &options, |out| {
+                        Python::attach(|py| {
+                            let mut builder = PyBuilder::new(py);
+                            let written = out.write(&mut builder)?;
+                            Ok(builder.finish(written).map(Bound::unbind))
+                        })
+                    })
+                    .map_err(Failure::Evaluation)
             })
             .map_err(|e| self.failure(py, e, host.as_deref()))?;
-        match result {
-            Some(value) => to_py(py, &value),
-            None => Ok(py.None().into_bound(py)),
-        }
+        Ok(result?.into_bound(py))
     }
 
     /// Evaluates the expression and records how the result was reached, at `level` (`"off"`,

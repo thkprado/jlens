@@ -14,6 +14,13 @@ All notable changes are recorded here. The format follows
   result. `evaluate` and the other entry points write their `serde_json` result through the same
   walk, which makes the object constructor case about 6% faster natively.
 
+### Changed
+
+- Python: `evaluate` and `evaluate_document` build their result as Python objects directly,
+  without a `serde_json` value in between, and create each key once per result. The object
+  constructor case of `benches/compare/python.py` takes 27% less time (31% against a
+  `Document`), the transform 14% (24%).
+
 ## [0.18.0]
 
 jlens tells an application which fields an expression reads, worked out from the expression

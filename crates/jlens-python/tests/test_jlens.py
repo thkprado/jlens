@@ -96,6 +96,17 @@ def test_result_numbers():
     assert type(Expression("1e21").evaluate()) is float
     assert everything.evaluate(2**53) == 2**53
     assert type(Expression("-0").evaluate()) is int
+    # Integers beyond 64 bits.
+    assert Expression("[9e18, 1e19, -1e19]").evaluate() == [9 * 10**18, 10**19, -(10**19)]
+
+
+def test_results_share_their_keys():
+    expression = Expression("[1..3].{'id': $, 'name': 'n' & $}")
+    document = Document.from_json("null")
+    for result in (expression.evaluate(), expression.evaluate_document(document)):
+        assert result == [{"id": n, "name": f"n{n}"} for n in (1, 2, 3)]
+        first, last = (list(item) for item in (result[0], result[2]))
+        assert all(a is b for a, b in zip(first, last))
 
 
 def test_unsupported_values_fail_where_they_are_read():
