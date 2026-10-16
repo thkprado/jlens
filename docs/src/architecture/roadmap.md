@@ -253,7 +253,7 @@ that cost from 350 to 106 ns for `1`, but a path still takes about seven times a
 
 JSONata in Python has a pure-Python port, a wrapper of jsonata-js, a young Rust port of
 jsonata-java and the Python package of jsonata-core (`jsonatapy`). jlens would bring its conformance, audits, schemas and speed to Python, where data
-pipelines and rules live, and more people using it would tell 0.18 which parts of the API to
+pipelines and rules live, and more people using it would tell 0.19 which parts of the API to
 keep. The package follows the WebAssembly package: the same objects, the same errors, beta until
 1.0.
 
@@ -271,12 +271,37 @@ keep. The package follows the WebAssembly package: the same objects, the same er
 | 10 | Reading one field of an object that has not been read. Found by #9: to look up `quantity` in an item, jlens reads the item's six fields into a map, where `jsonatapy` looks up that one field in the `dict`; reading a `dict` for one of six fields costs jlens 534 ns, against 66 ns. `Source` gets an optional method that writes one field, by its key; an object not read yet keeps the fields read this way, and reads its whole level, reusing them, when it is needed whole (`*`, `$keys`, `$string`, the result). The path step looks the field up this way. The Python source implements it, and so does the JSON one: `Expression::evaluate` on a `serde_json::Value` gains the same way. Lazy reading as ADR 0010 describes it changes, so ADR 0010 gets an amendment. What does not change: a level read whole is still read once, cycles and deep input still fail with `U1004` and `U1001`, and values read twice are the same value | ADR 0010 amended; the core's tests of lazy reading and the property tests cover objects read one field at a time, then whole; `cargo xtask ab` shows no loss on the native workload; `python.py speed` run again, with `names over items` compared before and after on the performance page | |
 | 11 | Release 0.17.0, with the Python package in beta | The release checklist, with the package installed from PyPI; the performance page measured again for 0.17.0: the native, allocator and WebAssembly tables and the numbers in "Where the time goes" | |
 
-## 0.18: an API to keep, toward 1.0
+## 0.18: the fields an expression reads
 
-After seventeen releases, nothing says which parts of jlens are meant to last. `cargo
+An application that evaluates rules builds their input first, often from a database or a
+service. Knowing which fields a rule reads, it could fetch only those; it could also show which
+rules depend on a field. jlens can answer from the expression alone: `$sum(items.quantity)`
+reads `quantity` in each item of `items`, and nothing else. The same answer lets jlens skip,
+when it parses JSON text, the fields no evaluation will read.
+
+JSONata is dynamic, so the answer is an upper bound. Where the analysis cannot follow, it says
+that a value is read whole: the wildcards `*` and `**`, the parent operator `%`, `$keys`,
+`$each`, `$sift`, `$spread`, `$string`, `$lookup` with a computed key, `$eval`, a value passed
+to a lambda or to a host function, a transform, an object in the result. For the paths,
+comparisons and aggregations rules are mostly made of, it is exact. A wrong answer would not
+fail: a field left out reads as undefined and the rule gives another result. So the test is the
+suite: each case evaluated on its input cut down to the fields reported must give the same
+result as on the whole input.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | ADR 0016, the fields an expression reads: what the analysis returns (a tree of field names, the items of an array, and values read whole, for the input and for each binding), how each construct of the language maps to it and where it gives up, how `@`, `#` and `%` take part, and its API in Rust, WebAssembly, Python and the CLI | The ADR accepted, with the table of constructs | |
+| 2 | The analysis in `jlens-core` and its Rust API | A test per construct; every case of the suite gives the same result or error on its input cut down to the fields reported; property tests: no panic, deep expressions within the nesting cap | |
+| 3 | The API in the WebAssembly and Python packages and the CLI, documented in the book | `types.d.ts` and the stubs; cases in `suite.mjs` and pytest; a section in the guides, with examples `doc-check` runs | |
+| 4 | Parsing JSON text without the fields an expression does not read (`Document::parse` for an expression, `evaluate_json`, the CLI), kept only if it pays | The parse of wide documents measured before and after; the outcome on the performance page, kept or not | |
+| 5 | Release 0.18.0 | The release checklist | |
+
+## 0.19: an API to keep, toward 1.0
+
+After eighteen releases, nothing says which parts of jlens are meant to last. `cargo
 semver-checks` runs in CI, but before 1.0 it only asks for a new minor version, and
 `jlens-core` exposes workspace plumbing (`stack`, `debug`, the AST's internals) next to its API.
-0.18 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
+0.19 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
 down. Applications built on jlens are separate projects: they use `jlens-core` as any
 application does, and what they lack comes back here as general features.
 
@@ -290,7 +315,7 @@ from what they needed, missed or worked around, not guessed beforehand.
 | 3 | `jlens-schema` and `jlens-lsp` changes as ADR 0015 says | As #2 | |
 | 4 | The contracts outside Rust, as ADR 0015 says: the Wasm API, the Python package, the JSON of audits and `jlens.json`; a test pins each, so that a change shows in review | Tests that fail on an unintended change of each contract | |
 | 5 | A stability page in the book, from ADR 0015, and the rules for changing a stable item in `CONTRIBUTING.md` | `doc-check` green; the page linked from the introduction | |
-| 6 | Release 0.18.0, the release that breaks once. 1.0.0 follows when ADR 0015's criterion is met | The release checklist, with the migration notes in the release notes | |
+| 6 | Release 0.19.0, the release that breaks once. 1.0.0 follows when ADR 0015's criterion is met | The release checklist, with the migration notes in the release notes | |
 
 ## Not planned
 
