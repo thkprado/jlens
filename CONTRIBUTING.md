@@ -89,12 +89,15 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    ```
 
 4. Commit, tag `vX.Y.Z`, and push the tag. The `Release` workflow first builds the `jlens`
-   binaries for Linux, macOS and Windows (CI builds them on each push to `main` too), then
+   binaries for Linux, macOS and Windows and the Python wheels and source distribution, each
+   tested on its platform (CI builds both on each push to `main` too), then
    publishes `jlens-regress`, `jlens-core`, `jlens-schema`, `jlens-lsp` and `jlens-cli` to
    crates.io, in that order, and to npm with provenance `jlens-wasm` and the packages of the
    CLI (ADR 0012: the five `jlens-cli-<os>-<cpu>` packages built by `cargo xtask npm-cli` from
    the archives, then `jlens-cli`; only when the repository variable `PUBLISH_NPM_CLI` is
-   `true`, which waits for npm to allow the name `jlens-cli-win32-x64`), and to ghcr.io the
+   `true`, which waits for npm to allow the name `jlens-cli-win32-x64`), and to PyPI the Python
+   package `jlens` (ADR 0014: fourteen wheels and the source distribution, with attestations),
+   and to ghcr.io the
    container image `ghcr.io/thkprado/jlens`
    (`crates/jlens-cli/Dockerfile`, the two static Linux binaries; tags `X.Y.Z`, `X.Y` and
    `latest`), and to the Visual Studio Marketplace and Open VSX the VS Code extension
@@ -103,17 +106,20 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    and the image (build provenance, through `actions/attest`) and drafts the GitHub release
    with the notes of the version, the archives and their `SHA256SUMS`. It needs the repository
    secrets `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`; `NPM_TOKEN` must be allowed to publish all
-   seven npm packages, and to create the CLI's six for their first release. The extension is
-   published from the environment `vscode`, set up as
-   [Publishing the VS Code extension](#publishing-the-vs-code-extension) says. The image is
+   seven npm packages, and to create the CLI's six for their first release. The Python
+   package is published from the environment `pypi`, and the extension from the environment
+   `vscode`, set up as [Publishing the Python package](#publishing-the-python-package) and
+   [Publishing the VS Code extension](#publishing-the-vs-code-extension) say. The image is
    pushed with the run's `GITHUB_TOKEN`. The provenance and the attestations are signed with
-   the run's OIDC token, so they need no secret. If the CLI's npm job or the extension's job
-   fails halfway, re-run it: it skips the packages whose version is already published.
+   the run's OIDC token, so they need no secret. If the CLI's npm job, the PyPI job or the
+   extension's job fails halfway, re-run it: it skips the files whose version is already
+   published.
 
    To publish by hand instead: `cargo publish -p jlens-regress`, then `-p jlens-core`, then
    `-p jlens-schema`, then `-p jlens-lsp`, then `-p jlens-cli`; then
    `npm publish --access public` in `crates/jlens-wasm/pkg` after `cargo xtask wasm` (without
-   provenance and attestations, which only a workflow run can sign); then
+   provenance and attestations, which only a workflow run can sign); then the Python package
+   as [Publishing the Python package](#publishing-the-python-package) says; then
    `cargo xtask release-notes X.Y.Z > notes.md` and
    `gh release create vX.Y.Z --draft --verify-tag --title "jlens X.Y.Z" --notes-file notes.md`.
 
@@ -148,6 +154,8 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    npm view jlens-wasm@X.Y.Z dist.attestations   # lists the provenance (slsa.dev) statement
    npm view jlens-cli@X.Y.Z dist.attestations    # and of jlens-cli-<os>-<cpu> likewise
    npx -y jlens-cli@X.Y.Z --version              # the binary of this platform, from npm
+   uv run --no-project --with jlens==X.Y.Z python -c "import jlens; print(jlens.__version__)"   # the wheel of this platform, from PyPI
+   curl -s https://pypi.org/integrity/jlens/X.Y.Z/jlens-X.Y.Z.tar.gz/provenance | jq '.attestation_bundles[].publisher'
    brew upgrade thkprado/jlens/jlens && jlens --version   # macOS and Linux, after the Homebrew run
    scoop update jlens; jlens --version                    # Windows, after the Scoop run
    docker run --rm ghcr.io/thkprado/jlens:X.Y.Z --version
@@ -166,13 +174,32 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    The first push of the image creates the package `jlens` on GitHub, private: make it public
    once, in its Package settings (Change visibility), so that `docker pull` needs no login.
 
-   The package page on npmjs.com also shows a Provenance section linking to the workflow run.
+   The package page on npmjs.com also shows a Provenance section linking to the workflow run,
+   and each file on pypi.org/project/jlens a Verified details section naming the workflow.
 7. Check the site. The tag also runs the `Pages` workflow, which builds the book and the web
    editor of the tag (`cargo xtask site`) and deploys them to <https://thkprado.github.io/jlens/>
    (the `github-pages` environment accepts `v*` tags). Check that the run passed
    (`gh run list --workflow pages.yml --limit 1`), that the book's introduction names the new
    version, and that the editor evaluates an example. If only the deployment failed, re-run it
    on the tag: `gh workflow run pages.yml --ref vX.Y.Z`.
+
+### Publishing the Python package
+
+The `pypi` job of the `Release` workflow runs in the GitHub environment `pypi`, whose deployment
+rules accept only `v*` tags. It holds no secret: PyPI trusts the run through trusted publishing.
+The project `jlens` on PyPI belongs to the maintainer's account, and registers as its trusted
+publisher the owner `thkprado`, the repository `jlens`, the workflow `release.yml` and the
+environment `pypi` (on pypi.org, under the project's **Publishing** settings). Until the first
+release the project does not exist: the publisher is registered as a *pending* publisher (under
+the account's **Publishing**), which creates the project on its first upload. If the
+workflow file, the environment or the repository is renamed, register the publisher again.
+`pypa/gh-action-pypi-publish` exchanges the run's OIDC token for an upload token valid for a few
+minutes, and signs a PEP 740 attestation for each file with the same token.
+
+To publish a release by hand (without attestations), download the wheels and the source
+distribution of a `Release` run that built them,
+`gh run download <run> --pattern 'python-*' --dir dist`, which puts each artifact in a folder of
+its own, then run `uvx twine upload --skip-existing dist/*/*` with an API token of the project.
 
 ### Publishing the VS Code extension
 

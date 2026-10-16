@@ -7,7 +7,8 @@ name: Wheels
 # distribution with free-threaded 3.14, which has no wheel. It builds the commit that triggered
 # the caller, never a ref given as input (see binaries.yml).
 # Called by CI on each push to main, so that a target that stops building is found before a
-# release.
+# release, and by the Release workflow, which uploads them as the artifacts python-<target> and
+# python-sdist and publishes them to PyPI.
 
 on:
   workflow_call:
@@ -93,7 +94,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: inputs.upload
         with:
-          name: wheels-${{ matrix.target }}
+          name: python-${{ matrix.target }}
           path: crates/jlens-python/dist/*.whl
           if-no-files-found: error
 
@@ -121,6 +122,6 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: inputs.upload
         with:
-          name: sdist
+          name: python-sdist
           path: crates/jlens-python/dist/*.tar.gz
           if-no-files-found: error

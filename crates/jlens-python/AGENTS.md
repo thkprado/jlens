@@ -18,4 +18,5 @@ Its Rust code is not unit-tested by `cargo test`: `maturin develop` in a virtual
 then `python -m pytest -p no:cacheprovider tests`.
 
 `.github/workflows/wheels.yml` builds the abi3 and abi3t wheels of every release target and the
-source distribution, and tests each (CI, on pushes to `main`).
+source distribution, and tests each (CI, on pushes to `main`); the `Release` workflow publishes
+them to PyPI (CONTRIBUTING.md).
