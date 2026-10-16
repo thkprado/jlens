@@ -443,6 +443,13 @@ where it is now parsed straight into a `Document`.
   its context or a variable, or calls a function, is still evaluated per item, as in jsonata-js. In
   0.19 this halved `number formatting` (`items[[0..19]]...`, 203 against 92.7 µs with
   `evaluate`; in Python, 164.5 against 81.3 µs with Python values in).
+- **Object constructors over one item.** An object constructor whose input is a single item,
+  as in `items.{...}`, which evaluates it once per item, or the update of a transform,
+  evaluates its pairs against the item instead of grouping: no group per key, no items to
+  join. Its keys are still evaluated before its values, so the errors are those of a grouping
+  (`T1003` for a key that is not a string, `D1009` for two pairs with the same key). In 0.19
+  this made `object constructor` 22% faster with `evaluate` (399 against 312 µs) and 25%
+  against a `Document` (376 against 281 µs), and `transform` 6% against a `Document`.
 - **String literals.** `=` and `!=` with a string literal compare with the literal's text
   instead of building a string, and so does a grouping with a literal key, which finds its group
   by the text: in `items{type: {'total': ..., 'n': ...}}`, `'total'` and `'n'` are built once

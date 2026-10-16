@@ -627,6 +627,59 @@ fn constant_predicates_agree_with_an_audit() {
     }
 }
 
+/// An object constructor over a single item builds no groups. Its keys are still evaluated
+/// before its values, two pairs with the same key fail with D1009 and a key that is not a string
+/// with T1003, as when grouping, with or without an audit.
+#[test]
+fn object_constructors_over_one_item_keep_the_grouping_order() {
+    let input = json!({
+        "a": "x",
+        "n": 2,
+        "o": {"k": "a"},
+        "items": [{"k": "p", "v": 1}, {"k": "q"}, {"k": "p", "v": 3}]
+    });
+    let results = [
+        ("{'b': 1, 'a': n}", json!({"b": 1, "a": 2})),
+        ("{'a': missing, 'b': 1}", json!({"b": 1})),
+        ("{missing: 1, 'b': 2}", json!({"b": 2})),
+        ("{a: n, 'y': 1}", json!({"x": 2, "y": 1})),
+        ("{'a': missing}", json!({})),
+        ("[]{'a': 1}", json!({"a": 1})),
+        ("[o]{k: $}", json!({"a": {"k": "a"}})),
+        ("o{k: 1}", json!({"a": 1})),
+        ("items.{k: v}", json!([{"p": 1}, {}, {"p": 3}])),
+        ("items{k: v}", json!({"p": [1, 3]})),
+        ("items.{'k': k, 'v': v}.k", json!(["p", "q", "p"])),
+    ];
+    let errors = [
+        ("{'a': 1, 'a': 2}", "D1009"),
+        ("{'x': 1, a: 2}", "D1009"),
+        ("{'a': missing, 'a': 1}", "D1009"),
+        ("{'a': 1, 'b': 2, 'c': 3, 'b': 4}", "D1009"),
+        ("{n: 1}", "T1003"),
+        ("{'a': $error('v'), n: 1}", "T1003"),
+        ("{'a': $error('v'), 'a': 1}", "D1009"),
+        ("{'a': 1, 'b': $error('v')}", "D3137"),
+        ("items.{'q': 1, k: 2}", "D1009"),
+    ];
+    let options = Options::new();
+    let audit = jlens_core::audit::AuditOptions::full();
+    let run = |source: &str| {
+        let expr = Expression::compile(source).unwrap();
+        let plain = expr.evaluate_with(Some(&input), &Bindings::new(), &options);
+        let (audited, _) = expr.evaluate_audited(Some(&input), &Bindings::new(), &options, &audit);
+        assert_eq!(format!("{plain:?}"), format!("{audited:?}"), "{source}");
+        plain
+    };
+    for (source, expected) in results {
+        let result = run(source).unwrap().unwrap();
+        assert_eq!(result.to_string(), expected.to_string(), "{source}");
+    }
+    for (source, code) in errors {
+        assert_eq!(run(source).unwrap_err().code(), code, "{source}");
+    }
+}
+
 #[test]
 fn unread_input_is_returned_as_converted() {
     let input = json!({"n": [2.0, -0.0, 1e300, 18446744073709551615u64], "o": {"a": [1.5]}});

@@ -11,6 +11,7 @@ use std::rc::{Rc, Weak};
 use std::sync::{Arc, OnceLock};
 
 use indexmap::IndexMap;
+use indexmap::map::Entry;
 use web_time::{Duration, Instant};
 
 use crate::ast::{Ast, BinaryOp, FallbackOp, Node, NodeKind, SortTerm, Stage, TransformDef};
@@ -1342,6 +1343,15 @@ impl<'a> Evaluator<'_, 'a> {
         env: &Env<'a>,
     ) -> Result<Value<'a>> {
         let reduce = input.has_flag(TUPLE_STREAM);
+        let single = match &input {
+            _ if reduce => None,
+            Value::Array(a) if a.items().len() > 1 => None,
+            Value::Array(a) => Some(a.items().first().cloned().unwrap_or_default()),
+            _ => Some(input.clone()),
+        };
+        if let Some(item) = single {
+            return self.object_of_item(pairs, expr, item, env);
+        }
         let mut items = input.items_or_self();
         if items.is_empty() && !reduce {
             // An empty input still produces a literal object.
@@ -1409,6 +1419,53 @@ impl<'a> Evaluator<'_, 'a> {
             if !value.is_undefined() {
                 result.insert(key, value);
             }
+        }
+        Ok(Value::object(result))
+    }
+
+    /// An object constructor over a single item, as `group` would build it without its groups:
+    /// each key with the item as its context, then each value, in the same order.
+    fn object_of_item(
+        &mut self,
+        pairs: &[(Node, Node)],
+        expr: &Node,
+        item: Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
+        // Until its value is evaluated, each key holds the index of the pair that produced it.
+        let mut result = Map::with_capacity_and_hasher(pairs.len(), Default::default());
+        for (pair_index, (key_expr, _)) in pairs.iter().enumerate() {
+            let literal = string_literal(key_expr)
+                .filter(|_| self.tracer.is_none() && self.depth < self.limits.max_depth);
+            let key = match literal {
+                Some(text) => Rc::from(text),
+                None => match self.eval(key_expr, &item, env)? {
+                    Value::Undefined => continue,
+                    Value::String(s) => s,
+                    other => return Err(err_at("T1003", expr).with_value("value", &other)),
+                },
+            };
+            // Each pair gives the item one key, so a key seen before comes from another pair.
+            match result.entry(key) {
+                Entry::Occupied(e) => {
+                    return Err(err_at("D1009", expr).with("value", &**e.key()));
+                }
+                Entry::Vacant(e) => {
+                    e.insert(Value::Number(pair_index as f64));
+                }
+            }
+        }
+        let mut undefined = false;
+        for slot in 0..result.len() {
+            let Value::Number(pair_index) = result[slot] else {
+                unreachable!("a key holds the index of its pair")
+            };
+            let value = self.eval(&pairs[pair_index as usize].1, &item, env)?;
+            undefined |= value.is_undefined();
+            result[slot] = value;
+        }
+        if undefined {
+            result.retain(|_, value| !value.is_undefined());
         }
         Ok(Value::object(result))
     }
