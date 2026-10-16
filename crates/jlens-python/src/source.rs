@@ -20,7 +20,7 @@ pub enum PySource<'py> {
     /// The input itself, the only value of its level.
     Input(Bound<'py, PyAny>),
     /// An array or an object, with its ancestors.
-    Level(Rc<Node<'py>>),
+    Level(Node<'py>),
 }
 
 /// An array or an object, and the chain of its ancestors, to detect cycles as `json.dumps` does.
@@ -29,12 +29,42 @@ pub struct Node<'py> {
     up: Option<Rc<Node<'py>>>,
 }
 
+/// The ancestors of the values of a level being read: the level, and its own ancestors. They
+/// are shared by the arrays and objects of the level, made when the first one is met.
+struct Ancestors<'n, 'py> {
+    level: Option<&'n Node<'py>>,
+    shared: Option<Rc<Node<'py>>>,
+}
+
+impl<'py> Ancestors<'_, 'py> {
+    /// The ancestors of `value`, or the message of a cycle when it is one of them.
+    fn of(&mut self, value: &Bound<'py, PyAny>) -> Result<Option<Rc<Node<'py>>>, String> {
+        let Some(level) = self.level else {
+            return Ok(None);
+        };
+        let mut ancestor = Some(level);
+        while let Some(node) = ancestor {
+            if node.value.is(value) {
+                return Err(convert::CIRCULAR.into());
+            }
+            ancestor = node.up.as_deref();
+        }
+        let shared = self.shared.get_or_insert_with(|| {
+            Rc::new(Node {
+                value: level.value.clone(),
+                up: level.up.clone(),
+            })
+        });
+        Ok(Some(shared.clone()))
+    }
+}
+
 impl<'py> PySource<'py> {
-    /// Writes `value`, whose parent is `up`.
+    /// Writes `value`, a value of the level whose ancestors are `ancestors`.
     fn put<'a>(
         sink: &mut Sink<'_, 'a>,
         value: &Bound<'py, PyAny>,
-        up: Option<&Rc<Node<'py>>>,
+        ancestors: &mut Ancestors<'_, 'py>,
     ) -> Result<(), String>
     where
         'py: 'a,
@@ -46,18 +76,11 @@ impl<'py> PySource<'py> {
             Some(Scalar::Float(n)) => sink.number(n),
             Some(Scalar::String(s)) => sink.string(&s),
             None => {
-                let mut ancestor = up;
-                while let Some(node) = ancestor {
-                    if node.value.is(value) {
-                        return Err(convert::CIRCULAR.into());
-                    }
-                    ancestor = node.up.as_ref();
-                }
-                let node = PySource::Level(Rc::new(Node {
+                let node = PySource::Level(Node {
                     value: value.clone(),
-                    up: up.cloned(),
-                }));
-                if value.is_instance_of::<PyDict>() {
+                    up: ancestors.of(value)?,
+                });
+                if value.is_exact_instance_of::<PyDict>() || value.is_instance_of::<PyDict>() {
                     sink.object(node);
                 } else {
                     sink.array(node);
@@ -74,8 +97,18 @@ where
 {
     fn read(&self, sink: &mut Sink<'_, 'a>) -> Result<(), String> {
         let node = match self {
-            PySource::Input(value) => return Self::put(sink, value, None),
+            PySource::Input(value) => {
+                let mut none = Ancestors {
+                    level: None,
+                    shared: None,
+                };
+                return Self::put(sink, value, &mut none);
+            }
             PySource::Level(node) => node,
+        };
+        let mut ancestors = Ancestors {
+            level: Some(node),
+            shared: None,
         };
         let value = &node.value;
         if let Ok(dict) = value.cast::<PyDict>() {
@@ -83,7 +116,7 @@ where
                 sink.reserve(dict.len());
                 for (key, item) in dict.iter() {
                     sink.key(&convert::key(&key)?);
-                    Self::put(sink, &item, Some(node))?;
+                    Self::put(sink, &item, &mut ancestors)?;
                 }
                 Ok(())
             })
@@ -93,7 +126,7 @@ where
                 sink.reserve(len);
                 for i in 0..len {
                     let item = list.get_item(i).map_err(|e| e.to_string())?;
-                    Self::put(sink, &item, Some(node))?;
+                    Self::put(sink, &item, &mut ancestors)?;
                 }
                 Ok(())
             })
@@ -101,7 +134,7 @@ where
             let tuple = value.cast::<PyTuple>().map_err(|e| e.to_string())?;
             sink.reserve(tuple.len());
             for item in tuple.iter() {
-                Self::put(sink, &item, Some(node))?;
+                Self::put(sink, &item, &mut ancestors)?;
             }
             Ok(())
         }

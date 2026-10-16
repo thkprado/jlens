@@ -41,6 +41,22 @@ pub enum Scalar<'v> {
 /// `dict`, `list` or `tuple`, and the message `json.dumps` would give for anything else. Numbers
 /// that are not finite become `null`, and an `int` beyond 64 bits the nearest `float`.
 pub fn scalar<'v>(value: &'v Bound<'_, PyAny>) -> Result<Option<Scalar<'v>>, String> {
+    // The built-in types themselves first: each test compares the type, where the tests of
+    // subclasses below call into Python for the type's flags.
+    if let Ok(s) = value.cast_exact::<PyString>() {
+        return Ok(Some(Scalar::String(text(s))));
+    }
+    if value.is_exact_instance_of::<PyInt>()
+        && let Ok(n) = value.extract::<i64>()
+    {
+        return Ok(Some(Scalar::Int(n)));
+    }
+    if let Ok(n) = value.cast_exact::<PyFloat>() {
+        return Ok(Some(float(n.value())));
+    }
+    if value.is_exact_instance_of::<PyDict>() || value.is_exact_instance_of::<PyList>() {
+        return Ok(None);
+    }
     Ok(Some(if value.is_none() {
         Scalar::Null
     } else if let Ok(b) = value.cast::<PyBool>() {

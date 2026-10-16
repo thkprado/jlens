@@ -115,6 +115,12 @@ def test_cycles_fail_cleanly():
     looped = []
     looped.append(looped)
     raises("U1004", Expression("$count(**)").evaluate, looped)
+    # A cycle through several levels.
+    outer = {"n": 1}
+    outer["child"] = {"items": [{"parent": outer}]}
+    raises("U1004", Expression("$string($)").evaluate, outer)
+    raises("U1004", Expression("child.items.parent").evaluate, outer)
+    assert Expression("$count(child.items)").evaluate(outer) == 1
     # A cycle is found when the level that holds it is read: below the levels read, it is not.
     assert Expression("a").evaluate({"a": 1, "b": cyclic}) == 1
     # The same value twice is not a cycle.
