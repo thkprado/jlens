@@ -324,7 +324,7 @@ pub(crate) fn lookup<'a>(input: &Value<'a>, key: &str) -> Value<'a> {
             });
             Value::sequence(out)
         }
-        Value::Object(o) => o.borrow().get(key).cloned().unwrap_or_default(),
+        Value::Object(o) => o.get(key),
         _ => Value::Undefined,
     }
 }

@@ -105,6 +105,18 @@ def test_unsupported_values_fail_where_they_are_read():
     raises("U1004", Expression("$").evaluate, datetime.date(2024, 1, 2))
     # A level the expression does not reach is not read.
     assert Expression("b").evaluate({"a": {"set": {1, 2}}, "b": 3}) == 3
+    # A path step reads its field alone: the other fields of the dict are read when it is
+    # needed whole.
+    assert Expression("b").evaluate({"a": {1, 2}, "b": 3, 4: 5}) == 3
+    raises("U1004", Expression("$keys($)").evaluate, {"a": {1, 2}, "b": 3})
+    raises("U1004", Expression("[b, $]").evaluate, {"b": 3, 4: 5})
+
+
+def test_fields_read_alone_then_whole():
+    order = {"o": {"p": {"x": 1}, "q": 2, "r": [3]}}
+    keys = Expression("($p := o.p; [$join($keys(o)), o.p = $p, $count(o.r)])")
+    assert keys.evaluate(order) == ["pqr", True, 1]
+    assert Expression("[o.q, o, o.missing, o.q]").evaluate(order) == [2, order["o"], 2]
 
 
 def test_cycles_fail_cleanly():

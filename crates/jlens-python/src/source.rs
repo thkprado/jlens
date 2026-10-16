@@ -5,6 +5,10 @@
 //! or a cycle stops the evaluation with `U1004`, with the message `json.dumps` would give. No
 //! Python code runs while a level is read, and a `dict` or `list` is locked while it is read,
 //! so that another thread of free-threaded Python cannot change it halfway.
+//!
+//! A path step looks its one field up in a `dict` not read whole yet (`read_field`). That
+//! lookup can call the `__eq__` of a key that is not a `str`, whose hash collides with the
+//! key's; such a `dict` fails when it is read whole.
 
 use std::rc::Rc;
 
@@ -138,5 +142,22 @@ where
             }
             Ok(())
         }
+    }
+
+    fn read_field(&self, key: &str, sink: &mut Sink<'_, 'a>) -> Result<bool, String> {
+        let PySource::Level(node) = self else {
+            return Ok(false);
+        };
+        let Ok(dict) = node.value.cast::<PyDict>() else {
+            return Ok(false);
+        };
+        if let Some(item) = dict.get_item(key).map_err(|e| e.to_string())? {
+            let mut ancestors = Ancestors {
+                level: Some(node),
+                shared: None,
+            };
+            Self::put(sink, &item, &mut ancestors)?;
+        }
+        Ok(true)
     }
 }

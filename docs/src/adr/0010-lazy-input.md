@@ -1,7 +1,8 @@
 # 0010 — Input documents converted lazily, one level at a time
 
 **Status:** Accepted. Amends [ADR 0003](0003-value-model.md), whose consequences left room for a
-borrowed view of the input.
+borrowed view of the input. Amended in 0.17: a path step reads one field of an object that has
+not been read ([below](#amendment-one-field-at-a-time-017)).
 
 ## Context
 
@@ -43,6 +44,7 @@ evaluations.
      every place that read them directly, so none is missed.
    - A lookup expands the whole level of its object, not just one key. That costs the width of
      the object once, and keeps one value per field, so a field read twice is the same value.
+     *Amended in 0.17: a lookup reads its one field, and keeps it.*
    - Keys go through the shared table of `value::Keys`, kept for the whole evaluation.
    - A value whose source was never expanded, returned as a result, is converted to JSON
      straight from its source (`customer` returns a clone of that `serde_json` subtree) without
@@ -143,7 +145,7 @@ evaluations.
   an `Rc` from a value without a lifetime needs `unsafe` or a self-referential type.
 - **Lookups that read one key without expanding the level.** Cheaper on wide objects, but a
   field read twice would be converted twice, into two different values. It can come later, for
-  the `Json` source, if a benchmark asks for it.
+  the `Json` source, if a benchmark asks for it. *Taken in 0.17, keeping the fields read.*
 - **Reading the JSON text lazily in WebAssembly.** `JSON.stringify` alone is over the budget.
 - **A `js` feature of `jlens-core`, depending on `js-sys`.** It ties the core library to one
   host; a trait serves the Wasm package and any other.
@@ -168,3 +170,67 @@ evaluations.
   for `evaluate` and bindings, with property tests that `evaluate` and `evaluate_document`
   agree; the `Source` trait, `U1004` and the WebAssembly source, with the benchmarks of
   roadmap 0.8, item 3.
+
+## Amendment: one field at a time (0.17)
+
+### Context
+
+Roadmap 0.17, item 9, measured reading a Python `dict` for `evaluate`: to look up `quantity` in
+an item of six fields, jlens read the six into a map, 534 ns, where `jsonatapy` looks up the one
+field in the `dict`, 66 ns. Over the 200 items of the case names over items, that was most of
+the 138 µs jlens took against 25 µs. The `Json` source pays the same way: a lookup converts
+every field of its object, strings included, to use one.
+
+### Decision
+
+1. **`Source` gains an optional method, `read_field(key, sink)`.** It writes the value of one
+   field of the object the source stands for, as the only value of the sink (nothing when the
+   object has no such field), and returns `true`. Its default returns `false`: the source reads
+   its object whole only, as before, and the evaluation reads the whole level. The Python source
+   implements it with one lookup in the `dict`. The WebAssembly source does not, for now: it
+   reads a level with one call into JavaScript, and a call per field has not been measured
+   against it.
+2. **The path step reads one field.** `functions::lookup`, the step's single site, asks the
+   object for its field with `Object::get`, which reads it alone when the object has not been
+   read whole. The `Json` source finds the key in its `serde_json` map, comparing the keys of an
+   object of up to 16 fields rather than hashing the key (`serde_json`'s map hashes with
+   SipHash). Every other access (`borrow()`, `*`, `$keys`, `$string`, comparisons, the result)
+   reads the whole level as before.
+3. **An array or object is read once; a scalar is read again.** An object keeps the arrays and
+   objects read alone in its map, with a state that says the map holds only some fields.
+   Reading such a field again finds it there; reading the whole level later reads every field
+   from the source, then puts back the values kept, so an array or object read twice is the
+   same value. Scalars, the only values whose identity does not show, are not kept: keeping
+   one costs a map, its allocations and a key, more than reading it again. A missing field is
+   not kept either.
+4. **An object that keeps a field is no longer *unread*.** It is converted to JSON, and walked
+   by the transform's check for cycles, through its whole level, not as the input it stands
+   for: an object it keeps may be one that a `$clone` that does not copy has changed. An object
+   of which only scalars were read stays unread.
+5. **What does not change.** A level read whole is read once; cycles and deep input fail with
+   `U1004` and `U1001`; a source that fails stops the evaluation as decision 6 says. Errors come
+   from the part that is read, now at the grain of a field: a Python `dict` holding a `set`
+   fails when that field, or the whole `dict`, is read, and a key that is not a `str` only when
+   the whole `dict` is.
+
+### Implementation notes
+
+- A first version kept every field read alone. It made the shipping rule, which reads five of
+  the six fields of each item, 20% slower with `cargo xtask ab --mode evaluate`: each item paid
+  for a map grown field by field. Making room for the whole object at the first field cured the
+  shipping rule but took names over items from 52 to 90 µs, and at the second field it cured
+  neither. Keeping only arrays and objects removes the map from objects whose scalars are read.
+- With `evaluate` on a `serde_json::Value`, against 2bf7c84: names over items 152 → 18.5 µs,
+  filter + aggregate 192 → 64 µs, group-by 208 → 101 µs, the shipping rule 216 → 151 µs, the
+  path 1.22 µs → 0.60 µs; no case slower (transform and recursion within ±1.5% over 20
+  rounds, as when a revision is compared with itself). `evaluate_document` is unchanged.
+
+### Consequences
+
+- A path through wide objects costs the fields it reads, not their width.
+- A scalar read several times is converted each time: a string allocates again. An expression
+  that reads a few fields of an object, then needs it whole, reads the arrays and objects among
+  them twice, for the cost of a lookup each.
+- A Python key's `__eq__` can run during a lookup, when a `dict` has a key that is not a `str`
+  and whose hash collides with the key looked up. Such a `dict` fails when it is read whole.
+- `Object` gains no field: its `read` flag becomes a state of three values.

@@ -170,33 +170,57 @@ fn bindings() -> Bindings {
         )
 }
 
-/// JSON read through the [`Source`] trait, one level at a time. An object with a field named
-/// `fails` cannot be read: its level fails.
-enum JsonSource<'j> {
-    /// The input itself, the only value of its level.
-    Root(&'j serde_json::Value),
-    Level(&'j serde_json::Value),
+/// JSON read through the [`Source`] trait, one level at a time, and one field at a time when
+/// `fields` is set. An object with a field named `fails` cannot be read, whole or one field.
+#[derive(Clone, Copy)]
+struct JsonSource<'j> {
+    json: &'j serde_json::Value,
+    /// Whether this is the input itself, the only value of its level.
+    root: bool,
+    fields: bool,
 }
 
-fn write<'j>(sink: &mut Sink<'_, 'j>, json: &'j serde_json::Value) {
-    match json {
-        serde_json::Value::Null => sink.null(),
-        serde_json::Value::Bool(b) => sink.bool(*b),
-        serde_json::Value::Number(n) => sink.number(n.as_f64().unwrap_or(f64::NAN)),
-        serde_json::Value::String(s) => sink.string(s),
-        serde_json::Value::Array(_) => sink.array(JsonSource::Level(json)),
-        serde_json::Value::Object(_) => sink.object(JsonSource::Level(json)),
+thread_local! {
+    /// The levels read whole, and the fields read alone, by the sources of this thread.
+    static READS: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+impl<'j> JsonSource<'j> {
+    fn root(json: &'j serde_json::Value, fields: bool) -> Self {
+        JsonSource {
+            json,
+            root: true,
+            fields,
+        }
+    }
+
+    fn write(&self, sink: &mut Sink<'_, 'j>, json: &'j serde_json::Value) {
+        let level = JsonSource {
+            json,
+            root: false,
+            fields: self.fields,
+        };
+        match json {
+            serde_json::Value::Null => sink.null(),
+            serde_json::Value::Bool(b) => sink.bool(*b),
+            serde_json::Value::Number(n) => sink.number(n.as_f64().unwrap_or(f64::NAN)),
+            serde_json::Value::String(s) => sink.string(s),
+            serde_json::Value::Array(_) => sink.array(level),
+            serde_json::Value::Object(_) => sink.object(level),
+        }
     }
 }
 
 impl<'j> Source<'j> for JsonSource<'j> {
     fn read(&self, sink: &mut Sink<'_, 'j>) -> Result<(), String> {
-        match self {
-            JsonSource::Root(json) => write(sink, json),
-            JsonSource::Level(serde_json::Value::Array(items)) => {
-                items.iter().for_each(|item| write(sink, item))
-            }
-            JsonSource::Level(serde_json::Value::Object(fields)) => {
+        READS.with(|reads| reads.set((reads.get().0 + 1, reads.get().1)));
+        if self.root {
+            self.write(sink, self.json);
+            return Ok(());
+        }
+        match self.json {
+            serde_json::Value::Array(items) => items.iter().for_each(|item| self.write(sink, item)),
+            serde_json::Value::Object(fields) => {
                 if fields.contains_key("fails") {
                     // Half a level, then a failure: the level is left empty.
                     sink.key("half");
@@ -205,12 +229,29 @@ impl<'j> Source<'j> for JsonSource<'j> {
                 }
                 for (key, value) in fields {
                     sink.key(key);
-                    write(sink, value);
+                    self.write(sink, value);
                 }
             }
-            JsonSource::Level(_) => {}
+            _ => {}
         }
         Ok(())
+    }
+
+    fn read_field(&self, key: &str, sink: &mut Sink<'_, 'j>) -> Result<bool, String> {
+        let serde_json::Value::Object(fields) = self.json else {
+            return Ok(false);
+        };
+        if !self.fields || self.root {
+            return Ok(false);
+        }
+        READS.with(|reads| reads.set((reads.get().0, reads.get().1 + 1)));
+        if fields.contains_key("fails") {
+            return Err("bad field".into());
+        }
+        if let Some(value) = fields.get(key) {
+            self.write(sink, value);
+        }
+        Ok(true)
     }
 }
 
@@ -339,7 +380,8 @@ proptest! {
             let bindings = bindings().var("o", input.clone());
             let lazy = expr.evaluate_with(Some(&input), &bindings, &options);
             let document = expr.evaluate_document(&Document::new(&input), &bindings, &options);
-            let source = expr.evaluate_source(&JsonSource::Root(&input), &bindings, &options);
+            let source = expr.evaluate_source(&JsonSource::root(&input, false), &bindings, &options);
+            let fields = expr.evaluate_source(&JsonSource::root(&input, true), &bindings, &options);
             let timed_out = |r: &Result<Option<serde_json::Value>, Error>| {
                 r.as_ref().is_err_and(|e| e.code() == "D1012")
             };
@@ -348,6 +390,9 @@ proptest! {
             }
             if !timed_out(&source) && !timed_out(&document) {
                 prop_assert_eq!(format!("{source:?}"), format!("{document:?}"));
+            }
+            if !timed_out(&fields) && !timed_out(&document) {
+                prop_assert_eq!(format!("{fields:?}"), format!("{document:?}"));
             }
         }
     }
@@ -468,35 +513,77 @@ fn a_level_that_cannot_be_read_fails_the_evaluation() {
             Ok(args[0].clone())
         }),
     );
-    let evaluate = |source: &str| {
-        let expr = Expression::compile(source).unwrap();
-        expr.evaluate_source(&JsonSource::Root(&input), &bindings, &Options::default())
-    };
-    // The levels an expression does not reach are never read.
-    assert_eq!(evaluate("ok.a").unwrap(), Some(json!(1)));
-    assert_eq!(evaluate("$exists(bad)").unwrap(), Some(json!(true)));
-    // Reading the bad level fails with U1004, carrying the source's message, whatever the
-    // expression does with the empty level.
-    for source in [
-        "bad.a",
-        "bad",
-        "$count($keys(bad))",
-        "list.bad.x",
-        "$string($)",
-        "**.a",
-    ] {
-        let error = evaluate(source).unwrap_err();
-        assert_eq!(error.code(), "U1004", "{source}");
-        assert!(error.message().contains("bad field"), "{source}");
+    // Levels read whole, then one field at a time: a field that cannot be read fails the same way.
+    for fields in [false, true] {
+        let evaluate = |source: &str| {
+            let expr = Expression::compile(source).unwrap();
+            let input = JsonSource::root(&input, fields);
+            expr.evaluate_source(&input, &bindings, &Options::default())
+        };
+        // The levels an expression does not reach are never read.
+        assert_eq!(evaluate("ok.a").unwrap(), Some(json!(1)));
+        assert_eq!(evaluate("$exists(bad)").unwrap(), Some(json!(true)));
+        // Reading the bad level fails with U1004, carrying the source's message, whatever the
+        // expression does with the empty level.
+        for source in [
+            "bad.a",
+            "bad",
+            "$count($keys(bad))",
+            "list.bad.x",
+            "$string($)",
+            "**.a",
+        ] {
+            let error = evaluate(source).unwrap_err();
+            assert_eq!(error.code(), "U1004", "{source}");
+            assert!(error.message().contains("bad field"), "{source}");
+        }
+        // A host function is not called with a level that could not be read.
+        assert_eq!(evaluate("$f(bad)").unwrap_err().code(), "U1004");
+        assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
     }
-    // A host function is not called with a level that could not be read.
-    assert_eq!(evaluate("$f(bad)").unwrap_err().code(), "U1004");
-    assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
     // Nothing written: the input is undefined.
     let expr = Expression::compile("$type($)").unwrap();
-    let nothing = JsonSource::Level(&serde_json::Value::Null);
+    let null = serde_json::Value::Null;
+    let nothing = JsonSource {
+        json: &null,
+        root: false,
+        fields: false,
+    };
     let result = expr.evaluate_source(&nothing, &Bindings::new(), &Options::default());
     assert_eq!(result.unwrap(), None);
+}
+
+/// A path step reads one field of an object not read yet, when the source can; the object keeps
+/// it, and reads its level once when it is needed whole (ADR 0010, amendment).
+#[test]
+fn a_path_step_reads_one_field() {
+    let input = json!({"o": {"a": 1, "b": {"c": 2}, "d": [3]}});
+    let reads = |source: &str, fields: bool| {
+        READS.with(|reads| reads.set((0, 0)));
+        let expr = Expression::compile(source).unwrap();
+        let input = JsonSource::root(&input, fields);
+        let result = expr.evaluate_source(&input, &Bindings::new(), &Options::default());
+        let (levels, fields) = READS.with(|reads| reads.get());
+        (result.unwrap(), levels, fields)
+    };
+    // The input itself is one read; each step reads one field.
+    assert_eq!(reads("o.b.c", true), (Some(json!(2)), 1, 3));
+    // A source that reads no fields alone reads each level whole.
+    assert_eq!(reads("o.b.c", false), (Some(json!(2)), 4, 0));
+    // An array or object read alone is kept, and so is it when its object is read whole later;
+    // a scalar is read again: `o` is read alone and whole once, `a` twice alone.
+    assert_eq!(
+        reads("[o.a, o.a, $count($keys(o)), o.a, o.b.c, $keys(o)]", true),
+        (Some(json!([1, 1, 3, 1, 2, "a", "b", "d"])), 2, 4)
+    );
+    // A missing field is looked up each time.
+    assert_eq!(reads("[o.x, o.x, o.a]", true), (Some(json!([1])), 1, 4));
+    // An object some fields of which were read is returned whole, in its order: `o`, `b` and
+    // `d` are read whole.
+    assert_eq!(
+        reads("o.b.c and o.a ? o : null", true),
+        (Some(input["o"].clone()), 4, 4)
+    );
 }
 
 /// Patterns that backtrack exponentially on a run of a's that ends in a character they cannot

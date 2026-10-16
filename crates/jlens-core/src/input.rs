@@ -5,7 +5,9 @@
 //! representations of a document implement [`Source`] and are evaluated with
 //! [`Expression::evaluate_source`](crate::Expression::evaluate_source), so that they are read the
 //! same way, without being converted to `serde_json` first. The WebAssembly package reads
-//! JavaScript objects this way.
+//! JavaScript objects this way. A source that looks up one field for less than it reads its
+//! object whole also implements [`Source::read_field`], which a path step uses; the Python
+//! package reads its dictionaries this way.
 //!
 //! ```
 //! use jlens_core::input::{Sink, Source};

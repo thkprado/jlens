@@ -6,7 +6,30 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The Python package `jlens` on PyPI (ADR 0014): `Expression` compiles an expression and
+  evaluates it against Python values, read as the evaluation goes (`evaluate`), JSON text
+  (`evaluate_json`) or a `Document`; bindings, Python functions as host functions, options and
+  limits, audits (`evaluate_with_audit`), and `JlensError` with the JSONata code, position and
+  token. `abi3` wheels for Python 3.10 and later and `abi3t` wheels for free-threaded Python
+  3.15, on the seven release targets, and a source distribution. A guide in the book.
+- `input::Source::read_field`: a source can write one field of an object, by its key, which a
+  path step reads without the rest of the object.
+
+### Changed
+
+- A path step reads its one field of an input object not read yet, instead of the object's
+  every field (ADR 0010, amended): `evaluate` on a `serde_json::Value` takes 18.5 µs on the
+  benchmark's names over items, against 152 µs, and 151 µs on the shipping rule, against
+  216 µs. Python's `evaluate` reads a `dict` the same way. Arrays and objects read so are kept
+  and read once; a scalar is read again each time.
+
 ### Fixed
+
+- Values nested thousands of levels deep, read from the input or built by a tail-recursive
+  function, no longer overflow the stack. Returning, comparing, serializing, cloning or passing
+  one to a host function fails with `U1001` beyond 1,000 levels; dropping one never fails.
 
 - `evaluateWithAudit` in the Wasm package converts to UTF-16 only the spans of the audit's
   nodes: a captured value with a `span` or `range` field (`{start, end}`) was rewritten too

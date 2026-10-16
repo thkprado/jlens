@@ -155,8 +155,8 @@ host function.
 ## Many expressions, one document
 
 Each `evaluate` call converts the parts of its input document that the expression reads into
-jlens's internal representation, one level at a time: a path costs the width of the objects it
-crosses. An expression that reads most of a document of a few dozen kilobytes (a filter over
+jlens's internal representation, one level at a time: a path step reads its one field of an
+object, other operations the object's whole level. An expression that reads most of a document of a few dozen kilobytes (a filter over
 every item, say) spends more on that conversion than on the rule. To evaluate several rules
 against the same document, convert it once into a
 [`Document`](https://docs.rs/jlens-core/latest/jlens_core/struct.Document.html):
@@ -175,7 +175,8 @@ An input held in another representation than `serde_json` (another JSON library,
 row, a host language's objects) can be read the same way, one level at a time, without being
 converted first. Implement
 [`input::Source`](https://docs.rs/jlens-core/latest/jlens_core/input/trait.Source.html) for
-it, and evaluate with `Expression::evaluate_source`. The documentation of the
+it, and evaluate with `Expression::evaluate_source`; implement its `read_field` too when the
+representation looks up one field for less than it reads a whole object. The documentation of the
 [`input`](https://docs.rs/jlens-core/latest/jlens_core/input/index.html) module has an
 example. A level that the source fails to read stops the evaluation with `U1004`. The
 WebAssembly package reads JavaScript objects this way.

@@ -118,6 +118,27 @@ impl<'a> Pending<'a> {
             match sink.level {
                 Level::Items(items) => items.clear(),
                 Level::Fields(map) => map.clear(),
+                Level::Field(_) => {}
+            }
+        }
+    }
+
+    /// Reads the field `key` from a source: `None` when the source reads its object whole only,
+    /// undefined when the object has no such field or the source failed (its error is then
+    /// recorded, as for a level).
+    fn read_source_field(&self, source: &dyn Source<'a>, key: &str) -> Option<Value<'a>> {
+        let mut value = Value::Undefined;
+        let mut sink = Sink {
+            level: Level::Field(&mut value),
+            shared: &self.shared,
+            key: None,
+        };
+        match source.read_field(key, &mut sink) {
+            Ok(true) => Some(value),
+            Ok(false) => None,
+            Err(message) => {
+                self.shared.fail(message);
+                Some(Value::Undefined)
             }
         }
     }
@@ -232,19 +253,29 @@ impl<'a> Array<'a> {
 /// An object. It is shared and mutable because the transform operator updates in place the
 /// objects that its pattern selects.
 pub(crate) struct Object<'a> {
-    /// The fields; empty until a lazy object is read.
+    /// The fields; empty until a lazy object is read, or holding the fields read alone.
     map: RefCell<Map<'a>>,
     /// The input a lazy object stands for. It is a plain field, so that the other objects
     /// cost one test of it.
     pending: Option<Pending<'a>>,
-    read: Cell<bool>,
+    read: Cell<Read>,
+}
+
+/// How much of a lazy object has been read into its map.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Read {
+    Nothing,
+    /// Some arrays and objects of its fields, each read alone by a path step (ADR 0010,
+    /// amendment).
+    Fields,
+    Whole,
 }
 
 impl<'a> Object<'a> {
     #[inline]
     fn cell(&self) -> &RefCell<Map<'a>> {
         if let Some(pending) = &self.pending
-            && !self.read.get()
+            && self.read.get() != Read::Whole
         {
             self.read(pending);
         }
@@ -252,25 +283,89 @@ impl<'a> Object<'a> {
     }
 
     /// Reads the fields of a lazy object into its map, which nothing borrows yet: every
-    /// borrow goes through `cell`.
+    /// borrow goes through `cell`. The fields read alone before keep their values, so that a
+    /// value read twice is the same value.
     #[cold]
     #[inline(never)]
     fn read(&self, pending: &Pending<'a>) {
-        self.read.set(true);
+        let before = self.read.replace(Read::Whole);
         let Ok(mut map) = self.map.try_borrow_mut() else {
             return;
         };
+        let mut alone = std::mem::take(&mut *map);
         match &pending.origin {
             Origin::Json(JsonValue::Object(fields)) => {
                 *map = Map::with_capacity_and_hasher(fields.len(), Default::default());
                 let mut keys = pending.shared.keys.borrow_mut();
                 for (k, v) in fields {
-                    map.insert(keys.get(k), Value::lazy(v, &pending.shared));
+                    let value = match alone.is_empty() {
+                        true => None,
+                        false => alone.swap_remove(k.as_str()),
+                    };
+                    let value = value.unwrap_or_else(|| Value::lazy(v, &pending.shared));
+                    map.insert(keys.get(k), value);
                 }
             }
             Origin::Json(_) => {}
             Origin::Source(source) => pending.read_source(&**source, Level::Fields(&mut map)),
         }
+        if before == Read::Fields {
+            for (key, value) in alone {
+                if let Some(slot) = map.get_mut(&key) {
+                    *slot = value;
+                }
+            }
+        }
+    }
+
+    /// The field `key`, or undefined. A lazy object not read whole reads that field alone
+    /// when its input can, and keeps it when it is an array or an object.
+    #[inline]
+    pub fn get(&self, key: &str) -> Value<'a> {
+        match &self.pending {
+            Some(pending) if self.read.get() != Read::Whole => self.read_field(pending, key),
+            _ => self.map.borrow().get(key).cloned().unwrap_or_default(),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn read_field(&self, pending: &Pending<'a>, key: &str) -> Value<'a> {
+        if self.read.get() == Read::Fields
+            && let Some(value) = self.map.borrow().get(key)
+        {
+            return value.clone();
+        }
+        let value = match &pending.origin {
+            Origin::Json(JsonValue::Object(fields)) => {
+                // `serde_json` hashes keys with SipHash: comparing them costs less in a small
+                // object.
+                let json = if fields.len() <= 16 {
+                    fields.iter().find(|(k, _)| *k == key).map(|(_, v)| v)
+                } else {
+                    fields.get(key)
+                };
+                let Some(json) = json else {
+                    return Value::Undefined;
+                };
+                Value::lazy(json, &pending.shared)
+            }
+            Origin::Json(_) => return Value::Undefined,
+            Origin::Source(source) => match pending.read_source_field(&**source, key) {
+                Some(Value::Undefined) => return Value::Undefined,
+                Some(value) => value,
+                None => return self.borrow().get(key).cloned().unwrap_or_default(),
+            },
+        };
+        // Only arrays and objects are kept: they are the values whose identity shows (the
+        // transform changes them in place), and keeping a scalar would cost more than reading
+        // it again.
+        if let Value::Array(_) | Value::Object(_) = value {
+            let key = pending.shared.keys.borrow_mut().get(key);
+            self.map.borrow_mut().insert(key, value.clone());
+            self.read.set(Read::Fields);
+        }
+        value
     }
 
     /// The fields, read from the input first if the object is lazy.
@@ -288,15 +383,15 @@ impl<'a> Object<'a> {
     /// The input JSON this object stands for, when it has not been read.
     fn unread(&self) -> Option<&'a JsonValue> {
         match &self.pending {
-            Some(p) if !self.read.get() => p.json(),
+            Some(p) if self.read.get() == Read::Nothing => p.json(),
             _ => None,
         }
     }
 
-    /// Whether the object has not been read from the input yet. Such an object holds only
-    /// values of the input.
+    /// Whether nothing of the object has been read from the input yet. Such an object holds
+    /// only values of the input.
     pub fn is_unread(&self) -> bool {
-        self.pending.is_some() && !self.read.get()
+        self.pending.is_some() && self.read.get() == Read::Nothing
     }
 }
 
@@ -496,7 +591,7 @@ impl<'a> Value<'a> {
         Value::Object(Rc::new(Object {
             map: RefCell::new(map),
             pending: None,
-            read: Cell::new(true),
+            read: Cell::new(Read::Whole),
         }))
     }
 
@@ -728,7 +823,7 @@ impl<'a> Value<'a> {
         Value::Object(Rc::new(Object {
             map: RefCell::new(Map::default()),
             pending: Some(pending),
-            read: Cell::new(false),
+            read: Cell::new(Read::Nothing),
         }))
     }
 
@@ -897,6 +992,21 @@ pub trait Source<'a> {
     /// left empty, and the evaluation fails at its next step, before it calls a host function,
     /// or before it returns its result.
     fn read(&self, sink: &mut Sink<'_, 'a>) -> std::result::Result<(), String>;
+
+    /// Writes the value of the field `key` of the object this source stands for, as the only
+    /// value (nothing when the object has no such field), and returns `true`. A source that
+    /// reads its object whole only returns `false`, writing nothing; that is the default.
+    ///
+    /// A path step calls it on an object not read whole yet. The object keeps an array or an
+    /// object written this way, so that it is read once; when the object is needed whole, its
+    /// level is read with [`Source::read`], and the arrays and objects read before keep their
+    /// values. A scalar is not kept: the step reads it again. Implement it when one field costs
+    /// less than the whole level, as a lookup in a hash map does. An error stops the
+    /// evaluation as it does in [`Source::read`].
+    fn read_field(&self, key: &str, sink: &mut Sink<'_, 'a>) -> std::result::Result<bool, String> {
+        let _ = (key, sink);
+        Ok(false)
+    }
 }
 
 /// Where a [`Source`] writes the values of a level.
@@ -909,6 +1019,8 @@ pub struct Sink<'s, 'a> {
 enum Level<'s, 'a> {
     Items(&'s mut Vec<Value<'a>>),
     Fields(&'s mut Map<'a>),
+    /// The value of one field, read alone: the first value written.
+    Field(&'s mut Value<'a>),
 }
 
 impl<'a> Sink<'_, 'a> {
@@ -920,6 +1032,7 @@ impl<'a> Sink<'_, 'a> {
         match &mut self.level {
             Level::Items(items) => items.reserve(additional),
             Level::Fields(map) => map.reserve(additional),
+            Level::Field(_) => {}
         }
     }
 
@@ -976,6 +1089,7 @@ impl<'a> Sink<'_, 'a> {
             },
             (_, Level::Items(_)) => return Err("expected a JSON array".into()),
             (_, Level::Fields(_)) => return Err("expected a JSON object".into()),
+            (_, Level::Field(_)) => return Err("a field is written as one value".into()),
         }
         Ok(())
     }
@@ -1005,6 +1119,11 @@ impl<'a> Sink<'_, 'a> {
             Level::Fields(map) => {
                 if let Some(key) = self.key.take() {
                     map.insert(key, value);
+                }
+            }
+            Level::Field(field) => {
+                if field.is_undefined() {
+                    **field = value;
                 }
             }
         }
@@ -1397,6 +1516,31 @@ mod tests {
             stringify(&v, true, usize::MAX).unwrap(),
             "{\n  \"a\": [\n    1,\n    2.5,\n    null\n  ],\n  \"b\": \"x\\\"y\\n\",\n  \"c\": {}\n}"
         );
+    }
+
+    #[test]
+    fn a_field_read_alone_is_kept_when_its_object_is_read_whole() {
+        let json = serde_json::json!({"a": {"b": 1}, "c": [2], "d": "x"});
+        let shared = Shared::new();
+        let Value::Object(o) = Value::lazy(&json, &shared) else {
+            panic!("an object");
+        };
+        let (Value::Object(a), Value::Array(c)) = (o.get("a"), o.get("c")) else {
+            panic!("fields");
+        };
+        assert!(o.get("missing").is_undefined());
+        assert!(!o.is_unread());
+        let Value::Object(again) = o.get("a") else {
+            panic!("a field");
+        };
+        assert!(Rc::ptr_eq(&a, &again));
+        let map = o.borrow();
+        assert_eq!(
+            map.keys().map(|k| &**k).collect::<Vec<_>>(),
+            ["a", "c", "d"]
+        );
+        assert!(matches!(&map["a"], Value::Object(whole) if Rc::ptr_eq(whole, &a)));
+        assert!(matches!(&map["c"], Value::Array(whole) if Rc::ptr_eq(whole, &c)));
     }
 
     #[test]
