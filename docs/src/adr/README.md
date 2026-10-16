@@ -20,3 +20,4 @@ earlier one instead.
 | [0012](0012-npm-distribution.md) | The CLI on npm: a launcher package and one package per platform | Accepted |
 | [0013](0013-vscode-extension.md) | The VS Code extension: one package per platform with the release binary | Accepted |
 | [0014](0014-python-package.md) | The Python package: PyO3 bindings that mirror the WebAssembly package | Accepted |
+| [0016](0016-fields-read.md) | The fields an expression reads: an abstract evaluation that gives an upper bound, and its union | Accepted |
