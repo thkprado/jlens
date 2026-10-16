@@ -23,7 +23,7 @@ All notable changes are recorded here. The format follows
   once per item: the number formatting case of the benchmarks takes less than half the time.
 - An object constructor over a single item, as in `items.{...}`, builds its object without
   grouping: the object constructor case of the benchmarks takes 22% less time (25% against a
-  `Document`).
+  `Document`), and 20% in Python (24% against a `Document`).
 - Python: `evaluate` and `evaluate_document` build their result as Python objects directly,
   without a `serde_json` value in between, and create each key once per result. The object
   constructor case of `benches/compare/python.py` takes 27% less time (31% against a

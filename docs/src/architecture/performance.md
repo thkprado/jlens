@@ -449,7 +449,9 @@ where it is now parsed straight into a `Document`.
   join. Its keys are still evaluated before its values, so the errors are those of a grouping
   (`T1003` for a key that is not a string, `D1009` for two pairs with the same key). In 0.19
   this made `object constructor` 22% faster with `evaluate` (399 against 312 µs) and 25%
-  against a `Document` (376 against 281 µs), and `transform` 6% against a `Document`.
+  against a `Document` (376 against 281 µs), and `transform` 6% against a `Document`. In
+  Python, the object constructor took 205 against 256 µs with Python values in, and 143
+  against 188 µs against a `Document`, against 182 and 141 µs in `jsonatapy`.
 - **String literals.** `=` and `!=` with a string literal compare with the literal's text
   instead of building a string, and so does a grouping with a literal key, which finds its group
   by the text: in `items{type: {'total': ..., 'n': ...}}`, `'total'` and `'n'` are built once
