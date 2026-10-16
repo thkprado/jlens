@@ -85,6 +85,8 @@ maturin develop && python -m pytest tests        # in crates/jlens-python, after
     format is documented in `xtask/src/docs.rs`.
   - Rust snippets in the crate guide live in `crates/jlens-core/tests/guide.rs`, between
     `ANCHOR` comments.
+  - Python snippets in the Python guide are scripts in `crates/jlens-python/tests/guide/`,
+    included whole or between `ANCHOR` comments.
   - Never edit the generated pages by hand: run `cargo xtask gen-docs`.
   - Significant design decisions get an ADR in `docs/adr/`.
 - **Snapshots** (`insta`): review every changed `.snap` file. Update them with

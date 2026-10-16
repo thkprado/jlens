@@ -4,13 +4,14 @@
 use it to filter, query and transform payloads, and to express business rules whose outcome must
 be explained.
 
-It ships in three forms that share a single engine:
+It ships in four forms that share a single engine:
 
 | Distribution | Package | Use it for |
 |---|---|---|
 | Rust crate | `jlens-core` (+ `jlens-schema`) | Embedding the engine in Rust services |
 | Command line | `jlens` binary | Scripts, pipelines, NDJSON filtering, debugging expressions |
 | WebAssembly | `jlens-wasm` (npm package, ES module) | Browsers: evaluation, editors with autocomplete, audit viewers |
+| Python | `jlens` (PyPI package) | Data pipelines and rules in Python: evaluation, host functions, audits |
 
 To try it without installing anything, open the [web editor](https://thkprado.github.io/jlens/editor/):
 it runs jlens in your browser, with completion, diagnostics, and the explanation and audit tree

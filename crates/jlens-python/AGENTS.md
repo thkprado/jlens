@@ -10,7 +10,8 @@ Guidance for working in the Python package. The repository-wide rules are in the
 - `src/host.rs` calls Python functions as host functions.
 - `python/jlens/` holds the package, the stubs (`_jlens.pyi`), the audit types (`_types.py`)
   and `py.typed`.
-- `tests/` holds the pytest suite.
+- `tests/` holds the pytest suite; `tests/guide/` holds the scripts the Python guide
+  (`docs/src/guides/python.md`) includes, which `test_guide.py` runs.
 
 ## Testing
 

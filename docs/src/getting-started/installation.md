@@ -1,6 +1,6 @@
 # Installation
 
-jlens comes in three forms that share one engine. Install the ones you need.
+jlens comes in four forms that share one engine. Install the ones you need.
 
 ## Command line
 
@@ -134,6 +134,25 @@ cargo xtask wasm          # writes crates/jlens-wasm/pkg
 
 The [WebAssembly guide](../guides/wasm.md) covers loading the module in browsers, bundlers and
 Node.js.
+
+## Python
+
+The Python package is `jlens` on [PyPI](https://pypi.org/project/jlens/), from 0.17.0 on, for
+CPython 3.10 and later:
+
+```sh
+pip install jlens
+```
+
+Each release has wheels for Linux (x86-64 and ARM64, glibc 2.28 or later and musl), macOS
+(Intel and Apple silicon) and Windows (x86-64): one for Python with the GIL, and one for
+free-threaded Python 3.15 and later. Elsewhere, and for free-threaded Python 3.14, pip builds the
+source distribution, which needs Rust 1.88 or later. The packages are published from the release
+workflow with [attestations](https://docs.pypi.org/attestations/), which link each file to the
+commit and the workflow run that built it.
+
+The [Python guide](../guides/python.md) shows how to use it, and how to build it from a
+checkout.
 
 ## This book
 

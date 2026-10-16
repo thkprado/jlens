@@ -6,7 +6,8 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 - **`jlens-core`**: the Rust crate (with `jlens-schema` for metadata and autocomplete);
 - **`jlens`**: the command-line tool, which includes a language server for editors
   (`jlens lsp`);
-- **`jlens-wasm`**: an ES module for the browser (npm package `jlens-wasm`).
+- **`jlens-wasm`**: an ES module for the browser (npm package `jlens-wasm`);
+- **`jlens` on PyPI**: the Python package (from 0.17.0).
 
 The documentation is at <https://thkprado.github.io/jlens/>, with a
 [web editor](https://thkprado.github.io/jlens/editor/) that runs jlens in your browser.
@@ -56,6 +57,7 @@ jlens check --schema schema.json -f fixtures/shipping-rule.jsonata
 | `crates/jlens-lsp` | Language server (`jlens lsp`) |
 | `crates/jlens-cli` | `jlens` binary |
 | `crates/jlens-wasm` | Browser bindings (`cargo xtask wasm`) |
+| `crates/jlens-python` | Python package (maturin) |
 | `tests/jsonata-suite` | Vendored official test suite (jsonata-js 2.2.2, MIT) |
 | `tests/conformance` | Baseline, overrides and conformance report |
 | `fixtures` | Sample documents and expressions used in tests and guides |
