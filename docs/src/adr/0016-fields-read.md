@@ -161,6 +161,15 @@ context only when a binding may have become that function (a binding used as a v
 function of the expression takes its context (`-` in a lambda's signature, or such a built-in
 taken as a value); the analysis decides once it has seen the whole expression.
 
+A call to a binding reads the whole input when it stands at the top of an expression, and
+`Whole` absorbs the rest of a union: one such rule would keep a whole document for every rule
+evaluated on it. So an application can mark a host function as not reading the context of its
+call. `HostCall::input` then gives nothing, so the mark is a guarantee rather than a promise,
+and the analysis, given the bindings (`Expression::reads_with`), reads only the arguments of a
+call to a marked function. Without the mark a host function reads its context, as before.
+Making that the default instead would change the API, a question for its stability (roadmap
+0.19).
+
 *Amended with the implementation (roadmap 0.18, item 2): the rows for a binding and for
 `$reduce` without `init` were found then.*
 
@@ -199,7 +208,9 @@ to keep all its bindings.
 
 ### 8. The API
 
-- **Rust:** a module `jlens_core::reads` with `Read` and `Reads`; `Expression::reads()`;
+- **Rust:** a module `jlens_core::reads` with `Read` and `Reads`; `Expression::reads()`, and
+  `Expression::reads_with(&Bindings)`, which knows the host functions marked as not reading
+  their context (decision 5);
   `union` on both; `Read::cut` on a `serde_json::Value`; accessors for the input, a binding and
   the flag; `Serialize` and `Deserialize` to the JSON form. The exact names are settled with
   the implementation, and `cargo-semver-checks` reviews them.
