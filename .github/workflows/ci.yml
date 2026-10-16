@@ -176,7 +176,7 @@ jobs:
       - name: Build the package
         run: |
           python -m pip install maturin pytest
-          maturin build --out dist
+          maturin build --out dist --interpreter python
           python -m pip install --no-index --find-links dist jlens
       - name: pytest
         run: python -m pytest -p no:cacheprovider tests
