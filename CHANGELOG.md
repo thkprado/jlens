@@ -6,6 +6,44 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.18.0]
+
+jlens tells an application which fields an expression reads, worked out from the expression
+alone: in Rust, JavaScript, Python and on the command line, for one rule or the union of
+several. The same answer lets it parse JSON text without the fields no evaluation reads, which
+`evaluateJson`, `evaluate_json` and `jlens eval` now do on their own. The CLI is still not on
+npm (see 0.14.0).
+
+### Added
+
+- The fields an expression reads (ADR 0016): `Expression::reads` returns a `Reads`, what the
+  input and each binding need, as a tree of fields whose leaves are read whole, with the items
+  of an array sharing a node. Where the analysis cannot follow (`*`, `**`, `$keys`, `$string`,
+  `$eval`, a value given to a host function, a transform, an object in the result), it reads
+  the value whole, so the answer is an upper bound: every case of the suite gives the same
+  result or error on its input cut down to it. `Reads::union` combines the reads of several
+  expressions, `Read::cut` cuts a value down to a read, and both have a JSON form.
+- `HostFunction::without_input` marks a host function that does not read the context of its
+  call, and `Expression::reads_with` takes the bindings into account, so that a call to a
+  marked function reads only its arguments.
+- `Expression.reads` and `unionReads` in the WebAssembly package, `Expression.reads` and
+  `union_reads` in the Python package, and `jlens reads`, given an expression or several files
+  (a result for each, or their union with `--union`). JavaScript and Python functions cannot
+  read the context of their call, so both packages mark every one.
+- `Document::parse_cut` parses JSON text without the fields a read leaves out: a 1 MB document
+  cut to two fields of each record parses in a quarter of the time. `Document.fromJson` in the
+  WebAssembly package and `Document.from_json` in the Python package take a read too, so that
+  one document serves the union of several expressions.
+
+### Changed
+
+- `evaluateJson`, `evaluate_json` and `jlens eval` parse their input without the fields the
+  expression does not read: `jlens eval '$sum(items.price)'` on a 10 MB document runs in 27 ms
+  instead of 76, and `--ndjson` in about half the time. The fields skipped are still checked
+  for syntax, but a number too large for a float or a lone surrogate escape (`"\ud800"`) in
+  one of them no longer fails the parse. `--explain`, `--audit` and `--trace-log` still parse
+  the whole input, since they show the values.
+
 ## [0.17.0]
 
 jlens comes to Python: the package `jlens` on PyPI evaluates expressions against Python values,
@@ -570,7 +608,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/thkprado/jlens/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/thkprado/jlens/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/thkprado/jlens/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/thkprado/jlens/compare/v0.14.0...v0.15.0

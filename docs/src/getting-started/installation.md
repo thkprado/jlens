@@ -17,7 +17,7 @@ From 0.6.0 on, each archive has a build attestation: a signed statement that the
 workflow of this repository built it, from which commit. Check one with the GitHub CLI:
 
 ```sh
-gh attestation verify jlens-0.17.0-x86_64-unknown-linux-musl.tar.gz --repo thkprado/jlens
+gh attestation verify jlens-0.18.0-x86_64-unknown-linux-musl.tar.gz --repo thkprado/jlens
 ```
 
 Elsewhere, build it from source with Rust 1.88 or later and a C compiler:
@@ -30,7 +30,7 @@ cargo install --path crates/jlens-cli            # from a checkout
 
 ```text
 $ jlens --version
-jlens 0.17.0
+jlens 0.18.0
 ```
 
 On macOS and Linux, Homebrew installs the same binary from the tap
@@ -67,7 +67,7 @@ says which package it looked for and exits with code 2.
 
 With Docker or Podman, the container image `ghcr.io/thkprado/jlens` (from 0.14.0 on) runs the
 static Linux binary, for `linux/amd64` and `linux/arm64`, with nothing else in the image. It is
-tagged with each version (`0.17.0`), each minor version (`0.17`) and `latest`. Give it `-i` to
+tagged with each version (`0.18.0`), each minor version (`0.18`) and `latest`. Give it `-i` to
 read standard input, or mount the current directory on `/work` to read files:
 
 ```sh
@@ -79,7 +79,7 @@ The image runs as an unprivileged user (UID 65532): add `--user "$(id -u):$(id -
 that only you can read. It has a build attestation too:
 
 ```sh
-gh attestation verify oci://ghcr.io/thkprado/jlens:0.17.0 --repo thkprado/jlens
+gh attestation verify oci://ghcr.io/thkprado/jlens:0.18.0 --repo thkprado/jlens
 ```
 
 Install the command through one channel. With more than one, the first `jlens` on the `PATH`
