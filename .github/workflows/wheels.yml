@@ -1,0 +1,126 @@
+name: Wheels
+
+# Builds the Python package (ADR 0014) for each release target: an abi3 wheel for Python 3.10 and
+# later, an abi3t wheel for free-threaded Python 3.15 and later, and the source distribution. Each
+# job installs what it built on that platform and runs the pytest suite on it: the wheels with
+# Python 3.10 and free-threaded 3.15 (in an Alpine container for musllinux), the source
+# distribution with free-threaded 3.14, which has no wheel. It builds the commit that triggered
+# the caller, never a ref given as input (see binaries.yml).
+# Called by CI on each push to main, so that a target that stops building is found before a
+# release.
+
+on:
+  workflow_call:
+    inputs:
+      upload:
+        description: "Upload the wheels and the source distribution as artifacts of the run"
+        type: boolean
+        default: false
+
+# Jobs read the repository; a job that needs more asks for it.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  wheel:
+    name: wheels (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, manylinux: "2_28" }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm, manylinux: "2_28" }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, manylinux: musllinux_1_2 }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm, manylinux: musllinux_1_2 }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: crates/jlens-python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      # On Linux the wheels build in a manylinux or musllinux container, which has its own
+      # interpreters; elsewhere maturin finds python3.10 and python3.15t on the PATH.
+      - if: runner.os != 'Linux'
+        run: |
+          uv python install 3.10 3.15t
+          uv python dir --bin >> "$GITHUB_PATH"
+      # One build per interpreter: given both at once, maturin builds a version-specific wheel
+      # for Python 3.10 instead of the abi3 one.
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'off' }}
+          rust-toolchain: stable
+          working-directory: crates/jlens-python
+          args: --release --locked --out dist --interpreter python3.10
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'off' }}
+          rust-toolchain: stable
+          working-directory: crates/jlens-python
+          args: --release --locked --out dist --interpreter python3.15t
+      - name: Test the wheels
+        env:
+          TEST: |
+            set -eu
+            ls dist/*-cp310-abi3-*.whl dist/*-cp315-abi3.abi3t-*.whl
+            test "$(ls dist/*.whl | wc -l)" -eq 2
+            for python in 3.10 3.15t; do
+              venv="venv-$python"
+              uv venv --quiet --managed-python --python "$python" "$venv"
+              uv pip install --quiet --python "$venv" pytest
+              # Each interpreter can install one of the two wheels only.
+              uv pip install --python "$venv" --no-index --find-links dist jlens
+              bin="$venv/bin"
+              [ -d "$bin" ] || bin="$venv/Scripts"
+              "$bin/python" -m pytest -p no:cacheprovider tests
+            done
+        run: |
+          if [ "${{ matrix.manylinux }}" = musllinux_1_2 ]; then
+            docker run --rm -v "$PWD:/w" -w /w ghcr.io/astral-sh/uv:alpine sh -c "$TEST"
+          else
+            sh -c "$TEST"
+          fi
+      - uses: actions/upload-artifact@v7
+        if: inputs.upload
+        with:
+          name: wheels-${{ matrix.target }}
+          path: crates/jlens-python/dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: source distribution
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: crates/jlens-python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          working-directory: crates/jlens-python
+          args: --out dist
+      - name: Build it with free-threaded Python 3.14 and test it
+        run: |
+          uv venv --managed-python --python 3.14t venv
+          uv pip install --python venv pytest dist/jlens-*.tar.gz
+          venv/bin/python -m pytest -p no:cacheprovider tests
+      - uses: actions/upload-artifact@v7
+        if: inputs.upload
+        with:
+          name: sdist
+          path: crates/jlens-python/dist/*.tar.gz
+          if-no-files-found: error

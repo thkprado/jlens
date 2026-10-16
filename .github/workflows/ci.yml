@@ -220,6 +220,13 @@ jobs:
       name: ${{ github.sha }}
       upload: true
 
+  # The Python package's wheels for every release target and its source distribution, each
+  # installed and tested (ADR 0014). Not on pull requests, for the same reason.
+  wheels:
+    name: Python wheels
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/wheels.yml
+
   # The npm packages of the CLI (ADR 0012), built from those archives as the Release workflow
   # builds them, then installed on each OS from the packed tarballs.
   npm-cli:
