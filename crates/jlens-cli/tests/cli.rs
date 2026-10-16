@@ -518,6 +518,26 @@ fn ast() {
     snapshot!("ast_tree", &["ast", "a[b > 1]"]);
 }
 
+#[test]
+fn reads() {
+    snapshot!(
+        "reads_expr",
+        &["reads", "$sum(items[type = 'book'].(price * $rate))"]
+    );
+    let files = [
+        "reads",
+        "-f",
+        "fixtures/cli/check/ok.jsonata",
+        "fixtures/cli/check/unknown-field.jsonata",
+    ];
+    snapshot!("reads_files", &files);
+    snapshot!("reads_union", &[&files[..], &["--union"]].concat());
+    snapshot!(
+        "reads_syntax_error",
+        &["reads", "-f", "fixtures/cli/check/*.jsonata"]
+    );
+}
+
 /// `jlens lsp` speaks the protocol on standard input and output, and exits when asked to.
 #[test]
 fn lsp_runs_a_language_server_session() {

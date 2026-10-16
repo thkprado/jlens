@@ -1,0 +1,18 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[&files[..], &[\"--union\"]].concat(), None)"
+---
+exit: 0
+--- stdout
+{
+  "input": {
+    "items": {
+      "quantity": true,
+      "type": true,
+      "unitPrice": true,
+      "unitprice": true
+    }
+  },
+  "bindings": {}
+}
+--- stderr

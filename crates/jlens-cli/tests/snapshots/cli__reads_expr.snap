@@ -1,0 +1,18 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"reads\", \"$sum(items[type = 'book'].(price * $rate))\"], None)"
+---
+exit: 0
+--- stdout
+{
+  "input": {
+    "items": {
+      "price": true,
+      "type": true
+    }
+  },
+  "bindings": {
+    "rate": true
+  }
+}
+--- stderr

@@ -7,6 +7,7 @@ mod errors;
 mod eval;
 mod functions;
 mod output;
+mod reads;
 mod report;
 mod schema;
 mod test;
@@ -47,6 +48,8 @@ enum Command {
     Eval(eval::EvalArgs),
     /// Check an expression for syntax errors, annotation problems and unknown fields.
     Check(CheckArgs),
+    /// Print the fields an expression reads of its input and bindings, as JSON.
+    Reads(reads::ReadsArgs),
     /// Run files of test cases: inputs, bindings and the expected result or error code.
     Test(test::TestArgs),
     /// List the built-in functions, or describe one.
@@ -159,6 +162,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
     match cli.command {
         Command::Eval(args) => eval::run(args),
         Command::Check(args) => check(args),
+        Command::Reads(args) => reads::run(args),
         Command::Test(args) => test::run(args),
         Command::Functions(args) => functions::run(args),
         Command::Errors(args) => errors::run(args),

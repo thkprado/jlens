@@ -231,6 +231,10 @@ to keep all its bindings.
   with `--union`. It follows [ADR 0008](0008-cli-machine-contract.md): a parse error fails as
   `check` does.
 
+  *Amended with the implementation (roadmap 0.18, item 3): `-f` prints an object keyed by file
+  even when it is given one file, so that a glob pattern's output does not change shape with
+  the number of files it matches.*
+
 ### 9. Parsing only the fields read
 
 Roadmap 0.18, item 4, gives `Document::parse` a `Read` (one expression's, or a union's) and

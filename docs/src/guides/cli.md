@@ -10,6 +10,7 @@ jlens eval      <EXPR> | -f FILE  [-i INPUT | --no-input] [--ndjson] [--filter]
                 [--explain | --audit json|text] [--audit-level decisions|full] [--trace-log FILE]
 jlens check     <EXPR> | -f FILE...  [--json] [--deny-warnings] [--schema SCHEMA]
                 [--config FILE] [--path FILE]
+jlens reads     <EXPR> | -f FILE...  [--union]
 jlens test      FILE...  [--json] [--timeout MS]
                 [--max-string-length BYTES] [--max-array-length N] [--max-result-size BYTES]
 jlens functions [NAME] [--json]
@@ -22,7 +23,7 @@ jlens ast       <EXPR> | -f FILE  [--tokens | --raw] [--recover]
 Every command takes the expression either as an argument or from a file with `-f`. Prefer `-f`
 for anything longer than a one-liner. Shells interpret `$`, `"` and `*` differently, and Windows
 shells (`cmd.exe`, PowerShell) in particular make quoting expressions awkward. Glob patterns in
-`jlens check -f`, `jlens test` and `jlens schema infer` are expanded by `jlens` itself, so they
+`jlens check -f`, `jlens reads -f`, `jlens test` and `jlens schema infer` are expanded by `jlens` itself, so they
 work in every shell.
 
 ## Exit codes
@@ -246,6 +247,59 @@ To validate a directory of rules in CI, warnings included:
 ```sh
 jlens check --deny-warnings -f 'rules/*.jsonata'
 ```
+
+## `jlens reads`
+
+Prints, as JSON on standard output, the fields an expression may read of its input and of each
+binding, without evaluating it ([ADR 0016](../adr/0016-fields-read.md)). An application can then
+fetch only those fields, or tell which rules depend on a field. A field maps to `true` when it is
+read whole, or to the fields read inside it; the items of an array share the entry of the array:
+
+```text
+$ jlens reads "$sum(items[type = 'book'].(price * $rate))"
+{
+  "input": {
+    "items": {
+      "price": true,
+      "type": true
+    }
+  },
+  "bindings": {
+    "rate": true
+  }
+}
+```
+
+The answer is an upper bound: the input and bindings cut down to it give the expression the same
+result, or the same error code. `input` is absent when the expression does not read its input,
+and `"everyBinding": true` means it may read any binding (as `$eval` can). The constructs the
+analysis cannot follow, such as `*` and `**`, read their value whole; the
+[crate guide](crate.md#the-fields-an-expression-reads) and the ADR give the details.
+
+`-f` takes several files, and glob patterns. The result is then an object keyed by file, even
+for one file, and `--union` prints instead the union of the files' results: what an input must
+keep for all of them. With `discount.jsonata` holding
+`customer.tier = 'gold' ? $sum(items.price) * 0.1 : 0` and `shipping.jsonata` holding
+`$sum(items.weight) > 10 ? 15 : 5`:
+
+```text
+$ jlens reads --union -f rules/discount.jsonata rules/shipping.jsonata
+{
+  "input": {
+    "customer": {
+      "tier": true
+    },
+    "items": {
+      "price": true,
+      "weight": true
+    }
+  },
+  "bindings": {}
+}
+```
+
+A syntax error is reported on standard error, as `jlens check` reports it, and makes the exit
+code 1; nothing is printed on standard output, even for the other files.
 
 ## `jlens test`
 

@@ -1,0 +1,27 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&files, None)"
+---
+exit: 0
+--- stdout
+{
+  "fixtures/cli/check/ok.jsonata": {
+    "input": {
+      "items": {
+        "type": true,
+        "unitPrice": true
+      }
+    },
+    "bindings": {}
+  },
+  "fixtures/cli/check/unknown-field.jsonata": {
+    "input": {
+      "items": {
+        "quantity": true,
+        "unitprice": true
+      }
+    },
+    "bindings": {}
+  }
+}
+--- stderr

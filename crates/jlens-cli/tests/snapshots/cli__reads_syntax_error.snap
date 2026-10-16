@@ -1,0 +1,12 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"reads\", \"-f\", \"fixtures/cli/check/*.jsonata\"], None)"
+---
+exit: 1
+--- stdout
+--- stderr
+error[S0202]: Expected ")", got ";"
+ --> fixtures/cli/check/syntax-error.jsonata:2:33
+  |
+2 |   $total := $sum(items.unitPrice;
+  |                                 ^
