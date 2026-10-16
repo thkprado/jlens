@@ -151,6 +151,20 @@ The package supports free-threaded Python (3.14t and later), where the threads o
 evaluate in parallel. A `Document` used by several threads is converted once more on each
 thread, the first time that thread evaluates against it.
 
+On Linux distributions built on musl, such as Alpine, give threads a larger stack before you
+create them, if they evaluate expressions that call Python code, such as a host function:
+
+```python
+{{#include ../../../crates/jlens-python/tests/guide/musl_threads.py:musl_threads}}
+```
+
+musl starts threads with a 128 KiB stack, so jlens evaluates on a larger stack of its own.
+CPython 3.14 and later cannot ask musl where a thread's stack ends: they assume it is 4 MB long.
+When the stack jlens allocated happens to lie at that assumed end, the Python code called from
+it raises `RecursionError` or aborts the process (`Unrecoverable stack overflow`). This is rare,
+depends on where memory is mapped, and does not affect the main thread, whose stack is larger.
+With a stack larger than 4 MB, a thread evaluates on its own stack.
+
 ## Host functions
 
 Python callables, in the bindings or registered on an expression, are called from the expression

@@ -7,6 +7,7 @@ import datetime
 import enum
 import gc
 import json
+import platform
 import sys
 import threading
 import time
@@ -453,9 +454,14 @@ def test_register_function():
     assert info.value.code.startswith("S04")
     with pytest.raises(TypeError):
         expr.register_function("f", 1)
-    # Usable from other threads.
-    with ThreadPoolExecutor(4) as pool:
-        assert list(pool.map(lambda p: expr.evaluate({"price": p}), range(8))) == [6] * 8
+    # Usable from other threads, given a large enough stack on musl (see the Python guide).
+    musl = platform.libc_ver()[0] == "musl"
+    previous = threading.stack_size(8 << 20) if musl else 0
+    try:
+        with ThreadPoolExecutor(4) as pool:
+            assert list(pool.map(lambda p: expr.evaluate({"price": p}), range(8))) == [6] * 8
+    finally:
+        threading.stack_size(previous)
 
 
 def test_exceptions_of_host_functions_are_raised_again():
