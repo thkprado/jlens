@@ -1,9 +1,12 @@
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, final
+from typing import Any, Literal, final
 
 from typing_extensions import Self
 
-__all__ = ["Document", "Expression", "JlensError", "__version__"]
+from ._types import AuditResult, CaptureLimits
+
+__all__ = ["Document", "Expression", "Function", "JlensError", "__version__"]
 
 __version__: str
 
@@ -75,6 +78,38 @@ class Expression:
         """Evaluates the expression against a `Document` converted beforehand. Other Python
         threads run during the evaluation."""
 
+    def evaluate_with_audit(
+        self,
+        input: Any = None,
+        bindings: dict[str, Any] | None = None,
+        *,
+        level: Literal["off", "decisions", "full"] | None = None,
+        limits: CaptureLimits | None = None,
+        timeout: float | None = None,
+        max_depth: int | None = None,
+        max_string_length: int | None = None,
+        max_array_length: int | None = None,
+        max_result_size: int | None = None,
+        now: int | float | datetime | str | None = None,
+        seed: int | None = None,
+    ) -> AuditResult:
+        """Evaluates the expression and records how the result was reached: at `level`
+        `"decisions"` (the default) the nodes that decide something, at `"full"` every node, at
+        `"off"` none. The input is converted whole first. Evaluation errors are reported in the
+        result's `error`, not raised; an exception of a host function is reported with its
+        `code` attribute (or the name of its type) and its text."""
+
+    def register_function(
+        self,
+        name: str,
+        implementation: Callable[..., Any],
+        signature: str | None = None,
+    ) -> None:
+        """Makes `implementation` available as `$name` in every evaluation. With a `signature`
+        (such as `<n-n?:n>`), arguments are checked before each call, as for built-in
+        functions. A function of the same name in the bindings takes precedence. Raises a
+        `JlensError` when the signature is invalid."""
+
 @final
 class Document:
     """A JSON document converted once, for evaluating several expressions (or one several
@@ -86,6 +121,21 @@ class Document:
     @staticmethod
     def from_json(text: str) -> Document:
         """Parses JSON text."""
+
+@final
+class Function:
+    """A JSONata function passed to a host function, such as the lambda in
+    `$retry(function() {...}, 3)`. Calling it applies the function with the context value
+    `null`; arguments and the result are converted as for a host function. It is valid until the
+    host function returns: calling it later raises a `JlensError` with code `U1005`."""
+
+    @property
+    def arity(self) -> int:
+        """The number of parameters the function declares."""
+
+    def __call__(self, *args: Any) -> Any:
+        """Applies the function. Raises a `JlensError`, or the exception a host function
+        raised, when it fails."""
 
 class JlensError(Exception):
     """A JSONata error. Offsets count code points, the unit of `str`."""

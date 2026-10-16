@@ -1,14 +1,18 @@
 //! Conversions at the Python boundary: values, options, offsets and errors.
 
 use std::borrow::Cow;
+use std::sync::Arc;
 use std::time::Duration;
 
+use jlens_core::audit::{AuditLevel, AuditOptions};
 use jlens_core::{Bindings, Options};
 use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::critical_section::with_critical_section;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use serde_json::Value as Json;
+
+use crate::host::{self, Host};
 
 pyo3::create_exception!(
     jlens,
@@ -225,24 +229,60 @@ pub fn to_py<'py>(py: Python<'py>, value: &Json) -> PyResult<Bound<'py, PyAny>> 
     })
 }
 
-/// Reads the `bindings` argument: `None` or a `dict` of names (without the `$`) to values.
-pub fn bindings(value: Option<&Bound<'_, PyAny>>) -> PyResult<Bindings> {
+/// A Python function registered on an expression with `register_function`.
+pub struct Registered {
+    pub name: String,
+    pub function: Py<PyAny>,
+    /// A valid signature.
+    pub signature: Option<String>,
+    pub arity: usize,
+}
+
+/// Reads the `bindings` argument: `None` or a `dict` of names (without the `$`) to values, after
+/// the functions registered on the expression `source`. A callable is a host function; the
+/// [`Host`] of the evaluation is returned when there is one.
+pub fn bindings<'py>(
+    py: Python<'py>,
+    value: Option<&Bound<'py, PyAny>>,
+    registered: &[Registered],
+    source: &Arc<str>,
+) -> PyResult<(Bindings, Option<Arc<Host>>)> {
     let mut out = Bindings::new();
-    let Some(value) = value.filter(|v| !v.is_none()) else {
-        return Ok(out);
+    let mut host = None::<Arc<Host>>;
+    let mut function = |name: &str, function: &Bound<'_, PyAny>, signature: Option<&str>, arity| {
+        let host = host.get_or_insert_with(|| Host::new(source.clone()));
+        let source = signature.unwrap_or_default();
+        host::function(host, name, function.clone().unbind(), signature, arity)
+            .map_err(|e| error(function.py(), &e, source))
     };
-    let dict = value
-        .cast::<PyDict>()
-        .map_err(|_| PyTypeError::new_err("bindings must be a dict"))?;
-    let entries: Vec<_> = with_critical_section(value, || dict.iter().collect());
-    for (name, value) in entries {
-        let name = key(&name)
-            .map_err(|_| PyTypeError::new_err("the names of the bindings must be str"))?
-            .into_owned();
-        let json = to_json(&value, &format!("binding {name}"))?;
-        out = out.var(name, json);
+    for r in registered {
+        let imp = function(
+            &r.name,
+            r.function.bind(py),
+            r.signature.as_deref(),
+            r.arity,
+        )?;
+        out = out.function(r.name.clone(), imp);
     }
-    Ok(out)
+    if let Some(value) = value.filter(|v| !v.is_none()) {
+        let dict = value
+            .cast::<PyDict>()
+            .map_err(|_| PyTypeError::new_err("bindings must be a dict"))?;
+        let entries: Vec<_> = with_critical_section(value, || dict.iter().collect());
+        for (name, value) in entries {
+            let name = key(&name)
+                .map_err(|_| PyTypeError::new_err("the names of the bindings must be str"))?
+                .into_owned();
+            if value.is_callable() {
+                let imp = function(&name, &value, None, host::arity(&value))?;
+                out = out.function(name, imp);
+            } else {
+                let json = to_json(&value, &format!("binding {name}"))?;
+                out = out.var(name, json);
+            }
+        }
+    }
+    Ok((out, host))
 }
 
 /// Reads the evaluation options, given as keyword arguments: `timeout` (seconds), `max_depth`,
@@ -379,7 +419,7 @@ pub fn error(py: Python<'_>, err: &jlens_core::Error, source: &str) -> PyErr {
 }
 
 /// The offset in code points of an offset in UTF-16 code units.
-fn utf16_to_chars(text: &str, units: usize) -> usize {
+pub fn utf16_to_chars(text: &str, units: usize) -> usize {
     let mut seen = 0;
     for (chars, c) in text.chars().enumerate() {
         if seen >= units {
@@ -391,6 +431,95 @@ fn utf16_to_chars(text: &str, units: usize) -> usize {
 }
 
 /// The offset in code points of an offset in bytes.
-fn bytes_to_chars(text: &str, bytes: usize) -> usize {
+pub fn bytes_to_chars(text: &str, bytes: usize) -> usize {
     text.char_indices().take_while(|(i, _)| *i < bytes).count()
+}
+
+/// Reads the `level` and `limits` arguments of `evaluate_with_audit`. `limits` is a `dict` of
+/// the capture limits, named as the fields of `CaptureLimits` (`max_items`, `max_nodes`, ...).
+pub fn audit_options(
+    level: Option<&str>,
+    limits: Option<&Bound<'_, PyDict>>,
+) -> PyResult<AuditOptions> {
+    let mut out = AuditOptions::default();
+    if let Some(level) = level {
+        out.level = match level {
+            "off" => AuditLevel::Off,
+            "decisions" => AuditLevel::Decisions,
+            "full" => AuditLevel::Full,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "level must be \"off\", \"decisions\" or \"full\"",
+                ));
+            }
+        };
+    }
+    for (name, value) in limits.into_iter().flat_map(|limits| limits.iter()) {
+        let name: String = name
+            .extract()
+            .map_err(|_| PyTypeError::new_err("the names of the limits must be str"))?;
+        if value.is_instance_of::<PyBool>() || !value.is_instance_of::<PyInt>() {
+            return Err(PyTypeError::new_err(format!("limit {name} must be an int")));
+        }
+        let value: usize = value
+            .extract()
+            .map_err(|_| PyValueError::new_err(format!("limit {name} must not be negative")))?;
+        let limits = &mut out.limits;
+        *match name.as_str() {
+            "max_items" => &mut limits.max_items,
+            "max_string" => &mut limits.max_string,
+            "max_depth" => &mut limits.max_depth,
+            "max_rejected" => &mut limits.max_rejected,
+            "max_nodes" => &mut limits.max_nodes,
+            "max_source" => &mut limits.max_source,
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown capture limit '{name}'"
+                )));
+            }
+        } = value;
+    }
+    Ok(out)
+}
+
+/// The fields of a `JlensError` for `err`, as a `dict`: `code`, `message`, and `position`,
+/// `start`, `end`, `token` and `value`, `None` when unknown. Offsets count code points.
+pub fn error_dict<'py>(
+    py: Python<'py>,
+    err: &jlens_core::Error,
+    source: &str,
+) -> PyResult<Bound<'py, PyDict>> {
+    let exception = error(py, err, source);
+    let exception = exception.value(py);
+    let dict = PyDict::new(py);
+    dict.set_item("code", err.code())?;
+    dict.set_item("message", err.message())?;
+    for name in ["position", "start", "end", "token", "value"] {
+        dict.set_item(name, exception.getattr(name)?)?;
+    }
+    Ok(dict)
+}
+
+/// Converts the byte offsets of the nodes' spans in `tree`, an audit tree, to code points. Only
+/// the nodes are walked: a captured value may have a field named `span` too.
+pub fn audit_spans_to_chars(source: &str, tree: &mut Json) {
+    fn walk(source: &str, node: &mut Json) {
+        jlens_core::stack::grow(|| {
+            if let Some(Json::Object(span)) = node.get_mut("span") {
+                for bound in ["start", "end"] {
+                    if let Some(n) = span.get(bound).and_then(Json::as_u64) {
+                        span.insert(bound.into(), bytes_to_chars(source, n as usize).into());
+                    }
+                }
+            }
+            if let Some(Json::Array(children)) = node.get_mut("children") {
+                children.iter_mut().for_each(|child| walk(source, child));
+            }
+        })
+    }
+    if !source.is_ascii()
+        && let Some(root) = tree.get_mut("root")
+    {
+        walk(source, root);
+    }
 }

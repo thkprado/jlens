@@ -352,3 +352,295 @@ def test_free_threaded_input_changed_by_another_thread():
     finally:
         stop.set()
         thread.join()
+
+
+SALES_ORDER = {
+    "number": "SO-12345",
+    "customer": {"login": "alice.walker99", "name": "Acme Stores"},
+    "items": [
+        {"code": "1", "type": "apparel", "unitPrice": 10000.0, "quantity": 2},
+        {"code": "2", "type": "electronic", "unitPrice": 25000.0, "quantity": 1},
+        {"code": "3", "type": "electronic", "unitPrice": 12000.0, "quantity": 1},
+    ],
+}
+
+RULE = """(
+  $total := $sum(items.(unitPrice * quantity));
+  /** @label "Authorized customer" @message "The customer must be approved." */
+  customer.login in ["alice.walker99"]
+  and
+  /** @label "Minimum total" */
+  $total > $minimum
+)"""
+
+
+class RateError(Exception):
+    code = "ACME01"
+
+
+def test_host_functions_in_the_bindings():
+    def collect(*args):
+        return list(args)
+
+    bindings = {
+        "add": lambda a, b: a + b,
+        "args": collect,
+        "types": lambda *args: [type(a).__name__ for a in args],
+        "two": lambda v, i: [v, i],
+        "pair": lambda: [{"a": 1}, {"a": 2}],
+        "nothing": lambda: None,
+        "rate": 0.5,
+    }
+
+    def ev(source, input=None):
+        return Expression(source).evaluate(input, bindings)
+
+    assert ev("$add(1, 2)") == 3
+    assert ev("$add(price, $rate)", {"price": 2}) == 2.5
+    assert ev("$args(1, 'a', missing, {'k': [1]})", {}) == [1, "a", None, {"k": [1]}]
+    assert ev("$types($add, function($x) { $x }, 1)") == ["Function", "Function", "int"]
+    assert ev("$pair().a") == [1, 2]
+    assert ev("$nothing()") is None
+    assert ev("$exists($nothing())") is False
+    # The arity, which higher-order functions use, counts the parameters without a default.
+    assert ev("$map([5, 6], $args)") == [[5], [6]]
+    assert ev("$map([5, 6], $two)") == [[5, 0], [6, 1]]
+    assert ev("$add(?, 1)(41)") == 42
+    assert ev("$type($add)") == "function"
+    assert ev("$sum([1])", {}) == 1
+    assert Expression("$sum([1])").evaluate(None, {"sum": lambda *a: "mine"}) == "mine"
+    assert Expression("$f()").evaluate_json("{}", {"f": lambda: {"a": 1}}) == '{"a":1}'
+    document = Document({"a": 2})
+    assert Expression("$f(a)").evaluate_document(document, {"f": lambda x: x * 2}) == 4
+    # Methods, classes and built-in functions are callables too.
+    assert Expression("$upper('a')").evaluate(None, {"upper": str.upper}) == "A"
+    assert Expression("$len('abc')").evaluate(None, {"len": len}) == 3
+
+
+def test_register_function():
+    expr = Expression("$tax(100) + price.$tax()")
+    expr.register_function("tax", lambda amount, rate: amount * (rate or 0.25), "<n-n?:n>")
+    assert expr.evaluate({"price": 8}) == 27
+    raises("T1006", Expression("$tax('x')").evaluate)
+    typed = Expression("$tax('x')")
+    typed.register_function("$tax", lambda a: a, "<n:n>")
+    error = raises("T0410", typed.evaluate)
+    assert (error.position, error.token) == (5, "tax")
+    # The bindings take precedence; registering again replaces the function.
+    assert expr.evaluate({"price": 8}, {"tax": lambda *a: 1}) == 2
+    expr.register_function("tax", lambda *a: 3)
+    assert expr.evaluate({"price": 8}) == 6
+    with pytest.raises(JlensError) as info:
+        expr.register_function("f", lambda: 1, "<n<s>:n>")
+    assert info.value.code.startswith("S04")
+    with pytest.raises(TypeError):
+        expr.register_function("f", 1)
+    # Usable from other threads.
+    with ThreadPoolExecutor(4) as pool:
+        assert list(pool.map(lambda p: expr.evaluate({"price": p}), range(8))) == [6] * 8
+
+
+def test_exceptions_of_host_functions_are_raised_again():
+    failing = RateError("The rate service is down")
+
+    def rate():
+        raise failing
+
+    expr = Expression("1 + $rate()")
+    with pytest.raises(RateError) as info:
+        expr.evaluate(None, {"rate": rate})
+    assert info.value is failing
+    assert (info.value.position, info.value.token) == (10, "rate")
+    with pytest.raises(RateError):
+        expr.evaluate_json(None, {"rate": rate})
+    with pytest.raises(RateError):
+        expr.evaluate_document(Document({}), {"rate": rate})
+
+    def interrupt():
+        raise KeyboardInterrupt
+
+    # An exception that is not an Exception goes through too.
+    with pytest.raises(KeyboardInterrupt):
+        expr.evaluate(None, {"rate": interrupt})
+    # An exception wrapped by $eval is the error of $eval.
+    raises("D3121", Expression("$eval('$rate()')").evaluate, None, {"rate": rate})
+    audited = expr.evaluate_with_audit(None, {"rate": rate})
+    assert (audited["error"]["code"], audited["error"]["message"]) == (
+        "ACME01",
+        "The rate service is down",
+    )
+    audited = expr.evaluate_with_audit(None, {"rate": lambda: {}["x"]})
+    assert audited["error"]["code"] == "KeyError"
+    # A result that cannot be converted fails like an exception.
+    cyclic = {}
+    cyclic["self"] = cyclic
+    with pytest.raises(ValueError, match="the result of \\$rate"):
+        expr.evaluate(None, {"rate": lambda: cyclic})
+    with pytest.raises(TypeError):
+        expr.evaluate(None, {"rate": lambda: {1, 2}})
+    # Expressions evaluated by a host function have their own functions and exceptions.
+    inner = Expression("$g()")
+    nested = {"f": lambda: inner.evaluate(None, {"g": lambda: 20}) + 1}
+    assert Expression("$f() * 2").evaluate(None, nested) == 42
+    with pytest.raises(RateError) as info:
+        Expression("$f()").evaluate(None, {"f": lambda: inner.evaluate(None, {"g": rate})})
+    assert info.value is failing
+    assert Expression("$add(1, 2)").evaluate(None, {"add": lambda a, b: a + b}) == 3
+
+
+def test_asynchronous_host_functions_fail_with_u1002():
+    async def fetch():
+        return 1
+
+    error = raises("U1002", Expression("$fetch()").evaluate, None, {"fetch": fetch})
+    assert error.token == "fetch"
+    assert "$fetch" in str(error)
+
+
+def test_host_functions_call_the_functions_they_receive():
+    def safe(f):
+        try:
+            return f()
+        except JlensError as error:
+            return error.code
+
+    bindings = {
+        "apply": lambda f, *args: f(*args),
+        "shape": lambda f: [type(f).__name__, f.arity],
+        "safe": safe,
+        "give": lambda f: f(lambda: 1, [2]),
+        "add": lambda a, b: a + b,
+    }
+
+    def ev(source, more=None, **options):
+        return Expression(source).evaluate(None, {**bindings, **(more or {})}, **options)
+
+    assert ev("$apply(function($x, $y) { $x + $y }, 1, 2)") == 3
+    assert ev("$apply($uppercase, 'a')") == "A"
+    assert ev("$apply($substring(?, 1), 'abc')") == "bc"
+    assert ev("$apply($uppercase ~> $trim, ' a ')") == "A"
+    assert ev("$apply($add, 1, 2)") == 3
+    assert ev("($n := 5; $apply(function() { $n + 1 }))") == 6
+    assert ev("$shape(function($a, $b) { 0 })") == ["Function", 2]
+    assert ev("$apply($string)") == "null"
+    assert ev("$give(function($f, $a) { {'f': $type($f), 'a': $a} })") == {"a": [2]}
+    assert ev("$apply(function() { $uppercase })") is None
+    # None stands for undefined.
+    assert Expression("$f(function($x) { $exists($x) })").evaluate(None, {"f": lambda f: f(None)}) is False
+    twice = Expression("$twice(function($n) { $n * 3 }, 2)")
+    twice.register_function("twice", lambda f, x: f(f(x)), "<fx:x>")
+    assert twice.evaluate() == 18
+    # Errors are raised with their codes; the host function may catch them or let them through.
+    assert ev("$safe(function() { $error('no') })") == "D3137"
+    error = raises("D3137", ev, "$apply(function() { $error('no') })")
+    assert str(error) == "no"
+    audited = Expression("$apply(function() { 1 + 'a' })").evaluate_with_audit(None, bindings)
+    assert (audited["error"]["code"], audited["error"]["position"]) == ("T2002", 23)
+    failing = RateError("down")
+
+    def rate():
+        raise failing
+
+    with pytest.raises(RateError) as info:
+        ev("$apply($rate)", {"rate": rate})
+    assert info.value is failing
+    raises("D1011", ev, "($f := function($n) { $apply($f, $n + 1) }; $f(0))", max_depth=50)
+    # Called after the host function returned, it raises U1005.
+    kept = []
+
+    def keep(f):
+        kept.append(f)
+        return f(1)
+
+    assert ev("$keep(function($x) { $x + 1 })", {"keep": keep}) == 2
+    error = raises("U1005", kept[0], 1)
+    assert error.token == "keep"
+
+    # Called from another thread while the host function runs: U1005 too.
+    def other_thread(f):
+        with ThreadPoolExecutor(1) as pool:
+            return pool.submit(safe, f).result()
+
+    assert ev("$other(function() { 1 })", {"other": other_thread}) == "U1005"
+    # Called again while it runs, through another host function: an error, not a crash.
+    stash = []
+
+    def outer(f):
+        stash.append(f)
+        return f()
+
+    reentry = {"outer": outer, "inner": lambda: stash[0]()}
+    raises("U1001", ev, "$outer(function() { $inner() })", reentry)
+    # Called during an evaluation that lets other threads run.
+    expr = Expression("$apply(function($x) { $x * 2 }, a)")
+    assert expr.evaluate_json('{"a": 4}', bindings) == "8"
+    assert expr.evaluate_document(Document({"a": 5}), bindings) == 10
+    assert ev("$apply($add, 2, 3)") == 5
+
+
+def test_evaluate_with_audit():
+    expr = Expression(RULE)
+    audit = expr.evaluate_with_audit(SALES_ORDER, {"minimum": 60000})
+    assert audit["result"] is False
+    assert audit["error"] is None
+    assert audit["audit"]["header"]["level"] == "decisions"
+    assert audit["audit"]["header"]["result"] is False
+    assert audit["audit"]["root"]
+    failed = [line["text"] for line in audit["explanation"]["lines"] if line["passed"] is False]
+    assert any(text.startswith("Minimum total") for text in failed), failed
+    assert audit["explanation_text"].startswith("result: false")
+    assert "✘ Minimum total" in audit["explanation_text"]
+
+    full = expr.evaluate_with_audit(
+        SALES_ORDER, {"minimum": 1}, level="full", limits={"max_nodes": 5}
+    )
+    assert full["result"] is True
+    assert (full["audit"]["nodeCount"], full["audit"]["truncated"]) == (5, True)
+    off = expr.evaluate_with_audit(SALES_ORDER, {"minimum": 1}, level="off")
+    assert off["audit"].get("root") is None
+
+    failing = Expression("$x.y + 1").evaluate_with_audit(None, {"x": {"y": "a"}})
+    assert failing["error"]["code"] == "T2001"
+    assert failing["error"]["value"] == "a"
+    assert failing["result"] is None
+    limited = Expression("[1..100]").evaluate_with_audit(max_array_length=50)
+    assert limited["error"]["code"] == "U1001"
+
+    with pytest.raises(ValueError):
+        expr.evaluate_with_audit(level="everything")
+    with pytest.raises(ValueError):
+        expr.evaluate_with_audit(limits={"max_nodez": 1})
+    with pytest.raises(TypeError):
+        expr.evaluate_with_audit(limits={"max_nodes": "1"})
+    with pytest.raises(TypeError):
+        expr.evaluate_with_audit(timeot=1)
+    cyclic = []
+    cyclic.append(cyclic)
+    with pytest.raises(ValueError, match="Circular reference detected"):
+        expr.evaluate_with_audit(cyclic)
+
+
+def test_audit_spans_count_code_points():
+    source = "'\U0001d11e' = 'x' or /** @label \"B\" */ $b"
+    audit = Expression(source).evaluate_with_audit(None, {"b": True})
+    spans = []
+
+    def walk(node):
+        spans.append((node["source"], node["span"]["start"], node["span"]["end"]))
+        for child in node.get("children", []):
+            walk(child)
+
+    walk(audit["audit"]["root"])
+    comparison = next(span for span in spans if span[0] == "'\U0001d11e' = 'x'")
+    assert comparison[1:] == (0, 9)
+    assert source[comparison[1] : comparison[2]] == comparison[0]
+
+    # A captured value with a field named `span` is left as it is.
+    def outputs(node):
+        yield node.get("output")
+        for child in node.get("children", []):
+            yield from outputs(child)
+
+    span = {"span": {"start": 7, "end": 9}}
+    captured = Expression("('\U0001d11e'; $x)").evaluate_with_audit(None, {"x": span}, level="full")
+    assert span in list(outputs(captured["audit"]["root"]))

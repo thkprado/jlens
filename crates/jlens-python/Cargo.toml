@@ -24,6 +24,7 @@ doctest = false
 jlens-core.workspace = true
 serde_json.workspace = true
 pyo3.workspace = true
+scoped-tls-hkt.workspace = true
 
 [build-dependencies]
 pyo3-build-config.workspace = true

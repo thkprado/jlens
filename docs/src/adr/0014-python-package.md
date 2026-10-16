@@ -134,6 +134,24 @@ with the GIL disabled. Each wheel takes 0.9 MB on Windows x86-64.
 - **The deep-input bug is fixed in jlens-core before the binding** (roadmap 0.17 #2): the
   conversion of results and `$string` go through `stack::grow`, with a robustness case on a
   deep `Source`.
+- **Host functions written in Python** (added with roadmap 0.17 #4). A callable in the
+  bindings, or registered with `register_function`, is a host function: `HostFunction` holds
+  the `Py<PyAny>` (which is `Send + Sync`) and attaches to the interpreter to call it. Without
+  a signature its arity counts the positional parameters before the first with a default, as
+  JavaScript's `length` does. At the function boundary `None` stands for undefined, in the
+  arguments and in the result; inside a list or a `dict` it is `null`. An exception the
+  function raises is kept by the evaluation and raised again unchanged, with the call's
+  `position` and `token` added when it has none; an awaitable result fails with `U1002`. A
+  JSONata function among the arguments arrives as a `jlens.Function`. The handle jlens-core
+  gives borrows the call (ADR 0011) and cannot live in a Python object, so each call publishes
+  it in a scoped thread-local (`scoped-tls-hkt`, whose safe API takes the place of
+  wasm-bindgen's borrowed closures), and the `Function` finds its call there by number. Called
+  after the call has returned, or from another thread, it raises `U1005`.
+- **`evaluate_with_audit`** returns a `dict` (typed by `jlens.AuditResult`) with `result`,
+  `error`, `audit`, `explanation` and `explanation_text`; `result` and `error` are always there,
+  `None` when there is none. The audit
+  tree and the explanation keep the JSON of the CLI (`nodeCount`, `durationMs`), with spans in
+  code points; the options and the capture `limits` are in `snake_case`.
 
 ## Consequences
 
