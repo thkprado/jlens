@@ -1,8 +1,10 @@
 //! Property tests: no input, however malformed, makes the parser or the evaluator panic.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use jlens_core::input::{Sink, Source};
+use jlens_core::reads::{Read, Reads};
 use jlens_core::{Bindings, CancelToken, Document, Error, Expression, HostFunction, Options};
 use proptest::prelude::*;
 use serde_json::json;
@@ -144,8 +146,16 @@ fn expression() -> impl Strategy<Value = String> {
 /// Host functions: one that returns its arguments, one with a signature, one that fails, one
 /// that calls its first argument with the others.
 fn bindings() -> Bindings {
+    functions().var("x", variable_x())
+}
+
+fn variable_x() -> serde_json::Value {
+    json!([1, "two", {"p": [{"q": 1, "r": 2}], "s": {}}, null])
+}
+
+/// The host functions of [`bindings`], without its variable.
+fn functions() -> Bindings {
     Bindings::new()
-        .var("x", json!([1, "two", null]))
         .function(
             "echo",
             HostFunction::new(2, |args, call| {
@@ -944,4 +954,112 @@ fn deep_values_fail_cleanly() {
         .unwrap()
         .join()
         .unwrap();
+}
+
+/// The outcome of an evaluation as the analysis of reads promises it: the result, or the error
+/// code. `None` for a timeout, which depends on the machine.
+fn outcome(result: Result<Option<serde_json::Value>, Error>) -> Option<String> {
+    match result {
+        Ok(value) => Some(format!("{value:?}")),
+        Err(e) if e.code() == "D1012" => None,
+        Err(e) => Some(e.code().to_owned()),
+    }
+}
+
+/// [`bindings`] cut by `reads`: the host functions, and the variable if it is read.
+fn cut_bindings(reads: &Reads) -> Bindings {
+    let x = variable_x();
+    let x = if reads.every_binding() {
+        Some(x)
+    } else {
+        reads.binding("x").map(|read| read.cut(&x))
+    };
+    match x {
+        Some(x) => functions().var("x", x),
+        None => functions(),
+    }
+}
+
+/// Whether `expr` gives the same outcome on the input and bindings cut by `reads`.
+fn agrees_when_cut(expr: &Expression, reads: &Reads) -> Result<(), TestCaseError> {
+    let options = Options::new()
+        .timeout(Duration::from_millis(50))
+        .max_depth(300)
+        .now(0)
+        .seed(1);
+    let input = input();
+    let whole = expr.evaluate_with(Some(&input), &bindings(), &options);
+    let cut_input = reads.input().map(|read| read.cut(&input));
+    let cut = expr.evaluate_with(cut_input.as_ref(), &cut_bindings(reads), &options);
+    if let (Some(whole), Some(cut)) = (outcome(whole), outcome(cut)) {
+        prop_assert_eq!(
+            whole,
+            cut,
+            "{} reads {}",
+            expr.source(),
+            serde_json::to_string(reads).unwrap()
+        );
+    }
+    Ok(())
+}
+
+fn read() -> impl Strategy<Value = Read> {
+    let leaf = prop_oneof![Just(Read::Whole), Just(Read::Fields(BTreeMap::new()))];
+    leaf.prop_recursive(4, 24, 3, |inner| {
+        prop::collection::btree_map(
+            prop::sample::select(&["a", "b", "items", "price"][..]).prop_map(String::from),
+            inner,
+            0..3,
+        )
+        .prop_map(Read::Fields)
+    })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2000))]
+
+    /// ADR 0016: an expression gives the same result, or error code, on its input and
+    /// bindings cut by its reads. The analysis never panics, however deep the expression.
+    #[test]
+    fn reads_keep_what_an_evaluation_needs(source in expression()) {
+        if let Ok(expr) = Expression::compile(&source) {
+            agrees_when_cut(&expr, &expr.reads())?;
+        }
+    }
+
+    /// An input cut by the union of several expressions' reads gives each its result.
+    #[test]
+    fn a_union_of_reads_serves_each_expression(a in valid(), b in valid()) {
+        if let (Ok(a), Ok(b)) = (Expression::compile(&a), Expression::compile(&b)) {
+            let union = a.reads().union(&b.reads());
+            agrees_when_cut(&a, &union)?;
+            agrees_when_cut(&b, &union)?;
+        }
+    }
+
+    #[test]
+    fn union_of_reads_is_a_join(a in read(), b in read(), c in read()) {
+        prop_assert_eq!(a.union(&b), b.union(&a));
+        prop_assert_eq!(a.union(&b).union(&c), a.union(&b.union(&c)));
+        prop_assert_eq!(a.union(&a), a.clone());
+        prop_assert_eq!(Read::Whole.union(&a), Read::Whole);
+        // The union keeps what each needs.
+        let value = input();
+        prop_assert_eq!(a.cut(&a.union(&b).cut(&value)), a.cut(&value));
+    }
+}
+
+#[test]
+fn reads_of_deep_expressions_stay_within_the_stack() {
+    let deep = format!("{}a{}", "(".repeat(990), ")".repeat(990));
+    let reads = Expression::compile(&deep).unwrap().reads();
+    assert_eq!(
+        serde_json::to_value(&reads).unwrap()["input"],
+        json!({"a": true})
+    );
+    let long = vec!["a"; 900].join(".");
+    let reads = Expression::compile(&long).unwrap().reads();
+    assert!(serde_json::to_string(&reads).is_ok());
+    let wide = format!("[{}]", vec!["a.b"; 10_000].join(", "));
+    assert!(Expression::compile(&wide).is_ok_and(|e| e.reads().input().is_some()));
 }

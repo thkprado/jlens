@@ -140,15 +140,29 @@ built-ins below. A built-in whose signature takes the context when an argument i
 | `$map(a, λ)` | `λ`'s body | those of `λ`'s body |
 | `$sort(a, λ)` | `λ`'s body, its value used | `a`'s |
 | `$reduce(a, λ, init)` | `init` and `λ`'s body, used | none |
+| `$reduce(a, λ)` | `λ`'s body, used | `a`'s |
 | `$eval` | decision 7 | none |
 | Every other built-in, `$lookup` with a computed key among them | the arguments, used | none |
-| A function that is not a built-in: a local variable, a binding, a computed value | the arguments, used | none |
+| A binding: a host function | the arguments and the context, used | none |
+| Another function: a local variable, a computed value | the arguments, used | none |
 
 Here `λ` is a lambda written as the argument. Its body is analysed where the call is, with the
 call's context, and its parameters take places: the item parameter of `$filter`, `$single`,
 `$map` and `$reduce`, both parameters of `$sort`, and the array parameter, have the places of
 `a`; the index and `$reduce`'s accumulator have none, which is sound because what flows into
-them is used. When the function argument is anything else, `a` is used whole.
+them is used. Without `init`, `$reduce` starts from the first item and returns it when it is
+the only one, so its accumulator and its value have the places of `a`. When the function
+argument is anything else, `a` is used whole.
+
+A host function can read the context of its call (`HostCall::input`), so a call to a binding
+uses the context: `$tax(price)` at the top of an expression reads the whole input, and
+`price.$tax()` reads `price`. A call through a local variable or a computed value uses the
+context only when a binding may have become that function (a binding used as a value) or a
+function of the expression takes its context (`-` in a lambda's signature, or such a built-in
+taken as a value); the analysis decides once it has seen the whole expression.
+
+*Amended with the implementation (roadmap 0.18, item 2): the rows for a binding and for
+`$reduce` without `init` were found then.*
 
 Every built-in not in the table falls in the default row, which is always sound: a new built-in
 needs no entry to be safe, only to be precise. The table lives next to the catalog in

@@ -48,6 +48,7 @@ mod json;
 mod lexer;
 mod parser;
 mod process;
+pub mod reads;
 mod regex;
 pub mod signature;
 pub mod stack;
@@ -145,6 +146,18 @@ impl Expression {
     /// The syntax tree of the expression.
     pub fn ast(&self) -> &Ast {
         &self.ast
+    }
+
+    /// What the expression may read of its input and of its bindings, found without
+    /// evaluating it ([ADR 0016]). Evaluated on its input and bindings cut by the result
+    /// ([`reads::Read::cut`]), the expression gives the same result or error code. See the
+    /// [`reads`] module.
+    ///
+    /// The analysis runs on each call, in time linear in the size of the expression.
+    ///
+    /// [ADR 0016]: https://github.com/thkprado/jlens/blob/main/docs/src/adr/0016-fields-read.md
+    pub fn reads(&self) -> reads::Reads {
+        reads::analyse(&self.ast)
     }
 
     /// Evaluates the expression against `input` with default [`Options`].
