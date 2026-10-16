@@ -10,6 +10,8 @@
 //! * Python callables in the bindings, or registered with `register_function`, are called as
 //!   host functions, and the JSONata functions they receive arrive as `jlens.Function`s.
 //!   `evaluate_with_audit` returns the audit and the explanation as Python values.
+//! * `Expression.reads` tells which fields of the input and the bindings an expression reads,
+//!   and [`union_reads`] unites what several expressions read (ADR 0016).
 //!
 //! Errors raise `jlens.JlensError`, whose offsets count code points, the unit of Python's `str`.
 //! The type stubs are in `python/jlens/_jlens.pyi`.
@@ -235,6 +237,21 @@ impl Expression {
         Ok(out)
     }
 
+    /// The fields of the input and of the bindings the expression reads (ADR 0016), as a `dict`
+    /// in the JSON form. The functions in `bindings`, and those registered on the expression,
+    /// read only their arguments, since a Python function does not receive the context of its
+    /// call; a call to a function the analysis does not know reads its context whole.
+    #[pyo3(signature = (bindings=None))]
+    fn reads<'py>(
+        &self,
+        py: Python<'py>,
+        bindings: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let (bindings, _host) = self.bindings(py, bindings)?;
+        let reads = serde_json::to_value(self.inner.reads_with(&bindings)).map_err(json_error)?;
+        to_py(py, &reads)
+    }
+
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
         if let Ok(registered) = self.registered.try_read() {
             for r in registered.iter() {
@@ -359,6 +376,24 @@ fn converted(json: &Arc<Json>) -> Rc<jlens_core::Document> {
     })
 }
 
+/// What any of several expressions reads: the union of their `reads()`. Raises a `TypeError`
+/// when `reads` is not a list or a tuple, and a `ValueError` when an item is not in the form
+/// `reads()` returns.
+#[pyfunction]
+fn union_reads<'py>(reads: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let Json::Array(items) = convert::to_json(reads, "reads")? else {
+        return Err(PyTypeError::new_err("reads must be a list"));
+    };
+    let mut union = jlens_core::reads::Reads::default();
+    for item in items {
+        let item: jlens_core::reads::Reads = serde_json::from_value(item)
+            .map_err(|e| PyValueError::new_err(format!("invalid reads: {e}")))?;
+        union = union.union(&item);
+    }
+    let union = serde_json::to_value(&union).map_err(json_error)?;
+    to_py(reads.py(), &union)
+}
+
 /// The native module of the `jlens` package.
 #[pymodule(gil_used = false)]
 fn _jlens(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -366,6 +401,7 @@ fn _jlens(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Expression>()?;
     m.add_class::<Document>()?;
     m.add_class::<Function>()?;
+    m.add_function(wrap_pyfunction!(union_reads, m)?)?;
     m.add("JlensError", m.py().get_type::<JlensError>())?;
     Ok(())
 }

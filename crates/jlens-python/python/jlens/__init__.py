@@ -5,8 +5,8 @@ documents. A document evaluated many times can be converted once into a :class:`
 Errors raise :class:`JlensError`, which carries the JSONata error code.
 """
 
-from ._jlens import Document, Expression, Function, JlensError, __version__
-from ._types import AuditResult, CaptureLimits, ErrorInfo
+from ._jlens import Document, Expression, Function, JlensError, __version__, union_reads
+from ._types import AuditResult, CaptureLimits, ErrorInfo, Read, Reads
 
 __all__ = [
     "AuditResult",
@@ -16,5 +16,8 @@ __all__ = [
     "Expression",
     "Function",
     "JlensError",
+    "Read",
+    "Reads",
     "__version__",
+    "union_reads",
 ]

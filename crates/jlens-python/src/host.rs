@@ -151,7 +151,8 @@ impl Host {
 }
 
 /// A host function that calls `function`, bound as `$name`, with `arity` parameters unless it
-/// has a signature. The signature must be valid.
+/// has a signature. The signature must be valid. It is marked as not reading the context of its
+/// call, which a Python function does not receive, for `Expression.reads`.
 pub fn function(
     host: &Arc<Host>,
     name: &str,
@@ -163,10 +164,11 @@ pub fn function(
     let imp = move |args: &[Option<Json>], call: &HostCall<'_>| {
         Python::attach(|py| self::call(py, &host, &name, function.bind(py), args, call))
     };
-    match signature {
-        Some(signature) => HostFunction::with_signature(signature, imp),
-        None => Ok(HostFunction::new(arity, imp)),
-    }
+    let function = match signature {
+        Some(signature) => HostFunction::with_signature(signature, imp)?,
+        None => HostFunction::new(arity, imp),
+    };
+    Ok(function.without_input())
 }
 
 /// The number of parameters of `function` that a call must give, as a JavaScript function's

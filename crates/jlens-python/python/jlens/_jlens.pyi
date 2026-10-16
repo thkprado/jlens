@@ -4,9 +4,16 @@ from typing import Any, Literal, final
 
 from typing_extensions import Self
 
-from ._types import AuditResult, CaptureLimits
+from ._types import AuditResult, CaptureLimits, Reads
 
-__all__ = ["Document", "Expression", "Function", "JlensError", "__version__"]
+__all__ = [
+    "Document",
+    "Expression",
+    "Function",
+    "JlensError",
+    "__version__",
+    "union_reads",
+]
 
 __version__: str
 
@@ -99,6 +106,12 @@ class Expression:
         result's `error`, not raised; an exception of a host function is reported with its
         `code` attribute (or the name of its type) and its text."""
 
+    def reads(self, bindings: dict[str, Any] | None = None) -> Reads:
+        """The fields of the input and of the bindings the expression reads: an input cut down
+        to them gives the same result. The functions in `bindings`, and those registered on the
+        expression, read only their arguments; a call to a function it does not know reads its
+        context whole."""
+
     def register_function(
         self,
         name: str,
@@ -136,6 +149,11 @@ class Function:
     def __call__(self, *args: Any) -> Any:
         """Applies the function. Raises a `JlensError`, or the exception a host function
         raised, when it fails."""
+
+def union_reads(reads: list[Reads] | tuple[Reads, ...]) -> Reads:
+    """What any of several expressions reads: an input cut down to the union gives each of them
+    its result. Raises a `ValueError` when an item is not in the form `Expression.reads`
+    returns."""
 
 class JlensError(Exception):
     """A JSONata error. Offsets count code points, the unit of `str`."""

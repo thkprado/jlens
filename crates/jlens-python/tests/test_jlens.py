@@ -662,3 +662,45 @@ def test_audit_spans_count_code_points():
     span = {"span": {"start": 7, "end": 9}}
     captured = Expression("('\U0001d11e'; $x)").evaluate_with_audit(None, {"x": span}, level="full")
     assert span in list(outputs(captured["audit"]["root"]))
+
+
+def test_reads_and_union_reads():
+    expr = Expression("$sum(items[type = $kind].(unitPrice * quantity))")
+    assert expr.reads() == {
+        "input": {"items": {"quantity": True, "type": True, "unitPrice": True}},
+        "bindings": {"kind": True},
+    }
+    # A function the analysis does not know may read the context of its call: the whole input.
+    priced = Expression("price * $rate(country)")
+    assert priced.reads()["input"] is True
+    # A Python function does not receive it: given the bindings, the call reads its arguments.
+    assert priced.reads({"rate": lambda country: 0.1})["input"] == {"country": True, "price": True}
+    # Even when a binding the analysis does not know is used as a value.
+    assert Expression("$rate(country) + $kind").reads({"rate": lambda country: 0.1}) == {
+        "input": {"country": True},
+        "bindings": {"kind": True, "rate": True},
+    }
+    priced.register_function("rate", lambda country: 0.1)
+    assert priced.reads()["input"] == {"country": True, "price": True}
+    # A `-` parameter takes the context when the argument is missing; `n` needs no fields of it.
+    doubled = Expression("price.$double()")
+    doubled.register_function("double", lambda n: n * 2, "<n-:n>")
+    assert doubled.reads()["input"] == {"price": {}}
+    assert Expression("$eval(rule)").reads()["everyBinding"] is True
+
+    union = jlens.union_reads(
+        [Expression("a.b + $x.y").reads(), Expression("$count(c) + $exists(a)").reads()]
+    )
+    assert union == {"input": {"a": {"b": True}, "c": {}}, "bindings": {"x": {"y": True}}}
+    assert jlens.union_reads(({"input": {"a": {"b": True}}, "bindings": {}}, {"input": True})) == {
+        "input": True,
+        "bindings": {},
+    }
+    assert jlens.union_reads([]) == {"bindings": {}}
+    with pytest.raises(TypeError):
+        jlens.union_reads({})
+    for bad in [[{"input": False}], [{"inputs": True}], [1]]:
+        with pytest.raises(ValueError):
+            jlens.union_reads(bad)
+    with pytest.raises(TypeError):
+        Expression("a").reads([])

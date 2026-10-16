@@ -1,8 +1,9 @@
-"""The types of the values `Expression.evaluate_with_audit` takes and returns."""
+"""The types of the values `Expression.evaluate_with_audit` takes and returns, and of those
+`Expression.reads` returns."""
 
-from typing import Any, TypedDict
+from typing import Any, Dict, Literal, TypedDict, Union
 
-__all__ = ["AuditResult", "CaptureLimits", "ErrorInfo"]
+__all__ = ["AuditResult", "CaptureLimits", "ErrorInfo", "Read", "Reads"]
 
 
 class CaptureLimits(TypedDict, total=False):
@@ -48,3 +49,23 @@ class AuditResult(TypedDict):
     """Why the result was reached: `result`, the result or the error as text, and `lines`."""
     explanation_text: str
     """`explanation` as text, as printed by `jlens eval --explain`."""
+
+
+Read = Union[Literal[True], Dict[str, "Read"]]
+"""What an expression reads of a value: `True` for the whole value; a `dict` for only the fields
+it lists, each with its own `Read` (of a list, its items, each read the same way; of a scalar,
+the scalar). An empty `dict` needs the value but none of its fields, as `$count` does."""
+
+
+class _ReadsBindings(TypedDict):
+    bindings: Dict[str, Read]
+    """The bindings the expression reads, by name (without the `$`)."""
+
+
+class Reads(_ReadsBindings, total=False):
+    """What an expression reads of its input and of its bindings, given by `Expression.reads`."""
+
+    input: Read
+    """Absent when the expression does not read its input."""
+    everyBinding: Literal[True]
+    """Set when the expression may read any binding whole, as `$eval` can: keep all bindings."""

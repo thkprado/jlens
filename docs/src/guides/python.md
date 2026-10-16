@@ -232,6 +232,32 @@ such as bindings that are not a `dict`, raise a `TypeError` instead, and a value
 converted, such as a cyclic binding or invalid JSON text, a `ValueError`. The
 [error reference](../language/errors.md) lists every code.
 
+## The fields an expression reads
+
+`reads` tells which fields of its input and of each binding an expression may read, without
+evaluating it ([ADR 0016](../adr/0016-fields-read.md)): an application can fetch only those from
+a database, or know which rules depend on a field. `union_reads` combines the answers of several
+expressions.
+
+```python
+{{#include ../../../crates/jlens-python/tests/guide/reads.py:reads}}
+```
+
+- **The answer is an upper bound.** `True` reads the value whole; a `dict` reads only the fields
+  it lists, of an object, or of each item of a list; an empty `dict` needs the value but none of
+  its fields, as `$count` does. On its input and bindings cut down that way, an expression gives
+  the same result, or fails with the same error code. Where the analysis cannot follow a value,
+  under `*` or `**`, in a constructed object or in the result, it reads the value whole.
+- **Pass the bindings** the expression will be evaluated with. A Python function does not
+  receive the context of its call, so a call to one in the bindings, or registered on the
+  expression, reads only its arguments, and the context a `-` parameter may take. A call to a
+  function the analysis does not know may read its context: the whole input, at the top of an
+  expression.
+- **`"everyBinding": True`** says the expression may read any binding whole, as `$eval` can:
+  keep them all. The keys are those of the JSON form, which the other packages and the CLI share.
+- **A binding named after a built-in function** shadows it during the evaluation, but the
+  analysis takes the name as the built-in's: such an application cannot cut its input by it.
+
 ## Explaining results
 
 `evaluate_with_audit` evaluates and records how the result was reached; see the
@@ -276,8 +302,8 @@ for Python.
 
 The package ships type stubs and `py.typed`. `Expression`, `Document`, `Function` and
 `JlensError` are typed, and so are the values `evaluate_with_audit` takes and returns:
-`AuditResult`, `ErrorInfo` and `CaptureLimits`, which are `TypedDict`s. Results of `evaluate` are
-`Any`.
+`AuditResult`, `ErrorInfo` and `CaptureLimits`, which are `TypedDict`s, and those `reads` and
+`union_reads` return: `Reads`, a `TypedDict`, and `Read`. Results of `evaluate` are `Any`.
 
 ## What the package leaves out
 

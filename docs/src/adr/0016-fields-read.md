@@ -221,8 +221,11 @@ to keep all its bindings.
   the bindings, as `reads_with` does.
 
   *Amended with the implementation (roadmap 0.18, item 3): `reads` takes the bindings.*
-- **Python:** `Expression.reads()`, a `dict` in the JSON form, and `jlens.union_reads(reads)`,
-  with the stubs typing both.
+- **Python:** `Expression.reads(bindings=None)`, a `dict` in the JSON form, and
+  `jlens.union_reads(reads)`, with the stubs typing both. A Python function does not receive the
+  context of its call, so the package marks every one, as the WebAssembly package does.
+
+  *Amended with the implementation (roadmap 0.18, item 3): `reads` takes the bindings.*
 - **CLI:** `jlens reads`, given an expression or one or more `--file`s, prints the JSON form on
   stdout: one `Reads` for one expression, an object keyed by file for several, or their union
   with `--union`. It follows [ADR 0008](0008-cli-machine-contract.md): a parse error fails as
