@@ -3,3 +3,4 @@
 /crates/jlens-wasm/pkg
 node_modules/
 *.swp
+__pycache__/
