@@ -559,6 +559,7 @@ impl<'a> Processor<'a> {
             }
             step.attrs.seeking_parent.extend(ancestry(&predicate));
             let stage = Stage::Filter {
+                constant: is_constant(&predicate),
                 expr: Box::new(predicate),
                 span: stage_span,
             };
@@ -716,6 +717,28 @@ fn ancestry(value: &Node) -> Vec<SlotId> {
         slots.push(slot);
     }
     slots
+}
+
+/// Whether a predicate gives the same value for every item it is tested against: it is built
+/// from literals, negations, binary operators, array constructors and parentheses alone, so it
+/// reads neither its context nor a variable, and calls no function.
+fn is_constant(node: &Node) -> bool {
+    let attrs = &node.attrs;
+    if !attrs.stages.is_empty() || !attrs.predicate.is_empty() || attrs.group.is_some() {
+        return false;
+    }
+    match &node.kind {
+        NodeKind::Number { .. } | NodeKind::String { .. } | NodeKind::Bool { .. } => true,
+        NodeKind::Null => true,
+        NodeKind::Negate { expr } => crate::stack::grow(|| is_constant(expr)),
+        NodeKind::Binary { lhs, rhs, .. } => {
+            crate::stack::grow(|| is_constant(lhs) && is_constant(rhs))
+        }
+        NodeKind::Array { items } | NodeKind::Block { exprs: items, .. } => {
+            items.iter().all(|i| crate::stack::grow(|| is_constant(i)))
+        }
+        _ => false,
+    }
 }
 
 fn last_step(node: &mut Node) -> &mut Node {

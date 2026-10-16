@@ -468,6 +468,10 @@ pub enum Stage {
         expr: Box<Node>,
         /// Byte span of the predicate including brackets.
         span: Span,
+        /// The predicate is built from literals alone, so it gives the same value for every
+        /// item, and is evaluated once rather than once per item.
+        #[serde(skip)]
+        constant: bool,
     },
     /// A position variable binding (`#$i`) that follows a filter.
     Index {

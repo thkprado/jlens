@@ -685,10 +685,12 @@ impl<'a> Evaluator<'_, 'a> {
 
         for stage in &expr.attrs.predicate {
             if let Stage::Filter {
-                expr: predicate, ..
+                expr: predicate,
+                constant,
+                ..
             } = stage
             {
-                result = self.filter(predicate, result, env)?;
+                result = self.filter(predicate, *constant, result, env)?;
             }
         }
         if !matches!(expr.kind, NodeKind::Path { .. })
@@ -882,8 +884,8 @@ impl<'a> Evaluator<'_, 'a> {
                 None => self.eval(step, item, env)?,
             };
             for stage in &step.attrs.stages {
-                if let Stage::Filter { expr, .. } = stage {
-                    res = self.filter(expr, res, env)?;
+                if let Stage::Filter { expr, constant, .. } = stage {
+                    res = self.filter(expr, *constant, res, env)?;
                 }
             }
             if !res.is_undefined() {
@@ -927,7 +929,9 @@ impl<'a> Evaluator<'_, 'a> {
         let mut result = input;
         for stage in stages {
             match stage {
-                Stage::Filter { expr, .. } => result = self.filter(expr, result, env)?,
+                Stage::Filter { expr, constant, .. } => {
+                    result = self.filter(expr, *constant, result, env)?;
+                }
                 Stage::Index { var, .. } => {
                     if let Value::Array(a) = &result {
                         for (ee, tuple) in a.items().iter().enumerate() {
@@ -1034,7 +1038,13 @@ impl<'a> Evaluator<'_, 'a> {
     }
 
     /// Applies a predicate to a sequence (jsonata-js `evaluateFilter`).
-    fn filter(&mut self, predicate: &Node, input: Value<'a>, env: &Env<'a>) -> Result<Value<'a>> {
+    fn filter(
+        &mut self,
+        predicate: &Node,
+        constant: bool,
+        input: Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
         let is_tuple = input.has_flag(TUPLE_STREAM);
         let flags = SEQUENCE | if is_tuple { TUPLE_STREAM } else { 0 };
         let items = input.items_or_self();
@@ -1056,6 +1066,12 @@ impl<'a> Evaluator<'_, 'a> {
                 Value::Array(_) => return Ok(item),
                 other => results.push(other),
             }
+            return Ok(Value::array(results, flags));
+        }
+
+        // A tracer is given each item's test, so it sees the predicate evaluated per item.
+        if constant && self.tracer.is_none() {
+            self.filter_constant(predicate, &items, env, &mut results)?;
             return Ok(Value::array(results, flags));
         }
 
@@ -1107,6 +1123,44 @@ impl<'a> Evaluator<'_, 'a> {
             if let Some(t) = self.tracer.as_deref_mut() {
                 t.filter_item(predicate, index, ValueRef(item), results.len() > before);
             }
+        }
+        Ok(())
+    }
+
+    /// Tests the items against a predicate that gives the same value for each: evaluated once,
+    /// against the first item, and not at all when there is none, as when each item is tested.
+    /// The items pass in their order, an item given by several indexes once for each.
+    fn filter_constant(
+        &mut self,
+        predicate: &Node,
+        items: &[Value<'a>],
+        env: &Env<'a>,
+        results: &mut Vec<Value<'a>>,
+    ) -> Result<()> {
+        let Some(first) = items.first() else {
+            return Ok(());
+        };
+        let mut res = self.eval(predicate, first, env)?;
+        if res.is_numeric()? {
+            res = Value::array(vec![res], 0);
+        }
+        if res.is_array_of_numbers()? {
+            let len = items.len() as f64;
+            let mut indexes: Vec<usize> = res
+                .items_or_self()
+                .iter()
+                .filter_map(|n| {
+                    let mut ii = n.as_number().unwrap_or(f64::NAN).floor();
+                    if ii < 0.0 {
+                        ii += len;
+                    }
+                    (ii >= 0.0 && ii < len).then_some(ii as usize)
+                })
+                .collect();
+            indexes.sort_unstable();
+            results.extend(indexes.into_iter().map(|i| items[i].clone()));
+        } else if boolean(&res)? == Some(true) {
+            results.extend(items.iter().cloned());
         }
         Ok(())
     }

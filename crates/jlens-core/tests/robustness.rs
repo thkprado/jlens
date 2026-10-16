@@ -522,6 +522,61 @@ fn field_paths_agree_with_an_audit() {
     }
 }
 
+/// A predicate of literals alone is evaluated once without a tracer, and once per item in an
+/// audit. The results and errors are the same.
+#[test]
+fn constant_predicates_agree_with_an_audit() {
+    let input = json!({
+        "items": [{"n": [1, 2]}, {"n": 3}, [4, 5], "six", {"n": [7]}],
+        "one": {"n": 1}
+    });
+    let bindings = Bindings::new().var("x", json!([1, [2, 3], 4]));
+    let sources = [
+        "items[[0..2]]",
+        "items[[2, 0, 0, -1]]",
+        "items[[1.5, -0.5, -0, 7, -9]]",
+        "items[[]]",
+        "items[[1, 'a']]",
+        "items[true]",
+        "items[false]",
+        "items['x']",
+        "items['']",
+        "items[null]",
+        "items[1 + 1]",
+        "items[-1]",
+        "items[2 > 1]",
+        "items[1 = 1 and 2 = 3]",
+        "items[1 + 'a']",
+        "items[-(1 + 1)]",
+        "items[('x'; [0, 1])]",
+        "missing[1 + 'a']",
+        "one[[0, 0]]",
+        "one[[1]]",
+        "items.n[[0..1]]",
+        "items.n[[1]][]",
+        "items[[0, 1]]#$i.{'i': $i}",
+        "items#$i[[3, 4]].{'i': $i}",
+        "items@$o[[1]].$o",
+        "items[[0..4]][[1, 3]][-1]",
+        "[1, 2, 3][[0, 2]]",
+        "[][1 + 'a']",
+        "$x[[0, 1]]",
+        "$x[[1..9]]",
+        "$string(items[[0]])",
+    ];
+    for source in sources {
+        let expr = Expression::compile(source).unwrap();
+        let plain = expr.evaluate_with(Some(&input), &bindings, &Options::new());
+        let (audited, _) = expr.evaluate_audited(
+            Some(&input),
+            &bindings,
+            &Options::new(),
+            &jlens_core::audit::AuditOptions::full(),
+        );
+        assert_eq!(format!("{plain:?}"), format!("{audited:?}"), "{source}");
+    }
+}
+
 #[test]
 fn unread_input_is_returned_as_converted() {
     let input = json!({"n": [2.0, -0.0, 1e300, 18446744073709551615u64], "o": {"a": [1.5]}});

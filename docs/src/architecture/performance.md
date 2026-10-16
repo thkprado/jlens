@@ -418,6 +418,12 @@ where it is now parsed straight into a `Document`.
   looks its fields up instead of building a path's sequences, unless a field before the last
   holds an array. A name mapped over the items of a path (`code` in `items.code`) is looked up in each
   item without evaluating the step for it.
+- **Predicates of literals.** A predicate built from literals alone, with operators, array
+  constructors and parentheses, gives the same value for every item: `[[0..19]]` is evaluated
+  once, not once per item, and its indexes pick their items directly. A predicate that reads
+  its context or a variable, or calls a function, is still evaluated per item, as in jsonata-js. In
+  0.19 this halved `number formatting` (`items[[0..19]]...`, 203 against 92.7 µs with
+  `evaluate`).
 - **String literals.** `=` and `!=` with a string literal compare with the literal's text
   instead of building a string, and so does a grouping with a literal key, which finds its group
   by the text: in `items{type: {'total': ..., 'n': ...}}`, `'total'` and `'n'` are built once

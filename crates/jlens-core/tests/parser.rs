@@ -186,6 +186,58 @@ fn paths_predicates_and_constructors() {
     }
 }
 
+/// Whether each filter of the last step is evaluated once, as a predicate of literals alone.
+fn constant_filters(src: &str) -> Vec<bool> {
+    let root = parse(src).unwrap_or_else(|e| panic!("{src}: {e}")).root;
+    let node = match &root.kind {
+        NodeKind::Path { steps, .. } => steps.last().unwrap(),
+        _ => &root,
+    };
+    let stages = node.attrs.stages.iter().chain(&node.attrs.predicate);
+    stages
+        .filter_map(|s| match s {
+            Stage::Filter { constant, .. } => Some(*constant),
+            Stage::Index { .. } => None,
+        })
+        .collect()
+}
+
+#[test]
+fn predicates_of_literals_alone_are_constant() {
+    let constant = [
+        "items[[0..19]]",
+        "items[0]",
+        "items[true]",
+        "items[null]",
+        "items['a' & 'b']",
+        "items[-(1 + 2)]",
+        "items[(1; [2])]",
+        "items[1 > 2 or 3 in [1, 3]]",
+        "items[1 + 'a']",
+        "[1, 2][[0]]",
+    ];
+    for src in constant {
+        assert_eq!(constant_filters(src), [true], "{src}");
+    }
+    let per_item = [
+        "items[price > 1]",
+        "items[$]",
+        "items[$v]",
+        "items[[0..$n]]",
+        "items[$count([1])]",
+        "items[[1, 2][0]]",
+        "items[[1, 2]{'a': 1}]",
+        "items[($a := 1; $a)]",
+        "items[1 ? 0 : 1]",
+        "items[/a/]",
+        "items[{'a': 1}]",
+    ];
+    for src in per_item {
+        assert_eq!(constant_filters(src), [false], "{src}");
+    }
+    assert_eq!(constant_filters("items[0][a][[1]]"), [true, false, true]);
+}
+
 #[test]
 fn lambdas_signatures_and_tail_calls() {
     assert_eq!(
