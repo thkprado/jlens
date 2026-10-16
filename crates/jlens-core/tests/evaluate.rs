@@ -710,6 +710,23 @@ fn missing_arguments_behave_as_in_javascript() {
 }
 
 #[test]
+fn a_negative_limit_is_checked_before_a_missing_pattern() {
+    // Found by `cargo xtask differential`: jsonata-js checks the limit first.
+    for (source, code) in [
+        ("$split('abc', nothing, -2.5)", "D3020"),
+        ("$replace('abc', nothing, 'x', -1)", "D3011"),
+    ] {
+        let err = Expression::compile(source)
+            .unwrap()
+            .evaluate(Some(&json!(null)), &Bindings::new())
+            .unwrap_err();
+        assert_eq!(err.code(), code, "{source}");
+    }
+    assert_eq!(eval("$split('abc', nothing, 1)", json!(null)), None);
+    assert_eq!(eval("$replace('abc', nothing, 'x', 1)", json!(null)), None);
+}
+
+#[test]
 fn a_builtin_is_one_value_per_evaluation() {
     assert_eq!(eval("$sum = $sum", json!(null)), Some(json!(true)));
     assert_eq!(
