@@ -42,6 +42,9 @@ All notable changes are recorded here. The format follows
 - `$fromMillis` fails with `D1001` for NaN, which `$toMillis` returns for a date that does not
   exist (`$fromMillis($toMillis('2024-13-01'))`), as for a date beyond JavaScript's range. It
   wrote the epoch, "1970-01-01T00:00:00.000Z"; jsonata-js writes "NaN" in every component.
+- An order-by whose keys are NaN (`$^(0 / 0)`) orders its items as jsonata-js does, which
+  reads NaN as neither equal to nor less than another key and swaps both ways; jlens read it as
+  equal and kept the order.
 
 ## [0.18.0]
 

@@ -310,6 +310,55 @@ fn order_by_raises_the_first_error_jsonata_js_raises() {
 }
 
 #[test]
+fn order_by_swaps_nan_keys_both_ways_as_jsonata_js() {
+    // jsonata-js compares keys with `===` and `<`: a NaN key is neither equal to nor less than
+    // another, so the comparison asks for a swap either way. These are its 2.2.2 results.
+    let digits = json!([5, 3, 8, 1, 9, 2, 7, 4, 6, 0]);
+    for (expr, input, expected) in [
+        ("$^(0 / 0)", json!([1, 2, 3, 4, 5]), json!([5, 4, 3, 2, 1])),
+        (
+            "$^(>(0 / 0))",
+            json!([1, 2, 3, 4, 5]),
+            json!([1, 2, 3, 4, 5]),
+        ),
+        (
+            "$^($parseInteger('x', 'w'))",
+            json!([1, 2, 3]),
+            json!([3, 2, 1]),
+        ),
+        (
+            "$^($ = 3 ? 0 / 0 : $)",
+            digits.clone(),
+            json!([0, 1, 2, 4, 6, 7, 8, 9, 3, 5]),
+        ),
+        (
+            "$^(>($ = 3 ? 0 / 0 : $))",
+            digits.clone(),
+            json!([9, 8, 7, 6, 5, 3, 4, 2, 1, 0]),
+        ),
+        (
+            "$^($ % 2 = 0 ? 0 / 0 : $)",
+            digits,
+            json!([0, 6, 4, 1, 3, 5, 7, 2, 9, 8]),
+        ),
+        // The next term is never reached: the first one never ties.
+        (
+            "$^(0 / 0, >$)",
+            json!([1, 2, 3, 4, 5]),
+            json!([5, 4, 3, 2, 1]),
+        ),
+        // Undefined keys still go last.
+        (
+            "$^($ = 2 ? undefined : 0 / 0)",
+            json!([1, 2, 3, 4]),
+            json!([4, 3, 1, 2]),
+        ),
+    ] {
+        assert_eq!(eval(expr, input), Some(expected), "{expr}");
+    }
+}
+
+#[test]
 fn group_by_joins_each_group_as_jsonata_js_appends_it() {
     // The results of jsonata-js 2.2.2: a group of one item keeps it as it is, and the arrays
     // of a larger group are flattened one level.

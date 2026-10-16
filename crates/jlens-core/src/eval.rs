@@ -1543,10 +1543,12 @@ impl<'a> Evaluator<'_, 'a> {
                             .with_value("value2", &bb));
                     }
                 };
+                // As jsonata-js (`===`, then `<`): a NaN key is neither equal to nor less than
+                // another, so it asks for a swap both ways.
                 comp = match ordering {
+                    Some(std::cmp::Ordering::Equal) => continue,
                     Some(std::cmp::Ordering::Less) => -1,
-                    Some(std::cmp::Ordering::Greater) => 1,
-                    _ => continue,
+                    Some(std::cmp::Ordering::Greater) | None => 1,
                 };
                 if term.descending {
                     comp = -comp;
