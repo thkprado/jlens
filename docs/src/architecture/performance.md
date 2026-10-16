@@ -460,7 +460,8 @@ where it is now parsed straight into a `Document`.
   shifts in a buffer on the stack, a tie is read from the bits of the number, and the result
   is written once. `number formatting` (20 calls) takes 45.1 against 91.9 µs with `evaluate`
   and 33.9 against 81.0 µs against a `Document`, and `$round` with decimals is about three
-  times faster. What remains of a call is mostly Rust's fixed-precision formatting of the
+  times faster. In Python, it takes 45 against 75.9 µs with Python values in and 24.7 against
+  53 µs against a `Document`, against 155 and 146 µs in `jsonatapy`. What remains of a call is mostly Rust's fixed-precision formatting of the
   digits (about 0.1 µs), the rounding (0.16 µs) and the string of its result.
 - **String literals.** `=` and `!=` with a string literal compare with the literal's text
   instead of building a string, and so does a grouping with a literal key, which finds its group
