@@ -32,6 +32,7 @@ cargo clippy --workspace --all-targets            # CI sets RUSTFLAGS=-D warning
 cargo test --workspace                            # unit, snapshot, guide and property tests, conformance baseline
 cargo xtask gen-docs --check                      # after changing the function catalog or error messages
 cargo xtask doc-check                             # after touching docs/ or behaviour the book shows
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps   # after touching doc comments
 cargo clippy -p jlens-wasm --target wasm32-unknown-unknown
 cargo xtask wasm-test                             # after touching jlens-wasm or anything it exposes
 maturin develop && python -m pytest tests        # in crates/jlens-python, after touching it or anything it exposes

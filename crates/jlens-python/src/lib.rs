@@ -11,7 +11,7 @@
 //!   host functions, and the JSONata functions they receive arrive as `jlens.Function`s.
 //!   `evaluate_with_audit` returns the audit and the explanation as Python values.
 //! * `Expression.reads` tells which fields of the input and the bindings an expression reads,
-//!   and [`union_reads`] unites what several expressions read (ADR 0016).
+//!   and `union_reads` unites what several expressions read (ADR 0016).
 //!
 //! Errors raise `jlens.JlensError`, whose offsets count code points, the unit of Python's `str`.
 //! The type stubs are in `python/jlens/_jlens.pyi`.
