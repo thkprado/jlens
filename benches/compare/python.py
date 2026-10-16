@@ -1,17 +1,19 @@
 """Compares jlens with the other JSONata implementations for Python, on ../cases.json.
 
-The implementations all install a module named `jsonata`, except jlens, so each one lives in
-its own virtual environment; this script runs in each of them:
+Three of the packages install a module named `jsonata`, so each package lives in a virtual
+environment of its own; this script runs in each of them:
 
-    python python.py speed  jlens=<python> jsonata-python=<python> jsonata=<python> jsonata-rs=<python>
-    python python.py limits jlens=<python> jsonata-python=<python> jsonata=<python> jsonata-rs=<python>
+    python python.py speed  jlens=<python> jsonatapy=<python> jsonata-python=<python> ...
+    python python.py limits jlens=<python> jsonatapy=<python> jsonata-python=<python> ...
 
-where <python> is the interpreter of the environment that holds that package (`jlens`,
-`jsonata-python`, `jsonata` or `jsonata-rs`). Only the standard library is needed.
+where each name is a key of IMPLEMENTATIONS (`jlens`, `jsonatapy`, `jsonata-python`, `jsonata`,
+`jsonata-rs`), and <python> the interpreter of the environment that holds that package. Only the
+standard library is needed.
 
 `speed` prints, for each case, the median time per evaluation over several rounds, with the
-input as Python values; for jlens, also against a `Document` converted once. It first checks
-that each implementation gives jlens's result.
+input as Python values; for the packages that can convert an input once and evaluate against it
+(jlens's `Document`, jsonatapy's `JsonataData`), also that way. It first checks that each
+implementation gives jlens's result.
 
 `limits` runs each case of LIMITS in a process of its own, so that a crash ends that process
 only, and prints what came out: a result, an exception, the process killed by a signal, or
@@ -45,9 +47,44 @@ class Jlens:
     def evaluate(self, compiled, input, timeout=None, max_depth=None):
         return compiled.evaluate(input, timeout=timeout, max_depth=max_depth)
 
+    def document(self, input):
+        return self.jlens.Document(input)
+
+    def evaluate_document(self, compiled, document):
+        return compiled.evaluate_document(document)
+
     def error(self, error):
         if isinstance(error, self.jlens.JlensError):
             return f"`{error.code}`"
+        return None
+
+
+class Jsonatapy:
+    """jsonatapy, the Python package of jsonata-core, a JSONata engine in Rust."""
+
+    def __init__(self):
+        import jsonatapy
+
+        self.jsonatapy = jsonatapy
+        self.version = _version("jsonatapy")
+
+    def compile(self, source):
+        return self.jsonatapy.compile(source)
+
+    def evaluate(self, compiled, input, timeout=None, max_depth=None):
+        return compiled.evaluate(input, timeout=_ms(timeout), max_stack_depth=max_depth)
+
+    def document(self, input):
+        return self.jsonatapy.JsonataData(input)
+
+    def evaluate_document(self, compiled, document):
+        return compiled.evaluate_with_data(document)
+
+    def error(self, error):
+        # A ValueError whose message starts with the code: "D1012: Evaluation timeout ..."
+        code = str(error).split(":")[0]
+        if isinstance(error, ValueError) and len(code) == 5 and code[1:].isdigit():
+            return f"`{code}`"
         return None
 
 
@@ -132,6 +169,7 @@ class JsonataRs:
 
 IMPLEMENTATIONS = {
     "jlens": Jlens,
+    "jsonatapy": Jsonatapy,
     "jsonata-python": JsonataPython,
     "jsonata": JsonataWrapper,
     "jsonata-rs": JsonataRs,
@@ -197,7 +235,8 @@ def speed_child(name):
     impl = IMPLEMENTATIONS[name]()
     input, cases = _cases()
     out = {"version": impl.version, "python": sys.version.split()[0], "cases": {}}
-    document = impl.jlens.Document(input) if name == "jlens" else None
+    out["document"] = hasattr(impl, "document")
+    document = impl.document(input) if hasattr(impl, "document") else None
     for case, source in cases:
         entry = {}
         try:
@@ -205,7 +244,8 @@ def speed_child(name):
             entry["result"] = _normalize(impl.evaluate(compiled, input))
             entry["evaluate"] = _measure(lambda: impl.evaluate(compiled, input))
             if document is not None:
-                entry["document"] = _measure(lambda: compiled.evaluate_document(document))
+                assert _normalize(impl.evaluate_document(compiled, document)) == entry["result"]
+                entry["document"] = _measure(lambda: impl.evaluate_document(compiled, document))
         except Exception as error:  # noqa: BLE001 - reported in the table
             entry["error"] = f"{type(error).__name__}: {str(error)[:100]}"
         out["cases"][case] = entry
@@ -235,28 +275,28 @@ def speed(pythons):
             continue
         runs[name] = json.loads(proc.stdout.strip().splitlines()[-1])
     reference = runs.get("jlens")
-    others = [n for n in runs if n != "jlens"]
-    print(", ".join(f"{n} {r['version']}" for n, r in runs.items()), f"on Python {next(iter(runs.values()))['python']}\n")
-    header = [f"{n} {runs[n]['version']}" for n in others]
-    if reference:
-        header += ["jlens `evaluate`", "jlens `evaluate_document`"]
+    order = [n for n in runs if n != "jlens"] + (["jlens"] if reference else [])
+    print(", ".join(f"{n} {runs[n]['version']}" for n in order), f"on Python {runs[order[0]]['python']}\n")
+    columns = []  # (name, key)
+    for name in order:
+        columns.append((name, "evaluate"))
+        if runs[name]["document"]:
+            columns.append((name, "document"))
+    header = [f"{n} {'converted once' if key == 'document' else ''}".strip() for n, key in columns]
     print("| Case | " + " | ".join(header) + " |")
     print("|---|" + "---:|" * len(header))
     _, cases = _cases()
     for case, _ in cases:
         expected = reference["cases"][case].get("result") if reference else None
         cells = []
-        for name in others:
+        for name, key in columns:
             entry = runs[name]["cases"][case]
             if "error" in entry:
                 cells.append(f"fails: {entry['error']}")
             elif reference and entry["result"] != expected:
                 cells.append(f"differs: {json.dumps(entry['result'])[:60]}")
             else:
-                cells.append(_fmt(entry["evaluate"]))
-        if reference:
-            entry = reference["cases"][case]
-            cells += [_fmt(entry["evaluate"]), _fmt(entry["document"])] if "error" not in entry else [entry["error"], ""]
+                cells.append(_fmt(entry[key]))
         print(f"| {case} | " + " | ".join(cells) + " |")
 
 

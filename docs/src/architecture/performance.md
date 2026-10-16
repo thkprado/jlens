@@ -192,38 +192,45 @@ filter + aggregate, 11× on the shipping rule and 10× on group-by and on sort +
 
 ### Python against the other implementations
 
-`benches/compare/python.py` compares the Python package with the three other JSONata packages
-on PyPI: `jsonata-python`, a port of jsonata-java in pure Python; `jsonata`, which runs
-jsonata-js in the Duktape JavaScript interpreter; and `jsonata-rs`, a port of jsonata-java in
-Rust. All four install a module named `jsonata` but jlens, so each needs a virtual environment
-of its own; the script's docstring says how to run it. It first checks that each package gives
-jlens's result for each case, and all of them do.
+`benches/compare/python.py` compares the Python package with the four other JSONata packages on
+PyPI: `jsonatapy`, the Python package of jsonata-core, a JSONata engine in Rust;
+`jsonata-python`, a port of jsonata-java in pure Python; `jsonata`, which runs jsonata-js in the
+Duktape JavaScript interpreter; and `jsonata-rs`, a port of jsonata-java in Rust. Three of them
+install a module named `jsonata`, so each package needs a virtual environment of its own; the
+script's docstring says how to run it. It first checks that each package gives jlens's result
+for each case, and all of them do.
 
 Measured for 0.17 (c4ba685) on Python 3.14.8, under Linux: Ubuntu 26.04 under WSL 2, on the
 machine above. On Windows, the module that `jsonata` builds cannot load jsonata-js ("Unable to
-load JSONATA into duktape JavaScript engine"). The input is the document as Python values; for
-jlens, also a `Document` converted once:
+load JSONATA into duktape JavaScript engine"). `jsonatapy` has wheels up to Python 3.13 and was
+built from its source distribution. The input is the document as Python values; for jlens and
+`jsonatapy`, also an input converted once (`Document`, `JsonataData`):
 
-| Case | jsonata-python 0.7.1 | jsonata 0.2.5 | jsonata-rs 0.1.4 | jlens `evaluate` | jlens `evaluate_document` |
-|---|---:|---:|---:|---:|---:|
-| path | 1.52 ms | 1.38 ms | 222 µs | 1.5 µs | 0.5 µs |
-| names over items | 2.00 ms | 9.15 ms | 246 µs | 159 µs | 6.9 µs |
-| filter + aggregate | 4.65 ms | 113 ms | 397 µs | 198 µs | 43 µs |
-| group-by | 6.10 ms | 136 ms | 849 µs | 235 µs | 76 µs |
-| sort + map | 24.5 ms | 1.06 s | 1.87 ms | 451 µs | 295 µs |
-| strings | 4.44 ms | 101 ms | 453 µs | 224 µs | 69 µs |
-| regex | 5.05 ms | 96.5 ms | 3.86 ms | 279 µs | 122 µs |
-| number formatting | 4.14 ms | 63.6 ms | 438 µs | 191 µs | 141 µs |
-| object constructor | 6.03 ms | 143 ms | 816 µs | 453 µs | 295 µs |
-| transform | 5.79 ms | 123 ms | 1.79 ms | 934 µs | 757 µs |
-| recursion | 41.0 ms | 3.49 s | 2.26 ms | 698 µs | 695 µs |
-| shipping rule | 9.52 ms | 265 ms | 693 µs | 268 µs | 105 µs |
+| Case | jsonata-python 0.7.1 | jsonata 0.2.5 | jsonata-rs 0.1.4 | jsonatapy 2.2.11 | jsonatapy, `JsonataData` | jlens `evaluate` | jlens `evaluate_document` |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| path | 1.51 ms | 1.38 ms | 216 µs | 0.7 µs | 0.4 µs | 1.5 µs | 0.5 µs |
+| names over items | 1.99 ms | 9.18 ms | 249 µs | 25 µs | 4.7 µs | 156 µs | 6.5 µs |
+| filter + aggregate | 4.67 ms | 113 ms | 407 µs | 124 µs | 88 µs | 199 µs | 42 µs |
+| group-by | 6.19 ms | 136 ms | 861 µs | 166 µs | 108 µs | 233 µs | 73 µs |
+| sort + map | 25.0 ms | 1.07 s | 1.89 ms | 456 µs | 393 µs | 439 µs | 276 µs |
+| strings | 4.50 ms | 102 ms | 464 µs | 163 µs | 136 µs | 225 µs | 65 µs |
+| regex | 5.14 ms | 100 ms | 3.88 ms | 2.67 ms | 2.62 ms | 277 µs | 95 µs |
+| number formatting | 4.20 ms | 64.1 ms | 439 µs | 155 µs | 144 µs | 185 µs | 135 µs |
+| object constructor | 6.09 ms | 147 ms | 815 µs | 182 µs | 140 µs | 439 µs | 290 µs |
+| transform | 5.96 ms | 124 ms | 1.80 ms | 1.01 ms | 877 µs | 888 µs | 732 µs |
+| recursion | 41.7 ms | 3.50 s | 2.27 ms | 730 µs | 840 µs | 683 µs | 677 µs |
+| shipping rule | 9.63 ms | 268 ms | 693 µs | 331 µs | 238 µs | 264 µs | 102 µs |
 
-- jlens `evaluate` is the fastest of the four on every case. Against `jsonata-rs`, the fastest
-  of the others, it takes 1.5 times less time on `names over items` and up to 14 times less on
-  `regex`; against `jsonata-python`, 6 to 59 times less, and 1,000 times less on `path`.
-- On `path`, the others take 0.2 to 1.5 ms where jlens takes 1.5 µs: they read the whole input
-  before evaluating, and jlens reads the two objects the path reaches.
+- With Python values in, `jsonatapy` is the fastest on seven cases and jlens on five. jlens
+  reads the input more slowly: `names over items`, which reads every item and does little with
+  each, takes 156 µs, against 25 µs, and 6.5 µs once the input is converted. Where the
+  evaluation itself dominates, jlens leads: by 9.6 times on `regex`, 20% on the shipping rule.
+- With the input converted once, jlens is the fastest on nine cases, by up to 2.3 times on the
+  shipping rule and 28 times on `regex`; `jsonatapy` on `path`, `names over items` and the
+  object constructor, which takes it half the time.
+- Against the three others, jlens `evaluate` takes 1.6 (`names over items`) to 14 times (`regex`)
+  less time than `jsonata-rs`, the fastest of them. They read the whole input before evaluating:
+  on `path` they take 0.2 to 1.5 ms where jlens takes 1.5 µs.
 - `jsonata` passes the input and the result through JSON text and compiles the expression at
   each call. It pastes the expression into JavaScript source between single quotes, so the
   comparison escapes the quotes in it.
@@ -232,27 +239,31 @@ How each behaves at the limits, measured by `python.py limits` on the same syste
 runs in a process of its own, killed after 30 seconds. `$string($)` reads the whole input, and
 the cyclic input is `{"n": 1, "child": {"parent": <the input>}}`:
 
-| Case | jsonata-python | jsonata | jsonata-rs | jlens |
-|---|---|---|---|---|
-| Input nested 900 levels, `$string($)` | result | result | result | result |
-| Input nested 2,000 levels | result | exception, no code | result | `U1001` |
-| Input nested 100,000 levels | `RecursionError` | `RecursionError` | process crashes (`SIGSEGV`) | `U1001` |
-| Cyclic input, `n` | `RecursionError` | exception: circular reference | process crashes (`SIGSEGV`) | `1` |
-| Cyclic input, `$string($)` | `RecursionError` | exception: circular reference | process crashes (`SIGSEGV`) | `U1004` |
-| Unbounded recursion, `1 + $f($n + 1)` | `RecursionError` | exception, no code, after 5.4 s | `STACK_OVERFLOW` | `D1011` |
-| The same, with a depth limit of 500 | `D1011` | no such option | `STACK_OVERFLOW` | `D1011` |
-| Endless tail call, `$f($n + 1)` | runs on | runs on | runs on | runs on |
-| The same, with a timeout of 1 s | `D1012` after 1.0 s | no such option | `TIMEOUT` after 1.0 s | `D1012` after 1.0 s |
+| Case | jsonata-python | jsonata | jsonata-rs | jsonatapy | jlens |
+|---|---|---|---|---|---|
+| Input nested 900 levels, `$string($)` | result | result | result | result | result |
+| Input nested 2,000 levels | result | exception, no code | result | result | `U1001` |
+| Input nested 100,000 levels | `RecursionError` | `RecursionError` | process crashes (`SIGSEGV`) | process crashes (`SIGSEGV`) | `U1001` |
+| Cyclic input, `n` | `RecursionError` | exception: circular reference | process crashes (`SIGSEGV`) | `1` | `1` |
+| Cyclic input, `$string($)` | `RecursionError` | exception: circular reference | process crashes (`SIGSEGV`) | process crashes (`SIGSEGV`) | `U1004` |
+| Unbounded recursion, `1 + $f($n + 1)` | `RecursionError` | exception, no code, after 5.8 s | `STACK_OVERFLOW` | `U1001` | `D1011` |
+| The same, with a depth limit of 500 | `D1011` | no such option | `STACK_OVERFLOW` | `U1001` | `D1011` |
+| Endless tail call, `$f($n + 1)` | runs on | runs on | runs on | `U1001` | runs on |
+| The same, with a timeout of 1 s | `D1012` after 1.0 s | no such option | `TIMEOUT` after 1.0 s | `D1012` after 1.0 s | `D1012` after 1.0 s |
 
 - jlens fails with a JSONata error in each case, and never ends the process. It refuses input
-  nested more than 1,000 levels, which the others accept as long as their stack or Python's
-  recursion limit lasts: a fixed limit that fails the same way on every platform, at the cost of
-  inputs between 1,000 levels and that point.
-- A cycle fails in jlens only when the expression reaches it; the others read the whole input
-  first, so `n` fails too.
-- `jsonata-rs` crashes the interpreter on deep or cyclic input. On Windows, whose main thread
-  has a smaller stack, unbounded recursion crashes it too.
-- No package stops an endless evaluation by default: set a timeout.
+  nested more than 1,000 levels, which most of the others accept as long as their stack or
+  Python's recursion limit lasts: a fixed limit that fails the same way on every platform, at the
+  cost of inputs between 1,000 levels and that point.
+- jlens and `jsonatapy` meet a cycle only when the expression reaches it; the others read the
+  whole input first, so `n` fails too.
+- `jsonata-rs` and `jsonatapy` crash the interpreter on input nested 100,000 levels, and when
+  they read a cycle. On Windows, whose main thread has a smaller stack, unbounded recursion
+  crashes `jsonata-rs` too.
+- `jsonatapy` limits recursion to 302 levels, even with a depth limit of 500, and tail calls to
+  500: the endless tail call stops after 0.02 s, and so does a loop of 100,000 tail calls that
+  jlens finishes.
+- Otherwise, no package stops an endless evaluation by default: set a timeout.
 
 ## Using the API efficiently
 
