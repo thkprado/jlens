@@ -827,6 +827,7 @@ name = "jlens-wasm"
 version = "0.18.0"
 dependencies = [
  "console_error_panic_hook",
+ "foldhash",
  "jlens-core",
  "jlens-schema",
  "js-sys",

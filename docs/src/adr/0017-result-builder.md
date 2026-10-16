@@ -70,7 +70,7 @@ Three facts bound the design:
 4. **The packages adopt it where it pays.** The Python package implements a builder over
    Python objects, with one `str` per key for the whole result. The WebAssembly package
    adopts it if a measurement shows a gain over building `serde_json` values and converting
-   them with `serde-wasm-bindgen`.
+   them through JSON text and `JSON.parse`.
 
 ## Alternatives not taken
 
@@ -98,3 +98,9 @@ Three facts bound the design:
 - A builder does not see the evaluation's values, only JSON: the value model stays private,
   as ADR 0010 kept it.
 - The tracer interface still sees results through `audit::ValueRef`, as JSON.
+- The WebAssembly package adopted it in 0.19. Like its input, read one level per call to a
+  JavaScript helper (ADR 0010), its builder writes the result as a list of operations, with
+  its numbers and strings, and one call to a JavaScript helper builds the values, decoding
+  each key once. The object constructor case evaluates against a `Document` in 305 µs instead
+  of 466 µs. `evaluateJson` still builds `serde_json` values: a builder gets each key after
+  its value, so it cannot write the JSON text in order.

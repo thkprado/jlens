@@ -21,6 +21,7 @@
 
 mod convert;
 mod host;
+mod output;
 mod service;
 mod source;
 
@@ -37,6 +38,7 @@ use wasm_bindgen::prelude::*;
 
 use convert::{Offsets, Registered, error_json, from_js, js_error, ser_to_js, to_js, type_error};
 use host::Scope;
+use output::{JsBuilder, NoInput};
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPES: &str = include_str!("types.d.ts");
@@ -126,20 +128,25 @@ impl Expression {
         let scope = Scope::enter(&self.offsets);
         let (bindings, options) = self.arguments(&scope, bindings, options)?;
         let options = convert::options(options.as_ref())?;
-        let result = match input.filter(|input| !input.is_undefined()) {
+        let mut builder = JsBuilder::default();
+        let write = |out: jlens_core::output::Output<'_, '_>| out.write(&mut builder);
+        let written = match input.filter(|input| !input.is_undefined()) {
             Some(input) => {
                 let source = source::JsSource::input(input);
                 self.inner
-                    .evaluate_source(&source, &bindings, &options)
+                    .evaluate_source_to(&source, &bindings, &options, write)
                     .map_err(|e| {
                         source
                             .exception(&e)
                             .unwrap_or_else(|| self.error(&scope, &e))
                     })?
             }
-            None => self.run(&scope, None, &bindings, &options)?,
+            None => self
+                .inner
+                .evaluate_source_to(&NoInput, &bindings, &options, write)
+                .map_err(|e| self.error(&scope, &e))?,
         };
-        Ok(result.map_or(JsValue::UNDEFINED, |v| to_js(&v)))
+        Ok(builder.finish(written))
     }
 
     /// Like `evaluate`, with the input document and the result as JSON text. This avoids
@@ -178,8 +185,14 @@ impl Expression {
         let scope = Scope::enter(&self.offsets);
         let (bindings, options) = self.arguments(&scope, bindings, options)?;
         let options = convert::options(options.as_ref())?;
-        let result = self.run(&scope, Some(&document.inner), &bindings, &options)?;
-        Ok(result.map_or(JsValue::UNDEFINED, |v| to_js(&v)))
+        let mut builder = JsBuilder::default();
+        let written = self
+            .inner
+            .evaluate_document_to(&document.inner, &bindings, &options, |out| {
+                out.write(&mut builder)
+            })
+            .map_err(|e| self.error(&scope, &e))?;
+        Ok(builder.finish(written))
     }
 
     /// Evaluates the expression and records how the result was reached. Never throws for

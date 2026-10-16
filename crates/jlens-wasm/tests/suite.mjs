@@ -63,6 +63,30 @@ export const cases = [
     equal(result.a, [2e21, 0.1 + 0.2, 1 / 3, 2 ** 64], "numbers");
   }],
 
+  ["results are the values JSON.parse builds", (j) => {
+    const source = `[
+      {"__proto__": 1, "é\u{1d11e}": "aé\u{1d11e}b", "f": $sum},
+      {"__proto__": {"__proto__": [2]}, "é\u{1d11e}": ""},
+      -0, [], {}, [[[]]], [1, $sum, "x"], true, false, null,
+      $.items.{"code": code, "kéy": [type]}
+    ]`;
+    const expr = new j.Expression(source);
+    const input = { items: [{ code: "1", type: "a" }, { code: "2", type: "\u{1d11e}" }] };
+    const results = [expr.evaluate(input), expr.evaluateDocument(new j.Document(input))];
+    for (const result of results) {
+      equal(result, JSON.parse(expr.evaluateJson(JSON.stringify(input))), "as JSON.parse");
+      const [first, second] = result;
+      ok(Object.hasOwn(first, "__proto__") && Object.getPrototypeOf(first) === Object.prototype, "own __proto__");
+      ok(Object.hasOwn(second.__proto__, "__proto__"), "own __proto__, key seen before");
+      equal(Object.keys(first), ["__proto__", "é\u{1d11e}"], "keys");
+      ok(Object.is(result[2], 0), "-0 is written 0");
+    }
+    // Parts of the input returned as they are, read or not.
+    const nested = { a: [{ "é": "x\u{1d11e}" }, { b: [1, null, true] }], c: { d: {} } };
+    equal(new j.Expression("$").evaluate(nested), nested, "input returned");
+    equal(new j.Expression("[a[0], $]").evaluate(nested), [nested.a[0], nested], "read and unread");
+  }],
+
   ["documents", (j) => {
     const doc = new j.Document(order);
     const rules = ["$sum(items.(unitPrice * quantity))", "customer.login", "items[type = $t].code"];

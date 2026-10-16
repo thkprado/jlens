@@ -161,18 +161,18 @@ that its asynchronous `evaluate` requires.
 
 | Case | jsonata-js 2.2.2 | jlens-wasm `evaluate` | jlens-wasm `evaluateJson` | jlens-wasm `evaluateDocument` |
 |---|---:|---:|---:|---:|
-| path | 2.1 µs | 6.8 µs | 110 µs | 1.6 µs |
-| names over items | 61 µs | 327 µs | 196 µs | 15 µs |
-| filter + aggregate | 612 µs | 359 µs | 280 µs | 51 µs |
-| group-by | 996 µs | 415 µs | 329 µs | 102 µs |
-| sort + map | 4.81 ms | 815 µs | 690 µs | 488 µs |
-| strings | 571 µs | 416 µs | 347 µs | 104 µs |
-| regex | 614 µs | 513 µs | 390 µs | 195 µs |
-| number formatting | 540 µs | 584 µs | 482 µs | 267 µs |
-| object constructor | 1.17 ms | 794 µs | 654 µs | 480 µs |
-| transform | 1.32 ms | 1.59 ms | 1.47 ms | 1.25 ms |
-| recursion | 7.54 ms | 1.11 ms | 1.21 ms | 1.14 ms |
-| shipping rule | 1.64 ms | 462 µs | 423 µs | 145 µs |
+| path | 2.1 µs | 6.7 µs | 109 µs | 1.5 µs |
+| names over items | 75 µs | 331 µs | 196 µs | 15 µs |
+| filter + aggregate | 616 µs | 360 µs | 279 µs | 51 µs |
+| group-by | 985 µs | 410 µs | 330 µs | 99 µs |
+| sort + map | 4.78 ms | 773 µs | 679 µs | 455 µs |
+| strings | 576 µs | 410 µs | 347 µs | 101 µs |
+| regex | 623 µs | 504 µs | 381 µs | 187 µs |
+| number formatting | 536 µs | 593 µs | 492 µs | 284 µs |
+| object constructor | 1.19 ms | 621 µs | 625 µs | 305 µs |
+| transform | 1.31 ms | 1.27 ms | 1.45 ms | 947 µs |
+| recursion | 7.62 ms | 1.03 ms | 1.13 ms | 1.03 ms |
+| shipping rule | 1.61 ms | 463 µs | 418 µs | 147 µs |
 
 jsonata-js works on the JavaScript objects it is given, so it never pays for converting the
 input. jlens-wasm `evaluate` reads the input object as the expression reaches it: an object or
@@ -183,21 +183,30 @@ objects. An expression that reads every item pays what converting the whole inpu
 and Python inputs, a JavaScript object is still read a whole level at a time: a path step does
 not read its one field alone, so `names over items` converts every item.
 
-`evaluate` is faster than jsonata-js on eight of the twelve cases, by up to 6.8× on recursion.
-It is slower on four:
+`evaluate` is faster than jsonata-js on nine of the twelve cases, by up to 7.4× on recursion.
+It is slower on three:
 - `path`, which does almost no work, so the overhead of calling into WebAssembly dominates;
-- `names over items`, by 5.3×: it reads every item and does little with each, so converting
+- `names over items`, by 4.4×: it reads every item and does little with each, so converting
   the input is nearly all of its time;
-- `number formatting`, by 8%, because it reads every item;
-- `transform`, whose deep copy of the document is the job V8's own JSON round trip does best.
+- `number formatting`, by 11%, because it reads every item.
 
 Against a `Document` converted once, jlens-wasm is faster on all twelve cases, by up to 12× on
 filter + aggregate, 11× on the shipping rule and 10× on group-by and on sort + map. On
-`transform` its lead is 6%.
+`transform` its lead is 38%.
+
+From 0.19 on, `evaluate` and `evaluateDocument` build their result straight into
+JavaScript values ([ADR 0017](../adr/0017-result-builder.md)): the builder writes it as a list
+of operations, its numbers and its strings, and one call to a JavaScript helper builds the
+values, decoding each key once. Before, the result was built as `serde_json` values, printed
+as JSON text and given to `JSON.parse`. The cases with large results gained most: against a
+`Document`, the object constructor took 466 µs, the transform 1.24 ms and `$` alone 376 µs,
+against 305 µs, 947 µs and 114 µs now. In 0.18.0, `transform` was slower than jsonata-js with
+`evaluate`.
 
 `evaluateJson` takes JSON text and returns JSON text. From 0.18.0 on, it parses the input
 without the fields the expression does not read ([ADR 0016](../adr/0016-fields-read.md)), so
-it is faster than `evaluate` on ten of the twelve cases. In 0.17.0, which parsed the whole text,
+it is faster than `evaluate` on seven of the twelve cases; it still writes its result through
+`serde_json` values. In 0.17.0, which parsed the whole text,
 `path` took 296 µs, `names over items` 307 µs and `regex` 487 µs; the cases that read most of
 the input, `transform` and the shipping rule, take the same time as then. On `path`, parsing
 24 KB of text still costs far more than the evaluation: an input evaluated more than once is
