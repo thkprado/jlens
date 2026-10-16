@@ -277,8 +277,10 @@ keep. The package follows the WebAssembly package: the same objects, the same er
 An application that evaluates rules builds their input first, often from a database or a
 service. Knowing which fields a rule reads, it could fetch only those; it could also show which
 rules depend on a field. jlens can answer from the expression alone: `$sum(items.quantity)`
-reads `quantity` in each item of `items`, and nothing else. The same answer lets jlens skip,
-when it parses JSON text, the fields no evaluation will read.
+reads `quantity` in each item of `items`, and nothing else. The answers of several rules
+evaluated on the same input combine: their union is what all of them read. The same answer, for
+one rule or their union, lets jlens skip, when it parses JSON text, the fields no evaluation
+will read.
 
 JSONata is dynamic, so the answer is an upper bound. Where the analysis cannot follow, it says
 that a value is read whole: the wildcards `*` and `**`, the parent operator `%`, `$keys`,
@@ -291,10 +293,10 @@ result as on the whole input.
 
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
-| 1 | ADR 0016, the fields an expression reads: what the analysis returns (a tree of field names, the items of an array, and values read whole, for the input and for each binding), how each construct of the language maps to it and where it gives up, how `@`, `#` and `%` take part, and its API in Rust, WebAssembly, Python and the CLI | The ADR accepted, with the table of constructs | |
-| 2 | The analysis in `jlens-core` and its Rust API | A test per construct; every case of the suite gives the same result or error on its input cut down to the fields reported; property tests: no panic, deep expressions within the nesting cap | |
+| 1 | ADR 0016, the fields an expression reads: what the analysis returns (a tree of field names, the items of an array, and values read whole, for the input and for each binding), the union of the results of several expressions, how each construct of the language maps to it and where it gives up, how `@`, `#` and `%` take part, and its API in Rust, WebAssembly, Python and the CLI (given several expression files, a result for each or their union) | The ADR accepted, with the table of constructs | |
+| 2 | The analysis in `jlens-core` and its Rust API, with the union | A test per construct; every case of the suite gives the same result or error on its input cut down to the fields reported; property tests: no panic, deep expressions within the nesting cap, the union commutative, associative and idempotent, a value read whole absorbing the rest, and an input cut down to the union of several results giving each expression its result | |
 | 3 | The API in the WebAssembly and Python packages and the CLI, documented in the book | `types.d.ts` and the stubs; cases in `suite.mjs` and pytest; a section in the guides, with examples `doc-check` runs | |
-| 4 | Parsing JSON text without the fields an expression does not read (`Document::parse` for an expression, `evaluate_json`, the CLI), kept only if it pays | The parse of wide documents measured before and after; the outcome on the performance page, kept or not | |
+| 4 | Parsing JSON text without the fields no evaluation reads: `Document::parse` given the result of the analysis, so that one document serves one expression or the union of several, `evaluate_json`, the CLI; kept only if it pays | The parse of wide documents measured before and after; the outcome on the performance page, kept or not | |
 | 5 | Release 0.18.0 | The release checklist | |
 
 ## 0.19: an API to keep, toward 1.0
