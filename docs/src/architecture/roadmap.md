@@ -255,7 +255,7 @@ that cost from 350 to 106 ns for `1`, but a path still takes about seven times a
 
 JSONata in Python has a pure-Python port, a wrapper of jsonata-js, a young Rust port of
 jsonata-java and the Python package of jsonata-core (`jsonatapy`). jlens would bring its conformance, audits, schemas and speed to Python, where data
-pipelines and rules live, and more people using it would tell 0.19 which parts of the API to
+pipelines and rules live, and more people using it would tell 0.20 which parts of the API to
 keep. The package follows the WebAssembly package: the same objects, the same errors, beta until
 1.0.
 
@@ -301,12 +301,47 @@ result as on the whole input.
 | 4 | Parsing JSON text without the fields no evaluation reads: `Document::parse` given the result of the analysis, so that one document serves one expression or the union of several, `evaluate_json`, the CLI; kept only if it pays | The parse of wide documents measured before and after; the outcome on the performance page, kept or not | **done**: in Rust, `Document::parse_cut`, kept: a 1 MB document cut to two fields of each record parses in a quarter of the time, a document read whole in the same time. In the WebAssembly and Python packages, `Document.fromJson` / `from_json` take a `Read`, and `evaluateJson` / `evaluate_json` cut their input by the expression's reads. `jlens eval` does too: `$sum(items.price)` on a 10 MB document runs in 27 ms instead of 76, and `--ndjson` in about half the time |
 | 5 | Release 0.18.0 | The release checklist | **done**; the npm channel of the CLI is left out (0.14 #7) |
 
-## 0.19: an API to keep, toward 1.0
+## 0.19: closing on jsonatapy
+
+With Python values in, `jsonatapy` is still faster than jlens on four of the twelve cases of
+`benches/compare/python.py`, measured again on 0.18.0 (WSL, Python 3.14.8): `path` (1.1 against
+0.7 µs), `names over items` (38 against 26 µs), number formatting (169 against 161 µs) and the
+object constructor (367 against 195 µs). Timing variants of each case and profiling them with
+`perf` found three causes:
+
+- **Converting the result.** Without its result converted, the object constructor evaluates
+  faster in jlens: `$count(items.{...})` takes 155 µs against a `Document`, 177 µs in
+  `jsonatapy`. Converting the 200 objects to `dict`s then costs jlens about 138 µs. A result
+  is converted twice, into a `serde_json::Value` (`Value::to_json_spending`, a map with
+  SipHash keys) and then into Python objects, with a new `str` for each key of each `dict`. A
+  string of the result costs 90 ns, against 24 ns.
+- **Reading an array of objects.** Each `dict` of a `list` that the evaluation does not read
+  costs 98 ns, against 30 ns: `$count(items)` takes 20 against 6.5 µs. About 40% of it is
+  `malloc` and `free`, since each item allocates twice, its boxed source and its `Rc<Object>`.
+  Looking a field up in the `dict` costs the same in both.
+- **The evaluator.** A predicate is evaluated once per item even when it does not depend on
+  the item: `[[0..19]]` builds the range 200 times, and `$count(items[[0..19]])` takes 87 µs.
+  An object constructor goes through grouping even for a single item: `$count(items.{'kind':
+  'item'})` takes 73 against 40 µs. `$formatNumber` takes 2.7 µs a call, against 1.8 µs.
+
+On `path`, the gap is mostly a fixed 0.24 µs that Python values add to each evaluation. Each
+item measures the cases it touches before and after with `cargo xtask ab`, plus
+`python.py speed` when the Python package is concerned.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | A result converted straight into Python objects. `jlens-core` writes a result through a trait, the counterpart of `Source` (ADR 0010), within the size limit of a result (`U1001`), rather than only building a `serde_json::Value`. The Python package implements it and keeps one `str` per key for the whole result, so each key is created and hashed once. The WebAssembly package adopts it if it pays | ADR 0017 accepted; the core's tests and property tests cover the trait, the size limit and nesting; `ab` shows no loss natively; `python.py speed` measured before and after, with the object constructor and `names over items`; the outcome on the performance page | |
+| 2 | A predicate that does not depend on its item is evaluated once. In jsonata-js the predicate of a filter is evaluated for each item, but a predicate built from literals alone, such as `[[0..19]]`, gives the same value each time. Which predicates qualify is decided in `process.rs`; anything that reads the context, a variable or a function call is not one of them | Tests of the predicates kept per item and of those evaluated once; conformance and differential unchanged; number formatting faster with `ab`, no case slower | |
+| 3 | One allocation per object or array of an input level, instead of two. Each value that a source writes as an array or object boxes its source and allocates its `Rc`; a level could hold its items' sources together, or share one allocation, without `unsafe`. Cycles and deep input still fail with `U1004` and `U1001`, and free-threaded Python stays supported | The core's tests of lazy reading and the property tests green; `$count(items)` and `names over items` measured before and after with Python values in; `ab --mode evaluate` shows no loss; or the reason it stays, on the performance page | |
+| 4 | An object constructor over a single item, without grouping: its pairs evaluated directly against the item, keeping `D1009` for two pairs with the same key and `T1003` for a key that is not a string. Then `$formatNumber`, by the time it takes per call: profile it and remove what does not depend on the number, such as parsing the picture again at each call | Tests for the single-item path and its errors; the object constructor and number formatting faster with `ab`, no case slower; what `$formatNumber` spends its time on, on the performance page | |
+| 5 | Release 0.19.0 | The release checklist; the Python table on the performance page measured again | |
+
+## 0.20: an API to keep, toward 1.0
 
 After eighteen releases, nothing says which parts of jlens are meant to last. `cargo
 semver-checks` runs in CI, but before 1.0 it only asks for a new minor version, and
 `jlens-core` exposes workspace plumbing (`stack`, `debug`, the AST's internals) next to its API.
-0.19 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
+0.20 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
 down. Applications built on jlens are separate projects: they use `jlens-core` as any
 application does, and what they lack comes back here as general features.
 
@@ -320,7 +355,7 @@ from what they needed, missed or worked around, not guessed beforehand.
 | 3 | `jlens-schema` and `jlens-lsp` changes as ADR 0015 says | As #2 | |
 | 4 | The contracts outside Rust, as ADR 0015 says: the Wasm API, the Python package, the JSON of audits and `jlens.json`; a test pins each, so that a change shows in review | Tests that fail on an unintended change of each contract | |
 | 5 | A stability page in the book, from ADR 0015, and the rules for changing a stable item in `CONTRIBUTING.md` | `doc-check` green; the page linked from the introduction | |
-| 6 | Release 0.19.0, the release that breaks once. 1.0.0 follows when ADR 0015's criterion is met | The release checklist, with the migration notes in the release notes | |
+| 6 | Release 0.20.0, the release that breaks once. 1.0.0 follows when ADR 0015's criterion is met | The release checklist, with the migration notes in the release notes | |
 
 ## Not planned
 
