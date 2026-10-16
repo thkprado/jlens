@@ -423,7 +423,7 @@ where it is now parsed straight into a `Document`.
   once, not once per item, and its indexes pick their items directly. A predicate that reads
   its context or a variable, or calls a function, is still evaluated per item, as in jsonata-js. In
   0.19 this halved `number formatting` (`items[[0..19]]...`, 203 against 92.7 µs with
-  `evaluate`).
+  `evaluate`; in Python, 164.5 against 81.3 µs with Python values in).
 - **String literals.** `=` and `!=` with a string literal compare with the literal's text
   instead of building a string, and so does a grouping with a literal key, which finds its group
   by the text: in `items{type: {'total': ..., 'n': ...}}`, `'total'` and `'n'` are built once
