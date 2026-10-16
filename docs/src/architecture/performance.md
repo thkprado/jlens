@@ -224,37 +224,40 @@ fourth package, `jsonata`, which runs jsonata-js in the Duktape JavaScript inter
 out: it has had no release since 2023, its module cannot load jsonata-js on Windows, and it
 compiles the expression at each call, taking up to 3.5 s on these cases.
 
-Measured for 0.17 (c76a814) on Python 3.14.8, under Linux: Ubuntu 26.04 under WSL 2, on the
+Measured for 0.19 (0a1c6ad) on Python 3.14.8, under Linux: Ubuntu 26.04 under WSL 2, on the
 machine above. `jsonatapy` has wheels up to Python 3.13 and was built from its source
 distribution. The input is the document as Python values; for jlens and `jsonatapy`, also an
-input converted once (`Document`, `JsonataData`):
+input converted once (`Document`, `JsonataData`). Two more runs of jlens and `jsonatapy` alone
+gave the same times within 5%:
 
 | Case | jsonata-python 0.7.1 | jsonata-rs 0.1.4 | jsonatapy 2.2.11 | jsonatapy, `JsonataData` | jlens `evaluate` | jlens `evaluate_document` |
 |---|---:|---:|---:|---:|---:|---:|
-| path | 1.50 ms | 212 µs | 0.7 µs | 0.4 µs | 1.0 µs | 0.5 µs |
-| names over items | 1.97 ms | 245 µs | 24 µs | 4.7 µs | 37 µs | 6.3 µs |
-| filter + aggregate | 4.63 ms | 403 µs | 122 µs | 88 µs | 89 µs | 42 µs |
-| group-by | 6.10 ms | 843 µs | 167 µs | 108 µs | 138 µs | 74 µs |
-| sort + map | 24.5 ms | 1.88 ms | 459 µs | 395 µs | 383 µs | 279 µs |
-| strings | 4.46 ms | 454 µs | 167 µs | 136 µs | 113 µs | 67 µs |
-| regex | 5.09 ms | 3.87 ms | 2.69 ms | 2.68 ms | 137 µs | 107 µs |
-| number formatting | 4.17 ms | 437 µs | 154 µs | 145 µs | 167 µs | 140 µs |
-| object constructor | 5.99 ms | 815 µs | 181 µs | 140 µs | 357 µs | 287 µs |
-| transform | 5.86 ms | 1.81 ms | 1.01 ms | 881 µs | 868 µs | 721 µs |
-| recursion | 41.0 ms | 2.28 ms | 731 µs | 834 µs | 700 µs | 698 µs |
-| shipping rule | 9.53 ms | 689 µs | 347 µs | 238 µs | 230 µs | 101 µs |
+| path | 1.48 ms | 214 µs | 0.7 µs | 0.3 µs | 1.1 µs | 0.5 µs |
+| names over items | 1.94 ms | 244 µs | 26 µs | 4.8 µs | 35 µs | 6.6 µs |
+| filter + aggregate | 4.62 ms | 395 µs | 122 µs | 88 µs | 82 µs | 39 µs |
+| group-by | 6.07 ms | 838 µs | 166 µs | 108 µs | 134 µs | 73 µs |
+| sort + map | 24.3 ms | 1.85 ms | 458 µs | 398 µs | 378 µs | 272 µs |
+| strings | 4.44 ms | 449 µs | 163 µs | 137 µs | 116 µs | 64 µs |
+| regex | 5.03 ms | 3.86 ms | 2.73 ms | 2.70 ms | 135 µs | 97 µs |
+| number formatting | 4.12 ms | 433 µs | 155 µs | 146 µs | 48 µs | 26 µs |
+| object constructor | 5.99 ms | 808 µs | 184 µs | 141 µs | 203 µs | 141 µs |
+| transform | 5.78 ms | 1.79 ms | 1.02 ms | 881 µs | 673 µs | 535 µs |
+| recursion | 40.6 ms | 2.37 ms | 744 µs | 853 µs | 711 µs | 706 µs |
+| shipping rule | 9.49 ms | 732 µs | 329 µs | 244 µs | 224 µs | 99 µs |
 
-- With Python values in, jlens is the fastest on eight cases, by 20 times on `regex` and 51%
-  on the shipping rule; `jsonatapy` on four: `path`, `names over items` (24 µs against 37 µs),
-  number formatting and the object constructor. Before a path step read its one field of a
-  `dict` (see below), jlens took 138 µs on `names over items` and 177 µs on `filter +
-  aggregate`, and was the fastest on five cases.
-- With the input converted once, jlens is the fastest on nine cases, by up to 2.4 times on the
-  shipping rule and 25 times on `regex`; `jsonatapy` on `path`, `names over items` and the
-  object constructor, which takes it half the time.
-- On every case but `path`, jlens `evaluate` takes 2.1 (transform) to 28 times (`regex`) less
-  time than `jsonata-rs`, and 7 to 64 times less than `jsonata-python`. Both read the whole
-  input before evaluating: on `path` they take 0.2 and 1.5 ms where jlens takes 1.0 µs.
+- With Python values in, jlens is the fastest on nine cases, by 20 times on `regex`, 3.2
+  times on number formatting and 47% on the shipping rule; `jsonatapy` on three: `path` (0.7
+  against 1.1 µs), `names over items` (26 against 35 µs) and the object constructor (184
+  against 203 µs). In 0.17 (c76a814) jlens took 357 µs on the object constructor, 167 µs on
+  number formatting and 868 µs on the transform, and was the fastest on eight cases; before a
+  path step read its one field of a `dict` (see below), it took 138 µs on `names over items`
+  and was the fastest on five.
+- With the input converted once, jlens is the fastest on nine cases, by up to 5.7 times on
+  number formatting and 28 times on `regex`; the object constructor takes both 141 µs, and
+  `jsonatapy` is faster on `path` and `names over items`.
+- On every case but `path`, jlens `evaluate` takes 2.7 (transform) to 29 times (`regex`) less
+  time than `jsonata-rs`, and 8.6 to 86 times less than `jsonata-python`. Both read the whole
+  input before evaluating: on `path` they take 0.2 and 1.5 ms where jlens takes 1.1 µs.
 
 Since then, the Python package builds a result as Python objects directly (ADR 0017), without a
 `serde_json` value in between, and creates each key of the result once, so that a key repeated
