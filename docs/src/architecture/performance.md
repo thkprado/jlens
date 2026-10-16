@@ -338,6 +338,20 @@ doc.free();
 Evaluations never modify a document, so one document serves any number of evaluations. A
 `Document` is not `Send`. Convert it on the thread that uses it.
 
+`Document::parse_cut` parses JSON text without the fields that the rules do not read, given
+what they read ([ADR 0016](../adr/0016-fields-read.md)): one rule's `Reads::input`, or the
+union of the rules'. It checks the syntax of the fields it skips but does not convert them, so
+the narrower the reads, the faster the parse, on this machine:
+
+| Parse | `Document::parse` | `Document::parse_cut` |
+|---|---:|---:|
+| The 24 KB document, cut by what `names over items` reads | 173 µs | 73 µs |
+| The same, cut by the union of every case (the transform reads it whole) | 173 µs | 170 µs |
+| 1,000 records of 40 fields (1 MB), cut by what `$sum(records[status = 'open'].amount)` reads | 6.42 ms | 1.56 ms |
+
+A rule that reads a document whole leaves nothing to skip, and then `parse_cut` costs what
+`parse` does.
+
 ## Where the time goes
 
 - **Allocation.** Values are reference-counted (`Rc`). Objects are `IndexMap`s that keep

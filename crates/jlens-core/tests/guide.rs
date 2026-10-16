@@ -229,7 +229,7 @@ fn documents() -> Result<()> {
 
 #[test]
 fn fields_read() -> Result<()> {
-    use jlens_core::{Bindings, Expression, HostFunction};
+    use jlens_core::{Bindings, Document, Expression, HostFunction, Options};
     use serde_json::json;
     // ANCHOR: reads
     // `$rate` looks up a tax rate; it never reads the context of its call.
@@ -271,6 +271,16 @@ fn fields_read() -> Result<()> {
         cut,
         json!({"items": [{"price": 12.5, "qty": 2}], "customer": {"country": "BR"}})
     );
+
+    // Or parse JSON text skipping the fields no rule reads: one document serves every rule.
+    let text = order.to_string();
+    let doc = Document::parse_cut(&text, reads.input().expect("the rules read the input"))?;
+    assert_eq!(doc.to_json(), cut);
+    for source in rules {
+        let rule = Expression::compile(source)?;
+        let result = rule.evaluate_document(&doc, &bindings, &Options::default())?;
+        assert_eq!(result, Some(json!(true)));
+    }
     // ANCHOR_END: reads
     Ok(())
 }

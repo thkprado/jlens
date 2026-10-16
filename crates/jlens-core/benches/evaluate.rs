@@ -6,7 +6,8 @@
 //! Groups:
 //! - `compile`: parsing and post-processing;
 //! - `evaluate`: evaluating each case against a 200-item document;
-//! - `document`: converting that document (with and without dropping it), and
+//! - `document`: converting that document (with and without dropping it), parsing it cut by
+//!   what the cases read, and parsing a wide document whole and cut; and
 //!   `evaluate_document`: the cases against it converted once;
 //! - `audit`: the shipping rule without a tracer, and with audits at each level.
 
@@ -95,6 +96,30 @@ fn document(c: &mut Criterion) {
     group.bench_function("serde_json::from_str", |b| {
         b.iter(|| serde_json::from_str::<Value>(black_box(&text)).unwrap())
     });
+    // Cut by what the cases read: one case, then the union of all of them.
+    let exprs: Vec<_> = cases
+        .iter()
+        .map(|(_, source)| Expression::compile(source).unwrap())
+        .collect();
+    let read = exprs[1].reads().input().unwrap().clone();
+    group.bench_function("Document::parse_cut names over items", |b| {
+        b.iter(|| Document::parse_cut(black_box(&text), &read).unwrap())
+    });
+    let union = exprs.iter().map(|e| e.reads()).reduce(|a, b| a.union(&b));
+    let union = union.unwrap().input().unwrap().clone();
+    group.bench_function("Document::parse_cut union", |b| {
+        b.iter(|| Document::parse_cut(black_box(&text), &union).unwrap())
+    });
+    // A wide document: 1,000 records of 40 fields, of which a rule reads two.
+    let wide = wide_document();
+    let rule = Expression::compile("$sum(records[status = 'open'].amount)").unwrap();
+    let read = rule.reads().input().unwrap().clone();
+    group.bench_function("wide Document::parse", |b| {
+        b.iter(|| Document::parse(black_box(&wide)).unwrap())
+    });
+    group.bench_function("wide Document::parse_cut", |b| {
+        b.iter(|| Document::parse_cut(black_box(&wide), &read).unwrap())
+    });
     group.finish();
 
     // The cases again, against a document converted once.
@@ -112,6 +137,32 @@ fn document(c: &mut Criterion) {
         });
     }
     group.finish();
+}
+
+/// 1,000 records of 40 fields: strings, numbers, a nested object and an array.
+fn wide_document() -> String {
+    let records: Vec<Value> = (0..1000)
+        .map(|i| {
+            let mut record = serde_json::Map::new();
+            record.insert("id".into(), Value::from(i));
+            record.insert("status".into(), Value::from(["open", "closed"][i % 2]));
+            record.insert("amount".into(), Value::from(i as f64 * 1.5));
+            for f in 0..34 {
+                record.insert(
+                    format!("field{f}"),
+                    Value::from(format!("value {i} of {f}")),
+                );
+            }
+            record.insert(
+                "address".into(),
+                serde_json::json!({"street": "Main St", "number": i}),
+            );
+            record.insert("tags".into(), serde_json::json!(["a", "b", "c"]));
+            record.insert("score".into(), Value::from(i % 7));
+            Value::Object(record)
+        })
+        .collect();
+    serde_json::to_string(&serde_json::json!({ "records": records })).unwrap()
 }
 
 fn audit(c: &mut Criterion) {

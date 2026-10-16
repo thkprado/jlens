@@ -242,6 +242,12 @@ skips, while it parses, the fields it does not list, building the document cut b
 kept only if the parse of wide documents measures faster; the performance page records the
 outcome either way.
 
+*Amended with the implementation (roadmap 0.18, item 4): `Document::parse` keeps its signature,
+and `Document::parse_cut` takes the `Read`. It is kept: a 1 MB document cut to two fields of
+each record parses four times as fast. The fields it skips are checked as JSON syntax only, so
+a number too large for a float or a lone surrogate escape passes there, where `parse` rejects
+it.*
+
 ## Alternatives not taken
 
 - **Reusing the language service's typing** (`jlens-schema`). It types an expression against a

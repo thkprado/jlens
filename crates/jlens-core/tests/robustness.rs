@@ -1044,6 +1044,31 @@ fn read() -> impl Strategy<Value = Read> {
     })
 }
 
+/// JSON values over the field names of [`read`], and one it never lists.
+fn json_value() -> impl Strategy<Value = serde_json::Value> {
+    let leaf = prop_oneof![
+        Just(json!(null)),
+        any::<bool>().prop_map(|b| json!(b)),
+        (-1000i32..1000).prop_map(|n| json!(n)),
+        (-1e6f64..1e6).prop_map(|n| json!(n)),
+        "[a-z\"\\\\𝄞]{0,4}".prop_map(|s| json!(s)),
+    ];
+    leaf.prop_recursive(4, 32, 4, |inner| {
+        let name = prop::sample::select(&["a", "b", "items", "price", "x"][..]);
+        prop_oneof![
+            prop::collection::vec(inner.clone(), 0..4).prop_map(serde_json::Value::Array),
+            prop::collection::vec((name, inner), 0..4).prop_map(|fields| {
+                serde_json::Value::Object(
+                    fields
+                        .into_iter()
+                        .map(|(name, value)| (name.to_owned(), value))
+                        .collect(),
+                )
+            }),
+        ]
+    })
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(2000))]
 
@@ -1085,6 +1110,22 @@ proptest! {
         // The union keeps what each needs.
         let value = input();
         prop_assert_eq!(a.cut(&a.union(&b).cut(&value)), a.cut(&value));
+    }
+
+    /// Parsing JSON text cut by a `Read` gives the value the `Read` cuts.
+    #[test]
+    fn parsing_cut_by_a_read_cuts_the_value(read in read(), value in json_value()) {
+        let text = serde_json::to_string(&value).unwrap();
+        let parsed = Document::parse_cut(&text, &read).unwrap();
+        prop_assert_eq!(parsed.to_json(), Document::new(&read.cut(&value)).to_json());
+    }
+
+    /// Parsing any text cut by a `Read` never panics, and accepts only JSON.
+    #[test]
+    fn parsing_any_text_cut_by_a_read_never_panics(read in read(), text in "[\\[\\]{}\":,a-z0-9 ]{0,24}") {
+        if Document::parse_cut(&text, &read).is_ok() {
+            prop_assert!(serde_json::from_str::<serde_json::Value>(&text).is_ok(), "{}", text);
+        }
     }
 }
 

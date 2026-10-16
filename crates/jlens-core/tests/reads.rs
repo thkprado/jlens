@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use jlens_core::reads::Reads;
-use jlens_core::{Bindings, Expression, Options};
+use jlens_core::{Bindings, Document, Expression, Options};
 use serde_json::{Map, Value};
 
 fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
@@ -175,4 +175,29 @@ fn every_suite_case_gives_its_result_on_the_fields_it_reads() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// `Document::parse_cut` builds the document `Read::cut` gives, on every input of the suite.
+#[test]
+fn parsing_cut_by_the_reads_of_a_suite_case_gives_its_cut_input() {
+    let mut compared = 0;
+    for case in cases() {
+        let (Ok(expr), Some(input)) = (Expression::compile(&case.expr), &case.input) else {
+            continue;
+        };
+        let Some(read) = expr.reads().input().cloned() else {
+            continue;
+        };
+        let text = serde_json::to_string(input).unwrap();
+        let parsed = Document::parse_cut(&text, &read).unwrap().to_json();
+        assert_eq!(
+            parsed,
+            Document::new(&read.cut(input)).to_json(),
+            "{}: {}",
+            case.id,
+            case.expr
+        );
+        compared += 1;
+    }
+    assert!(compared > 700, "{compared} inputs compared");
 }

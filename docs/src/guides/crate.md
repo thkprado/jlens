@@ -202,6 +202,9 @@ names for the input and for each binding; `union` combines the answers of severa
   that does not with `HostFunction::without_input`, and analyse with `Expression::reads_with`,
   given the bindings: a call to it then reads only its arguments, and `HostCall::input` gives
   `None`. A parameter with `-` in its signature still reads the context it may take.
+- **`Document::parse_cut`** parses JSON text cut by a `Read`, skipping the fields it leaves
+  out: given the union of several rules' reads, one document serves them all, and the parse
+  takes less time the less the rules read ([Performance](../architecture/performance.md#reusing-documents)).
 - **A binding named after a built-in function** shadows it during the evaluation, but the
   analysis takes the name as the built-in's: such an application cannot cut its input by it.
 
