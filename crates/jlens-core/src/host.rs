@@ -42,6 +42,8 @@ pub struct HostFunction {
     imp: Arc<Implementation>,
     signature: Option<Arc<Signature>>,
     arity: usize,
+    /// Whether [`HostCall::input`] gives the context of the call.
+    reads_input: bool,
 }
 
 impl HostFunction {
@@ -63,6 +65,7 @@ impl HostFunction {
             imp: Arc::new(imp),
             signature: None,
             arity,
+            reads_input: true,
         }
     }
 
@@ -85,7 +88,46 @@ impl HostFunction {
             imp: Arc::new(imp),
             arity: signature.params.len(),
             signature: Some(Arc::new(signature)),
+            reads_input: true,
         })
+    }
+
+    /// Marks the function as not reading the context of its call: [`HostCall::input`] then
+    /// gives `None`. [`Expression::reads_with`](crate::Expression::reads_with) counts a call to
+    /// it as reading its arguments only, where an unmarked function reads the whole context of
+    /// its call, which is the whole input at the top of an expression (ADR 0016).
+    ///
+    /// A parameter with the `-` modifier still takes the context value when the call leaves
+    /// it out, as an argument, and the analysis counts it.
+    ///
+    /// ```
+    /// use jlens_core::{Bindings, Expression, HostFunction};
+    /// use serde_json::json;
+    ///
+    /// let rate = HostFunction::new(1, |args, call| {
+    ///     assert_eq!(call.input(), None);
+    ///     Ok(Some(json!(if args[0] == Some(json!("BR")) { 0.2 } else { 0.1 })))
+    /// })
+    /// .without_input();
+    /// let bindings = Bindings::new().function("rate", rate);
+    /// let expr = Expression::compile("price * $rate(country)").unwrap();
+    /// let reads = expr.reads_with(&bindings);
+    /// assert_eq!(
+    ///     serde_json::to_value(reads.input()).unwrap(),
+    ///     json!({"price": true, "country": true})
+    /// );
+    /// let order = json!({"price": 50, "country": "BR"});
+    /// assert_eq!(expr.evaluate(Some(&order), &bindings).unwrap(), Some(json!(10)));
+    /// ```
+    pub fn without_input(mut self) -> Self {
+        self.reads_input = false;
+        self
+    }
+
+    /// Whether [`HostCall::input`] gives the context of a call, unless
+    /// [`without_input`](HostFunction::without_input) marked the function.
+    pub fn reads_input(&self) -> bool {
+        self.reads_input
     }
 
     /// The signature, if the function has one.
@@ -124,7 +166,9 @@ impl HostFunction {
         // Converting the arguments reads them: a part of the input that could not be read is
         // not given to the function.
         caller.read_failure()?;
+        let undefined = Value::Undefined;
         let input = match input {
+            _ if !self.reads_input => &undefined,
             // The input array, wrapped so that it counts as a single context value.
             Value::Array(a) if a.has(OUTER_WRAPPER) && a.len() == 1 => &a.items()[0],
             v => v,
@@ -151,6 +195,7 @@ impl fmt::Debug for HostFunction {
                 &self.signature.as_ref().map(|s| s.definition.as_str()),
             )
             .field("arity", &self.arity)
+            .field("reads_input", &self.reads_input)
             .finish_non_exhaustive()
     }
 }
@@ -177,7 +222,8 @@ pub struct HostCall<'a> {
 
 impl HostCall<'_> {
     /// The context value of the call: the input of the function call expression, such as the
-    /// current item in `items.$f()`. `None` when it is undefined.
+    /// current item in `items.$f()`. `None` when it is undefined, and for a function marked
+    /// [`without_input`](HostFunction::without_input).
     ///
     /// The value is converted to JSON when this method is called, so a function that does not
     /// need it does not pay for converting it. A value larger than the size limit of a result

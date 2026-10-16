@@ -228,6 +228,54 @@ fn documents() -> Result<()> {
 }
 
 #[test]
+fn fields_read() -> Result<()> {
+    use jlens_core::{Bindings, Expression, HostFunction};
+    use serde_json::json;
+    // ANCHOR: reads
+    // `$rate` looks up a tax rate; it never reads the context of its call.
+    let rate = HostFunction::new(1, |args, _call| {
+        Ok(Some(json!(if args[0] == Some(json!("BR")) {
+            0.2
+        } else {
+            0.1
+        })))
+    })
+    .without_input();
+    let bindings = Bindings::new().function("rate", rate);
+
+    let rules = [
+        "$sum(items.(price * qty)) * $rate(customer.country) < 100",
+        "$count(items) <= 50",
+    ];
+    let mut reads = None;
+    for source in rules {
+        let rule = Expression::compile(source)?.reads_with(&bindings);
+        reads = Some(match reads {
+            None => rule,
+            Some(all) => rule.union(&all),
+        });
+    }
+    let reads = reads.expect("at least one rule");
+    assert_eq!(
+        serde_json::to_value(reads.input())?,
+        json!({"items": {"price": true, "qty": true}, "customer": {"country": true}})
+    );
+
+    // Fetch only those fields, or cut a document down to them.
+    let order = json!({
+        "items": [{"sku": "B-12", "price": 12.5, "qty": 2}],
+        "customer": {"name": "Ada", "country": "BR"}
+    });
+    let cut = reads.input().expect("the rules read the input").cut(&order);
+    assert_eq!(
+        cut,
+        json!({"items": [{"price": 12.5, "qty": 2}], "customer": {"country": "BR"}})
+    );
+    // ANCHOR_END: reads
+    Ok(())
+}
+
+#[test]
 fn audit() -> Result<()> {
     use jlens_core::{Bindings, Expression, Options};
     use serde_json::json;

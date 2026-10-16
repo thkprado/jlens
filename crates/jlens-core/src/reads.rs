@@ -40,7 +40,10 @@
 //!
 //! - A call to a function that is not a built-in reads its context whole, since a host
 //!   function can read it ([`HostCall::input`](crate::HostCall::input)). `$tax(price)` at the
-//!   top of an expression reads the whole input; `price.$tax()` reads `price`.
+//!   top of an expression reads the whole input; `price.$tax()` reads `price`. A host function
+//!   marked [`without_input`](crate::HostFunction::without_input) cannot read it, and
+//!   [`Expression::reads_with`](crate::Expression::reads_with), given the bindings, counts a
+//!   call to it as reading its arguments only.
 //! - A binding or host function named after a built-in shadows it during the evaluation, but
 //!   the analysis takes the name as the built-in's. Such an application cannot cut its input
 //!   by the analysis.
@@ -54,8 +57,10 @@ use serde::de::{self, DeserializeSeed, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
+use crate::Bindings;
 use crate::ast::{Ast, FallbackOp, LambdaDef, Node, NodeKind, Stage, TransformDef};
 use crate::functions::{self, Native};
+use crate::signature::Signature;
 
 /// The most field names a [`Read`] nests. The analysis reads a value whole at this depth, and
 /// deserializing a deeper `Read` fails.
@@ -280,9 +285,12 @@ enum Root {
 }
 
 impl Place {
-    /// The value of a binding as it is, which may be a host function.
-    fn is_binding(&self) -> bool {
-        matches!(self.root, Root::Binding(_)) && self.path.is_empty()
+    /// The name of the binding whose value this is, which may be a host function.
+    fn binding(&self) -> Option<&str> {
+        match &self.root {
+            Root::Binding(name) if self.path.is_empty() => Some(name),
+            _ => None,
+        }
     }
 }
 
@@ -323,6 +331,8 @@ enum Arg<'n> {
 }
 
 struct Analysis<'n> {
+    /// The host functions marked as not reading their context, with their signatures.
+    marked: HashMap<&'n str, Option<&'n Signature>>,
     input: Option<Read>,
     bindings: BTreeMap<String, Read>,
     /// The bindings the expression names, read whole if the analysis gives up.
@@ -349,9 +359,14 @@ struct Analysis<'n> {
     context_functions: bool,
 }
 
-/// Analyses a processed tree.
-pub(crate) fn analyse(ast: &Ast) -> Reads {
+/// Analyses a processed tree, given the bindings it will be evaluated with.
+pub(crate) fn analyse<'n>(ast: &'n Ast, bindings: &'n Bindings) -> Reads {
     let mut analysis = Analysis {
+        marked: bindings
+            .functions()
+            .filter(|(_, function)| !function.reads_input())
+            .map(|(name, function)| (name, function.signature()))
+            .collect(),
         input: None,
         bindings: BTreeMap::new(),
         named: BTreeSet::new(),
@@ -501,7 +516,16 @@ impl<'n> Analysis<'n> {
     /// Uses a value: its places are read whole.
     fn use_whole(&mut self, places: &[Place]) {
         for place in places {
-            self.escaped |= place.is_binding();
+            if let Some(name) = place.binding() {
+                match self.marked.get(name) {
+                    // A marked host function reads the context of a call only through its
+                    // signature, as a lambda does.
+                    Some(signature) => {
+                        self.context_functions |= signature.is_some_and(takes_context)
+                    }
+                    None => self.escaped = true,
+                }
+            }
             self.mark(place, true);
         }
     }
@@ -915,8 +939,16 @@ impl<'n> Analysis<'n> {
         }
         let function = self.eval(procedure, context, scope);
         self.mark_all(&function);
-        // A host function can read the context of its call.
-        if function.iter().any(Place::is_binding) {
+        // A host function can read the context of its call, unless it is marked.
+        let mut reads_context = false;
+        for name in function.iter().filter_map(Place::binding) {
+            match self.marked.get(name) {
+                Some(Some(signature)) => self.signature_context(signature, args.len(), context),
+                Some(None) => {}
+                None => reads_context = true,
+            }
+        }
+        if reads_context {
             self.use_whole(context);
         } else {
             self.calls.push(context.to_vec());
@@ -991,16 +1023,23 @@ impl<'n> Analysis<'n> {
         }
     }
 
-    /// A built-in whose first parameter takes the context (`-`) reads it when the arguments
-    /// can leave that parameter empty: whole if it accepts objects or arrays, else as a scalar,
-    /// which a cut keeps.
     fn native_context(&mut self, native: &Native, count: usize, context: &[Place]) {
-        let Some(signature) = &native.signature else {
-            return;
-        };
+        if let Some(signature) = &native.signature {
+            self.signature_context(signature, count, context);
+        }
+    }
+
+    /// A function whose first parameter takes the context (`-`) reads it when the arguments
+    /// can leave that parameter empty: whole if it accepts objects or arrays, else as a scalar,
+    /// which a cut keeps. A later parameter that takes it reads it whole.
+    fn signature_context(&mut self, signature: &Signature, count: usize, context: &[Place]) {
         let Some((first, rest)) = signature.params.split_first() else {
             return;
         };
+        if rest.iter().any(|param| param.context) {
+            self.use_whole(context);
+            return;
+        }
         let Some(pattern) = first.context_pattern.as_deref().filter(|_| first.context) else {
             return;
         };
@@ -1092,10 +1131,11 @@ fn string_literal(node: &Node) -> Option<&str> {
 }
 
 fn has_context_param(native: &Native) -> bool {
-    native
-        .signature
-        .as_ref()
-        .is_some_and(|s| s.params.iter().any(|p| p.context))
+    native.signature.as_ref().is_some_and(takes_context)
+}
+
+fn takes_context(signature: &Signature) -> bool {
+    signature.params.iter().any(|p| p.context)
 }
 
 /// How many arguments a parameter pattern takes: `?` none or one, `+` one or more.
@@ -1261,6 +1301,49 @@ mod tests {
         assert_eq!(
             reads("($f := $sum($g); $h := $g; $h(price))")["input"],
             json!(true)
+        );
+    }
+
+    #[test]
+    fn marked_host_functions_read_their_arguments() {
+        use crate::{Bindings, HostFunction};
+        let bindings = Bindings::new()
+            .function(
+                "rate",
+                HostFunction::new(1, |_, _| Ok(None)).without_input(),
+            )
+            .function(
+                "tax",
+                HostFunction::with_signature("<n-n?:n>", |_, _| Ok(None))
+                    .unwrap()
+                    .without_input(),
+            )
+            .function("plain", HostFunction::new(1, |_, _| Ok(None)));
+        let input = |source: &str| {
+            let expr = Expression::compile(source).unwrap();
+            serde_json::to_value(expr.reads_with(&bindings).input()).unwrap()
+        };
+        assert_eq!(input("$rate(country)"), json!({"country": true}));
+        assert_eq!(reads("$rate(country)")["input"], json!(true));
+        assert_eq!(input("$rate(country) + $plain(1)"), json!(true));
+        // Taken as a value, a marked function still reads only its arguments.
+        assert_eq!(input("($f := $rate; $f(price))"), json!({"price": true}));
+        // The context a signature may take: a scalar here.
+        assert_eq!(input("$tax(price)"), json!({"price": true}));
+        assert_eq!(
+            input("$tax(price, rate)"),
+            json!({"price": true, "rate": true})
+        );
+        assert_eq!(input("order.$tax()"), json!({"order": {}}));
+        assert_eq!(input("($f := $tax; $f(price))"), json!({"price": true}));
+        // Passed on, a function that takes its context may be called with any context.
+        assert_eq!(
+            input("($g := function($h) { $h() }; a.$g($tax))"),
+            json!(true)
+        );
+        assert_eq!(
+            input("($g := function($h) { $h() }; a.$g($rate))"),
+            json!({"a": {}})
         );
     }
 

@@ -157,7 +157,15 @@ impl Expression {
     ///
     /// [ADR 0016]: https://github.com/thkprado/jlens/blob/main/docs/src/adr/0016-fields-read.md
     pub fn reads(&self) -> reads::Reads {
-        reads::analyse(&self.ast)
+        reads::analyse(&self.ast, &Bindings::new())
+    }
+
+    /// What the expression may read of its input and of each binding, evaluated with
+    /// `bindings`: as [`reads`](Expression::reads), except that a call to a host function
+    /// marked [`without_input`](HostFunction::without_input) reads only its arguments, and the
+    /// context its signature may take.
+    pub fn reads_with(&self, bindings: &Bindings) -> reads::Reads {
+        reads::analyse(&self.ast, bindings)
     }
 
     /// Evaluates the expression against `input` with default [`Options`].

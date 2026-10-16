@@ -181,6 +181,30 @@ representation looks up one field for less than it reads a whole object. The doc
 example. A level that the source fails to read stops the evaluation with `U1004`. The
 WebAssembly package reads JavaScript objects this way.
 
+## The fields an expression reads
+
+`Expression::reads` tells which fields of its input and of each binding an expression may read,
+without evaluating it ([ADR 0016](../adr/0016-fields-read.md)): an application can fetch only
+those from a database, or know which rules depend on a field. The answer is a
+[`Reads`](https://docs.rs/jlens-core/latest/jlens_core/reads/struct.Reads.html), a tree of field
+names for the input and for each binding; `union` combines the answers of several expressions.
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:reads}}
+```
+
+- **The answer is an upper bound.** On its input and bindings cut by its reads (`Read::cut`), an
+  expression gives the same result, or fails with the same error code. Where the analysis cannot
+  follow a value, under `*` or `**`, in a constructed object or in the result, it reads the value
+  whole (`true` in the JSON form).
+- **A host function can read the context of its call** through `HostCall::input`, so a call to
+  one reads that context whole: the whole input, at the top of an expression. Mark a function
+  that does not with `HostFunction::without_input`, and analyse with `Expression::reads_with`,
+  given the bindings: a call to it then reads only its arguments, and `HostCall::input` gives
+  `None`. A parameter with `-` in its signature still reads the context it may take.
+- **A binding named after a built-in function** shadows it during the evaluation, but the
+  analysis takes the name as the built-in's: such an application cannot cut its input by it.
+
 ## Explaining results
 
 `evaluate_audited` records an audit tree of the evaluation: comparisons and their operands,

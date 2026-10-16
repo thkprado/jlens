@@ -966,6 +966,18 @@ fn outcome(result: Result<Option<serde_json::Value>, Error>) -> Option<String> {
     }
 }
 
+/// `bindings` with every host function marked as not reading its context.
+fn without_input(bindings: Bindings) -> Bindings {
+    let mut marked = Bindings::new();
+    for (name, value) in bindings.iter() {
+        marked = marked.var(name, value.clone());
+    }
+    for (name, function) in bindings.functions() {
+        marked = marked.function(name, function.clone().without_input());
+    }
+    marked
+}
+
 /// [`bindings`] cut by `reads`: the host functions, and the variable if it is read.
 fn cut_bindings(reads: &Reads) -> Bindings {
     let x = variable_x();
@@ -982,15 +994,32 @@ fn cut_bindings(reads: &Reads) -> Bindings {
 
 /// Whether `expr` gives the same outcome on the input and bindings cut by `reads`.
 fn agrees_when_cut(expr: &Expression, reads: &Reads) -> Result<(), TestCaseError> {
+    agrees_when_cut_with(expr, reads, false)
+}
+
+/// [`agrees_when_cut`], with the host functions marked as not reading their context when
+/// `marked` is set.
+fn agrees_when_cut_with(
+    expr: &Expression,
+    reads: &Reads,
+    marked: bool,
+) -> Result<(), TestCaseError> {
+    let mark = |bindings: Bindings| {
+        if marked {
+            without_input(bindings)
+        } else {
+            bindings
+        }
+    };
     let options = Options::new()
         .timeout(Duration::from_millis(50))
         .max_depth(300)
         .now(0)
         .seed(1);
     let input = input();
-    let whole = expr.evaluate_with(Some(&input), &bindings(), &options);
+    let whole = expr.evaluate_with(Some(&input), &mark(bindings()), &options);
     let cut_input = reads.input().map(|read| read.cut(&input));
-    let cut = expr.evaluate_with(cut_input.as_ref(), &cut_bindings(reads), &options);
+    let cut = expr.evaluate_with(cut_input.as_ref(), &mark(cut_bindings(reads)), &options);
     if let (Some(whole), Some(cut)) = (outcome(whole), outcome(cut)) {
         prop_assert_eq!(
             whole,
@@ -1024,6 +1053,16 @@ proptest! {
     fn reads_keep_what_an_evaluation_needs(source in expression()) {
         if let Ok(expr) = Expression::compile(&source) {
             agrees_when_cut(&expr, &expr.reads())?;
+        }
+    }
+
+    /// The same, with host functions that do not read the context of their call, given to
+    /// the analysis.
+    #[test]
+    fn reads_with_marked_functions_keep_what_an_evaluation_needs(source in expression()) {
+        if let Ok(expr) = Expression::compile(&source) {
+            let reads = expr.reads_with(&without_input(bindings()));
+            agrees_when_cut_with(&expr, &reads, true)?;
         }
     }
 
