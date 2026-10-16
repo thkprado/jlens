@@ -452,6 +452,16 @@ where it is now parsed straight into a `Document`.
   against a `Document` (376 against 281 µs), and `transform` 6% against a `Document`. In
   Python, the object constructor took 205 against 256 µs with Python values in, and 143
   against 188 µs against a `Document`, against 182 and 141 µs in `jsonatapy`.
+- **`$formatNumber`.** Until 0.19 a call spent most of its time on work that does not
+  depend on the number: it parsed and validated its picture again (about 1.3 µs). Rounding to
+  the picture's decimals shifted the number through three heap strings, twice (0.55 µs).
+  Detecting a tie wrote the number with 30 extra digits, and the result took four allocations.
+  An evaluation now keeps the last eight pictures it parsed, by picture and options. Rounding
+  shifts in a buffer on the stack, a tie is read from the bits of the number, and the result
+  is written once. `number formatting` (20 calls) takes 45.1 against 91.9 µs with `evaluate`
+  and 33.9 against 81.0 µs against a `Document`, and `$round` with decimals is about three
+  times faster. What remains of a call is mostly Rust's fixed-precision formatting of the
+  digits (about 0.1 µs), the rounding (0.16 µs) and the string of its result.
 - **String literals.** `=` and `!=` with a string literal compare with the literal's text
   instead of building a string, and so does a grouping with a literal key, which finds its group
   by the text: in `items{type: {'total': ..., 'n': ...}}`, `'total'` and `'n'` are built once

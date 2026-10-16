@@ -680,6 +680,35 @@ fn object_constructors_over_one_item_keep_the_grouping_order() {
     }
 }
 
+/// `$formatNumber` keeps the pictures it parsed during an evaluation: one is reused only with
+/// the same options, and more pictures than it keeps still format right.
+#[test]
+fn format_number_reuses_a_picture_only_with_its_options() {
+    let widths: Vec<usize> = (1..=10).chain(1..=10).chain((1..=10).rev()).collect();
+    let padded: Vec<String> = widths.iter().map(|&n| format!("{:0>n$}", 7)).collect();
+    let cases = [
+        (
+            "[1, 3].$formatNumber($ / 4, '0%', $ = 3 ? {'percent': 'p'} : {})",
+            json!(["25%", "1%"]),
+        ),
+        (
+            "[-1, -2, -3].$formatNumber($, '0', $ = -2 ? {'minus-sign': '~'} : {})",
+            json!(["-1", "~2", "-3"]),
+        ),
+        (
+            "[1..10, 1..10, [1..10]^(>$)].$formatNumber(7, $pad('', $, '0'))",
+            json!(padded),
+        ),
+    ];
+    for (source, expected) in cases {
+        let result = Expression::compile(source)
+            .unwrap()
+            .evaluate(None, &Bindings::new())
+            .unwrap();
+        assert_eq!(result, Some(expected), "{source}");
+    }
+}
+
 #[test]
 fn unread_input_is_returned_as_converted() {
     let input = json!({"n": [2.0, -0.0, 1e300, 18446744073709551615u64], "o": {"a": [1.5]}});

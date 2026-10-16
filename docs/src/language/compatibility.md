@@ -24,7 +24,7 @@ its time zone or JavaScript's internals.
 
 | Topic | jsonata-js | jlens |
 |---|---|---|
-| String representation | UTF-16, may contain lone surrogates | UTF-8 (`String`). A lone surrogate written as `\uD800` becomes U+FFFD |
+| String representation | UTF-16, may contain lone surrogates | UTF-8 (`String`). A lone surrogate written as `\uD800` becomes U+FFFD, and so does a digit of `$formatNumber` that would be one (a `zero-digit` just below U+D800) |
 | `\uXXXX` surrogate pairs | Two code units | Combined into one character, so `"𝄞"` is `𝄞` |
 | Error `position` | UTF-16 offset | The same UTF-16 offset, plus a byte `span` |
 

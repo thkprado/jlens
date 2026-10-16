@@ -1,5 +1,9 @@
 //! Numeric functions, including `$formatNumber` (XPath F&O 3.1 `fn:format-number`).
 
+use std::borrow::Cow;
+use std::fmt;
+use std::rc::Rc;
+
 use super::{Call, arg, num, text};
 use crate::error::{Error, Result};
 use crate::eval::Evaluator;
@@ -110,14 +114,42 @@ fn js_round(x: f64) -> f64 {
 /// Shifts the decimal point by editing the number's JavaScript string form, as jsonata-js
 /// does to avoid binary floating-point errors.
 fn shift(x: f64, places: f64) -> f64 {
-    let s = js_number(x);
+    let mut digits = ryu_js::Buffer::new();
+    let s = if x == 0.0 { "0" } else { digits.format(x) };
     let (mantissa, exp) = match s.split_once('e') {
-        Some((m, e)) => (m.to_owned(), e.parse::<f64>().unwrap_or(0.0)),
+        Some((m, e)) => (m, e.parse::<f64>().unwrap_or(0.0)),
         None => (s, 0.0),
     };
-    format!("{mantissa}e{}", exp + places)
-        .parse()
-        .unwrap_or(f64::NAN)
+    let exp = exp + places;
+    // The usual case, an integral exponent, is written on the stack.
+    let mut buf = [0u8; 64];
+    if exp.fract() == 0.0 && exp.abs() < 1e6 && mantissa.len() < 48 {
+        let mut n = mantissa.len();
+        buf[..n].copy_from_slice(mantissa.as_bytes());
+        buf[n] = b'e';
+        n += 1;
+        let mut e = exp as i32;
+        if e < 0 {
+            buf[n] = b'-';
+            n += 1;
+            e = -e;
+        }
+        let start = n;
+        loop {
+            buf[n] = b'0' + (e % 10) as u8;
+            n += 1;
+            e /= 10;
+            if e == 0 {
+                break;
+            }
+        }
+        buf[start..n].reverse();
+        return std::str::from_utf8(&buf[..n])
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(f64::NAN);
+    }
+    format!("{mantissa}e{exp}").parse().unwrap_or(f64::NAN)
 }
 
 /// `$round`: round half to even, optionally to `precision` decimal places.
@@ -239,40 +271,78 @@ fn to_radix(value: f64, radix: u32) -> String {
     digits.iter().rev().collect()
 }
 
-/// `Number.prototype.toFixed`: rounds half away from zero on the exact binary value. From 1e21,
-/// where JavaScript switches to exponent notation (`1e+21`), it keeps writing digits.
-fn to_fixed(x: f64, dp: usize) -> String {
-    if !x.is_finite() {
-        return js_number(x);
-    }
-    let exact = format!("{:.*}", dp + 30, x.abs());
-    let tail = &exact[exact.len() - 30..];
-    let tie = tail.starts_with('5') && tail[1..].bytes().all(|b| b == b'0');
-    let mut out = if tie {
+/// `Number.prototype.toFixed` of `|x|`: rounds half away from zero on the exact binary value.
+/// From 1e21, where JavaScript switches to exponent notation (`1e+21`), it keeps writing digits.
+fn write_fixed(out: &mut impl fmt::Write, x: f64, dp: usize) {
+    let x = x.abs();
+    let _ = if !x.is_finite() {
+        out.write_str(&js_number(x))
+    } else if is_tie(x, dp) {
         // Ties go to the larger magnitude, like JavaScript.
-        let bumped = x.abs() + 0.5 * 10f64.powi(-(dp as i32));
-        format!("{:.*}", dp, bumped)
+        write!(out, "{:.*}", dp, x + 0.5 * 10f64.powi(-(dp as i32)))
     } else {
-        format!("{:.*}", dp, x.abs())
+        write!(out, "{:.*}", dp, x)
     };
-    if x < 0.0 && out.chars().any(|c| c.is_ascii_digit() && c != '0') {
-        out.insert(0, '-');
-    }
-    out
+}
+
+/// Whether the exact value of `x` lies halfway between two multiples of 10^-dp, that is, whether
+/// 2·|x|·10^dp is an odd integer. With |x| = m·2^e, that is m·5^dp·2^(e+dp+1), odd when the
+/// factors of two cancel exactly.
+fn is_tie(x: f64, dp: usize) -> bool {
+    let bits = x.abs().to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let fraction = bits & ((1 << 52) - 1);
+    let (mantissa, shift) = if exponent == 0 {
+        (fraction, -1074)
+    } else {
+        (fraction | 1 << 52, exponent - 1075)
+    };
+    mantissa != 0 && i64::from(mantissa.trailing_zeros()) + shift + dp as i64 + 1 == 0
 }
 
 /// Settings of a picture string (`$formatNumber`'s third argument overrides them).
+#[derive(PartialEq)]
 struct Props {
     decimal: char,
     grouping: char,
     exponent: char,
-    minus: String,
+    minus: Cow<'static, str>,
     percent: char,
     per_mille: char,
     zero: char,
     digit: char,
     pattern: char,
 }
+
+impl Default for Props {
+    fn default() -> Self {
+        Props {
+            decimal: '.',
+            grouping: ',',
+            exponent: 'e',
+            minus: Cow::Borrowed("-"),
+            percent: '%',
+            per_mille: '\u{2030}',
+            zero: '0',
+            digit: '#',
+            pattern: ';',
+        }
+    }
+}
+
+/// A picture string of `$formatNumber`, parsed and validated. An evaluation keeps the last few
+/// (`Evaluator::pictures`), so that a call in a loop parses its picture once.
+pub(crate) struct Picture {
+    source: Rc<str>,
+    props: Props,
+    /// The ten digits, from the zero digit.
+    family: Vec<char>,
+    /// The sub-pictures for positive and for negative values.
+    variables: [Analysis; 2],
+}
+
+/// How many parsed pictures an evaluation keeps.
+pub(crate) const PICTURES: usize = 8;
 
 #[derive(Clone)]
 struct Parts {
@@ -333,7 +403,7 @@ fn regular(indexes: &[usize]) -> usize {
 }
 
 pub(super) fn format_number<'a>(
-    _: &mut Evaluator<'_, 'a>,
+    ev: &mut Evaluator<'_, 'a>,
     a: Vec<Value<'a>>,
     _: &Call<'_, 'a>,
 ) -> R<'a> {
@@ -341,17 +411,7 @@ pub(super) fn format_number<'a>(
         return Ok(Value::Undefined);
     };
     let picture = text(&a, 1).unwrap_or_default();
-    let mut p = Props {
-        decimal: '.',
-        grouping: ',',
-        exponent: 'e',
-        minus: "-".into(),
-        percent: '%',
-        per_mille: '\u{2030}',
-        zero: '0',
-        digit: '#',
-        pattern: ';',
-    };
+    let mut p = Props::default();
     if let Value::Object(options) = arg(&a, 2) {
         for (key, v) in options.borrow().iter() {
             let Some(s) = v.as_str() else { continue };
@@ -360,7 +420,7 @@ pub(super) fn format_number<'a>(
                 "decimal-separator" => p.decimal = c,
                 "grouping-separator" => p.grouping = c,
                 "exponent-separator" => p.exponent = c,
-                "minus-sign" => p.minus = s.to_owned(),
+                "minus-sign" => p.minus = Cow::Owned(s.to_owned()),
                 "percent" => p.percent = c,
                 "per-mille" => p.per_mille = c,
                 "zero-digit" => p.zero = c,
@@ -370,13 +430,41 @@ pub(super) fn format_number<'a>(
             }
         }
     }
-    format_number_with(value, &picture, &p).map(Value::string)
+    let pictures = ev.pictures();
+    let i = match pictures
+        .iter()
+        .position(|c| c.source == picture && c.props == p)
+    {
+        Some(i) => i,
+        None => {
+            let parsed = Picture::parse(picture, p)?;
+            if pictures.len() == PICTURES {
+                pictures.remove(0);
+            }
+            pictures.push(parsed);
+            pictures.len() - 1
+        }
+    };
+    Ok(Value::string(format_picture(&pictures[i], value)))
 }
 
-fn format_number_with(value: f64, picture: &str, p: &Props) -> Result<String> {
+impl Picture {
+    fn parse(source: Rc<str>, p: Props) -> Result<Picture> {
+        let (family, variables) = analyse_picture(&source, &p)?;
+        Ok(Picture {
+            source,
+            props: p,
+            family,
+            variables,
+        })
+    }
+}
+
+fn analyse_picture(picture: &str, p: &Props) -> Result<(Vec<char>, [Analysis; 2])> {
     let zero_code = p.zero as u32;
+    // A digit that would be a lone surrogate, or past U+10FFFF, becomes U+FFFD.
     let family: Vec<char> = (0..10)
-        .filter_map(|i| char::from_u32(zero_code + i))
+        .map(|i| char::from_u32(zero_code + i).unwrap_or('\u{FFFD}'))
         .collect();
     let is_digit = |c: char| family.contains(&c);
     let mut active = family.clone();
@@ -571,7 +659,18 @@ fn format_number_with(value: f64, picture: &str, p: &Props) -> Result<String> {
         negative.prefix = format!("{}{}", p.minus, negative.prefix);
         variables.push(negative);
     }
+    let negative = variables.pop();
+    let positive = variables.pop();
+    match (positive, negative) {
+        (Some(positive), Some(negative)) => Ok((family, [positive, negative])),
+        _ => Err(Error::new("D3080")),
+    }
+}
 
+fn format_picture(picture: &Picture, value: f64) -> String {
+    let p = &picture.props;
+    let family = &picture.family;
+    let variables = &picture.variables;
     let pic = if value >= 0.0 {
         &variables[0]
     } else {
@@ -607,26 +706,17 @@ fn format_number_with(value: f64, picture: &str, p: &Props) -> Result<String> {
     };
 
     let rounded = round(mantissa, pic.max_fraction as f64);
-    let make_string = |v: f64, dp: usize| -> Vec<char> {
-        to_fixed(v.abs(), dp)
-            .chars()
-            .map(|c| {
-                if c.is_ascii_digit() {
-                    family[(c as u8 - b'0') as usize]
-                } else {
-                    c
-                }
-            })
-            .collect()
+    let make_string = |v: f64, dp: usize, s: &mut Vec<char>| {
+        write_fixed(&mut Digits { out: s, family }, v, dp);
     };
-    let mut s = make_string(rounded, pic.max_fraction);
+    let mut s = Vec::with_capacity(32);
+    make_string(rounded, pic.max_fraction, &mut s);
     match s.iter().position(|&c| c == '.') {
         None => s.push(p.decimal),
         Some(i) => s[i] = p.decimal,
     }
-    while s.first() == Some(&p.zero) {
-        s.remove(0);
-    }
+    let leading = s.iter().take_while(|&&c| c == p.zero).count();
+    s.drain(..leading);
     while s.last() == Some(&p.zero) {
         s.pop();
     }
@@ -668,22 +758,43 @@ fn format_number_with(value: f64, picture: &str, p: &Props) -> Result<String> {
     if !pic.picture.contains(&p.decimal) || decimal_pos + 1 == s.len() {
         s.pop();
     }
-    let mut out: String = s.into_iter().collect();
+    let mut out = String::with_capacity(pic.prefix.len() + s.len() + pic.suffix.len() + 8);
+    out.push_str(&pic.prefix);
+    out.extend(s);
     if let Some(e) = exponent {
-        let mut digits = make_string(f64::from(e), 0);
-        if digits.len() < pic.min_exponent {
-            digits.splice(
-                0..0,
-                std::iter::repeat_n(p.zero, pic.min_exponent - digits.len()),
-            );
-        }
+        let mut digits = Vec::new();
+        make_string(f64::from(e), 0, &mut digits);
         out.push(p.exponent);
         if e < 0 {
             out.push_str(&p.minus);
         }
+        out.extend(std::iter::repeat_n(
+            p.zero,
+            pic.min_exponent.saturating_sub(digits.len()),
+        ));
         out.extend(digits);
     }
-    Ok(format!("{}{out}{}", pic.prefix, pic.suffix))
+    out.push_str(&pic.suffix);
+    out
+}
+
+/// Writes text into characters, with the ASCII digits replaced by those of a digit family.
+struct Digits<'d> {
+    out: &'d mut Vec<char>,
+    family: &'d [char],
+}
+
+impl fmt::Write for Digits<'_> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.out.extend(s.chars().map(|c| {
+            if c.is_ascii_digit() {
+                self.family[(c as u8 - b'0') as usize]
+            } else {
+                c
+            }
+        }));
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -691,18 +802,10 @@ mod tests {
     use super::*;
 
     fn fmt(v: f64, picture: &str) -> String {
-        let p = Props {
-            decimal: '.',
-            grouping: ',',
-            exponent: 'e',
-            minus: "-".into(),
-            percent: '%',
-            per_mille: '\u{2030}',
-            zero: '0',
-            digit: '#',
-            pattern: ';',
-        };
-        format_number_with(v, picture, &p).unwrap()
+        format_picture(
+            &Picture::parse(picture.into(), Props::default()).unwrap(),
+            v,
+        )
     }
 
     #[test]
@@ -712,6 +815,35 @@ mod tests {
         assert_eq!(fmt(0.14, "01%"), "14%");
         assert_eq!(fmt(-6.0, "000"), "-006");
         assert_eq!(fmt(1e6, "#,##0"), "1,000,000");
+    }
+
+    #[test]
+    fn digits_past_valid_code_points_are_replaced() {
+        let p = Props {
+            zero: '\u{D7FF}',
+            ..Props::default()
+        };
+        let picture = Picture::parse("\u{D7FF}".into(), p).unwrap();
+        assert_eq!(format_picture(&picture, 5.0), "\u{FFFD}");
+    }
+
+    #[test]
+    fn ties_agree_with_the_exact_expansion() {
+        let expanded = |x: f64, dp: usize| {
+            let exact = format!("{:.*}", dp + 60, x.abs());
+            let tail = &exact[exact.len() - 60..];
+            tail.starts_with('5') && tail[1..].bytes().all(|b| b == b'0')
+        };
+        let mut values = vec![
+            0.0, 0.5, 2.5, 0.125, -0.375, 1.005, 1e21, 5e-324, 0.1, 1234.5,
+        ];
+        values.extend((0..2000).map(|k| f64::from(k) / 64.0));
+        values.extend((0..2000).map(|k| f64::from(k) * 0.01));
+        for x in values {
+            for dp in 0..8 {
+                assert_eq!(is_tie(x, dp), expanded(x, dp), "{x} to {dp} places");
+            }
+        }
     }
 
     #[test]
@@ -752,6 +884,11 @@ mod tests {
         assert_eq!(round(1.005, 2.0), 1.0);
         assert_eq!(round(12345.0, -2.0), 12300.0);
         assert_eq!(round(-1e300, 20.0), -1e300);
+        let to_fixed = |x, dp| {
+            let mut out = String::new();
+            write_fixed(&mut out, x, dp);
+            out
+        };
         assert_eq!(to_fixed(0.5, 0), "1");
         assert_eq!(to_fixed(2.5, 0), "3");
         assert_eq!(to_fixed(1.25, 1), "1.3");

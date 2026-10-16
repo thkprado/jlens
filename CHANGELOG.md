@@ -30,6 +30,14 @@ All notable changes are recorded here. The format follows
   `Document`), the transform 14% (24%).
 - Python: the arrays and objects of a level read from Python values cost one allocation each
   instead of two: `$count(items)` over 200 `dict`s takes 19% less time, names over items 6%.
+- `$formatNumber` parses its picture once per evaluation, rounds without heap strings and
+  detects ties from the bits of the number: the number formatting case of the benchmarks takes
+  51% less time (58% against a `Document`). `$round` with decimals is about three times faster.
+
+### Fixed
+
+- `$formatNumber` with a `zero-digit` just below U+D800, whose digits would be lone
+  surrogates, panicked; those digits are now U+FFFD, as a lone surrogate in a string literal is.
 
 ## [0.18.0]
 

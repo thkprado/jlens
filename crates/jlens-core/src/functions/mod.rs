@@ -10,6 +10,8 @@ mod collections;
 mod numeric;
 mod strings;
 
+pub(crate) use numeric::Picture;
+
 use std::sync::OnceLock;
 
 use serde::Serialize;

@@ -17,7 +17,7 @@ use web_time::{Duration, Instant};
 use crate::ast::{Ast, BinaryOp, FallbackOp, Node, NodeKind, SortTerm, Stage, TransformDef};
 use crate::audit::{Branch, EvalInfo, Outcome, Tracer, ValueRef};
 use crate::error::{Error, Result};
-use crate::functions::{self, Call, boolean};
+use crate::functions::{self, Call, Picture, boolean};
 use crate::output::Output;
 use crate::regex::Regex;
 use crate::signature::Signature;
@@ -123,6 +123,8 @@ pub(crate) struct Evaluator<'t, 'a> {
     /// it). Their bindings are cleared when the evaluation ends so the memory is reclaimed.
     cyclic: Vec<Weak<Frame<'a>>>,
     regexes: HashMap<(String, String), Rc<Regex>>,
+    /// The pictures `$formatNumber` parsed last, at most `numeric::PICTURES`.
+    pictures: Vec<Picture>,
     /// The system clock, read once, the first time the evaluation needs it: for its
     /// timestamp (`$now`, `$millis`) or the seed of `$random` and `$shuffle`.
     clock: Option<Duration>,
@@ -291,6 +293,7 @@ pub(crate) fn evaluate<'a, 'v, R>(
         limits,
         cyclic: Vec::new(),
         regexes: HashMap::new(),
+        pictures: Vec::new(),
         clock: None,
         tracer,
         source,
@@ -378,6 +381,11 @@ impl<'a> Evaluator<'_, 'a> {
             Some(millis) => millis as f64,
             None => self.clock().as_millis() as f64,
         }
+    }
+
+    /// The pictures `$formatNumber` parsed last.
+    pub(crate) fn pictures(&mut self) -> &mut Vec<Picture> {
+        &mut self.pictures
     }
 
     /// A pseudo-random number in [0, 1).
