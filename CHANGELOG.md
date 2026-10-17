@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.19.0]
+
+jlens gets faster where `jsonatapy`, the Python package of jsonata-core, was ahead: a
+result is written straight into Python and JavaScript values, a predicate of literals is
+evaluated once, an object constructor over one item skips grouping, `$formatNumber` takes
+half the time, and the Python package reads `dict` fields with interned keys and allocates
+with mimalloc. With Python values in, jlens is now the fastest on ten of the twelve cases of
+`benches/compare/python.py`. The CLI is still not on npm (see 0.14.0).
+
 ### Added
 
 - Results written straight into another representation (ADR 0017): implement
@@ -661,7 +670,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/thkprado/jlens/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/thkprado/jlens/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/thkprado/jlens/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/thkprado/jlens/compare/v0.15.0...v0.16.0
