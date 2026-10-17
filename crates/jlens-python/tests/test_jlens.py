@@ -288,6 +288,32 @@ def test_invalid_options():
     assert expr.evaluate(timeout=None, max_depth=None) == 1
 
 
+def test_options_of_every_evaluate_method():
+    expr = Expression("[1..5].$random()")
+    document = Document(None)
+    values = expr.evaluate(seed=7)
+    assert expr.evaluate_json(seed=7) == json.dumps(values, separators=(",", ":"))
+    assert expr.evaluate_document(document, seed=7) == values
+    assert expr.evaluate_with_audit(seed=7, level="off")["result"] == values
+    deep = Expression("($f := function($n){ $n = 0 ? 0 : 1 + $f($n - 1) }; $f(100))")
+    for call in (
+        deep.evaluate,
+        deep.evaluate_json,
+        lambda **options: deep.evaluate_document(document, **options),
+    ):
+        assert call(max_depth=None) in (100, "100")
+        raises("D1011", call, max_depth=100)
+        with pytest.raises(TypeError):
+            call(timeot=1)
+        with pytest.raises(TypeError):
+            call(max_depth="10")
+    assert deep.evaluate_with_audit(max_depth=100)["error"]["code"] == "D1011"
+    with pytest.raises(TypeError):
+        expr.evaluate_with_audit(timeot=1)
+    with pytest.raises(TypeError):
+        expr.evaluate(None, None, 1)
+
+
 def test_document():
     document = Document(ORDER)
     expr = Expression("$sum(items.price)")

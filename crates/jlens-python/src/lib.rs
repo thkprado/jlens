@@ -122,16 +122,35 @@ impl Expression {
     /// Evaluates the expression against `input`, read one level at a time as the expression
     /// reaches it. `None` means no input document, and a result of `None` an undefined result
     /// or `null`.
-    #[pyo3(signature = (input=None, bindings=None, **options))]
+    // The options are keyword parameters, so that a call builds no `dict` (vectorcall).
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (input=None, bindings=None, *,
+        timeout=None, max_depth=None, max_string_length=None,
+        max_array_length=None, max_result_size=None, now=None, seed=None
+    ))]
     fn evaluate<'py>(
         &self,
         py: Python<'py>,
         input: Option<&Bound<'py, PyAny>>,
         bindings: Option<&Bound<'py, PyAny>>,
-        options: Option<&Bound<'py, PyDict>>,
+        timeout: Option<&Bound<'py, PyAny>>,
+        max_depth: Option<&Bound<'py, PyAny>>,
+        max_string_length: Option<&Bound<'py, PyAny>>,
+        max_array_length: Option<&Bound<'py, PyAny>>,
+        max_result_size: Option<&Bound<'py, PyAny>>,
+        now: Option<&Bound<'py, PyAny>>,
+        seed: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let (bindings, host) = self.bindings(py, bindings)?;
-        let options = convert::options(options)?;
+        let options = convert::options(convert::OptionArgs {
+            timeout,
+            max_depth,
+            max_string_length,
+            max_array_length,
+            max_result_size,
+            now,
+            seed,
+        })?;
         let mut builder = PyBuilder::new(py);
         let write = |out: jlens_core::output::Output<'_, '_>| out.write(&mut builder);
         let written = match input.filter(|input| !input.is_none()) {
@@ -152,16 +171,34 @@ impl Expression {
     /// undefined result, `"null"` for `null`. The fields of the input that the expression does
     /// not read (`reads()`, without bindings) are skipped while parsing. The evaluation lets
     /// other Python threads run, and attaches again to call a host function written in Python.
-    #[pyo3(signature = (input=None, bindings=None, **options))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (input=None, bindings=None, *,
+        timeout=None, max_depth=None, max_string_length=None,
+        max_array_length=None, max_result_size=None, now=None, seed=None
+    ))]
     fn evaluate_json(
         &self,
         py: Python<'_>,
         input: Option<&str>,
         bindings: Option<&Bound<'_, PyAny>>,
-        options: Option<&Bound<'_, PyDict>>,
+        timeout: Option<&Bound<'_, PyAny>>,
+        max_depth: Option<&Bound<'_, PyAny>>,
+        max_string_length: Option<&Bound<'_, PyAny>>,
+        max_array_length: Option<&Bound<'_, PyAny>>,
+        max_result_size: Option<&Bound<'_, PyAny>>,
+        now: Option<&Bound<'_, PyAny>>,
+        seed: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Option<String>> {
         let (bindings, host) = self.bindings(py, bindings)?;
-        let options = convert::options(options)?;
+        let options = convert::options(convert::OptionArgs {
+            timeout,
+            max_depth,
+            max_string_length,
+            max_array_length,
+            max_result_size,
+            now,
+            seed,
+        })?;
         let result = py.detach(|| {
             let document = match input {
                 Some(text) => Some(
@@ -178,16 +215,34 @@ impl Expression {
 
     /// Evaluates the expression against a `Document` converted beforehand. The evaluation lets
     /// other Python threads run.
-    #[pyo3(signature = (document, bindings=None, **options))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (document, bindings=None, *,
+        timeout=None, max_depth=None, max_string_length=None,
+        max_array_length=None, max_result_size=None, now=None, seed=None
+    ))]
     fn evaluate_document<'py>(
         &self,
         py: Python<'py>,
         document: &Bound<'py, Document>,
         bindings: Option<&Bound<'py, PyAny>>,
-        options: Option<&Bound<'py, PyDict>>,
+        timeout: Option<&Bound<'py, PyAny>>,
+        max_depth: Option<&Bound<'py, PyAny>>,
+        max_string_length: Option<&Bound<'py, PyAny>>,
+        max_array_length: Option<&Bound<'py, PyAny>>,
+        max_result_size: Option<&Bound<'py, PyAny>>,
+        now: Option<&Bound<'py, PyAny>>,
+        seed: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let (bindings, host) = self.bindings(py, bindings)?;
-        let options = convert::options(options)?;
+        let options = convert::options(convert::OptionArgs {
+            timeout,
+            max_depth,
+            max_string_length,
+            max_array_length,
+            max_result_size,
+            now,
+            seed,
+        })?;
         let source = &document.get().source;
         // The result is written attached again, once the evaluation has succeeded.
         let result = py
@@ -212,7 +267,11 @@ impl Expression {
     /// `"decisions"`, the default, or `"full"`) within the capture `limits`. The input is
     /// converted whole first. Evaluation errors are not raised: they are reported in the result,
     /// a `dict` with `result`, `error`, `audit`, `explanation` and `explanation_text`.
-    #[pyo3(signature = (input=None, bindings=None, *, level=None, limits=None, **options))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (input=None, bindings=None, *, level=None, limits=None,
+        timeout=None, max_depth=None, max_string_length=None,
+        max_array_length=None, max_result_size=None, now=None, seed=None
+    ))]
     fn evaluate_with_audit<'py>(
         &self,
         py: Python<'py>,
@@ -220,7 +279,13 @@ impl Expression {
         bindings: Option<&Bound<'py, PyAny>>,
         level: Option<&str>,
         limits: Option<&Bound<'py, PyDict>>,
-        options: Option<&Bound<'py, PyDict>>,
+        timeout: Option<&Bound<'py, PyAny>>,
+        max_depth: Option<&Bound<'py, PyAny>>,
+        max_string_length: Option<&Bound<'py, PyAny>>,
+        max_array_length: Option<&Bound<'py, PyAny>>,
+        max_result_size: Option<&Bound<'py, PyAny>>,
+        now: Option<&Bound<'py, PyAny>>,
+        seed: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyDict>> {
         let input = match input.filter(|input| !input.is_none()) {
             Some(input) => Some(convert::to_json(input, "the input")?),
@@ -228,7 +293,15 @@ impl Expression {
         };
         let audit_options = convert::audit_options(level, limits)?;
         let (bindings, _host) = self.bindings(py, bindings)?;
-        let options = convert::options(options)?;
+        let options = convert::options(convert::OptionArgs {
+            timeout,
+            max_depth,
+            max_string_length,
+            max_array_length,
+            max_result_size,
+            now,
+            seed,
+        })?;
         let (result, tree) =
             self.inner
                 .evaluate_audited(input.as_ref(), &bindings, &options, &audit_options);

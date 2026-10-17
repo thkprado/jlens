@@ -321,6 +321,13 @@ Natively, `cargo xtask ab --mode evaluate` over 20 rounds finds no case slower b
 by 2%. A first version made each lazy object 16 bytes larger, to hold the member's index, and
 names over items 17% slower; the index now sits in room the layout of an object left free.
 
+From 0.19 on, the options of the `evaluate` methods are keyword-only parameters instead of
+`**options`, so that a call with options builds no tuple and no `dict`. `python.py speed` passes
+`timeout=None, max_depth=None` to jlens. Measured before and after on the same system, the
+median of three alternated runs: `path` went from 1.1 to 0.9 µs, the other cases within 3%.
+`customer.name` took 1.01 µs with these two keywords and 0.82 µs without before, and now 0.86
+against 0.82 µs.
+
 How each behaves at the limits, measured by `python.py limits` on the same system. Each case
 runs in a process of its own, killed after 30 seconds. `$string($)` reads the whole input, and
 the cyclic input is `{"n": 1, "child": {"parent": <the input>}}`:

@@ -301,47 +301,51 @@ pub fn bindings<'py>(
     Ok((out, host))
 }
 
-/// Reads the evaluation options, given as keyword arguments: `timeout` (seconds), `max_depth`,
-/// `max_string_length`, `max_array_length`, `max_result_size`, `now` and `seed`. `None` leaves
-/// an option at its default.
-pub fn options(options: Option<&Bound<'_, PyDict>>) -> PyResult<Options> {
-    let mut out = Options::default();
-    let Some(options) = options else {
-        return Ok(out);
-    };
-    for (name, value) in options.iter() {
-        if value.is_none() {
-            continue;
-        }
-        let name: String = name.extract()?;
-        let count = || -> PyResult<usize> {
-            if value.is_instance_of::<PyBool>() || !value.is_instance_of::<PyInt>() {
-                return Err(PyTypeError::new_err(format!("{name} must be an int")));
-            }
-            value
-                .extract()
-                .map_err(|_| PyValueError::new_err(format!("{name} must not be negative")))
+/// The evaluation options, as the keyword-only arguments of the `evaluate` methods: `timeout`
+/// (seconds), `max_depth`, `max_string_length`, `max_array_length`, `max_result_size`, `now`
+/// and `seed`. Absent or `None`, an option keeps its default.
+pub struct OptionArgs<'a, 'py> {
+    pub timeout: Option<&'a Bound<'py, PyAny>>,
+    pub max_depth: Option<&'a Bound<'py, PyAny>>,
+    pub max_string_length: Option<&'a Bound<'py, PyAny>>,
+    pub max_array_length: Option<&'a Bound<'py, PyAny>>,
+    pub max_result_size: Option<&'a Bound<'py, PyAny>>,
+    pub now: Option<&'a Bound<'py, PyAny>>,
+    pub seed: Option<&'a Bound<'py, PyAny>>,
+}
+
+/// Reads the evaluation options.
+pub fn options(args: OptionArgs<'_, '_>) -> PyResult<Options> {
+    fn given<'a, 'py>(value: Option<&'a Bound<'py, PyAny>>) -> Option<&'a Bound<'py, PyAny>> {
+        value.filter(|value| !value.is_none())
+    }
+    let count = |name: &str, value: Option<&Bound<'_, PyAny>>| -> PyResult<Option<usize>> {
+        let Some(value) = given(value) else {
+            return Ok(None);
         };
-        match name.as_str() {
-            "timeout" => {
-                let seconds = number(&value)
-                    .ok_or_else(|| PyTypeError::new_err("timeout must be a number of seconds"))?;
-                out.timeout = Some(Duration::try_from_secs_f64(seconds).map_err(|_| {
-                    PyValueError::new_err("timeout must be a non-negative number of seconds")
-                })?);
-            }
-            "max_depth" => out.max_depth = Some(count()?),
-            "max_string_length" => out.max_string_length = Some(count()?),
-            "max_array_length" => out.max_array_length = Some(count()?),
-            "max_result_size" => out.max_result_size = Some(count()?),
-            "seed" => out.seed = Some(count()? as u64),
-            "now" => out.now = Some(now(&value)?),
-            _ => {
-                return Err(PyTypeError::new_err(format!(
-                    "unexpected keyword argument '{name}'"
-                )));
-            }
+        if value.is_instance_of::<PyBool>() || !value.is_instance_of::<PyInt>() {
+            return Err(PyTypeError::new_err(format!("{name} must be an int")));
         }
+        value
+            .extract()
+            .map(Some)
+            .map_err(|_| PyValueError::new_err(format!("{name} must not be negative")))
+    };
+    let mut out = Options::default();
+    if let Some(value) = given(args.timeout) {
+        let seconds = number(value)
+            .ok_or_else(|| PyTypeError::new_err("timeout must be a number of seconds"))?;
+        out.timeout = Some(Duration::try_from_secs_f64(seconds).map_err(|_| {
+            PyValueError::new_err("timeout must be a non-negative number of seconds")
+        })?);
+    }
+    out.max_depth = count("max_depth", args.max_depth)?;
+    out.max_string_length = count("max_string_length", args.max_string_length)?;
+    out.max_array_length = count("max_array_length", args.max_array_length)?;
+    out.max_result_size = count("max_result_size", args.max_result_size)?;
+    out.seed = count("seed", args.seed)?.map(|seed| seed as u64);
+    if let Some(value) = given(args.now) {
+        out.now = Some(now(value)?);
     }
     Ok(out)
 }

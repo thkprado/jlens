@@ -34,6 +34,11 @@ All notable changes are recorded here. The format follows
   detects ties from the bits of the number: the number formatting case of the benchmarks takes
   51% less time (58% against a `Document`), and 41% in Python (53% against a `Document`).
   `$round` with decimals is about three times faster.
+- Python: the options of `evaluate`, `evaluate_json`, `evaluate_document` and
+  `evaluate_with_audit` are keyword-only parameters instead of `**options`, so that a call
+  builds no `dict` for them: two options cost 0.04 µs per call instead of 0.19 µs, and `path`
+  of `benches/compare/python.py` takes 0.9 µs instead of 1.1. An unknown keyword is still a
+  `TypeError`, whose message now names the method.
 
 ### Fixed
 
