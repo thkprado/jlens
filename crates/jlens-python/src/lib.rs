@@ -39,6 +39,12 @@ use host::{Function, Host};
 use output::{NoInput, PyBuilder};
 use source::PySource;
 
+// Evaluation allocates for most of its work, and the system allocators are slower at it: with
+// glibc's, `malloc` and `free` took up to 38% of an evaluation (roadmap 0.19 #8). Only the
+// package's own allocations go through it; Python's objects keep the interpreter's allocator.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// A compiled JSONata expression.
 ///
 /// Compile once, then evaluate against any number of documents, from any thread.

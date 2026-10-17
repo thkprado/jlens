@@ -23,6 +23,9 @@ doctest = false
 [dependencies]
 jlens-core.workspace = true
 foldhash.workspace = true
+# Its thread-local state through the dynamic model: a module loaded at run time cannot count on
+# room for the initial-exec one.
+mimalloc = { workspace = true, features = ["local_dynamic_tls"] }
 serde_json.workspace = true
 pyo3.workspace = true
 scoped-tls-hkt.workspace = true

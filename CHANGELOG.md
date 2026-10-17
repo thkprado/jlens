@@ -43,6 +43,10 @@ All notable changes are recorded here. The format follows
   first evaluation, so that a step into a `dict` neither builds nor hashes a `str`. In
   `benches/compare/python.py`, `names over items` takes 18% less time, the object constructor,
   `group-by`, `filter + aggregate` and `strings` 11% to 15% less, and the shipping rule 20% less.
+- Python: the package uses mimalloc as its allocator, as the `jlens` command does (ADR 0014,
+  amended). In `benches/compare/python.py` on Linux, ten cases take 4% to 19% less time,
+  `recursion` 7% more and the smallest evaluations 0.02 to 0.07 µs more; a wheel is 60 to 70 KB
+  larger.
 
 ### Fixed
 

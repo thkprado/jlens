@@ -170,3 +170,38 @@ with the GIL disabled. Each wheel takes 0.9 MB on Windows x86-64.
 - The workspace builds `jlens-python` with `cargo build` like any crate; the pytest suite needs
   maturin and a Python, which `cargo test` does not. Its CI and release steps are 0.17 #3 to #6.
 - jlens-core gains a fix for every `Source` input, the WebAssembly package's included.
+
+## Amendment: mimalloc as the allocator (0.19)
+
+### Context
+
+Roadmap 0.19, items 8 and 11. Profiled with glibc's allocator, `malloc` and `free` took 24% to
+38% of the object constructor and 30% of `$count(items)`, where each `dict` of the list
+allocates its object; `jsonatapy` uses mimalloc. The `jlens` command has used mimalloc since
+0.15, where it made glibc builds 3 to 20% faster on ten of the twelve benchmarks, and musl and
+Windows builds up to 3 and 2 times faster (the performance chapter). The module is loaded by
+the interpreter at run time (`dlopen` on Linux), where the space for initial-exec thread-locals
+is small and shared with every other module loaded so far.
+
+### Decision
+
+1. **mimalloc is the global allocator of `jlens-python`**, on every wheel target, and of no
+   other library crate: a Rust application chooses its own allocator. It serves the module's
+   own allocations; Python objects keep the interpreter's allocator, and no allocation crosses
+   from one to the other.
+2. **With mimalloc's `local_dynamic_tls`**, which reaches its thread-local state through the
+   dynamic model, as a library loaded at run time should, rather than counting on room for the
+   initial-exec model. Measured against plain mimalloc, it costs the smallest cases at most
+   0.02 µs, and reading a list of `dict`s 7 to 11% less.
+
+### Consequences
+
+- With Python values in (`python.py speed`, WSL, the median of three alternated runs against
+  glibc's allocator), ten cases take 4% to 19% less time, `$count(items)` 35% less; the
+  smallest evaluations take 0.02 to 0.07 µs more, and `recursion` 7% more, as natively with
+  glibc (6%).
+- A wheel grows by 60 to 70 KB (1.23 to 1.30 MB for Linux x86-64, 1.13 to 1.19 MB for
+  Windows). The 0.18.0 wheels already
+  took 1.09 to 1.43 MB, not "under 1 MB" as the consequences above said.
+- Every target builds mimalloc's C sources with its own compiler, as the command's release
+  binaries already do: the manylinux and musllinux containers on Linux, MSVC on Windows.

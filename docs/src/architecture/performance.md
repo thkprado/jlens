@@ -224,42 +224,43 @@ fourth package, `jsonata`, which runs jsonata-js in the Duktape JavaScript inter
 out: it has had no release since 2023, its module cannot load jsonata-js on Windows, and it
 compiles the expression at each call, taking up to 3.5 s on these cases.
 
-Measured for 0.19 (0a1c6ad) on Python 3.14.8, under Linux: Ubuntu 26.04 under WSL 2, on the
-machine above. `jsonatapy` has wheels up to Python 3.13 and was built from its source
-distribution. The input is the document as Python values; for jlens and `jsonatapy`, also an
-input converted once (`Document`, `JsonataData`). Two more runs of jlens and `jsonatapy` alone
-gave the same times within 5%:
+Measured for 0.19, with roadmap item 11 (mimalloc), on Python 3.14.8, under Linux: Ubuntu
+26.04 under WSL 2, on the machine above. `jsonatapy` has wheels up to Python 3.13 and was built
+from its source distribution. The input is the document as Python values; for jlens and
+`jsonatapy`, also an input converted once (`Document`, `JsonataData`). Two more runs of jlens and
+`jsonatapy` alone gave the same times within 5%:
 
 | Case | jsonata-python 0.7.1 | jsonata-rs 0.1.4 | jsonatapy 2.2.11 | jsonatapy, `JsonataData` | jlens `evaluate` | jlens `evaluate_document` |
 |---|---:|---:|---:|---:|---:|---:|
-| path | 1.48 ms | 214 µs | 0.7 µs | 0.3 µs | 1.1 µs | 0.5 µs |
-| names over items | 1.94 ms | 244 µs | 26 µs | 4.8 µs | 35 µs | 6.6 µs |
-| filter + aggregate | 4.62 ms | 395 µs | 122 µs | 88 µs | 82 µs | 39 µs |
-| group-by | 6.07 ms | 838 µs | 166 µs | 108 µs | 134 µs | 73 µs |
-| sort + map | 24.3 ms | 1.85 ms | 458 µs | 398 µs | 378 µs | 272 µs |
-| strings | 4.44 ms | 449 µs | 163 µs | 137 µs | 116 µs | 64 µs |
-| regex | 5.03 ms | 3.86 ms | 2.73 ms | 2.70 ms | 135 µs | 97 µs |
-| number formatting | 4.12 ms | 433 µs | 155 µs | 146 µs | 48 µs | 26 µs |
-| object constructor | 5.99 ms | 808 µs | 184 µs | 141 µs | 203 µs | 141 µs |
-| transform | 5.78 ms | 1.79 ms | 1.02 ms | 881 µs | 673 µs | 535 µs |
-| recursion | 40.6 ms | 2.37 ms | 744 µs | 853 µs | 711 µs | 706 µs |
-| shipping rule | 9.49 ms | 732 µs | 329 µs | 244 µs | 224 µs | 99 µs |
+| path | 1.46 ms | 212 µs | 0.7 µs | 0.4 µs | 0.8 µs | 0.5 µs |
+| names over items | 1.93 ms | 241 µs | 25 µs | 4.7 µs | 23 µs | 6.2 µs |
+| filter + aggregate | 4.60 ms | 398 µs | 125 µs | 89 µs | 67 µs | 39 µs |
+| group-by | 6.08 ms | 864 µs | 167 µs | 108 µs | 106 µs | 73 µs |
+| sort + map | 25.0 ms | 1.85 ms | 457 µs | 393 µs | 310 µs | 259 µs |
+| strings | 4.47 ms | 444 µs | 165 µs | 137 µs | 84 µs | 57 µs |
+| regex | 5.05 ms | 3.88 ms | 2.73 ms | 2.66 ms | 120 µs | 98 µs |
+| number formatting | 4.14 ms | 428 µs | 153 µs | 144 µs | 35 µs | 23 µs |
+| object constructor | 6.10 ms | 808 µs | 181 µs | 141 µs | 151 µs | 116 µs |
+| transform | 5.83 ms | 1.79 ms | 1.01 ms | 883 µs | 584 µs | 457 µs |
+| recursion | 40.9 ms | 2.35 ms | 735 µs | 837 µs | 748 µs | 752 µs |
+| shipping rule | 9.60 ms | 681 µs | 337 µs | 237 µs | 170 µs | 98 µs |
 
-- With Python values in, jlens is the fastest on nine cases, by 20 times on `regex`, 3.2
-  times on number formatting and 47% on the shipping rule; `jsonatapy` on three: `path` (0.7
-  against 1.1 µs), `names over items` (26 against 35 µs) and the object constructor (184
-  against 203 µs). In 0.17 (c76a814) jlens took 357 µs on the object constructor, 167 µs on
-  number formatting and 868 µs on the transform, and was the fastest on eight cases; before a
-  path step read its one field of a `dict` (see below), it took 138 µs on `names over items`
-  and was the fastest on five.
-- With the input converted once, jlens is the fastest on nine cases, by up to 5.7 times on
-  number formatting and 28 times on `regex`; the object constructor takes both 141 µs, and
-  `jsonatapy` is faster on `path` and `names over items`.
-- On every case but `path`, jlens `evaluate` takes 2.7 (transform) to 29 times (`regex`) less
-  time than `jsonata-rs`, and 8.6 to 86 times less than `jsonata-python`. Both read the whole
-  input before evaluating: on `path` they take 0.2 and 1.5 ms where jlens takes 1.1 µs.
+- With Python values in, jlens is the fastest on ten cases, by 23 times on `regex`, 4.4 times
+  on number formatting and twice on the shipping rule; `jsonatapy` on `path` (0.7 against
+  0.8 µs) and, within 2%, on `recursion`. At 0a1c6ad, before items 9 to 11 of roadmap 0.19,
+  jlens took 1.1 µs on `path`, 35 µs on `names over items` and 203 µs on the object
+  constructor, and was the fastest on nine cases; in 0.17 (c76a814) it took 357 µs on the
+  object constructor, 167 µs on number formatting and 868 µs on the transform, and was the
+  fastest on eight; before a path step read its one field of a `dict` (see below), it took
+  138 µs on `names over items` and was the fastest on five.
+- With the input converted once, jlens is the fastest on ten cases, by up to 6.3 times on
+  number formatting and 27 times on `regex`, and on the object constructor by 116 against
+  141 µs; `jsonatapy` is faster on `path` and `names over items`.
+- On every case but `path`, jlens `evaluate` takes 3.1 (transform) to 32 times (`regex`) less
+  time than `jsonata-rs`, and 10 to 120 times less than `jsonata-python`. Both read the whole
+  input before evaluating: on `path` they take 0.2 and 1.5 ms where jlens takes 0.8 µs.
 
-Since then, the Python package builds a result as Python objects directly (ADR 0017), without a
+From 0.19 on, the Python package builds a result as Python objects directly (ADR 0017), without a
 `serde_json` value in between, and creates each key of the result once, so that a key repeated
 in every object is created and hashed once. Measured before and after on the same system, with
 Python values in and against a `Document`:
@@ -271,8 +272,8 @@ Python values in and against a `Document`:
 | sort + map | 392 µs | 360 µs | 287 µs | 266 µs |
 | names over items | 38.9 µs | 37.5 µs | 6.6 µs | 6.8 µs |
 
-The object constructor still takes `jsonatapy` 182 µs: the rest of the gap is the evaluation
-(roadmap 0.19).
+The rest of the gap to `jsonatapy` on the object constructor was the evaluation, which the
+object constructor over a single item (roadmap 0.19 #4) and the changes below closed.
 
 What reading Python values costs, per value, measured with inputs that each exercise one step
 and the time of the same evaluation against a `Document` taken off. The first column is
@@ -348,6 +349,37 @@ same way, against the input as Python values:
 
 Number formatting, the transform and the recursion stayed within 1%, as did every case against a
 converted input, which looks no key up in a `dict`.
+
+Also from 0.19 on, the package uses mimalloc as its allocator, as the command does, with
+`local_dynamic_tls`, the thread-local model of a library loaded at run time ([ADR 0014,
+amended](../adr/0014-python-package.md#amendment-mimalloc-as-the-allocator-019)). Measured the
+same way, with glibc's allocator before; the last rows come from `variants.py`, kept with the
+profiles of roadmap 0.19 #8:
+
+| Case | Before | After | Before, `Document` | After, `Document` |
+|---|---:|---:|---:|---:|
+| path | 0.9 µs | 0.9 µs | 0.5 µs | 0.5 µs |
+| names over items | 28.1 µs | 23.1 µs | 6.6 µs | 6.4 µs |
+| filter + aggregate | 70.2 µs | 67.3 µs | 39.6 µs | 39.5 µs |
+| group-by | 112.2 µs | 107.9 µs | 71.6 µs | 72.0 µs |
+| sort + map | 337.8 µs | 311.2 µs | 263.3 µs | 260.4 µs |
+| strings | 103.2 µs | 85.5 µs | 64.5 µs | 57.0 µs |
+| regex | 127.8 µs | 122.4 µs | 96.2 µs | 99.6 µs |
+| number formatting | 43.2 µs | 34.9 µs | 24.1 µs | 23.4 µs |
+| object constructor | 182.9 µs | 149.9 µs | 138.7 µs | 115.6 µs |
+| transform | 676.0 µs | 579.4 µs | 532.1 µs | 456.7 µs |
+| recursion | 700.1 µs | 750.6 µs | 703.2 µs | 764.5 µs |
+| shipping rule | 179.4 µs | 172.4 µs | 99.7 µs | 99.3 µs |
+| `1`, no input | 0.31 µs | 0.33 µs | | |
+| `customer.name` | 0.74 µs | 0.78 µs | | |
+| `$count(items)` | 14.8 µs | 9.6 µs | | |
+
+- `recursion` takes 7% more, as natively with glibc (6%, in the allocator table above).
+- Plain mimalloc, with initial-exec thread-locals, gave the same times within 4%, but for the
+  smallest cases, 0.01 to 0.02 µs faster, and reading lists of `dict`s, 7 to 11% slower
+  (`names over items` 24.7 µs, `$count(items)` 10.8 µs).
+- The wheel grows from 1.23 to 1.30 MB for Linux x86-64, and from 1.13 to 1.19 MB for
+  Windows.
 
 How each behaves at the limits, measured by `python.py limits` on the same system. Each case
 runs in a process of its own, killed after 30 seconds. `$string($)` reads the whole input, and
