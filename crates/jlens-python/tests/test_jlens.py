@@ -131,6 +131,18 @@ def test_fields_read_alone_then_whole():
     assert Expression("[o.q, o, o.missing, o.q]").evaluate(order) == [2, order["o"], 2]
 
 
+def test_fields_found_whatever_str_their_keys_are():
+    class Key(str):
+        pass
+
+    name = "".join(["na", "me"])  # not interned
+    inputs = [{"name": 1}, json.loads('{"name": 1}'), {name: 1}, {Key("name"): 1}]
+    # The first expression names its keys; the second reads its input whole, so it names none.
+    for expression in (Expression("name"), Expression("{'n': name, 'k': $keys($)}.n")):
+        assert [expression.evaluate(i) for i in inputs] == [1, 1, 1, 1]
+        assert expression.evaluate({"other": 1}) is None
+
+
 def test_cycles_fail_cleanly():
     cyclic = {"a": 1}
     cyclic["self"] = cyclic

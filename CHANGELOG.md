@@ -39,6 +39,10 @@ All notable changes are recorded here. The format follows
   builds no `dict` for them: two options cost 0.04 µs per call instead of 0.19 µs, and `path`
   of `benches/compare/python.py` takes 0.9 µs instead of 1.1. An unknown keyword is still a
   `TypeError`, whose message now names the method.
+- Python: each `Expression` keeps an interned `str` for every field name it reads, made on its
+  first evaluation, so that a step into a `dict` neither builds nor hashes a `str`. In
+  `benches/compare/python.py`, `names over items` takes 18% less time, the object constructor,
+  `group-by`, `filter + aggregate` and `strings` 11% to 15% less, and the shipping rule 20% less.
 
 ### Fixed
 

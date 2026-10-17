@@ -9,39 +9,45 @@
 //! The arrays and objects of a level are written as members of one [`Level`], so that each
 //! costs the core one allocation, not two.
 //!
-//! A path step looks its one field up in a `dict` not read whole yet (`read_field`). That
-//! lookup can call the `__eq__` of a key that is not a `str`, whose hash collides with the
-//! key's; such a `dict` fails when it is read whole.
+//! A path step looks its one field up in a `dict` not read whole yet (`read_field`), with the
+//! key's `str` taken from [`Keys`] when the expression names it, so that a lookup neither builds
+//! a `str` nor hashes it. That lookup can call the `__eq__` of a key that is not a `str`, whose
+//! hash collides with the key's; such a `dict` fails when it is read whole.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use jlens_core::input::{Sink, Source, Sources};
 use pyo3::prelude::*;
 use pyo3::sync::critical_section::with_critical_section;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyDict, PyList, PyString, PyTuple};
 
 use crate::convert::{self, Scalar};
 
-/// The input itself, the only value of its level.
-pub struct PySource<'py>(pub Bound<'py, PyAny>);
+/// The fields an expression reads of its input, as interned `str`s, made once per expression.
+pub type Keys = HashMap<Box<str>, Py<PyString>, foldhash::fast::RandomState>;
+
+/// The input itself, the only value of its level, and the keys of the expression.
+pub struct PySource<'k, 'py>(pub Bound<'py, PyAny>, pub &'k Keys);
 
 /// A level that holds arrays or objects: its value, the chain of its ancestors, to detect cycles
 /// as `json.dumps` does, and its arrays and objects, the members the core reads.
-struct Level<'py> {
+struct Level<'k, 'py> {
     /// The array or object; none for the level of the input.
     value: Option<Bound<'py, PyAny>>,
+    keys: &'k Keys,
     /// The level whose member `value` is.
-    up: Option<Rc<Level<'py>>>,
+    up: Option<Rc<Level<'k, 'py>>>,
     /// The first member, the level made for it, and the others: a level holding one array or
     /// object allocates nothing more.
     first: Bound<'py, PyAny>,
     others: RefCell<Vec<Bound<'py, PyAny>>>,
     /// This level, so that its members' levels can point to it.
-    this: Weak<Level<'py>>,
+    this: Weak<Level<'k, 'py>>,
 }
 
-impl<'py> Level<'py> {
+impl<'k, 'py> Level<'k, 'py> {
     /// Calls `f` with the member at `index`.
     fn with<R>(&self, index: u32, f: impl FnOnce(&Bound<'py, PyAny>) -> R) -> R {
         match index.checked_sub(1) {
@@ -52,16 +58,22 @@ impl<'py> Level<'py> {
 }
 
 /// Writes the values of a level being read, `value` (none for the input), a member of `up`.
-struct Writer<'l, 'py> {
+struct Writer<'l, 'k, 'py> {
+    keys: &'k Keys,
     value: Option<&'l Bound<'py, PyAny>>,
-    up: Option<&'l Rc<Level<'py>>>,
+    up: Option<&'l Rc<Level<'k, 'py>>>,
     /// The level of the arrays and objects written, made when the first one is met.
-    level: Option<Rc<Level<'py>>>,
+    level: Option<Rc<Level<'k, 'py>>>,
 }
 
-impl<'l, 'py> Writer<'l, 'py> {
-    fn new(value: Option<&'l Bound<'py, PyAny>>, up: Option<&'l Rc<Level<'py>>>) -> Self {
+impl<'l, 'k, 'py> Writer<'l, 'k, 'py> {
+    fn new(
+        keys: &'k Keys,
+        value: Option<&'l Bound<'py, PyAny>>,
+        up: Option<&'l Rc<Level<'k, 'py>>>,
+    ) -> Self {
         Writer {
+            keys,
             value,
             up,
             level: None,
@@ -71,6 +83,7 @@ impl<'l, 'py> Writer<'l, 'py> {
     /// Writes `item`, a value of the level.
     fn put<'a>(&mut self, sink: &mut Sink<'_, 'a>, item: &Bound<'py, PyAny>) -> Result<(), String>
     where
+        'k: 'a,
         'py: 'a,
     {
         match convert::scalar(item)? {
@@ -94,6 +107,7 @@ impl<'l, 'py> Writer<'l, 'py> {
                     made = true;
                     Rc::new_cyclic(|this| Level {
                         value: self.value.cloned(),
+                        keys: self.keys,
                         up: self.up.cloned(),
                         first: item.clone(),
                         others: RefCell::default(),
@@ -122,6 +136,7 @@ impl<'l, 'py> Writer<'l, 'py> {
     /// Writes the items of the array, or the fields of the object, `value`.
     fn read<'a>(mut self, value: &Bound<'py, PyAny>, sink: &mut Sink<'_, 'a>) -> Result<(), String>
     where
+        'k: 'a,
         'py: 'a,
     {
         if let Ok(dict) = value.cast::<PyDict>() {
@@ -154,23 +169,25 @@ impl<'l, 'py> Writer<'l, 'py> {
     }
 }
 
-impl<'py, 'a> Source<'a> for PySource<'py>
+impl<'k, 'py, 'a> Source<'a> for PySource<'k, 'py>
 where
+    'k: 'a,
     'py: 'a,
 {
     fn read(&self, sink: &mut Sink<'_, 'a>) -> Result<(), String> {
-        Writer::new(None, None).put(sink, &self.0)
+        Writer::new(self.1, None, None).put(sink, &self.0)
     }
 }
 
-impl<'py, 'a> Sources<'a> for Level<'py>
+impl<'k, 'py, 'a> Sources<'a> for Level<'k, 'py>
 where
+    'k: 'a,
     'py: 'a,
 {
     fn read(&self, index: u32, sink: &mut Sink<'_, 'a>) -> Result<(), String> {
         let this = self.this.upgrade();
         self.with(index, |member| {
-            Writer::new(Some(member), this.as_ref()).read(member, sink)
+            Writer::new(self.keys, Some(member), this.as_ref()).read(member, sink)
         })
     }
 
@@ -179,9 +196,13 @@ where
             let Ok(dict) = member.cast::<PyDict>() else {
                 return Ok(false);
             };
-            if let Some(item) = dict.get_item(key).map_err(|e| e.to_string())? {
+            let item = match self.keys.get(key) {
+                Some(key) => dict.get_item(key.bind(member.py())),
+                None => dict.get_item(key),
+            };
+            if let Some(item) = item.map_err(|e| e.to_string())? {
                 let this = self.this.upgrade();
-                Writer::new(Some(member), this.as_ref()).put(sink, &item)?;
+                Writer::new(self.keys, Some(member), this.as_ref()).put(sink, &item)?;
             }
             Ok(true)
         })

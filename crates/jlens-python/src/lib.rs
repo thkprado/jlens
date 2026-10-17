@@ -30,6 +30,7 @@ use jlens_core::{Bindings, Options, audit};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::gc::{PyTraverseError, PyVisit};
 use pyo3::prelude::*;
+use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyDict, PyString};
 use serde_json::Value as Json;
 
@@ -50,6 +51,9 @@ pub struct Expression {
     /// What the expression reads of its input, which cuts the input of `evaluate_json`; worked
     /// out on the first call.
     input_read: OnceLock<Read>,
+    /// The fields `input_read` names, as interned `str`s, which `evaluate` looks up in `dict`s;
+    /// made on the first call.
+    keys: PyOnceLock<source::Keys>,
 }
 
 /// Why `evaluate_json` and `evaluate_document` failed, carried out of the code that runs
@@ -71,6 +75,7 @@ impl Expression {
             source: source.into(),
             registered: RwLock::default(),
             input_read: OnceLock::new(),
+            keys: PyOnceLock::new(),
         })
     }
 
@@ -155,7 +160,7 @@ impl Expression {
         let write = |out: jlens_core::output::Output<'_, '_>| out.write(&mut builder);
         let written = match input.filter(|input| !input.is_none()) {
             Some(input) => {
-                let source = PySource(input.clone());
+                let source = PySource(input.clone(), self.keys(py));
                 self.inner
                     .evaluate_source_to(&source, &bindings, &options, write)
             }
@@ -374,6 +379,22 @@ impl Expression {
                 .input()
                 .cloned()
                 .unwrap_or_else(|| Read::Fields(Default::default()))
+        })
+    }
+
+    fn keys(&self, py: Python<'_>) -> &source::Keys {
+        fn add(py: Python<'_>, read: &Read, keys: &mut source::Keys) {
+            for (name, read) in read.fields().into_iter().flatten() {
+                if !keys.contains_key(name.as_str()) {
+                    keys.insert(name.as_str().into(), PyString::intern(py, name).unbind());
+                }
+                add(py, read, keys);
+            }
+        }
+        self.keys.get_or_init(py, || {
+            let mut keys = source::Keys::default();
+            add(py, self.input_read(), &mut keys);
+            keys
         })
     }
 

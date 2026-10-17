@@ -328,6 +328,27 @@ median of three alternated runs: `path` went from 1.1 to 0.9 µs, the other case
 `customer.name` took 1.01 µs with these two keywords and 0.82 µs without before, and now 0.86
 against 0.82 µs.
 
+Also from 0.19 on, each `Expression` keeps an interned `str` for every field name of what it reads
+(`reads()`), made on its first evaluation: a step into a `dict` looks its field up with it,
+instead of building a `str`, hashing it and freeing it at each lookup. A name the expression
+does not read by name, as when it reads its input whole, is looked up as before. Measured the
+same way, against the input as Python values:
+
+| Case | Before | After |
+|---|---:|---:|
+| path | 0.9 µs | 0.8 µs |
+| names over items | 34.3 µs | 28.2 µs |
+| filter + aggregate | 83.2 µs | 70.6 µs |
+| group-by | 132.5 µs | 112.8 µs |
+| sort + map | 364.0 µs | 333.4 µs |
+| strings | 114.6 µs | 100.6 µs |
+| regex | 133.7 µs | 125.9 µs |
+| object constructor | 202.6 µs | 179.8 µs |
+| shipping rule | 225.2 µs | 179.9 µs |
+
+Number formatting, the transform and the recursion stayed within 1%, as did every case against a
+converted input, which looks no key up in a `dict`.
+
 How each behaves at the limits, measured by `python.py limits` on the same system. Each case
 runs in a process of its own, killed after 30 seconds. `$string($)` reads the whole input, and
 the cyclic input is `{"n": 1, "child": {"parent": <the input>}}`:
