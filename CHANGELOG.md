@@ -37,6 +37,11 @@ with mimalloc. With Python values in, jlens is now the fastest on ten of the twe
   without a `serde_json` value in between, and create each key once per result. The object
   constructor case of `benches/compare/python.py` takes 27% less time (31% against a
   `Document`), the transform 14% (24%).
+- WebAssembly: `evaluate` and `evaluateDocument` build their result as JavaScript values
+  directly (ADR 0017), through one call to a JavaScript helper that decodes each key once,
+  instead of printing JSON text for `JSON.parse`. Against a `Document`, the object constructor
+  case of `benches/compare/compare.mjs` takes 35% less time and the transform 24%; returning
+  the whole input, `$`, 70%. `evaluateJson` still writes JSON text through `serde_json` values.
 - Python: the arrays and objects of a level read from Python values cost one allocation each
   instead of two: `$count(items)` over 200 `dict`s takes 19% less time, names over items 6%.
 - `$formatNumber` parses its picture once per evaluation, rounds without heap strings and
