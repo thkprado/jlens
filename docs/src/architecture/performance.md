@@ -373,11 +373,14 @@ profiles of roadmap 0.19 #8:
 | transform | 676.0 µs | 579.4 µs | 532.1 µs | 456.7 µs |
 | recursion | 700.1 µs | 750.6 µs | 703.2 µs | 764.5 µs |
 | shipping rule | 179.4 µs | 172.4 µs | 99.7 µs | 99.3 µs |
-| `1`, no input | 0.31 µs | 0.33 µs | | |
-| `customer.name` | 0.74 µs | 0.78 µs | | |
-| `$count(items)` | 14.8 µs | 9.6 µs | | |
+| `1`, no input | 0.31 µs | 0.33 µs | – | – |
+| `customer.name` | 0.74 µs | 0.78 µs | 0.49 µs | 0.51 µs |
+| `$count(items)` | 14.8 µs | 9.6 µs | 0.77 µs | 0.80 µs |
 
 - `recursion` takes 7% more, as natively with glibc (6%, in the allocator table above).
+- `1` reads no input, so it has no `Document` to evaluate against. Against a `Document`,
+  `customer.name` and `$count(items)` read no `dict` and allocate nothing per item: like the
+  smallest evaluations with Python values in, they take 0.02 to 0.03 µs more.
 - Plain mimalloc, with initial-exec thread-locals, gave the same times within 4%, but for the
   smallest cases, 0.01 to 0.02 µs faster, and reading lists of `dict`s, 7 to 11% slower
   (`names over items` 24.7 µs, `$count(items)` 10.8 µs).
