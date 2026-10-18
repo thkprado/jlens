@@ -168,7 +168,7 @@ call. `HostCall::input` then gives nothing, so the mark is a guarantee rather th
 and the analysis, given the bindings (`Expression::reads_with`), reads only the arguments of a
 call to a marked function. Without the mark a host function reads its context, as before.
 Making that the default instead would change the API, a question for its stability (roadmap
-0.21).
+0.22).
 
 *Amended with the implementation (roadmap 0.18, item 2): the rows for a binding and for
 `$reduce` without `init` were found then.*
