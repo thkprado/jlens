@@ -377,7 +377,8 @@ hundred steps would remove most of that cost.
 | 3 | The timeout read every few hundred steps instead of at every step, using the counter of #2; the cancellation token, an atomic load, still read at every step. `ab` gains `--timeout`, for both programs | The `$map` above and the `ab` workload measured with a timeout, before and after, natively and in WebAssembly; the timeout's existing tests green (a loop still stops with `D1012`); the outcome on the performance page | |
 | 4 | `maxSteps` in the WebAssembly package | The JS suite runs the table of exact counts of #2 in Node and the browser and finds the counts Rust finds; `types.d.ts`; the Wasm guide | |
 | 5 | `max_steps` in the Python package, and `--max-steps` in `jlens eval` and `jlens test` | pytest runs the table of exact counts; the stubs; CLI snapshot tests; the Python and CLI guides | |
-| 6 | Release 0.20.0 | The release checklist | |
+| 6 | `$eval` and the other limits. Since #2, `$eval` lets `U1006` through, but it still wraps `D1011`, `D1012` and `U1003` raised while it evaluates its text in `D3121`, as it did before: an application cannot tell a timeout, a cancellation or a recursion too deep from an error in the text without reading the message. Decide whether they pass through as `U1006` does, weighing what jsonata-js gives (whose own guard, a callback that throws, is wrapped too) | The decision in `compatibility.md`; if they pass through, a test for each code, and the differential tests unchanged | |
+| 7 | Release 0.20.0 | The release checklist | |
 
 ## 0.21: an API to keep, toward 1.0
 
