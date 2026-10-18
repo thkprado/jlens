@@ -1,0 +1,84 @@
+{
+  "about": "The step limit (ADR 0018): exact counts that change only on purpose. Each expression, evaluated against `input`, takes `steps` steps. Read by tests/steps.rs and by the WebAssembly package's JS suite. A change to a count goes in the changelog under its own heading.",
+  "input": {
+    "a": { "b": { "c": 1 } },
+    "items": [
+      { "price": 1, "code": "x" },
+      { "price": 2, "code": "y" },
+      { "price": 3, "code": "x" }
+    ]
+  },
+  "groups": [
+    {
+      "note": "A literal is one node.",
+      "counts": [["1", 1]]
+    },
+    {
+      "note": "A path is a node, and each step a node for each item it is evaluated against.",
+      "counts": [
+        ["a", 2],
+        ["a.b.c", 4],
+        ["$.a.b", 4],
+        ["items.price", 5],
+        ["items.(price * 2)", 17]
+      ]
+    },
+    {
+      "note": "A step that gives nothing ends the path.",
+      "counts": [["nothing.b.c", 2]]
+    },
+    {
+      "note": "A predicate is evaluated for each item, even one that gives the same value for each.",
+      "counts": [
+        ["items[true]", 5],
+        ["items[0 = 0]", 11],
+        ["items[price > 1].code", 16]
+      ]
+    },
+    {
+      "note": "An index is not evaluated.",
+      "counts": [["items[1]", 2]]
+    },
+    {
+      "note": "A string literal compared is a node.",
+      "counts": [
+        ["a.b.c = \"x\"", 6],
+        ["\"x\" != a.b.c", 6]
+      ]
+    },
+    {
+      "note": "A key is evaluated for each item, a literal key too.",
+      "counts": [
+        ["items{code: $sum(price)}", 17],
+        ["items{\"total\": $sum(price)}", 11],
+        ["{\"a\": 1, \"b\": a.b.c}", 8]
+      ]
+    },
+    {
+      "note": "A function called back is a step, and its body counts its nodes.",
+      "counts": [
+        ["$map(items, function($v){ $v.price * 2 })", 23],
+        ["$sort(items, function($l, $r){ $l.price < $r.price }).code", 33]
+      ]
+    },
+    {
+      "note": "A regular expression is a function too, called back for each search: three that find an \"a\" and one that finds none.",
+      "counts": [["$replace(\"banana\", /a/, function($m){ \"o\" })", 15]]
+    },
+    {
+      "note": "The text `$eval` evaluates spends the same budget.",
+      "counts": [["$eval(\"1 + 2\")", 6]]
+    },
+    {
+      "note": "One step for each 1,024 steps of the backtracker.",
+      "counts": [["$contains(\"aaaaaaaaaaaaaaaaaa!\", /^(a+)+$/)", 644]]
+    },
+    {
+      "note": "A tail call counts the nodes of the body it evaluates.",
+      "counts": [
+        ["($f := function($n){ $n = 0 ? 0 : $f($n - 1) }; $f(10))", 101],
+        ["$sum($map([1..10], function($i){ $sum($map([1..10], function($j){ $i * $j })) }))", 509]
+      ]
+    }
+  ]
+}

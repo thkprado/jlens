@@ -1,62 +1,37 @@
 //! The step limit (ADR 0018): exact counts that change only on purpose.
 //!
-//! A change to a count shows in this table, and goes in the changelog under its own heading.
+//! The table is `steps.json`: a change to a count shows there, and goes in the changelog under
+//! its own heading.
 
 use jlens_core::audit::AuditOptions;
 use jlens_core::{Bindings, Expression, HostFunction, Options};
 use serde_json::{Value, json};
 
-fn input() -> Value {
-    json!({
-        "a": {"b": {"c": 1}},
-        "items": [
-            {"price": 1, "code": "x"},
-            {"price": 2, "code": "y"},
-            {"price": 3, "code": "x"}
-        ]
-    })
+/// The table, shared with the WebAssembly package's JS suite.
+const TABLE: &str = include_str!("steps.json");
+
+fn table() -> Value {
+    serde_json::from_str(TABLE).expect("steps.json is JSON")
 }
 
-/// Each expression, evaluated against [`input`], and the steps it takes.
-#[rustfmt::skip]
-const COUNTS: &[(&str, u64)] = &[
-    // A literal is one node.
-    ("1", 1),
-    // A path is a node, and each step a node for each item it is evaluated against.
-    ("a", 2),
-    ("a.b.c", 4),
-    ("$.a.b", 4),
-    // A step that gives nothing ends the path.
-    ("nothing.b.c", 2),
-    ("items.price", 5),
-    ("items.(price * 2)", 17),
-    // A predicate is evaluated for each item, even one that gives the same value for each.
-    ("items[true]", 5),
-    ("items[0 = 0]", 11),
-    ("items[price > 1].code", 16),
-    // An index is not evaluated.
-    ("items[1]", 2),
-    // A string literal compared is a node.
-    (r#"a.b.c = "x""#, 6),
-    (r#""x" != a.b.c"#, 6),
-    // A key is evaluated for each item, a literal key too.
-    ("items{code: $sum(price)}", 17),
-    (r#"items{"total": $sum(price)}"#, 11),
-    (r#"{"a": 1, "b": a.b.c}"#, 8),
-    // A function called back is a step, and its body counts its nodes.
-    ("$map(items, function($v){ $v.price * 2 })", 23),
-    ("$sort(items, function($l, $r){ $l.price < $r.price }).code", 33),
-    // A regular expression is a function too, called back for each search: three that find
-    // an "a" and one that finds none.
-    (r#"$replace("banana", /a/, function($m){ "o" })"#, 15),
-    // The text `$eval` evaluates spends the same budget.
-    (r#"$eval("1 + 2")"#, 6),
-    // One step for each 1,024 steps of the backtracker.
-    (r#"$contains("aaaaaaaaaaaaaaaaaa!", /^(a+)+$/)"#, 644),
-    // A tail call counts the nodes of the body it evaluates.
-    ("($f := function($n){ $n = 0 ? 0 : $f($n - 1) }; $f(10))", 101),
-    ("$sum($map([1..10], function($i){ $sum($map([1..10], function($j){ $i * $j })) }))", 509),
-];
+/// The input the table's expressions are evaluated against.
+fn input() -> Value {
+    table()["input"].clone()
+}
+
+/// Each expression of the table and the steps it takes.
+fn counts() -> Vec<(String, u64)> {
+    let table = table();
+    let groups = table["groups"].as_array().expect("groups");
+    groups
+        .iter()
+        .flat_map(|group| group["counts"].as_array().expect("counts"))
+        .map(|entry| {
+            let source = entry[0].as_str().expect("an expression");
+            (source.to_owned(), entry[1].as_u64().expect("a count"))
+        })
+        .collect()
+}
 
 fn evaluate(
     expr: &Expression,
@@ -101,7 +76,7 @@ fn check(source: &str, input: &Value, bindings: &Bindings, steps: u64) -> Vec<St
 #[test]
 fn exact_counts() {
     let input = input();
-    let failures: Vec<String> = COUNTS
+    let failures: Vec<String> = counts()
         .iter()
         .flat_map(|(source, steps)| check(source, &input, &Bindings::new(), *steps))
         .collect();

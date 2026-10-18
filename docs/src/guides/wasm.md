@@ -90,7 +90,7 @@ expr.free();                                 // release it (or let the garbage c
   [how the input is read](#how-the-input-is-read).
 - **`bindings`** is an object of variables and functions: `{limit: 10}` makes `$limit`
   available, and a function becomes a [host function](#host-functions).
-- **`options`** sets the [limits](#limits-and-memory) (`timeout`, `maxDepth`,
+- **`options`** sets the [limits](#limits-and-memory) (`timeout`, `maxDepth`, `maxSteps`,
   `maxStringLength`, `maxArrayLength`, `maxResultSize`), and the clock and seed that make an
   evaluation reproducible: `now` fixes `$now()` and `$millis()` (milliseconds since the epoch,
   a `Date` or an ISO 8601 timestamp), and `seed` fixes `$random()` and `$shuffle()`.
@@ -431,6 +431,7 @@ monaco.languages.registerCompletionItemProvider("jsonata", {
 |---|---|---|
 | Evaluation depth (`maxDepth`) | 500 | `D1011` |
 | Evaluation time (`timeout`, milliseconds) | none | `D1012` |
+| Evaluation steps (`maxSteps`) | none | `U1006` |
 | Length of a string built (`maxStringLength`, bytes of UTF-8) | 256 MiB | `U1001` |
 | Items of an array built (`maxArrayLength`) | 16,777,216 | `U1001` |
 | Size of the result as JSON text (`maxResultSize`, bytes) | 256 MiB | `U1001` |
@@ -439,7 +440,17 @@ monaco.languages.registerCompletionItemProvider("jsonata", {
 
 The size of the result counts a value each time it appears, as the JSON text does, and also
 limits the arguments passed to a host function. Wasm evaluations are synchronous, so there is
-no cancellation: use `timeout`. In a browser, an evaluation can also run in a Web Worker, and
+no cancellation: use `timeout` or `maxSteps`.
+
+A timeout reads the clock, so the same evaluation can pass natively and fail in WebAssembly,
+which is slower, or pass on one machine and fail on another. `maxSteps` does not depend on the
+machine: each node evaluated is a step, and so is each function a built-in or a host function
+calls back, and each 1,024 steps of a regular expression's backtracking. The same expression,
+input and options take the same steps in every browser, in Node.js and natively, and fail with
+`U1006` once the budget is spent; the error's `value` is the limit. The header of an audit
+reports the steps an evaluation took (`audit.header.steps`), to set a budget from. For the same
+outcome on every platform, set `maxDepth` too, since its default differs natively. See
+[ADR 0018](../adr/0018-step-limit.md). In a browser, an evaluation can also run in a Web Worker, and
 terminating the worker stops it; the web editor does this.
 
 The depth limit is lower than on native targets (50,000). WebAssembly runs on the JavaScript

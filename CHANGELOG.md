@@ -16,6 +16,9 @@ All notable changes are recorded here. The format follows
   steps they skip. Without a limit, evaluation is as fast as before.
 - The audit header reports `steps`, the steps the evaluation took, given to tracers by the new
   `Tracer::steps`. The WebAssembly and Python audits have it too.
+- The WebAssembly package takes the step limit as the option `maxSteps`, and takes the same
+  steps as the native engine: its tests run the table of exact counts of `jlens-core`, now in
+  `crates/jlens-core/tests/steps.json`, in Node.js and in the browser.
 - `cargo xtask ab --timeout MS` measures both revisions with a timeout.
 
 ### Changed

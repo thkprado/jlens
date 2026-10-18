@@ -31,6 +31,12 @@ export interface EvaluateOptions {
   timeout?: number;
   /** Maximum evaluation depth (default 500; error `D1011`). */
   maxDepth?: number;
+  /**
+   * Maximum number of evaluation steps (error `U1006`): each node evaluated, each function
+   * called back and each 1,024 steps of a regular expression's backtracking. The same
+   * expression, input and options take the same steps on every machine and natively.
+   */
+  maxSteps?: number;
   /** Maximum length, in bytes of UTF-8, of a string the evaluation builds (default 256 MiB; error `U1001`). */
   maxStringLength?: number;
   /** Maximum number of items of an array the evaluation builds (default 16,777,216; error `U1001`). */

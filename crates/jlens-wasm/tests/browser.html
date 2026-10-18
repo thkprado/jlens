@@ -12,6 +12,12 @@
     import { cases } from "./suite.mjs";
 
     const log = document.getElementById("log");
+    // Reads a file of the repository, relative to this directory.
+    const load = async (path) => {
+      const response = await fetch(new URL(path, import.meta.url));
+      if (!response.ok) throw new Error(`${path}: ${response.status}`);
+      return response.text();
+    };
     let failed = 0;
     try {
       await init();
@@ -19,7 +25,7 @@
         // Shown by `cargo xtask wasm-test` when the page hangs.
         console.log(`jlens test: ${name}`);
         try {
-          await run(jlens, { virtualTime: true });
+          await run(jlens, { virtualTime: true, load });
           log.textContent += `ok   ${name}\n`;
         } catch (err) {
           failed++;

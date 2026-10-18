@@ -210,8 +210,8 @@ pub fn bindings(
     Ok(out)
 }
 
-/// Reads the evaluation options: `timeout` (milliseconds), `maxDepth`, `maxStringLength`,
-/// `maxArrayLength`, `maxResultSize`, `now` and `seed`.
+/// Reads the evaluation options: `timeout` (milliseconds), `maxDepth`, `maxSteps`,
+/// `maxStringLength`, `maxArrayLength`, `maxResultSize`, `now` and `seed`.
 pub fn options(options: Option<&Value>) -> Result<Options, JsValue> {
     let mut out = Options::default();
     let Some(options) = options else {
@@ -240,6 +240,12 @@ pub fn options(options: Option<&Value>) -> Result<Options, JsValue> {
         out.timeout = Some(std::time::Duration::from_secs_f64(ms / 1000.0));
     }
     out.max_depth = count("maxDepth")?;
+    if let Some(v) = get("maxSteps") {
+        out.max_steps = Some(
+            v.as_u64()
+                .ok_or_else(|| type_error("options.maxSteps must be a non-negative integer"))?,
+        );
+    }
     out.max_string_length = count("maxStringLength")?;
     out.max_array_length = count("maxArrayLength")?;
     out.max_result_size = count("maxResultSize")?;

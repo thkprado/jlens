@@ -1,6 +1,7 @@
 // Tests of the jlens WebAssembly package, shared by the Node.js runner (node.test.mjs) and the
 // browser runner (browser.html). Each case receives the initialized module and the environment:
-// `virtualTime` is true under headless Chrome's virtual time (`--virtual-time-budget`).
+// `virtualTime` is true under headless Chrome's virtual time (`--virtual-time-budget`), and
+// `load(path)` reads a file of the repository, relative to the tests directory, as text.
 
 const order = {
   number: "SO-12345",
@@ -195,6 +196,42 @@ export const cases = [
     const deep = new j.Expression("($f := function($n){ $n = 0 ? 0 : 1 + $f($n - 1) }; $f(100))");
     throws(() => deep.evaluate(undefined, null, { maxDepth: 100 }), (e) => equal(e.code, "D1011"));
     equal(deep.evaluate(), 100);
+  }],
+
+  ["the step limit takes the steps Rust counts", async (j, env) => {
+    // The table of exact counts of jlens-core (ADR 0018): each expression succeeds with its
+    // count, fails with U1006 with one step less, and an audit reports that many.
+    const table = JSON.parse(await env.load("../../jlens-core/tests/steps.json"));
+    const check = (expr, steps, bindings = null) => {
+      const what = expr.source;
+      expr.evaluate(table.input, bindings, { maxSteps: steps });
+      throws(() => expr.evaluate(table.input, bindings, { maxSteps: steps - 1 }), (e) => {
+        equal([e.code, e.value], ["U1006", steps - 1], what);
+      });
+      equal(expr.evaluateWithAudit(table.input, bindings).audit.header.steps, steps, `${what}: audited`);
+    };
+    let checked = 0;
+    for (const group of table.groups) {
+      for (const [source, steps] of group.counts) {
+        const expr = new j.Expression(source);
+        check(expr, steps);
+        expr.free();
+        checked++;
+      }
+    }
+    ok(checked > 20, "the whole table");
+    // A host function's calls back spend the budget too: the call, its name and its
+    // arguments, then each call back, a step and the body's 3 nodes.
+    const twice = (f, x) => f(f(x));
+    check(new j.Expression("$twice(function($x){ $x + 1 }, 1)"), 12, { twice });
+    // The other entry points take the option too.
+    const loop = new j.Expression("$sum([1..1000].($ * 2))");
+    throws(() => loop.evaluateJson("null", null, { maxSteps: 100 }), (e) => equal(e.code, "U1006"));
+    const doc = new j.Document({});
+    throws(() => loop.evaluateDocument(doc, null, { maxSteps: 100 }), (e) => equal(e.code, "U1006"));
+    doc.free();
+    equal(loop.evaluateWithAudit(null, null, { maxSteps: 100 }).error.code, "U1006", "audited");
+    throws(() => loop.evaluate(null, null, { maxSteps: -1 }), (e) => ok(e instanceof TypeError, "negative"));
   }],
 
   ["size limits", (j) => {

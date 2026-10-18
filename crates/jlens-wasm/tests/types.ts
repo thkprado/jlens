@@ -30,7 +30,7 @@ export async function check(): Promise<void> {
   const expr = new Expression("$sum(items.price)");
   const source: string = expr.source;
   const r1: unknown = expr.evaluate();
-  const r2: unknown = expr.evaluate({ items: [] }, { limit: 1 }, { timeout: 100, maxDepth: 50 });
+  const r2: unknown = expr.evaluate({ items: [] }, { limit: 1 }, { timeout: 100, maxDepth: 50, maxSteps: 1000 });
   const limits: EvaluateOptions = { maxStringLength: 1024, maxArrayLength: 100, maxResultSize: 4096 };
   const clock: EvaluateOptions = { now: new Date(0), seed: 7 };
   expr.evaluate(null, null, { ...limits, ...clock, now: "2024-01-02T03:04:05Z" });
