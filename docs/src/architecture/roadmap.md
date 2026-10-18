@@ -378,7 +378,8 @@ hundred steps would remove most of that cost.
 | 4 | `maxSteps` in the WebAssembly package | The JS suite runs the table of exact counts of #2 in Node and the browser and finds the counts Rust finds; `types.d.ts`; the Wasm guide | |
 | 5 | `max_steps` in the Python package, and `--max-steps` in `jlens eval` and `jlens test` | pytest runs the table of exact counts; the stubs; CLI snapshot tests; the Python and CLI guides | |
 | 6 | `$eval` and the other limits. Since #2, `$eval` lets `U1006` through, but it still wraps `D1011`, `D1012` and `U1003` raised while it evaluates its text in `D3121`, as it did before: an application cannot tell a timeout, a cancellation or a recursion too deep from an error in the text without reading the message. Decide whether they pass through as `U1006` does, weighing what jsonata-js gives (whose own guard, a callback that throws, is wrapped too) | The decision in `compatibility.md`; if they pass through, a test for each code, and the differential tests unchanged | |
-| 7 | Release 0.20.0 | The release checklist | |
+| 7 | The performance of the release, measured once everything else is in. Natively, `cargo xtask ab` against 0.19.0: without a limit, with `--b-max-steps` and with `--timeout` (#3); in WebAssembly, `benches/compare/compare.mjs` with and without `maxSteps`; in Python, `benches/compare/python.py` with and without `max_steps`; and the `$map` of ADR 0018 with a timeout, natively and in WebAssembly. Only if a case is more than 2% slower: a profile to find the cause; a small fix goes in with its before and after, a larger one becomes an item of its own | The measurements on the performance page, with what each limit costs; every case within 2%, or its cause found and recorded | |
+| 8 | Release 0.20.0 | The release checklist | |
 
 ## 0.21: an API to keep, toward 1.0
 
