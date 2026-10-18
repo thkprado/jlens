@@ -294,6 +294,34 @@ fn documents_from_rust() -> Result<()> {
 }
 
 #[test]
+fn document_variables() -> Result<()> {
+    use jlens_core::{Bindings, Document, Expression, Options};
+    use serde_json::json;
+    // ANCHOR: document_variables
+    let doc = Document::parse(
+        r#"{"limit": 20, "tasks": [
+            {"name": "write", "hours": 12},
+            {"name": "review", "hours": 30}
+        ]}"#,
+    )?;
+    let late = Expression::compile("$self.hours > limit")?;
+    let options = Options::default();
+    let mut flagged = Vec::new();
+    for i in 0..2 {
+        // `$self` is the task itself, shared with the document, not a copy.
+        let task = doc.pointer(&format!("/tasks/{i}")).unwrap();
+        let result =
+            late.evaluate_document_with(&doc, &[("self", &task)], &Bindings::new(), &options)?;
+        if result == Some(json!(true)) {
+            flagged.push(task.to_json()["name"].clone());
+        }
+    }
+    assert_eq!(flagged, [json!("review")]);
+    // ANCHOR_END: document_variables
+    Ok(())
+}
+
+#[test]
 fn fields_read() -> Result<()> {
     use jlens_core::{Bindings, Document, Expression, HostFunction, Options};
     use serde_json::json;

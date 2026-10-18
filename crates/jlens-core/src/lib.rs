@@ -268,12 +268,64 @@ impl Expression {
         options: &Options,
         write: impl FnOnce(output::Output<'_, '_>) -> Result<R>,
     ) -> Result<R> {
+        self.evaluate_document_with_to(document, &[], bindings, options, write)
+    }
+
+    /// Evaluates the expression against a [`Document`], as
+    /// [`evaluate_document`](Expression::evaluate_document) does, with `variables` bound to
+    /// documents as well: each name (without the leading `$`) to its document, which is not
+    /// converted. The variables of `bindings` are converted whole at each evaluation; a value
+    /// already in a `Document`, or a part of one ([`Document::pointer`]), binds for nothing.
+    /// A name of `variables` takes the place of a variable or a host function of the same name
+    /// in `bindings`, and a later pair the place of an earlier one.
+    ///
+    /// The evaluation does not modify the documents, as it does not modify its input.
+    ///
+    /// ```
+    /// use jlens_core::{Bindings, Document, Expression, Options};
+    ///
+    /// let doc = Document::parse(r#"{"items": [{"price": 2}, {"price": 30}]}"#).unwrap();
+    /// let expr = Expression::compile("$self.price > $sum(items.price) / 2").unwrap();
+    /// let options = Options::default();
+    /// for (i, expected) in [false, true].into_iter().enumerate() {
+    ///     let item = doc.pointer(&format!("/items/{i}")).unwrap();
+    ///     let result =
+    ///         expr.evaluate_document_with(&doc, &[("self", &item)], &Bindings::new(), &options);
+    ///     assert_eq!(result.unwrap(), Some(serde_json::json!(expected)));
+    /// }
+    /// ```
+    pub fn evaluate_document_with(
+        &self,
+        document: &Document,
+        variables: &[(&str, &Document)],
+        bindings: &Bindings,
+        options: &Options,
+    ) -> Result<Option<JsonValue>> {
+        self.evaluate_document_with_to(document, variables, bindings, options, to_json)
+    }
+
+    /// Evaluates the expression like
+    /// [`evaluate_document_with`](Expression::evaluate_document_with), and gives its result to
+    /// `write`, as [`evaluate_source_to`](Expression::evaluate_source_to) does.
+    pub fn evaluate_document_with_to<R>(
+        &self,
+        document: &Document,
+        variables: &[(&str, &Document)],
+        bindings: &Bindings,
+        options: &Options,
+        write: impl FnOnce(output::Output<'_, '_>) -> Result<R>,
+    ) -> Result<R> {
         eval::evaluate(
             &self.ast,
             document.value().clone(),
             bindings
                 .iter()
-                .map(|(name, json)| (name, value::Value::from_json(json))),
+                .map(|(name, json)| (name, value::Value::from_json(json)))
+                .chain(
+                    variables
+                        .iter()
+                        .map(|&(name, document)| (name, document.value().clone())),
+                ),
             bindings,
             limits(options),
             None,

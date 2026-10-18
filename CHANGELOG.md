@@ -14,6 +14,11 @@ All notable changes are recorded here. The format follows
   fails instead of overflowing the stack. For ten records of twenty fields it takes 17.3 µs,
   against 40.0 µs through `to_value` and `Document::new`. The benchmark `host_state` measures
   it, and the crate guide shows when `evaluate_source` is the faster choice.
+- Variables bound to documents (ADR 0019): `Expression::evaluate_document_with` binds names to
+  `Document`s, which are not converted, where a variable of `Bindings` is converted whole at
+  each evaluation; `Document::pointer` takes a part of a document (a JSON Pointer, as
+  `serde_json::Value::pointer` reads it) without copying it. `evaluate_document_with_to`
+  writes the result with a builder.
 
 ## [0.20.0]
 

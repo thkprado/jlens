@@ -867,6 +867,61 @@ fn documents_serialized_from_rust_match_serde_json() {
 }
 
 #[test]
+fn variables_bind_to_documents() {
+    use jlens_core::{Document, HostFunction};
+    let doc = Document::parse(r#"{"items": [{"n": 1}, {"n": 2}], "a/b": {"~": true}}"#).unwrap();
+    // JSON Pointers, as `serde_json` reads them.
+    let part = |pointer: &str| doc.pointer(pointer).map(|d| d.to_json());
+    assert_eq!(part(""), Some(doc.to_json()));
+    assert_eq!(part("/items/1"), Some(json!({"n": 2})));
+    assert_eq!(part("/items/1/n"), Some(json!(2)));
+    assert_eq!(part("/a~1b/~0"), Some(json!(true)));
+    for missing in [
+        "items",
+        "/item",
+        "/items/2",
+        "/items/01",
+        "/items/+1",
+        "/items/-",
+        "/items/1/n/0",
+    ] {
+        assert_eq!(part(missing), None, "{missing}");
+    }
+
+    let options = Options::default();
+    let second = doc.pointer("/items/1").unwrap();
+    let first = doc.pointer("/items/0").unwrap();
+    let bindings = Bindings::new()
+        .var("self", 10)
+        .function("other", HostFunction::new(0, |_, _| Ok(Some(json!(0)))));
+    let eval = |source: &str, variables: &[(&str, &Document)]| {
+        Expression::compile(source)
+            .unwrap()
+            .evaluate_document_with(&doc, variables, &bindings, &options)
+            .unwrap()
+    };
+    assert_eq!(
+        eval("$self.n + $count(items)", &[("self", &second)]),
+        Some(json!(4))
+    );
+    // A document takes the place of a variable or a function of `bindings`, and a later pair
+    // the place of an earlier one.
+    assert_eq!(eval("$self", &[]), Some(json!(10)));
+    assert_eq!(eval("$other.n", &[("other", &first)]), Some(json!(1)));
+    assert_eq!(
+        eval("$self.n", &[("self", &first), ("self", &second)]),
+        Some(json!(2))
+    );
+    // A transform copies a bound document before it changes it.
+    assert_eq!(
+        eval("$self ~> |$|{'n': 5}|", &[("self", &second)]),
+        Some(json!({"n": 5}))
+    );
+    assert_eq!(second.to_json(), json!({"n": 2}));
+    assert_eq!(part("/items/1"), Some(json!({"n": 2})));
+}
+
+#[test]
 fn compiled_expressions_can_be_shared_between_threads() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Expression>();

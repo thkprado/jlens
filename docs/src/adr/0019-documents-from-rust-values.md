@@ -123,4 +123,36 @@ The benchmark measures what that costs: a record of twenty fields read through a
 What would remove it is a variable whose value is already a document, bound without converting
 (an `Rc` clone), with a way to take a part of a document as one (`$self` = the fourth record).
 `Bindings` cannot hold a `Document` (it is `Send + Sync`, a document is not), so that is new API
-of its own, decided separately: roadmap 0.21 #2.
+of its own, decided separately (roadmap 0.21 #2), below.
+
+### Decision (0.21)
+
+1. **`Document::pointer(&self, pointer: &str) -> Option<Document>`** takes a part of a document,
+   named by a JSON Pointer (RFC 6901) with the rules of `serde_json::Value::pointer`: `""` is the
+   whole document, `~1` and `~0` stand for `/` and `~`, an array index is digits without a
+   leading zero, and anything else (`-`, a missing field, a step into a scalar) is `None`. The
+   part is an `Rc` clone of the value it names: it shares the document's values, and nothing is
+   copied.
+2. **`Expression::evaluate_document_with(&self, document, variables: &[(&str, &Document)],
+   bindings, options)`**, and `evaluate_document_with_to`, which writes the result with a
+   builder. Each pair binds a name (without `$`) to a document, as an `Rc` clone. A slice of
+   pairs, rather than a new type of document variables, keeps the API to two methods and no
+   type; `evaluate_document` and `evaluate_document_to` keep their signatures and call them with
+   no pairs.
+3. **Precedence.** A name of `variables` takes the place of a variable or a host function of the
+   same name in `bindings`, and a later pair the place of an earlier one, as a later
+   `Bindings::var` replaces an earlier one. The evaluator binds the host functions before the
+   variables to give that order; the names of a `Bindings` are distinct, so the other entry
+   points are unchanged.
+4. **Transforms.** A bound document is input like the document itself: the transform operator
+   modifies only the copy `$clone` makes, so `$self ~> |$|{…}|` leaves the document and its part
+   as they were. Tests check it, and the property test checks the documents after every
+   evaluation.
+5. **The WebAssembly and Python packages** do not get it in 0.21: the friction came from a Rust
+   host, and each package binds its own documents and variables. An item of its own when one is
+   asked for.
+
+Measured with `host binding` (Windows, release): the record through a variable of `Bindings`
+takes 3.18 µs, bound to its part of the document 0.42 µs, read from the document
+(`items[3]…`) 0.79 µs. A bound document is faster than the path, as a variable is looked up
+where `items[3]` steps through the document and filters its items.

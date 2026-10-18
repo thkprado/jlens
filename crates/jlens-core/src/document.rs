@@ -126,6 +126,36 @@ impl Document {
         })
     }
 
+    /// The part of the document that a JSON Pointer ([RFC 6901]) names, or `None`, with the
+    /// rules of [`serde_json::Value::pointer`]: `""` names the whole document, and `/items/3`
+    /// the fourth item of the field `items`. The part shares the document's values: nothing is
+    /// copied, so binding it to a variable with
+    /// [`Expression::evaluate_document_with`](crate::Expression::evaluate_document_with) costs
+    /// no conversion.
+    ///
+    /// [RFC 6901]: https://www.rfc-editor.org/rfc/rfc6901
+    pub fn pointer(&self, pointer: &str) -> Option<Document> {
+        if pointer.is_empty() {
+            return Some(Document {
+                value: self.value.clone(),
+            });
+        }
+        let rest = pointer.strip_prefix('/')?;
+        let mut value = self.value.clone();
+        for token in rest.split('/') {
+            let token = token.replace("~1", "/").replace("~0", "~");
+            value = match &value {
+                Value::Object(object) => match object.get(&token) {
+                    Value::Undefined => return None,
+                    field => field,
+                },
+                Value::Array(array) => array.items().get(index(&token)?)?.clone(),
+                _ => return None,
+            };
+        }
+        Some(Document { value })
+    }
+
     /// The document as JSON.
     pub fn to_json(&self) -> JsonValue {
         self.value.to_json().unwrap_or(JsonValue::Null)
@@ -146,6 +176,14 @@ impl From<&JsonValue> for Document {
     fn from(json: &JsonValue) -> Self {
         Document::new(json)
     }
+}
+
+/// An array index of a JSON Pointer: digits, without a leading zero, as `serde_json` reads it.
+fn index(token: &str) -> Option<usize> {
+    if token.starts_with('+') || (token.starts_with('0') && token.len() != 1) {
+        return None;
+    }
+    token.parse().ok()
 }
 
 /// Parses JSON text into a value, sharing the keys of its objects through `keys`.

@@ -588,6 +588,17 @@ only the fields each expression reaches:
 For one evaluation per state, a `Source` is the fastest; from about four, a document built with
 `from_serialize`.
 
+`host binding` reads one of the ten records through a variable (`$self.score > 50 and
+$self.active`). A variable of `Bindings` is a `serde_json::Value`, converted whole at each
+evaluation; `evaluate_document_with` binds the record's part of the document
+(`Document::pointer("/items/3")`), which is not converted:
+
+| `host binding` | Time |
+|---|---:|
+| `$self` from `Bindings` | 3.18 µs |
+| `$self` bound to `doc.pointer("/items/3")` | 0.42 µs |
+| `items[3]` read from the document, for reference | 0.79 µs |
+
 ## Where the time goes
 
 - **Allocation.** Values are reference-counted (`Rc`). Objects are `IndexMap`s that keep

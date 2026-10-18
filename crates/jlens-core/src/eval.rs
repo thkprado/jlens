@@ -324,18 +324,20 @@ pub(crate) fn evaluate<'a, 'v, R>(
         parent: None,
         input: input.clone(),
     });
-    for (name, value) in variables {
-        // The input takes the place of a variable named `$`, as it did when it was bound.
-        if name != "$" {
-            ev.bind(&env, name, value);
-        }
-    }
+    // Functions first: a variable bound to a document takes the place of a function of the same
+    // name (the names of `bindings` are distinct).
     for (name, function) in bindings.functions() {
         ev.bind(
             &env,
             name,
             Value::function(Function::Host(function.clone())),
         );
+    }
+    for (name, value) in variables {
+        // The input takes the place of a variable named `$`, as it did when it was bound.
+        if name != "$" {
+            ev.bind(&env, name, value);
+        }
     }
     if let Value::Array(a) = &input
         && !a.is_sequence()

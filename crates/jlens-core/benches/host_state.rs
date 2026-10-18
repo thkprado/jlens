@@ -11,7 +11,9 @@
 //!   `serde_json::Value` and `Document::new`, `Document::from_serialize`, lazy `evaluate` over
 //!   the `serde_json::Value`, and a [`Source`] written over the state;
 //! - `host binding`: an expression that reads one record through a variable of
-//!   `evaluate_document`, against the same expression reading it from the document.
+//!   `evaluate_document`, converted from a `serde_json::Value` or bound to the record's part of
+//!   the document (`evaluate_document_with`), against the same expression reading it from the
+//!   document.
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -312,13 +314,21 @@ fn binding(c: &mut Criterion) {
     let bound = Bindings::new().var("self", record);
     let by_variable = Expression::compile("$self.score > 50 and $self.active").unwrap();
     let by_path = Expression::compile("items[3].score > 50 and items[3].active").unwrap();
+    let part = doc.pointer("/items/3").unwrap();
+    let expected = by_path
+        .evaluate_document(&doc, &Bindings::new(), &options)
+        .unwrap();
     assert_eq!(
         by_variable
             .evaluate_document(&doc, &bound, &options)
             .unwrap(),
-        by_path
-            .evaluate_document(&doc, &Bindings::new(), &options)
-            .unwrap()
+        expected
+    );
+    assert_eq!(
+        by_variable
+            .evaluate_document_with(&doc, &[("self", &part)], &Bindings::new(), &options)
+            .unwrap(),
+        expected
     );
 
     let mut group = c.benchmark_group("host binding");
@@ -330,6 +340,13 @@ fn binding(c: &mut Criterion) {
         })
     });
     let none = Bindings::new();
+    group.bench_function("record through a document variable", |b| {
+        b.iter(|| {
+            by_variable
+                .evaluate_document_with(black_box(&doc), &[("self", &part)], &none, &options)
+                .unwrap()
+        })
+    });
     group.bench_function("record through the document", |b| {
         b.iter(|| {
             by_path

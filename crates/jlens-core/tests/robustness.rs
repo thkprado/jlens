@@ -458,6 +458,41 @@ proptest! {
         }
     }
 
+    /// A variable bound to a document, or to a part of one, gives the results of the same value
+    /// bound in `Bindings`, and leaves the documents as they were.
+    #[test]
+    fn variables_bound_to_documents_agree_with_bindings(
+        source in expression(),
+        pointer in prop::sample::select(&["", "/a", "/a/b", "/a/b/2", "/items/1", "/s", "/o/p"][..]),
+    ) {
+        if let Ok(expr) = Expression::compile(&source) {
+            let options = Options::new()
+                .timeout(Duration::from_millis(50))
+                .max_depth(300)
+                .now(0)
+                .seed(1);
+            let input = input();
+            let doc = Document::new(&input);
+            let part = doc.pointer(pointer).unwrap();
+            let x = Document::new(&variable_x());
+            let bindings = functions()
+                .var("x", variable_x())
+                .var("o", input.pointer(pointer).unwrap().clone());
+            let converted = expr.evaluate_document(&doc, &bindings, &options);
+            let bound = expr.evaluate_document_with(
+                &doc,
+                &[("x", &x), ("o", &part)],
+                &functions().var("o", 0),
+                &options,
+            );
+            if outcome(converted.clone()).is_some() && outcome(bound.clone()).is_some() {
+                prop_assert_eq!(format!("{bound:?}"), format!("{converted:?}"));
+            }
+            prop_assert_eq!(doc.to_json(), Document::new(&input).to_json());
+            prop_assert_eq!(x.to_json(), Document::new(&variable_x()).to_json());
+        }
+    }
+
     /// A result written with a [`Builder`] (ADR 0017) is the one `evaluate` returns, and fails
     /// the same way, within a size limit or not.
     #[test]
@@ -1522,6 +1557,25 @@ proptest! {
     fn serializing_into_a_document_converts_the_value(value in json_value()) {
         let serialized = Document::from_serialize(&value).unwrap();
         prop_assert_eq!(serialized.to_json(), Document::new(&value).to_json());
+    }
+
+    /// A JSON Pointer names the part of a document that it names in the `serde_json::Value`.
+    #[test]
+    fn pointers_agree_with_serde_json(
+        value in json_value(),
+        tokens in prop::collection::vec(
+            prop::sample::select(&["a", "items", "x", "0", "1", "3", "01", "+1", "-1", "", "~0", "~1"][..]),
+            0..4,
+        ),
+        slash in any::<bool>(),
+    ) {
+        let pointer = match slash {
+            true => tokens.iter().map(|t| format!("/{t}")).collect::<String>(),
+            false => tokens.join("/"),
+        };
+        let part = Document::new(&value).pointer(&pointer).map(|d| d.to_json());
+        let expected = value.pointer(&pointer).map(|v| Document::new(v).to_json());
+        prop_assert_eq!(part, expected, "{}", pointer);
     }
 
     /// Parsing any text cut by a `Read` never panics, and accepts only JSON.
