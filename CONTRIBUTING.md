@@ -80,7 +80,14 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    with a sentence that sums up the release. The section becomes the GitHub release notes;
    preview them with `cargo xtask release-notes X.Y.Z`, which points relative links
    (`](docs/...)`) at the files of the tag.
-3. Check that everything passes, including the packages:
+3. Measure the tables of the [performance page](docs/src/architecture/performance.md) again
+   and set the new version in the sentence above them (`for jlens X.Y.Z`): the native table
+   with `cargo bench -p jlens-core`, the WebAssembly one with `node compare.mjs` in
+   `benches/compare` after `cargo xtask wasm`, and the Python one with `python.py speed` (its
+   docstring says how), together with the text that quotes their numbers. Compare the new
+   numbers with the old table, not only one revision with another: a change in the benchmark
+   scripts shows only there.
+4. Check that everything passes, including the packages:
 
    ```sh
    cargo package --workspace --exclude jlens-wasm --exclude xtask
@@ -88,7 +95,7 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    (cd crates/jlens-wasm/pkg && npm pack --dry-run)
    ```
 
-4. Commit, push the commit to `main`, tag it `vX.Y.Z`, and push the tag. The `Release` workflow
+5. Commit, push the commit to `main`, tag it `vX.Y.Z`, and push the tag. The `Release` workflow
    first builds the `jlens` binaries for Linux, macOS and Windows and the Python wheels and
    source distribution, each tested on its platform (CI builds both on each push to `main`
    too), and waits for the CI run of the tagged commit on `main`: nothing is published unless
@@ -135,7 +142,7 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    run checks out other code in the cache scope of `main`. When that workflow itself is broken,
    draft the release by hand as above (without attestations) and fix the workflow on `main` for
    the next release.
-5. Review the draft on the Releases page, edit it if needed, and publish it. `cargo binstall`
+6. Review the draft on the Releases page, edit it if needed, and publish it. `cargo binstall`
    finds the binaries once the release is published. Publishing it starts the `Homebrew`
    workflow, which writes the formula of the release (`cargo xtask homebrew`, from its
    `SHA256SUMS`) to the tap `thkprado/homebrew-jlens`. It needs the repository secret
@@ -148,7 +155,7 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    `thkprado/scoop-jlens`, with the secret `SCOOP_BUCKET_TOKEN`: a token like the one of the
    tap, whose only repository is `thkprado/scoop-jlens`. It is run again the same way:
    `gh workflow run scoop.yml --ref vX.Y.Z`.
-6. Check that the packages prove where they were built:
+7. Check that the packages prove where they were built:
 
    ```sh
    gh release download vX.Y.Z --dir dist
@@ -179,7 +186,7 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
 
    The package page on npmjs.com also shows a Provenance section linking to the workflow run,
    and each file on pypi.org/project/jlens a Verified details section naming the workflow.
-7. Check the site. The tag also runs the `Pages` workflow, which builds the book and the web
+8. Check the site. The tag also runs the `Pages` workflow, which builds the book and the web
    editor of the tag (`cargo xtask site`) and deploys them to <https://thkprado.github.io/jlens/>
    (the `github-pages` environment accepts `v*` tags). Check that the run passed
    (`gh run list --workflow pages.yml --limit 1`), that the book's introduction names the new
