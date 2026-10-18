@@ -434,10 +434,23 @@ so a step costs the same comparison with or without one. The timeout reads the c
 - **In WebAssembly**, one build per Node.js process, the processes alternating, four each:
   `evaluate` between 6.3% faster (`recursion`) and 0.8% slower, `evaluateDocument` between 14%
   faster (`names over items`) and 1.2% slower. With `maxSteps`, `node compare.mjs --max-steps N`
-  gives the times without a limit, plus what an options object costs: the options go through
-  `JSON.stringify` and a parse, about 0.6 µs for `{}` and 1.1 µs for one option, so `path`
-  against a `Document` takes 1.3 µs without options, and 2.4 µs with `{maxSteps}` or
-  `{timeout}`, as in 0.19.0.
+  gives the times without a limit, plus what an options object costs. In 0.19.0 the options
+  went through `JSON.stringify` and a parse, about 0.6 µs for `{}` and 1.1 µs for one option,
+  so `path` against a `Document` took 1.3 µs without options, and 2.4 µs with `{maxSteps}` or
+  `{timeout}`. From 0.20 the options are read from the object, by one call to a JavaScript
+  helper that reads each option at its own site:
+
+  | `path` against a `Document` | Through JSON | From the object |
+  |---|---:|---:|
+  | no options | 1.27 µs | 1.22 µs |
+  | `{}` | 1.93 µs | 1.41 µs |
+  | `{maxSteps}` | 2.44 µs | 1.61 µs |
+  | `{timeout}` | 2.51 µs | 1.72 µs |
+  | `{now: new Date(0)}` | 32.5 µs | 1.76 µs |
+  | `{timeout, maxSteps, seed}` | 3.40 µs | 1.80 µs |
+
+  A `Date` for `now` cost the most, as its string was parsed by an expression compiled on each
+  call; it now gives its time directly, and a string is parsed by an expression compiled once.
 - **In Python**, `python.py speed`, three runs of each: no case more than 1.5% slower than
   0.19.0, `recursion` 3% faster. `max_steps` (`python.py speed --max-steps N`) costs about
   40 ns per call, about what `max_depth` costs: `path` against a `Document` takes 0.43 µs

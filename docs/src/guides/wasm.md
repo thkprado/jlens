@@ -93,7 +93,11 @@ expr.free();                                 // release it (or let the garbage c
 - **`options`** sets the [limits](#limits-and-memory) (`timeout`, `maxDepth`, `maxSteps`,
   `maxStringLength`, `maxArrayLength`, `maxResultSize`), and the clock and seed that make an
   evaluation reproducible: `now` fixes `$now()` and `$millis()` (milliseconds since the epoch,
-  a `Date` or an ISO 8601 timestamp), and `seed` fixes `$random()` and `$shuffle()`.
+  a `Date` or an ISO 8601 timestamp), and `seed` fixes `$random()` and `$shuffle()`. The
+  options are read from the object, unlike the input: each once, as a property, so a getter
+  or an inherited option works, and `toJSON` is not called. `undefined` and `null` mean the
+  default; a number must be finite, so `NaN` or `Infinity` throws a `TypeError`, as an invalid
+  `Date` does.
 - **The result** is a plain value, or `undefined` when the expression evaluates to undefined.
   Numbers and object key order are the same as in jsonata-js.
 

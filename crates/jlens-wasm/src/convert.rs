@@ -210,76 +210,164 @@ pub fn bindings(
     Ok(out)
 }
 
+#[wasm_bindgen(inline_js = r#"
+const read = new Float64Array(16);
+let now = "";
+let set = 0;
+
+// Writes the tag and number of option `i` into `read`. The tag is 0 for undefined or null, 1 for
+// a number, 2 for a Date (its time, NaN when invalid), 3 for a string (`now` only, kept for
+// jlensNow) and 4 for anything else.
+function put(i, v) {
+  let tag = 4;
+  let n = 0;
+  if (v === undefined || v === null) tag = 0;
+  else if (typeof v === "number") (tag = 1), (n = v);
+  else if (typeof v === "string" && i === 6) (tag = 3), (now = v);
+  else if (Object.prototype.toString.call(v) === "[object Date]") (tag = 2), (n = Date.prototype.getTime.call(v));
+  read[2 * i] = tag;
+  read[2 * i + 1] = n;
+  if (tag !== 0) set = 1;
+}
+
+// Reads the evaluation options into `read`, in the order of `convert::options`. Each option is
+// read once, as a property (getters and inherited properties included, `toJSON` not called),
+// each at its own site, which V8 caches for the shape of the options. Returns -1 when `options`
+// is not a plain object, 0 when no option is set, and 1 otherwise.
+export function jlensOptions(options) {
+  if (typeof options !== "object" || Array.isArray(options)) return -1;
+  set = 0;
+  put(0, options.timeout);
+  put(1, options.maxDepth);
+  put(2, options.maxSteps);
+  put(3, options.maxStringLength);
+  put(4, options.maxArrayLength);
+  put(5, options.maxResultSize);
+  put(6, options.now);
+  put(7, options.seed);
+  return set;
+}
+
+export function jlensOptionsRead() {
+  return read;
+}
+
+export function jlensNow() {
+  return now;
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch, js_name = jlensOptions)]
+    fn read_options(options: &JsValue) -> Result<i32, JsValue>;
+    #[wasm_bindgen(js_name = jlensOptionsRead)]
+    fn options_read() -> js_sys::Float64Array;
+    #[wasm_bindgen(js_name = jlensNow)]
+    fn options_now() -> String;
+}
+
+thread_local! {
+    /// The array `jlensOptions` writes into.
+    static OPTIONS_READ: js_sys::Float64Array = options_read();
+    /// `$toMillis`, for a timestamp given as a string.
+    static TO_MILLIS: jlens_core::Expression =
+        jlens_core::Expression::compile("$toMillis($t)").expect("a valid expression");
+}
+
+/// An option, as `jlensOptions` reads it.
+enum Opt {
+    Unset,
+    Number(f64),
+    Date(f64),
+    Text,
+    Other,
+}
+
 /// Reads the evaluation options: `timeout` (milliseconds), `maxDepth`, `maxSteps`,
-/// `maxStringLength`, `maxArrayLength`, `maxResultSize`, `now` and `seed`.
-pub fn options(options: Option<&Value>) -> Result<Options, JsValue> {
+/// `maxStringLength`, `maxArrayLength`, `maxResultSize`, `now` and `seed`. They are read from
+/// the object itself, not through JSON: `undefined` and `null` mean the default, a number must
+/// be finite, and `now` may be a `Date`.
+pub fn options(options: Option<&JsValue>) -> Result<Options, JsValue> {
     let mut out = Options::default();
     let Some(options) = options else {
         return Ok(out);
     };
-    let Value::Object(map) = options else {
-        return Err(type_error("options must be an object"));
-    };
-    let get = |key: &str| map.get(key).filter(|v| !v.is_null());
-    let count = |key: &str| -> Result<Option<usize>, JsValue> {
-        get(key)
-            .map(|v| {
-                v.as_u64()
-                    .and_then(|n| usize::try_from(n).ok())
-                    .ok_or_else(|| {
-                        type_error(&format!("options.{key} must be a non-negative integer"))
-                    })
-            })
-            .transpose()
-    };
-    if let Some(v) = get("timeout") {
-        let ms = v
-            .as_f64()
-            .filter(|ms| *ms >= 0.0)
-            .ok_or_else(|| type_error("options.timeout must be a number of milliseconds"))?;
-        out.timeout = Some(std::time::Duration::from_secs_f64(ms / 1000.0));
+    match read_options(options)? {
+        -1 => return Err(type_error("options must be an object")),
+        0 => return Ok(out),
+        _ => {}
     }
-    out.max_depth = count("maxDepth")?;
-    if let Some(v) = get("maxSteps") {
-        out.max_steps = Some(
-            v.as_u64()
-                .ok_or_else(|| type_error("options.maxSteps must be a non-negative integer"))?,
-        );
+    let mut read = [0.0; 16];
+    OPTIONS_READ.with(|array| array.copy_to(&mut read));
+    let get = |i: usize| match read[2 * i] as u8 {
+        0 => Opt::Unset,
+        1 => Opt::Number(read[2 * i + 1]),
+        2 => Opt::Date(read[2 * i + 1]),
+        3 => Opt::Text,
+        _ => Opt::Other,
+    };
+    // A non-negative integer below 2^64.
+    let integer = |i: usize, key: &str| -> Result<Option<u64>, JsValue> {
+        match get(i) {
+            Opt::Unset => Ok(None),
+            Opt::Number(n) if n >= 0.0 && n.fract() == 0.0 && n < u64::MAX as f64 => {
+                Ok(Some(n as u64))
+            }
+            _ => Err(type_error(&format!(
+                "options.{key} must be a non-negative integer"
+            ))),
+        }
+    };
+    // A count larger than the address space limits nothing more than the largest one.
+    let count = |i: usize, key: &str| -> Result<Option<usize>, JsValue> {
+        Ok(integer(i, key)?.map(|n| usize::try_from(n).unwrap_or(usize::MAX)))
+    };
+    match get(0) {
+        Opt::Unset => {}
+        Opt::Number(ms) if ms >= 0.0 && ms.is_finite() => {
+            // A timeout too long for a `Duration` never expires.
+            out.timeout = std::time::Duration::try_from_secs_f64(ms / 1000.0).ok();
+        }
+        _ => {
+            return Err(type_error(
+                "options.timeout must be a number of milliseconds",
+            ));
+        }
     }
-    out.max_string_length = count("maxStringLength")?;
-    out.max_array_length = count("maxArrayLength")?;
-    out.max_result_size = count("maxResultSize")?;
-    if let Some(v) = get("now") {
-        out.now = Some(now(v).ok_or_else(|| {
+    out.max_depth = count(1, "maxDepth")?;
+    out.max_steps = integer(2, "maxSteps")?;
+    out.max_string_length = count(3, "maxStringLength")?;
+    out.max_array_length = count(4, "maxArrayLength")?;
+    out.max_result_size = count(5, "maxResultSize")?;
+    let now = match get(6) {
+        Opt::Unset => None,
+        Opt::Number(ms) | Opt::Date(ms) => Some(millis(ms)),
+        Opt::Text => Some(timestamp(&options_now())),
+        Opt::Other => Some(None),
+    };
+    if let Some(now) = now {
+        out.now = Some(now.ok_or_else(|| {
             type_error(
                 "options.now must be milliseconds since the epoch, a Date or an ISO 8601 timestamp",
             )
         })?);
     }
-    if let Some(v) = get("seed") {
-        out.seed = Some(
-            v.as_u64()
-                .ok_or_else(|| type_error("options.seed must be a non-negative integer"))?,
-        );
-    }
+    out.seed = integer(7, "seed")?;
     Ok(out)
 }
 
-/// Reads `now`: an integer number of milliseconds, or a timestamp string (a `Date` arrives as
-/// its ISO 8601 string, through `JSON.stringify`).
-fn now(value: &Value) -> Option<i64> {
-    match value {
-        Value::Number(n) => n.as_i64(),
-        Value::String(text) => {
-            let expr =
-                jlens_core::Expression::compile("$toMillis($t)").expect("a valid expression");
-            match expr.evaluate(None, &Bindings::new().var("t", text.as_str())) {
-                Ok(Some(Value::Number(n))) => n.as_f64().map(|f| f as i64),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
+/// An integer number of milliseconds since the epoch, or `None` (an invalid `Date` is `NaN`).
+fn millis(ms: f64) -> Option<i64> {
+    (ms.fract() == 0.0 && ms.abs() < i64::MAX as f64).then_some(ms as i64)
+}
+
+/// The milliseconds of an ISO 8601 timestamp.
+fn timestamp(text: &str) -> Option<i64> {
+    TO_MILLIS.with(
+        |expr| match expr.evaluate(None, &Bindings::new().var("t", text)) {
+            Ok(Some(Value::Number(n))) => n.as_f64().map(|f| f as i64),
+            _ => None,
+        },
+    )
 }
 
 /// The fields of a jlens error, as JSON, with offsets in UTF-16 code units.

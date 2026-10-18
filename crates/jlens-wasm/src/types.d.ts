@@ -25,7 +25,12 @@ export type HostFunction = (...args: any[]) => unknown;
  */
 export type Callable = ((...args: any[]) => unknown) & { readonly arity: number };
 
-/** Evaluation guardrails, and the clock and seed that make an evaluation reproducible. */
+/**
+ * Evaluation guardrails, and the clock and seed that make an evaluation reproducible. Each
+ * option is read once, as a property (getters and inherited properties included, `toJSON` not
+ * called); `undefined` and `null` mean the default. A number must be finite: `NaN` and
+ * `Infinity` throw a `TypeError`, as other invalid values do.
+ */
 export interface EvaluateOptions {
   /** Maximum duration of one evaluation, in milliseconds (error `D1012`). */
   timeout?: number;
@@ -48,8 +53,8 @@ export interface EvaluateOptions {
    */
   maxResultSize?: number;
   /**
-   * The evaluation's timestamp for `$now()` and `$millis()`: milliseconds since the epoch, a
-   * `Date` or an ISO 8601 timestamp. Default: the system clock.
+   * The evaluation's timestamp for `$now()` and `$millis()`: an integer number of milliseconds
+   * since the epoch, a valid `Date` or an ISO 8601 timestamp. Default: the system clock.
    */
   now?: number | Date | string;
   /** Seed for `$random()` and `$shuffle()`: the same seed gives the same results. */

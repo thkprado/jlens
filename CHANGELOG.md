@@ -36,6 +36,21 @@ All notable changes are recorded here. The format follows
   depth (`D1011`), the timeout (`D1012`), a size limit (`U1001`), a cancellation (`U1003`) or
   the step limit (`U1006`), the error keeps its code, located at the call of `$eval`. Other
   errors of the text are still `D3121`, as in jsonata-js, which wraps the limits too.
+- The WebAssembly package reads the options of `evaluate`, `evaluateJson`, `evaluateDocument`
+  and `evaluateWithAudit` from the object itself instead of through `JSON.stringify` and a
+  parse. `{}` costs about 0.2 µs instead of 0.6 µs, one option 0.4 µs instead of 1.1 µs, and
+  `now` given as a `Date` 0.6 µs instead of 31 µs. What `JSON.stringify` decided is now decided
+  on purpose:
+  - `NaN`, `Infinity` and `-Infinity` are a `TypeError` for every option, as an invalid `Date`
+    is for `now`; `JSON.stringify` made them `null`, which silently meant the default.
+  - Each option is read once, as a property: a getter is called, an inherited option is read,
+    and an exception a getter throws is rethrown as it is. `toJSON` is not called, on the
+    options or on an option, and the other properties of the object are not read, so a cycle
+    among them is no longer an error.
+  - Options must be an object, not an array or a function (a function meant no options).
+  - A timeout too long for the clock (above about 10¹⁹ seconds) no longer panics: it never
+    expires. A count beyond the address space, such as `maxDepth: 2 ** 40`, limits as much as
+    the largest one instead of being a `TypeError`.
 
 ## [0.19.0]
 

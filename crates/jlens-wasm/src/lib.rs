@@ -126,7 +126,7 @@ impl Expression {
         options: Option<JsValue>,
     ) -> Result<JsValue, JsValue> {
         let scope = Scope::enter(&self.offsets);
-        let (bindings, options) = self.arguments(&scope, bindings, options)?;
+        let bindings = self.bindings(&scope, bindings)?;
         let options = convert::options(options.as_ref())?;
         let mut builder = JsBuilder::default();
         let write = |out: jlens_core::output::Output<'_, '_>| out.write(&mut builder);
@@ -167,7 +167,7 @@ impl Expression {
             None => None,
         };
         let scope = Scope::enter(&self.offsets);
-        let (bindings, options) = self.arguments(&scope, bindings, options)?;
+        let bindings = self.bindings(&scope, bindings)?;
         let options = convert::options(options.as_ref())?;
         let result = self.run(&scope, document.as_ref(), &bindings, &options)?;
         Ok(result.map(|v| jlens_core::format_json(&v, false)))
@@ -183,7 +183,7 @@ impl Expression {
         options: Option<JsValue>,
     ) -> Result<JsValue, JsValue> {
         let scope = Scope::enter(&self.offsets);
-        let (bindings, options) = self.arguments(&scope, bindings, options)?;
+        let bindings = self.bindings(&scope, bindings)?;
         let options = convert::options(options.as_ref())?;
         let mut builder = JsBuilder::default();
         let written = self
@@ -209,7 +209,7 @@ impl Expression {
             None => None,
         };
         let scope = Scope::enter(&self.offsets);
-        let (bindings, options) = self.arguments(&scope, bindings, options)?;
+        let bindings = self.bindings(&scope, bindings)?;
         let eval_options = convert::options(options.as_ref())?;
         let audit_options = audit_options(options.as_ref())?;
         let (result, tree) =
@@ -244,7 +244,7 @@ impl Expression {
     #[wasm_bindgen(skip_typescript)]
     pub fn reads(&self, bindings: Option<JsValue>) -> Result<JsValue, JsValue> {
         let scope = Scope::enter(&self.offsets);
-        let (bindings, _) = self.arguments(&scope, bindings, None)?;
+        let bindings = self.bindings(&scope, bindings)?;
         Ok(ser_to_js(&self.inner.reads_with(&bindings)))
     }
 
@@ -294,25 +294,14 @@ impl Expression {
         }
     }
 
-    /// Reads the `bindings` and `options` arguments of the evaluation methods. The functions of
-    /// the bindings, and those registered on the expression, belong to `scope`. The options are
-    /// returned as JSON, for `convert::options` and `audit_options`.
-    fn arguments(
-        &self,
-        scope: &Scope,
-        bindings: Option<JsValue>,
-        options: Option<JsValue>,
-    ) -> Result<(Bindings, Option<Value>), JsValue> {
-        let bindings = convert::bindings(
+    /// Reads the `bindings` argument of the evaluation methods. The functions of the bindings,
+    /// and those registered on the expression, belong to `scope`.
+    fn bindings(&self, scope: &Scope, bindings: Option<JsValue>) -> Result<Bindings, JsValue> {
+        convert::bindings(
             &bindings.unwrap_or(JsValue::UNDEFINED),
             scope,
             &self.registered,
-        )?;
-        let options = match &options {
-            Some(options) => from_js(options, "options")?,
-            None => None,
-        };
-        Ok((bindings, options))
+        )
     }
 }
 
@@ -380,27 +369,32 @@ impl Document {
     }
 }
 
-/// Reads `level` and `limits` from the options of `evaluateWithAudit`.
-fn audit_options(options: Option<&Value>) -> Result<AuditOptions, JsValue> {
+/// Reads `level` and `limits` from the options of `evaluateWithAudit` (an object, checked by
+/// `convert::options`), each through JSON.
+fn audit_options(options: Option<&JsValue>) -> Result<AuditOptions, JsValue> {
     let mut out = AuditOptions::default();
-    let Some(Value::Object(map)) = options else {
+    let Some(options) = options else {
         return Ok(out);
     };
-    if let Some(level) = map.get("level").filter(|v| !v.is_null()) {
-        out.level = serde_json::from_value(level.clone())
+    let get = |key: &str| -> Result<Option<Value>, JsValue> {
+        let value = js_sys::Reflect::get(options, &JsValue::from_str(key))?;
+        Ok(from_js(&value, &format!("options.{key}"))?.filter(|v| !v.is_null()))
+    };
+    if let Some(level) = get("level")? {
+        out.level = serde_json::from_value(level)
             .map_err(|_| type_error("options.level must be \"off\", \"decisions\" or \"full\""))?;
     }
-    if let Some(limits) = map.get("limits").filter(|v| !v.is_null()) {
+    if let Some(limits) = get("limits")? {
         let Value::Object(given) = limits else {
             return Err(type_error("options.limits must be an object"));
         };
         let mut merged = serde_json::to_value(CaptureLimits::default()).expect("serializable");
         if let Value::Object(base) = &mut merged {
             for (key, value) in given {
-                if !base.contains_key(key) {
+                if !base.contains_key(&key) {
                     return Err(type_error(&format!("unknown capture limit `{key}`")));
                 }
-                base.insert(key.clone(), value.clone());
+                base.insert(key, value);
             }
         }
         out.limits = serde_json::from_value(merged)

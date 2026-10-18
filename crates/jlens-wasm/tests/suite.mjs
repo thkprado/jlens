@@ -449,6 +449,59 @@ export const cases = [
     );
   }],
 
+  ["options are read from the object, not through JSON", (j) => {
+    const expr = new j.Expression("[1..50].($ * 2)");
+    const steps = (e) => equal(e.code, "U1006");
+    const type = (what) => (e) => ok(e instanceof TypeError, what);
+    // undefined and null mean the default, for the options and for each option.
+    for (const options of [undefined, null, {}, { maxSteps: undefined }, { maxSteps: null, now: null }]) {
+      equal(expr.evaluate(null, null, options).length, 50, JSON.stringify(options));
+    }
+    equal(expr.evaluateJson("null", null, null), JSON.stringify(expr.evaluate()), "evaluateJson");
+    equal(expr.evaluateDocument(new j.Document(null), null, null).length, 50, "evaluateDocument");
+    equal(expr.evaluateWithAudit(null, null, null).result.length, 50, "evaluateWithAudit");
+    // Only objects: not a number, a string, an array, a function or a boxed number.
+    for (const options of [5, "x", [], () => {}]) {
+      throws(() => expr.evaluate(null, null, options), type(typeof options));
+    }
+    throws(() => expr.evaluate(null, null, { maxSteps: new Number(5) }), type("boxed number"));
+    // NaN and Infinity are not numbers of milliseconds, counts or seeds (JSON.stringify made them
+    // null, the default); -0 is 0.
+    for (const key of ["timeout", "maxSteps", "maxDepth", "maxResultSize", "now", "seed"]) {
+      for (const n of [NaN, Infinity, -Infinity]) {
+        throws(() => expr.evaluate(null, null, { [key]: n }), type(`${key}: ${n}`));
+      }
+    }
+    throws(() => expr.evaluate(null, null, { maxSteps: -0 }), steps);
+    // A timeout too long for the clock never expires; a count beyond the address space limits
+    // nothing more.
+    equal(expr.evaluate(null, null, { timeout: 1e300 }).length, 50, "timeout 1e300");
+    equal(expr.evaluate(null, null, { maxDepth: 2 ** 40, maxArrayLength: 2 ** 53 }).length, 50, "large counts");
+    // A Date gives its time; an invalid Date is an error (JSON.stringify made it null).
+    const clock = new j.Expression("$millis()");
+    equal(clock.evaluate(null, null, { now: new Date(86400000) }), 86400000, "Date");
+    throws(() => clock.evaluate(null, null, { now: new Date("never") }), type("invalid Date"));
+    throws(() => clock.evaluate(null, null, { now: 1.5 }), type("fractional now"));
+    throws(() => clock.evaluate(null, null, { seed: 7, now: "x" }), (e) => ok(e.message.includes("now"), e.message));
+    // toJSON is not called, on the options or on an option.
+    equal(expr.evaluate(null, null, { toJSON: () => ({ maxSteps: 1 }) }).length, 50, "toJSON of the options");
+    throws(() => expr.evaluate(null, null, { maxSteps: { toJSON: () => 1 } }), type("toJSON of an option"));
+    // Each option is read once, as a property: getters and inherited properties included.
+    let reads = 0;
+    throws(() => expr.evaluate(null, null, { get maxSteps() { reads++; return 1; } }), steps);
+    equal(reads, 1, "a getter is called once");
+    throws(() => expr.evaluate(null, null, Object.create({ maxSteps: 1 })), steps);
+    const failing = new Error("getter");
+    throws(() => expr.evaluate(null, null, { get timeout() { throw failing; } }), (e) => ok(e === failing, "rethrown"));
+    // Other properties are not read: a cycle among them is no error.
+    const cyclic = { maxSteps: 1000, tag: {} };
+    cyclic.tag.self = cyclic;
+    equal(expr.evaluate(null, null, cyclic).length, 50, "a cycle");
+    // The audit options are read the same way.
+    const audited = expr.evaluateWithAudit(null, null, Object.create({ level: "full", maxSteps: 1 }));
+    equal([audited.audit.header.level, audited.error.code], ["full", "U1006"], "audit options");
+  }],
+
   ["evaluateWithAudit", (j) => {
     const expr = new j.Expression(rule);
     const audit = expr.evaluateWithAudit(order, { minimum: 60000 });
