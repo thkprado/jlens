@@ -1517,6 +1517,13 @@ proptest! {
         prop_assert_eq!(parsed.to_json(), Document::new(&read.cut(&value)).to_json());
     }
 
+    /// Serializing a value straight into a document gives the document converted from it.
+    #[test]
+    fn serializing_into_a_document_converts_the_value(value in json_value()) {
+        let serialized = Document::from_serialize(&value).unwrap();
+        prop_assert_eq!(serialized.to_json(), Document::new(&value).to_json());
+    }
+
     /// Parsing any text cut by a `Read` never panics, and accepts only JSON.
     #[test]
     fn parsing_any_text_cut_by_a_read_never_panics(read in read(), text in "[\\[\\]{}\":,a-z0-9 ]{0,24}") {

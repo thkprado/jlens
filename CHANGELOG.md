@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Document::from_serialize` serializes any `serde::Serialize` value straight into a document
+  (ADR 0019). It builds the document that `Document::new(&serde_json::to_value(value)?)` builds
+  and fails where `to_value` fails, except for a value nested more than 1,000 levels deep, which
+  fails instead of overflowing the stack. For ten records of twenty fields it takes 17.3 µs,
+  against 40.0 µs through `to_value` and `Document::new`. The benchmark `host_state` measures
+  it, and the crate guide shows when `evaluate_source` is the faster choice.
+
 ## [0.20.0]
 
 jlens gets a ceiling on what one evaluation may cost that gives the same answer on every

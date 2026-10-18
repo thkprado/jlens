@@ -11,6 +11,9 @@ by the comparisons with jsonata-js and with the other Python packages:
   items, filters with aggregation, grouping, sorting, string and regex functions, number formatting, an object constructor, a
   transform, a recursive function, and the shipping rule from the guides.
 - `benches/orders-200.json` is a 24 KB store order with 200 items.
+- `crates/jlens-core/benches/host_state.rs` builds a document from Rust values again and again,
+  as an application that keeps its state in Rust types does
+  ([below](#documents-built-from-rust-values)). It is native only.
 
 ```sh
 cargo bench -p jlens-core                     # criterion, native
@@ -552,6 +555,38 @@ process start included, before and after:
 
 The last row gains too: the input used to be parsed into a `serde_json::Value` and converted,
 where it is now parsed straight into a `Document`.
+
+### Documents built from Rust values
+
+An application that keeps its state in Rust types builds its document with
+`Document::from_serialize`, which serializes the state straight into it
+([ADR 0019](../adr/0019-documents-from-rust-values.md)), rather than through a
+`serde_json::Value`. The benchmark `host_state` (`cargo bench -p jlens-core --bench host_state`)
+measures a state of ten records of twenty fields (strings, numbers, booleans, small lists),
+rebuilt at each iteration, on this machine:
+
+| `host build`: building the document | Time |
+|---|---:|
+| `serde_json::to_value` alone, for reference | 21.7 µs |
+| `to_value` + `Document::new` | 40.0 µs |
+| `serde_json::to_string` + `Document::parse` | 36.5 µs |
+| `Document::from_serialize` | 17.3 µs |
+
+`host rebuild` builds the document and evaluates the first 1, 4 or 10 of ten small expressions
+(filters, sorts, `[0]`) against it, as an application does between two changes of its state.
+For comparison, the last two rows build no document: lazy `evaluate` over the
+`serde_json::Value`, and `evaluate_source` over a `Source` written over the state, which reads
+only the fields each expression reaches:
+
+| `host rebuild` | 1 | 4 | 10 |
+|---|---:|---:|---:|
+| `to_value` + `Document::new` + `evaluate_document` | 41.3 µs | 50.1 µs | 70.1 µs |
+| `Document::from_serialize` + `evaluate_document` | 18.8 µs | 27.5 µs | 47.0 µs |
+| `to_value` + `evaluate` | 24.5 µs | 40.0 µs | 69.0 µs |
+| `evaluate_source` | 3.7 µs | 19.9 µs | 53.8 µs |
+
+For one evaluation per state, a `Source` is the fastest; from about four, a document built with
+`from_serialize`.
 
 ## Where the time goes
 

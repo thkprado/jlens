@@ -23,4 +23,4 @@ earlier one instead.
 | [0016](0016-fields-read.md) | The fields an expression reads: an abstract evaluation that gives an upper bound, and its union | Accepted |
 | [0017](0017-result-builder.md) | Results written straight into another representation, through a builder the core walks | Accepted |
 | [0018](0018-step-limit.md) | A deterministic step limit: each evaluated node and callback is a step, fast paths charge what they skip, `U1006` | Accepted |
-| [0019](0019-documents-from-rust-values.md) | Documents serialized straight from Rust values, as `serde_json::to_value` and `Document::new` would build them | Proposed |
+| [0019](0019-documents-from-rust-values.md) | Documents serialized straight from Rust values, as `serde_json::to_value` and `Document::new` would build them | Accepted |

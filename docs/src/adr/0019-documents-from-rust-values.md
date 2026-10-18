@@ -1,6 +1,6 @@
 # 0019 — Documents serialized straight from Rust values
 
-**Status:** Proposed.
+**Status:** Accepted.
 
 ## Context
 
@@ -98,10 +98,11 @@ interns the keys and builds its own maps. Most of that is copying from one tree 
 
 ## Consequences
 
-- The serializer is about 500 lines, most of them the methods `serde::Serializer` requires.
+- The serializer is about 600 lines, most of them the methods `serde::Serializer` requires.
   serde 1 is stable, and `jlens-core` already exposes `serde_json` types, so a `Serialize` bound
   adds no dependency to the API that 1.0 will keep (ADR 0015 lists it among the stable items).
-- The benchmark `host_state` joins the workload, with a `host build` row on the performance page.
+- The benchmark `host_state` joins the workload, with `host build` and `host rebuild` on the
+  performance page.
 - A later step could serialize only the fields some expressions read, as `Document::parse_cut`
   parses them (ADR 0016): a struct field the `Read` leaves out would not be serialized at all.
   Not part of this decision; measured if an application asks for it.

@@ -245,6 +245,55 @@ fn documents() -> Result<()> {
 }
 
 #[test]
+fn documents_from_rust() -> Result<()> {
+    use jlens_core::{Bindings, Document, Expression, Options};
+    use serde_json::json;
+    // ANCHOR: from_serialize
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    struct Task {
+        name: String,
+        priority: u32,
+        open: bool,
+    }
+    #[derive(Serialize)]
+    struct Queue {
+        tasks: Vec<Task>,
+    }
+
+    let target = Expression::compile("(tasks[open]^(priority))[0].name")?;
+    let mut queue = Queue {
+        tasks: vec![
+            Task {
+                name: "write".into(),
+                priority: 30,
+                open: false,
+            },
+            Task {
+                name: "review".into(),
+                priority: 12,
+                open: true,
+            },
+            Task {
+                name: "ship".into(),
+                priority: 40,
+                open: true,
+            },
+        ],
+    };
+    for expected in ["review", "ship"] {
+        // The state changes, the document is built again.
+        let doc = Document::from_serialize(&queue)?;
+        let name = target.evaluate_document(&doc, &Bindings::new(), &Options::default())?;
+        assert_eq!(name, Some(json!(expected)));
+        queue.tasks.retain(|task| task.name != expected);
+    }
+    // ANCHOR_END: from_serialize
+    Ok(())
+}
+
+#[test]
 fn fields_read() -> Result<()> {
     use jlens_core::{Bindings, Document, Expression, HostFunction, Options};
     use serde_json::json;

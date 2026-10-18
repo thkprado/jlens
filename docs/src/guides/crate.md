@@ -180,6 +180,26 @@ against the same document, convert it once into a
 `Document::new` converts a `serde_json::Value`. A `Document` is not `Send`: use it on the thread
 that created it. [Performance](../architecture/performance.md) has measurements.
 
+### Documents built from Rust values
+
+An application that keeps its state in Rust types and evaluates a few expressions each time it
+changes needs no `serde_json::Value` in between: `Document::from_serialize` serializes any
+`Serialize` value straight into a document
+([ADR 0019](../adr/0019-documents-from-rust-values.md)). It builds the document that
+`Document::new(&serde_json::to_value(&state)?)` builds, in less than half the time, and fails
+where `to_value` fails (a map key that is not a string, number or boolean, say).
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:from_serialize}}
+```
+
+An application that evaluates only once or twice per state can skip the document: a
+[`Source`](#other-input-representations) written over its types reads only the fields an
+expression reaches, and `Expression::evaluate_source` evaluates against it. For ten records of
+twenty fields, one expression takes 3.7 µs that way, against 19 µs for building the document and
+evaluating; by four expressions the two are close, and by ten the document is faster
+([Performance](../architecture/performance.md#documents-built-from-rust-values)).
+
 ## Other input representations
 
 An input held in another representation than `serde_json` (another JSON library, a database

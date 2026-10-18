@@ -754,6 +754,119 @@ fn documents_are_reusable_and_unchanged_by_evaluation() {
 }
 
 #[test]
+fn documents_serialized_from_rust_match_serde_json() {
+    use jlens_core::Document;
+    use serde::Serialize;
+    use serde::ser::{SerializeMap, Serializer};
+    use std::collections::BTreeMap;
+
+    #[derive(Serialize)]
+    enum Shape {
+        Empty,
+        Circle(f64),
+        Point(i32, i32),
+        Rect { w: u8, h: u8 },
+    }
+    #[derive(Serialize)]
+    struct Id(u32);
+    #[derive(Serialize)]
+    struct Unit;
+    #[derive(Serialize)]
+    struct All<'a> {
+        name: &'a str,
+        letter: char,
+        small: f32,
+        nan: f64,
+        big: u64,
+        wide: i128,
+        id: Id,
+        unit: Unit,
+        nothing: Option<u8>,
+        pair: (bool, &'a str),
+        shapes: Vec<Shape>,
+        by_number: BTreeMap<i32, &'a str>,
+        by_flag: BTreeMap<bool, u8>,
+        by_shape: BTreeMap<&'a str, Shape>,
+        json: Value,
+    }
+    /// A map that repeats a key, and one keyed by floats.
+    struct Entries<K>(Vec<(K, u8)>);
+    impl<K: Serialize> Serialize for Entries<K> {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            let mut map = s.serialize_map(None)?;
+            for (k, v) in &self.0 {
+                map.serialize_entry(k, v)?;
+            }
+            map.end()
+        }
+    }
+
+    let same = |value: &dyn erased::Erased| {
+        let json = value.to_value();
+        let document = value.serialized();
+        match (json, document) {
+            (Ok(json), Ok(document)) => {
+                assert_eq!(document.to_json(), Document::new(&json).to_json())
+            }
+            (Err(_), Err(_)) => {}
+            (json, document) => panic!("{json:?} against {document:?}"),
+        }
+    };
+    let all = All {
+        name: "pen",
+        letter: '𝄞',
+        small: 0.1,
+        nan: f64::NAN,
+        big: u64::MAX,
+        wide: -(1 << 60),
+        id: Id(7),
+        unit: Unit,
+        nothing: None,
+        pair: (true, "x"),
+        shapes: vec![
+            Shape::Empty,
+            Shape::Circle(1.5),
+            Shape::Point(1, -2),
+            Shape::Rect { w: 2, h: 3 },
+        ],
+        by_number: BTreeMap::from([(-1, "a"), (10, "b")]),
+        by_flag: BTreeMap::from([(false, 0), (true, 1)]),
+        by_shape: BTreeMap::from([("c", Shape::Circle(2.0))]),
+        json: json!({"z": 1, "a": [null, {"k": "v"}]}),
+    };
+    same(&all);
+    same(&Entries(vec![("k", 1), ("j", 2), ("k", 3)]));
+    same(&Entries(vec![(1.5, 1), (1e21, 2), (-0.0, 3)]));
+    // Errors: a number out of range, keys that JSON has no string for.
+    same(&(1u128 << 64));
+    same(&Entries(vec![(f64::NAN, 1)]));
+    same(&Entries(vec![((), 1)]));
+    same(&Entries(vec![(vec![1], 1)]));
+    // Past 1,000 levels, the document fails where `serde_json` does not.
+    let mut deep = json!(1);
+    for _ in 0..1001 {
+        deep = json!([deep]);
+    }
+    assert!(Document::from_serialize(&deep).is_err());
+
+    mod erased {
+        use jlens_core::Document;
+        pub trait Erased {
+            fn to_value(&self) -> serde_json::Result<serde_json::Value>;
+            fn serialized(&self) -> serde_json::Result<Document>;
+        }
+        impl<T: serde::Serialize> Erased for T {
+            fn to_value(&self) -> serde_json::Result<serde_json::Value> {
+                serde_json::to_value(self)
+            }
+            fn serialized(&self) -> serde_json::Result<Document> {
+                Document::from_serialize(self)
+            }
+        }
+    }
+}
+
+#[test]
 fn compiled_expressions_can_be_shared_between_threads() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Expression>();

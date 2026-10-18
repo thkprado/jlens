@@ -8,6 +8,8 @@ use std::rc::Rc;
 use serde::de::{DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde_json::Value as JsonValue;
 
+mod serialize;
+
 use crate::reads::Read;
 use crate::value::{Keys, Map, Value};
 
@@ -87,6 +89,41 @@ impl Document {
         let value = CutSeed(&mut keys, read, PhantomData).deserialize(&mut deserializer)?;
         deserializer.end()?;
         Ok(Document { value })
+    }
+
+    /// Serializes a Rust value straight into the internal representation, without a
+    /// `serde_json::Value` in between. The document is the one
+    /// `Document::new(&serde_json::to_value(value)?)` gives, and the errors are those of
+    /// `serde_json::to_value`, except for a value nested more than 1,000 levels deep, which
+    /// fails.
+    ///
+    /// An application that keeps its state in Rust types and evaluates a few expressions each
+    /// time it changes builds the document this way, at half the cost of `to_value` and
+    /// [`new`](Document::new).
+    ///
+    /// ```
+    /// use jlens_core::{Bindings, Document, Expression, Options};
+    /// use serde::Serialize;
+    ///
+    /// #[derive(Serialize)]
+    /// struct Item {
+    ///     name: String,
+    ///     price: f64,
+    /// }
+    ///
+    /// let items = vec![
+    ///     Item { name: "pen".into(), price: 2.0 },
+    ///     Item { name: "book".into(), price: 12.5 },
+    /// ];
+    /// let doc = Document::from_serialize(&items).unwrap();
+    /// let expr = Expression::compile("$[price > 5].name").unwrap();
+    /// let result = expr.evaluate_document(&doc, &Bindings::new(), &Options::default());
+    /// assert_eq!(result.unwrap(), Some(serde_json::json!("book")));
+    /// ```
+    pub fn from_serialize<T: ?Sized + serde::Serialize>(value: &T) -> serde_json::Result<Self> {
+        Ok(Document {
+            value: serialize::to_value(value, &mut Keys::default(), 0)?,
+        })
     }
 
     /// The document as JSON.
