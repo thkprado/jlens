@@ -13,7 +13,7 @@ body:
     attributes:
       label: Version
       description: The jlens version (`jlens --version`, or the crate or npm package version).
-      placeholder: "0.19.0"
+      placeholder: "0.20.0"
     validations:
       required: true
   - type: dropdown

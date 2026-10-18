@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.20.0]
+
+jlens gets a ceiling on what one evaluation may cost that gives the same answer on every
+machine: a budget of evaluation steps, `max_steps`, which stops an evaluation with `U1006`
+once spent, in Rust, WebAssembly, Python and the CLI, with or without a tracer (ADR 0018).
+A timeout now reads the clock every 256 steps, `$eval` lets the limits of its text through,
+and the WebAssembly package reads its options without JSON. Without a limit, every case of
+the benchmarks stays within 2% of 0.19.0. The CLI is still not on npm (see 0.14.0).
+
 ### Added
 
 - A deterministic step limit (ADR 0018): `Options::max_steps` stops an evaluation with the new
@@ -721,7 +730,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/thkprado/jlens/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/thkprado/jlens/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/thkprado/jlens/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/thkprado/jlens/compare/v0.16.0...v0.17.0

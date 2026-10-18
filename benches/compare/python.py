@@ -45,14 +45,18 @@ class Jlens:
     def compile(self, source):
         return self.jlens.Expression(source)
 
-    def evaluate(self, compiled, input, timeout=None, max_depth=None, **limits):
-        return compiled.evaluate(input, timeout=timeout, max_depth=max_depth, **limits)
+    def evaluate(self, compiled, input, timeout=None, max_depth=None, max_steps=None):
+        if max_steps is None:
+            return compiled.evaluate(input, timeout=timeout, max_depth=max_depth)
+        return compiled.evaluate(input, timeout=timeout, max_depth=max_depth, max_steps=max_steps)
 
     def document(self, input):
         return self.jlens.Document(input)
 
-    def evaluate_document(self, compiled, document, **limits):
-        return compiled.evaluate_document(document, **limits)
+    def evaluate_document(self, compiled, document, max_steps=None):
+        if max_steps is None:
+            return compiled.evaluate_document(document)
+        return compiled.evaluate_document(document, max_steps=max_steps)
 
     def error(self, error):
         if isinstance(error, self.jlens.JlensError):
@@ -206,7 +210,9 @@ def _measure(run, rounds=7, round_s=0.2):
 def speed_child(name, max_steps=None):
     """Measures one implementation; prints a JSON object on its last line."""
     impl = IMPLEMENTATIONS[name]()
-    limits = {} if max_steps is None else {"max_steps": int(max_steps)}
+    # Without a limit, no call passes `max_steps`: a call with `**limits`, even empty, builds a
+    # tuple and a dict, which cost about 0.3 µs, as much as the smallest cases take.
+    n = None if max_steps is None else int(max_steps)
     input, cases = _cases()
     out = {"version": impl.version, "python": sys.version.split()[0], "cases": {}}
     out["document"] = hasattr(impl, "document")
@@ -215,12 +221,17 @@ def speed_child(name, max_steps=None):
         entry = {}
         try:
             compiled = impl.compile(source)
-            entry["result"] = _normalize(impl.evaluate(compiled, input, **limits))
-            entry["evaluate"] = _measure(lambda: impl.evaluate(compiled, input, **limits))
+            if n is None:
+                run = lambda c=compiled: impl.evaluate(c, input)
+                run_document = lambda c=compiled: impl.evaluate_document(c, document)
+            else:
+                run = lambda c=compiled: impl.evaluate(c, input, max_steps=n)
+                run_document = lambda c=compiled: impl.evaluate_document(c, document, max_steps=n)
+            entry["result"] = _normalize(run())
+            entry["evaluate"] = _measure(run)
             if document is not None:
-                result = _normalize(impl.evaluate_document(compiled, document, **limits))
-                assert result == entry["result"]
-                entry["document"] = _measure(lambda: impl.evaluate_document(compiled, document, **limits))
+                assert _normalize(run_document()) == entry["result"]
+                entry["document"] = _measure(run_document)
         except Exception as error:  # noqa: BLE001 - reported in the table
             entry["error"] = f"{type(error).__name__}: {str(error)[:100]}"
         out["cases"][case] = entry
