@@ -179,6 +179,62 @@ fn guardrails_stop_catastrophic_regexes() {
     canceller.join().unwrap();
 }
 
+/// `$eval` reports an error of its text as `D3121`, but a limit of the evaluation passes
+/// through, located at the call of `$eval` as `D3121` is.
+#[test]
+fn eval_lets_the_limits_of_the_evaluation_through() {
+    let run = |text: &str, options: &Options| {
+        let source = format!("1 + $eval({})", serde_json::to_string(text).unwrap());
+        Expression::compile(&source)
+            .unwrap()
+            .evaluate_with(None, &Bindings::new(), options)
+            .unwrap_err()
+    };
+    let wrapped = run("1 + 'a'", &Options::new());
+    assert_eq!(wrapped.code(), "D3121");
+
+    let forever = "($f := function($n){ $f($n + 1) }; $f(0))";
+    let token = jlens_core::CancelToken::new();
+    let cancel = || {
+        let token = token.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            token.cancel();
+        })
+    };
+    let cancelled = Options::new().cancel_token(token.clone());
+    let mut canceller = None;
+    for (text, options, code) in [
+        (
+            "($f := function($n){ 1 + $f($n + 1) }; $f(0))",
+            Options::new().max_depth(500),
+            "D1011",
+        ),
+        (
+            forever,
+            Options::new().timeout(Duration::from_millis(50)),
+            "D1012",
+        ),
+        ("[1..1000]", Options::new().max_array_length(100), "U1001"),
+        (forever, cancelled, "U1003"),
+        (
+            "$sum([1..10].($ * 2))",
+            Options::new().max_steps(10),
+            "U1006",
+        ),
+    ] {
+        // The token is cancelled while `$eval` runs, not before the evaluation starts.
+        if code == "U1003" {
+            canceller = Some(cancel());
+        }
+        let err = run(text, &options);
+        assert_eq!(err.code(), code, "{text}");
+        assert_eq!(err.position(), wrapped.position(), "{text}");
+        assert_eq!(err.token(), wrapped.token(), "{text}");
+    }
+    canceller.unwrap().join().unwrap();
+}
+
 #[test]
 fn deeply_nested_regexes_are_syntax_errors() {
     // regress 0.10.5 overflowed the stack parsing this; 0.12.0 caps the nesting.

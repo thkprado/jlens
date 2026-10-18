@@ -32,6 +32,10 @@ All notable changes are recorded here. The format follows
   steps late. On a loop of small steps it cost 47% natively and 149% in WebAssembly; it now
   costs about 1%. On the benchmark workload with a timeout, every case is 3 to 37% faster.
   The cancellation token is still checked at every step.
+- `$eval` no longer hides the limits of the evaluation in `D3121`: when its text reaches the
+  depth (`D1011`), the timeout (`D1012`), a size limit (`U1001`), a cancellation (`U1003`) or
+  the step limit (`U1006`), the error keeps its code, located at the call of `$eval`. Other
+  errors of the text are still `D3121`, as in jsonata-js, which wraps the limits too.
 
 ## [0.19.0]
 

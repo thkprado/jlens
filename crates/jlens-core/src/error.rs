@@ -83,6 +83,15 @@ impl Error {
         self
     }
 
+    /// Drops the location and the token, for an error that leaves the source it was located in
+    /// (the text of `$eval`), so that the caller locates it in its own.
+    pub(crate) fn unlocated(mut self) -> Self {
+        self.0.position = None;
+        self.0.span = None;
+        self.0.details.remove("token");
+        self
+    }
+
     pub(crate) fn at_if_missing(self, span: Span, position: usize) -> Self {
         if self.0.position.is_none() {
             self.at(span, position)

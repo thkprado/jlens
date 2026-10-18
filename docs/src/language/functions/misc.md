@@ -46,7 +46,9 @@ input: address.json
 
 `$eval(expression, context?)` parses and evaluates a JSONata expression given as a string. The
 context value is `context` if given, the current context otherwise. A syntax error in
-`expression` fails with `D3120`; an evaluation error, with `D3121`.
+`expression` fails with `D3120`; an evaluation error, with `D3121`. A limit of the evaluation
+that `expression` reaches keeps its own code, located at the call of `$eval`: depth (`D1011`),
+timeout (`D1012`), size (`U1001`), cancellation (`U1003`) and steps (`U1006`).
 
 ```jsonata-example
 $eval("[1, $string(2), 3]")
