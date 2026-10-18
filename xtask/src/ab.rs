@@ -22,7 +22,9 @@
 //! `--b-allocator mimalloc` makes `mimalloc` the global allocator of B's program, so that
 //! `ab . . --b-allocator mimalloc` measures the allocator alone. `--b-max-steps N` evaluates B's
 //! cases with `Options::max_steps(N)`, so that `ab . . --b-max-steps N` measures a step limit
-//! against none (ADR 0018); B must be a revision that has it. `--target` builds both programs for
+//! against none (ADR 0018); B must be a revision that has it. `--timeout MS` evaluates the cases
+//! of both programs with `Options::timeout`, long enough never to expire, so that `ab A B
+//! --timeout MS` measures what a timeout costs in each. `--target` builds both programs for
 //! another target that runs here, such as `x86_64-unknown-linux-musl` on Linux.
 
 use std::collections::BTreeMap;
@@ -68,7 +70,7 @@ const MIMALLOC: &str = "
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 ";
 
-/// The line of the probe that `--b-max-steps` replaces.
+/// The line of the probe that `--b-max-steps` and `--timeout` replace.
 const OPTIONS: &str = "let options = Options::default();";
 
 /// How B's program differs from A's.
@@ -76,6 +78,8 @@ const OPTIONS: &str = "let options = Options::default();";
 struct Variant {
     mimalloc: bool,
     max_steps: Option<u64>,
+    /// The timeout, in milliseconds, of both programs.
+    timeout: Option<u64>,
 }
 
 pub fn run(args: &[String]) -> Result<()> {
@@ -84,6 +88,7 @@ pub fn run(args: &[String]) -> Result<()> {
     let mut mode = "evaluate".to_owned();
     let mut b_allocator = "system".to_owned();
     let mut b_max_steps = None;
+    let mut timeout = None;
     let mut target = None;
     let mut i = 0;
     while i < args.len() {
@@ -113,6 +118,14 @@ pub fn run(args: &[String]) -> Result<()> {
                 );
                 i += 1;
             }
+            "--timeout" => {
+                let ms = args.get(i + 1).context("--timeout needs a value")?;
+                timeout = Some(
+                    ms.parse::<u64>()
+                        .with_context(|| format!("--timeout takes milliseconds, not {ms:?}"))?,
+                );
+                i += 1;
+            }
             "--target" => {
                 target = Some(args.get(i + 1).context("--target needs a value")?.clone());
                 i += 1;
@@ -135,12 +148,19 @@ pub fn run(args: &[String]) -> Result<()> {
 
     let work = Work::new(target)?;
     let programs = [
-        work.build(a, Variant::default())?,
+        work.build(
+            a,
+            Variant {
+                timeout,
+                ..Variant::default()
+            },
+        )?,
         work.build(
             b,
             Variant {
                 mimalloc: b_allocator == "mimalloc",
                 max_steps: b_max_steps,
+                timeout,
             },
         )?,
     ];
@@ -215,9 +235,10 @@ pub fn run(args: &[String]) -> Result<()> {
     } else {
         format!(" with {}", with.join(" and "))
     };
+    let both = timeout.map_or(String::new(), |ms| format!("; both with timeout({ms} ms)"));
     println!(
         "
-A is {a}, B is {b}{with}"
+A is {a}, B is {b}{with}{both}"
     );
     Ok(())
 }
@@ -266,6 +287,9 @@ impl Work {
         }
         if let Some(steps) = with.max_steps {
             variant.push_str(&format!("-steps{steps}"));
+        }
+        if let Some(ms) = with.timeout {
+            variant.push_str(&format!("-timeout{ms}"));
         }
         if let Some(target) = &self.target {
             variant.push_str(&format!("-{target}"));
@@ -333,13 +357,22 @@ impl Work {
                 ),
         )?;
         let mut source = PROBE.to_owned();
+        let mut options = String::new();
         if let Some(steps) = with.max_steps {
+            options.push_str(&format!(".max_steps({steps})"));
+        }
+        if let Some(ms) = with.timeout {
+            options.push_str(&format!(".timeout(Duration::from_millis({ms}))"));
+        }
+        if !options.is_empty() {
             if !source.contains(OPTIONS) {
-                bail!("the probe has no line {OPTIONS:?} for --b-max-steps to replace");
+                bail!(
+                    "the probe has no line {OPTIONS:?} for --b-max-steps or --timeout to replace"
+                );
             }
             source = source.replace(
                 OPTIONS,
-                &format!("let options = Options::default().max_steps({steps});"),
+                &format!("let options = Options::default(){options};"),
             );
         }
         if with.mimalloc {

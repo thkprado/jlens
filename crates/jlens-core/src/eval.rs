@@ -105,6 +105,11 @@ pub(crate) const DEFAULT_MAX_DEPTH: usize = 50_000;
 #[cfg(target_arch = "wasm32")]
 pub(crate) const DEFAULT_MAX_DEPTH: usize = 500;
 
+/// How many steps a timeout lets pass between two reads of the clock (ADR 0018): reading it
+/// costs about as much as a step, more in WebAssembly, and a timeout fires at most this many
+/// steps late.
+const CLOCK_EVERY: u64 = 256;
+
 /// Default maximum length of a built string, in bytes (256 MiB). jsonata-js is limited by the
 /// JavaScript engine (about 2^29 UTF-16 units in V8); jlens fails cleanly instead of running
 /// out of memory.
@@ -119,9 +124,12 @@ pub(crate) const DEFAULT_MAX_RESULT_SIZE: usize = 1 << 28;
 pub(crate) struct Evaluator<'t, 'a> {
     depth: usize,
     limits: Limits,
-    /// The steps left in the budget (ADR 0018), `u64::MAX` without a limit, so that counting
-    /// takes no branch on whether there is one.
+    /// The steps left until the next checkpoint (ADR 0018): the end of the budget, or with a
+    /// timeout the next read of the clock, every [`CLOCK_EVERY`] steps. `u64::MAX` without a
+    /// limit or a timeout, so that counting takes no branch on whether there is one.
     steps: Cell<u64>,
+    /// The steps of the budget left after the next checkpoint.
+    reserve: Cell<u64>,
     /// When the evaluation started, read only when it has a timeout.
     started: Option<Instant>,
     /// Frames that may be part of reference cycles (a frame binding a closure that captures
@@ -291,9 +299,15 @@ pub(crate) fn evaluate<'a, 'v, R>(
     if ast.has_errors() {
         return Err(Error::new("S0500").at(Default::default(), 0));
     }
+    let budget = limits.max_steps.unwrap_or(u64::MAX);
+    let first = match limits.timeout {
+        Some(_) => budget.min(CLOCK_EVERY),
+        None => budget,
+    };
     let mut ev = Evaluator {
         depth: 0,
-        steps: Cell::new(limits.max_steps.unwrap_or(u64::MAX)),
+        steps: Cell::new(first),
+        reserve: Cell::new(budget - first),
         started: limits.timeout.map(|_| Instant::now()),
         rng: limits.seed.map_or(0, |seed| splitmix64(seed) | 1),
         limits,
@@ -443,32 +457,47 @@ impl<'a> Evaluator<'_, 'a> {
         }
         self.charge(1)?;
         self.read_failure()?;
-        self.time_limits()
+        self.cancelled()
     }
 
     /// Spends `steps` of the budget, those the general path would take where a fast path skips
-    /// evaluating nodes. Fails with `U1006` when fewer remain, leaving none, as the general path
-    /// would after spending them one by one.
+    /// evaluating nodes. Past a checkpoint, see [`Self::checkpoint`].
     #[inline]
     fn charge(&self, steps: u64) -> Result<()> {
         let left = self.steps.get();
         if left < steps {
-            self.steps.set(0);
-            return Err(self.out_of_steps());
+            return self.checkpoint(steps);
         }
         self.steps.set(left - steps);
         Ok(())
     }
 
+    /// Spends `steps` that reach past the next checkpoint. Fails with `U1006` when the budget
+    /// has fewer left, leaving none, as the general path would after spending them one by one;
+    /// otherwise, with a timeout, reads the clock and sets the next checkpoint
+    /// [`CLOCK_EVERY`] steps on.
     #[cold]
     #[inline(never)]
-    fn out_of_steps(&self) -> Error {
-        Error::new("U1006").with("value", self.limits.max_steps.unwrap_or(u64::MAX))
+    fn checkpoint(&self, steps: u64) -> Result<()> {
+        let Some(left) = (self.steps.get() + self.reserve.get()).checked_sub(steps) else {
+            self.steps.set(0);
+            self.reserve.set(0);
+            return Err(
+                Error::new("U1006").with("value", self.limits.max_steps.unwrap_or(u64::MAX))
+            );
+        };
+        let next = match self.limits.timeout {
+            Some(_) => left.min(CLOCK_EVERY),
+            None => left,
+        };
+        self.steps.set(next);
+        self.reserve.set(left - next);
+        self.timeout()
     }
 
     /// The steps the evaluation has taken so far.
     fn steps_taken(&self) -> u64 {
-        self.limits.max_steps.unwrap_or(u64::MAX) - self.steps.get()
+        self.limits.max_steps.unwrap_or(u64::MAX) - self.steps.get() - self.reserve.get()
     }
 
     /// Fails with `U1004` once a level of the input could not be read from its source.
@@ -480,13 +509,19 @@ impl<'a> Evaluator<'_, 'a> {
         }
     }
 
-    /// Fails with `D1012` once the timeout has passed, or `U1003` once the token is cancelled.
-    fn time_limits(&self) -> Result<()> {
+    /// Fails with `D1012` once the timeout has passed. Steps read the clock only at a
+    /// checkpoint; the backtracker at each of its polls.
+    fn timeout(&self) -> Result<()> {
         if let (Some(timeout), Some(started)) = (self.limits.timeout, self.started)
             && started.elapsed() > timeout
         {
             return Err(Error::new("D1012").with("value", timeout.as_millis() as u64));
         }
+        Ok(())
+    }
+
+    /// Fails with `U1003` once the token is cancelled, read at every step.
+    fn cancelled(&self) -> Result<()> {
         if let Some(token) = &self.limits.cancel_token
             && token.is_cancelled()
         {
@@ -515,7 +550,12 @@ impl<'a> Evaluator<'_, 'a> {
         }
         let mut stopped = None;
         let found = re.find_from_interruptible(text, from, || {
-            stopped = self.charge(1).and_then(|()| self.time_limits()).err();
+            // Each poll reads the clock: one stands for 1,024 steps of the backtracker.
+            stopped = self
+                .charge(1)
+                .and_then(|()| self.timeout())
+                .and_then(|()| self.cancelled())
+                .err();
             stopped.is_some()
         });
         match found {
@@ -1275,7 +1315,7 @@ impl<'a> Evaluator<'_, 'a> {
         }
         self.charge(1)?;
         self.read_failure()?;
-        self.time_limits()
+        self.cancelled()
     }
 
     fn binary(

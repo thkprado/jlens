@@ -16,6 +16,14 @@ All notable changes are recorded here. The format follows
   steps they skip. Without a limit, evaluation is as fast as before.
 - The audit header reports `steps`, the steps the evaluation took, given to tracers by the new
   `Tracer::steps`. The WebAssembly and Python audits have it too.
+- `cargo xtask ab --timeout MS` measures both revisions with a timeout.
+
+### Changed
+
+- A timeout reads the clock every 256 steps instead of at every step, so it fires at most 256
+  steps late. On a loop of small steps it cost 47% natively and 149% in WebAssembly; it now
+  costs about 1%. On the benchmark workload with a timeout, every case is 3 to 37% faster.
+  The cancellation token is still checked at every step.
 
 ## [0.19.0]
 

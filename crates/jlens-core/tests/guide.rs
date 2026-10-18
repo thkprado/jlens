@@ -58,7 +58,7 @@ fn options() -> Result<()> {
     // The same budget stops the same evaluation everywhere: U1006 when spent.
     let loops = Expression::compile("$sum($map([1..100], function($i) { $i * 2 }))")?;
     let err = loops
-        .evaluate_with(None, &Bindings::new(), &options.clone().max_steps(500))
+        .evaluate_with(None, &Bindings::new(), &options.clone().max_steps(400))
         .unwrap_err();
     assert_eq!(err.code(), "U1006");
     // ANCHOR_END: options

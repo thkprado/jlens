@@ -417,6 +417,28 @@ the cyclic input is `{"n": 1, "child": {"parent": <the input>}}`:
   jlens finishes.
 - Otherwise, no package stops an endless evaluation by default: set a timeout.
 
+### What a timeout costs
+
+Until 0.19, a timeout read the clock at every step of the evaluation, which can cost more than
+the step itself. Since 0.20 the step counter of the step limit
+([ADR 0018](../adr/0018-step-limit.md)) paces it: the clock is read every 256 steps, so a
+timeout fires at most 256 steps late. Measured on `$sum($map([1..300000], function($x) { $x *
+2 + 1 }))`, a loop of small steps, with a timeout of 60 s that never expires (the median of 21
+runs of `jlens eval`, and of 15 evaluations in Node.js):
+
+| | Before, without | Before, with | After, without | After, with |
+|---|---:|---:|---:|---:|
+| Native (`jlens eval`, whole process) | 139 ms | 204 ms (+47%) | 141 ms | 142 ms (+0.8%) |
+| WebAssembly (Node.js) | 109 ms | 272 ms (+149%) | 104 ms | 105 ms (+1.3%) |
+
+In WebAssembly the clock is `performance.now()`, a call out of the module, which made it the
+larger cost there. On the benchmark workload, `cargo xtask ab HEAD . --timeout 60000` found
+every case 3 to 37% faster with a timeout than before (`recursion` and `filter + aggregate`
+by 37 and 36%), and as fast as without a timeout. Without a timeout, the same comparison found
+`filter + aggregate` and `shipping rule` 3.5% slower and `regex` 3.9% faster, although a step
+does the same work as before: a change to `eval.rs` that adds only an unused field already
+makes those two cases about 3% slower, so the layout of the compiled code moves them.
+
 ## Using the API efficiently
 
 - **Compile once.** `Expression::compile` (`new Expression` in JavaScript) parses and

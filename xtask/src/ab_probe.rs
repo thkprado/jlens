@@ -38,7 +38,7 @@ pub fn main() {
     let input = read_json(&dir.join(spec["input"].as_str().unwrap_or_default()));
     let doc = Document::new(&input);
     let bindings = Bindings::new();
-    // `cargo xtask ab --b-max-steps` replaces this line.
+    // `cargo xtask ab --b-max-steps` and `--timeout` replace this line.
     let options = Options::default();
     for case in spec["cases"].as_array().into_iter().flatten() {
         let name = case["name"].as_str().unwrap_or_default();

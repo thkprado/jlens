@@ -127,12 +127,17 @@ timeout, a limit an application does not set changes nothing.
      of every evaluation, for a quota that charges what was used, is a question for 0.21.
 
 5. **The counter paces the timeout.** The cancellation token, an atomic load, is still read at
-   every step. The clock is read only every *N* steps of the same counter (a mask on the
-   remaining count, which is `u64::MAX` without a limit, so there is no branch on an
-   `Option`). *N* is settled by measurement in #3; proposed: 256. Target: the `$map` above
-   with a timeout within 2% of the time without one, natively and in WebAssembly. A timeout
-   then fires up to *N* steps late, which is at most *N* times the largest step; regular
-   expressions keep reading the clock at each of their checks.
+   every step. The clock is read only every *N* steps of the same counter. Proposed: a mask
+   on the remaining count. Settled in #3: the counter counts down to the next checkpoint,
+   the end of the budget or, with a timeout, the next read of the clock, and the rest of the
+   budget waits in a reserve. A step then costs one comparison, as without a timeout, and the
+   checkpoint is the branch already taken when the budget runs out. A mask was measured too:
+   the fast paths spend several steps at once and can step over every multiple of *N*, and
+   testing for that on each step made two cases of the workload 5% slower. *N* is 256.
+   Target: the `$map` above with a timeout within 2% of the time without one, natively and in
+   WebAssembly; measured, 0.8% natively (47% before) and 1.3% in WebAssembly (149% before).
+   A timeout then fires up to *N* steps late, which is at most *N* times the largest step;
+   regular expressions keep reading the clock at each of their checks.
 
 ## Alternatives considered
 

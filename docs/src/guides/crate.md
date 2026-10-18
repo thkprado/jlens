@@ -57,8 +57,9 @@ than `Options::max_array_length` (16,777,216 items) or a result larger than
 `Options::max_result_size` (256 MiB of JSON text) stops the evaluation with `U1001`
 instead of exhausting memory. See [Guardrails](../architecture/evaluator.md#guardrails).
 
-A timeout reads the clock, so the same evaluation can pass on a fast machine and fail on a
-slow one. `Options::max_steps` is a budget that does not depend on the machine: each node
+A timeout reads the clock every 256 steps (defined below), so it costs almost nothing, and
+fires at most 256 steps late; a regular expression reads it at each of its checks. Being a
+clock, it lets the same evaluation pass on a fast machine and fail on a slow one. `Options::max_steps` is a budget that does not depend on the machine: each node
 evaluated is a step, and so is each function a built-in or a host function calls back, and each
 1,024 steps of a regular expression's backtracking. The same expression, input and options take
 the same steps everywhere, natively and in WebAssembly, with or without a tracer, and fail with
@@ -78,8 +79,7 @@ of a token share one flag:
 {{#include ../../../crates/jlens-core/tests/guide.rs:cancel}}
 ```
 
-The evaluation checks the token between steps, as it checks the timeout, and fails with
-`U1003`. A host function that is running finishes first. A cancelled token stays cancelled, so
+The evaluation checks the token at every step and fails with `U1003`. A host function that is running finishes first. A cancelled token stays cancelled, so
 create one per job.
 
 ### Reproducible results
