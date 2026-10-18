@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"eval\", \"--json\", \"--no-input\", \"--max-steps\", \"100\",\n\"$sum($map([1..1000], function($i) { $i }))\"], None)"
+---
+exit: 1
+--- stdout
+{"ok":false,"error":{"code":"U1006","message":"The evaluation exceeded its budget of 100 steps","token":"map","value":100,"position":10,"line":1,"column":6}}
+--- stderr

@@ -21,6 +21,9 @@ All notable changes are recorded here. The format follows
   `crates/jlens-core/tests/steps.json`, in Node.js and in the browser.
 - The Python package takes the step limit as the keyword argument `max_steps`, and its tests
   run the same table. `jlens eval` and `jlens test` take it as `--max-steps N`.
+- The error envelope of `jlens eval --json` and `jlens test --json` carries the error's `token`
+  and `value` when it has them, as the WebAssembly and Python packages do: the step budget of
+  `U1006`, or the value at fault of a type error.
 - `cargo xtask ab --timeout MS` measures both revisions with a timeout.
 
 ### Changed

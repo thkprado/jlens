@@ -4,5 +4,5 @@ expression: "jlens(&[\"eval\", \"--json\", \"customer.name + 1\", \"-i\", ORDER]
 ---
 exit: 1
 --- stdout
-{"ok":false,"error":{"code":"T2001","message":"The left side of the \"+\" operator must evaluate to a number","position":15,"line":1,"column":1}}
+{"ok":false,"error":{"code":"T2001","message":"The left side of the \"+\" operator must evaluate to a number","token":"+","value":"Acme Stores","position":15,"line":1,"column":1}}
 --- stderr

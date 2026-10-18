@@ -146,6 +146,18 @@ fn eval_json() {
         "eval_json_type_error",
         &["eval", "--json", "customer.name + 1", "-i", ORDER]
     );
+    // The limit is the error's value.
+    snapshot!(
+        "eval_json_max_steps",
+        &[
+            "eval",
+            "--json",
+            "--no-input",
+            "--max-steps",
+            "100",
+            "$sum($map([1..1000], function($i) { $i }))"
+        ]
+    );
     snapshot!(
         "eval_json_filter",
         &["eval", "--json", "--filter", "a > 1"],

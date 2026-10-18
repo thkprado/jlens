@@ -71,6 +71,10 @@ pub fn error_envelope(err: &jlens_core::Error, source: &str, line: Option<usize>
         code: &'a str,
         message: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        token: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value: Option<&'a Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         position: Option<usize>,
         #[serde(skip_serializing_if = "Option::is_none")]
         line: Option<usize>,
@@ -84,6 +88,8 @@ pub fn error_envelope(err: &jlens_core::Error, source: &str, line: Option<usize>
         error: ErrorInfo {
             code: err.code(),
             message: err.message(),
+            token: err.token(),
+            value: err.value(),
             position: err.position(),
             line: location.map(|(line, _)| line),
             column: location.map(|(_, column)| column),

@@ -112,14 +112,18 @@ standard output. Nothing needs to be read from standard error.
 |---|---|
 | A result | `{"ok":true,"result":…}` |
 | An undefined result | `{"ok":true,"undefined":true}` |
-| An error | `{"ok":false,"error":{"code":…,"message":…,"position":…,"line":…,"column":…}}` |
+| An error | `{"ok":false,"error":{"code":…,"message":…,"token":…,"value":…,"position":…,"line":…,"column":…}}` |
 
 ```text
 $ jlens eval --json -i fixtures/online-store-order.json 'customer.name + 1'
-{"ok":false,"error":{"code":"T2001","message":"The left side of the \"+\" operator must evaluate to a number","position":15,"line":1,"column":1}}
+{"ok":false,"error":{"code":"T2001","message":"The left side of the \"+\" operator must evaluate to a number","token":"+","value":"Acme Stores","position":15,"line":1,"column":1}}
 ```
 
 - Decide on `ok`, and match errors by `code`; `message` is for people and may change.
+- `token` and `value` are the error's details, as jsonata-js gives them, and absent when the
+  error has none: `token` is usually the operator, function or name involved, and `value` the
+  value at fault, or the limit that was reached (`U1006` gives the step budget). A `value` of
+  `null` is the value `null`, not a missing one.
 - `line` and `column` (1-based, the column in characters) mark the start of the offending text
   in the expression, as the human report does. `position` is the jsonata-js position, a UTF-16
   offset usually just past the offending token. The three are absent when the error has no
@@ -366,7 +370,7 @@ the shape of the [`eval --json` envelope](#machine-output---json):
 
 ```text
 $ jlens test --json tests/discount.json
-{"passed":2,"failed":1,"failures":[{"file":"tests/discount.json","case":3,"name":"text prices","expected":{"ok":false,"error":{"code":"T2001"}},"actual":{"ok":false,"error":{"code":"T0412","message":"Argument 1 of function \"sum\" must be an array of \"numbers\"","position":5,"line":1,"column":1}}}]}
+{"passed":2,"failed":1,"failures":[{"file":"tests/discount.json","case":3,"name":"text prices","expected":{"ok":false,"error":{"code":"T2001"}},"actual":{"ok":false,"error":{"code":"T0412","message":"Argument 1 of function \"sum\" must be an array of \"numbers\"","token":"sum","value":"10","position":5,"line":1,"column":1}}}]}
 ```
 
 ## `jlens functions`

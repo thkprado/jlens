@@ -4,5 +4,5 @@ expression: "jlens(&[\"eval\", \"--json\", \"--no-input\", \"(\\n  $a := 1;\\n  
 ---
 exit: 1
 --- stdout
-{"ok":false,"error":{"code":"S0211","message":"The symbol \")\" cannot be used as a unary operator","position":21,"line":4,"column":1}}
+{"ok":false,"error":{"code":"S0211","message":"The symbol \")\" cannot be used as a unary operator","token":")","position":21,"line":4,"column":1}}
 --- stderr
