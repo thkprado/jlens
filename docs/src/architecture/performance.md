@@ -423,18 +423,19 @@ From 0.20 on, every evaluation counts its steps for the step limit
 ([ADR 0018](../adr/0018-step-limit.md)). Without a limit the budget is too large to be spent,
 so a step costs the same comparison with or without one. The timeout reads the clock at every
 256th step rather than at every step, so a timeout fires at most 256 steps late. Measured for
-0.20 against 0.19.0, on the machine above:
+0.20 against 0.19.0, on the machine above, once the rest of the release was in:
 
-- **Natively**, `cargo xtask ab v0.19.0 .`, ten rounds: every case between 2.7% faster
-  (`recursion`) and 2.4% slower (`shipping rule`). The three cases above 2% (`filter +
-  aggregate`, `strings` and `shipping rule`) were within 1% of 0.19.0 over 30 rounds. With a
-  step limit (`--b-max-steps 1000000000`, 0.20 with a limit against 0.19.0 without one), every
-  case between 3.0% faster and 1.4% slower. With a timeout of 60 s in both (`--timeout 60000`),
-  0.20 is 5% (`path`) to 38% (`recursion`, `filter + aggregate`, `shipping rule`) faster.
+- **Natively**, `cargo xtask ab v0.19.0 .`, ten rounds: every case between 2.9% faster
+  (`recursion`) and 1.0% slower (`group-by`). With a step limit (`--b-max-steps 1000000000`,
+  0.20 with a limit against 0.19.0 without one), every case between 2.5% faster and 1.7%
+  slower, except `path` at 6.0% slower, which was 0.5% slower over 30 rounds. With a timeout of
+  60 s in both (`--timeout 60000`), 0.20 is 4% (`path`) to 38% (`shipping rule`) faster.
 - **In WebAssembly**, one build per Node.js process, the processes alternating, four each:
-  `evaluate` between 6.3% faster (`recursion`) and 0.8% slower, `evaluateDocument` between 14%
-  faster (`names over items`) and 1.2% slower. With `maxSteps`, `node compare.mjs --max-steps N`
-  gives the times without a limit, plus what an options object costs. In 0.19.0 the options
+  `evaluate` between 2.0% faster (`recursion`) and 1.9% slower, `evaluateJson` within 2.3%,
+  `evaluateDocument` between 14% faster (`names over items`) and 1.5% slower. `evaluate` was
+  about 1% slower in most cases; three of them measured again, six processes each, were within
+  0.7% of 0.19.0. With `maxSteps`, `node compare.mjs --max-steps N` gives the times without a
+  limit, within 2.2%, plus what an options object costs. In 0.19.0 the options
   went through `JSON.stringify` and a parse, about 0.6 µs for `{}` and 1.1 µs for one option,
   so `path` against a `Document` took 1.3 µs without options, and 2.4 µs with `{maxSteps}` or
   `{timeout}`. From 0.20 the options are read from the object, by one call to a JavaScript
@@ -451,8 +452,12 @@ so a step costs the same comparison with or without one. The timeout reads the c
 
   A `Date` for `now` cost the most, as its string was parsed by an expression compiled on each
   call; it now gives its time directly, and a string is parsed by an expression compiled once.
-- **In Python**, `python.py speed`, three runs of each: no case more than 1.5% slower than
-  0.19.0, `recursion` 3% faster. `max_steps` (`python.py speed --max-steps N`) costs about
+- **In Python**, `python.py speed`, three runs of each: every case between 2.2% faster
+  (`recursion`, `shipping rule`) and 2.2% slower, except `number formatting` at 2.6% slower
+  (35.8 µs against 34.9 µs). That case runs no code that changed in 0.20 but the counter, and
+  the gap depends on how it is measured: 1.6% in a loop of 200,000 evaluations, none under
+  `perf` (38.0 µs in both), where samples move between functions whose code did not change, as
+  code layout does. `max_steps` (`python.py speed --max-steps N`) costs about
   40 ns per call, about what `max_depth` costs: `path` against a `Document` takes 0.43 µs
   without options, 0.47 µs with `max_steps` or `max_depth`, and 0.49 µs with `timeout`.
 
@@ -464,7 +469,7 @@ Node.js):
 | | 0.19.0, without | 0.19.0, timeout | 0.20, without | 0.20, timeout | 0.20, step limit |
 |---|---:|---:|---:|---:|---:|
 | Native (`jlens eval`, whole process) | 96 ms | 157 ms (+63%) | 92 ms | 92 ms (+0.3%) | 91 ms (−0.3%) |
-| WebAssembly (Node.js) | 105 ms | 270 ms (+156%) | 105 ms | 107 ms (+2.0%) | 106 ms (+1.0%) |
+| WebAssembly (Node.js) | 107 ms | 264 ms (+145%) | 105 ms | 107 ms (+2.4%) | 106 ms (+1.1%) |
 
 In WebAssembly the clock is `performance.now()`, a call out of the module, which made it the
 larger cost there.
