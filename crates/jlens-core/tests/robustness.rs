@@ -521,6 +521,39 @@ proptest! {
             }
         }
     }
+
+    /// Any step limit gives the result, or `U1006` when the audit counts more steps (ADR
+    /// 0018), with a tracer or without.
+    #[test]
+    fn step_limits_give_the_result_or_u1006(source in expression(), limit in 0u64..200) {
+        if let Ok(expr) = Expression::compile(&source) {
+            let options = Options::new()
+                .timeout(Duration::from_millis(50))
+                .max_depth(300)
+                .now(0)
+                .seed(1);
+            let bindings = bindings();
+            let input = input();
+            let audit_options = jlens_core::audit::AuditOptions::decisions();
+            let free = expr.evaluate_with(Some(&input), &bindings, &options);
+            let (_, audit) = expr.evaluate_audited(Some(&input), &bindings, &options, &audit_options);
+            let limited = options.clone().max_steps(limit);
+            let plain = expr.evaluate_with(Some(&input), &bindings, &limited);
+            let (audited, _) = expr.evaluate_audited(Some(&input), &bindings, &limited, &audit_options);
+            let timed_out = |r: &Result<Option<serde_json::Value>, Error>| {
+                r.as_ref().is_err_and(|e| e.code() == "D1012")
+            };
+            if ![&free, &plain, &audited].into_iter().any(timed_out) {
+                prop_assert_eq!(format!("{plain:?}"), format!("{audited:?}"));
+                if limit >= audit.header.steps {
+                    prop_assert_eq!(format!("{plain:?}"), format!("{free:?}"));
+                } else {
+                    let code = plain.err().map(|e| e.code().to_owned());
+                    prop_assert_eq!(code.as_deref(), Some("U1006"));
+                }
+            }
+        }
+    }
 }
 
 /// Paths of field names take a fast path that falls back on the general one where an array is

@@ -20,8 +20,10 @@
 //! rename, so a run sees either no program or a whole one.
 //!
 //! `--b-allocator mimalloc` makes `mimalloc` the global allocator of B's program, so that
-//! `ab . . --b-allocator mimalloc` measures the allocator alone. `--target` builds both programs
-//! for another target that runs here, such as `x86_64-unknown-linux-musl` on Linux.
+//! `ab . . --b-allocator mimalloc` measures the allocator alone. `--b-max-steps N` evaluates B's
+//! cases with `Options::max_steps(N)`, so that `ab . . --b-max-steps N` measures a step limit
+//! against none (ADR 0018); B must be a revision that has it. `--target` builds both programs for
+//! another target that runs here, such as `x86_64-unknown-linux-musl` on Linux.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -66,11 +68,22 @@ const MIMALLOC: &str = "
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 ";
 
+/// The line of the probe that `--b-max-steps` replaces.
+const OPTIONS: &str = "let options = Options::default();";
+
+/// How B's program differs from A's.
+#[derive(Clone, Copy, Default)]
+struct Variant {
+    mimalloc: bool,
+    max_steps: Option<u64>,
+}
+
 pub fn run(args: &[String]) -> Result<()> {
     let mut positional = Vec::new();
     let mut cases = Vec::new();
     let mut mode = "evaluate".to_owned();
     let mut b_allocator = "system".to_owned();
+    let mut b_max_steps = None;
     let mut target = None;
     let mut i = 0;
     while i < args.len() {
@@ -89,6 +102,15 @@ pub fn run(args: &[String]) -> Result<()> {
                     .get(i + 1)
                     .context("--b-allocator needs a value")?
                     .clone();
+                i += 1;
+            }
+            "--b-max-steps" => {
+                let steps = args.get(i + 1).context("--b-max-steps needs a value")?;
+                b_max_steps = Some(
+                    steps
+                        .parse::<u64>()
+                        .with_context(|| format!("--b-max-steps takes a number, not {steps:?}"))?,
+                );
                 i += 1;
             }
             "--target" => {
@@ -113,8 +135,14 @@ pub fn run(args: &[String]) -> Result<()> {
 
     let work = Work::new(target)?;
     let programs = [
-        work.build(a, false)?,
-        work.build(b, b_allocator == "mimalloc")?,
+        work.build(a, Variant::default())?,
+        work.build(
+            b,
+            Variant {
+                mimalloc: b_allocator == "mimalloc",
+                max_steps: b_max_steps,
+            },
+        )?,
     ];
     let benches = root().join("benches");
     let mut times: [BTreeMap<String, Vec<u128>>; 2] = Default::default();
@@ -175,14 +203,21 @@ pub fn run(args: &[String]) -> Result<()> {
             change(a.1, b.1)
         );
     }
+    let mut with = Vec::new();
+    if b_allocator == "mimalloc" {
+        with.push("mimalloc".to_owned());
+    }
+    if let Some(steps) = b_max_steps {
+        with.push(format!("max_steps({steps})"));
+    }
+    let with = if with.is_empty() {
+        String::new()
+    } else {
+        format!(" with {}", with.join(" and "))
+    };
     println!(
         "
-A is {a}, B is {b}{}",
-        if b_allocator == "mimalloc" {
-            " with mimalloc"
-        } else {
-            ""
-        }
+A is {a}, B is {b}{with}"
     );
     Ok(())
 }
@@ -221,13 +256,16 @@ impl Work {
         Ok(Work { dir, target })
     }
 
-    /// Builds the probe against the `jlens-core` of `rev`, with `mimalloc` as its global
-    /// allocator if asked, and returns the path of the program.
-    fn build(&self, rev: &str, mimalloc: bool) -> Result<PathBuf> {
-        // Programs that differ in allocator or target are kept apart.
+    /// Builds the probe against the `jlens-core` of `rev`, as `with` asks, and returns the path
+    /// of the program.
+    fn build(&self, rev: &str, with: Variant) -> Result<PathBuf> {
+        // Programs that differ in allocator, step limit or target are kept apart.
         let mut variant = String::new();
-        if mimalloc {
+        if with.mimalloc {
             variant.push_str("-mimalloc");
+        }
+        if let Some(steps) = with.max_steps {
+            variant.push_str(&format!("-steps{steps}"));
         }
         if let Some(target) = &self.target {
             variant.push_str(&format!("-{target}"));
@@ -235,7 +273,7 @@ impl Work {
         if rev == "." {
             let name = format!("worktree{variant}");
             let program = self.dir.join(format!("{name}{}", env::consts::EXE_SUFFIX));
-            self.compile(rev, &root(), &name, mimalloc, &program)?;
+            self.compile(rev, &root(), &name, with, &program)?;
             return Ok(program);
         }
 
@@ -250,7 +288,7 @@ impl Work {
         let source = self.dir.join(format!("src-{short}"));
         git(&["worktree", "add", "--detach", &path(&source), &commit])?;
         let name = format!("{short}{variant}");
-        let built = self.compile(rev, &source, &name, mimalloc, &self.dir.join(&file));
+        let built = self.compile(rev, &source, &name, with, &self.dir.join(&file));
         git(&["worktree", "remove", "--force", &path(&source)])?;
         built?;
         // Another run may have published the same program meanwhile; on Windows the rename then
@@ -271,7 +309,7 @@ impl Work {
         rev: &str,
         checkout: &Path,
         name: &str,
-        mimalloc: bool,
+        with: Variant,
         program: &Path,
     ) -> Result<()> {
         let crate_dir = self.dir.join(format!("probe-{name}"));
@@ -285,13 +323,28 @@ impl Work {
             MANIFEST
                 .replace("{core}", &core)
                 .replace("{bin}", &bin)
-                .replace("{extra}", if mimalloc { "mimalloc = \"0.1\"" } else { "" }),
+                .replace(
+                    "{extra}",
+                    if with.mimalloc {
+                        "mimalloc = \"0.1\""
+                    } else {
+                        ""
+                    },
+                ),
         )?;
-        let source = if mimalloc {
-            format!("{PROBE}{MIMALLOC}")
-        } else {
-            PROBE.to_owned()
-        };
+        let mut source = PROBE.to_owned();
+        if let Some(steps) = with.max_steps {
+            if !source.contains(OPTIONS) {
+                bail!("the probe has no line {OPTIONS:?} for --b-max-steps to replace");
+            }
+            source = source.replace(
+                OPTIONS,
+                &format!("let options = Options::default().max_steps({steps});"),
+            );
+        }
+        if with.mimalloc {
+            source.push_str(MIMALLOC);
+        }
         fs::write(crate_dir.join("main.rs"), source)?;
         fs::copy(checkout.join("Cargo.lock"), crate_dir.join("Cargo.lock"))?;
         let target = root().join("target/ab/target");

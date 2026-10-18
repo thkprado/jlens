@@ -149,6 +149,7 @@ Raised when an evaluation exceeds its configured limits, is cancelled, or needs 
 | `U1003` | `The evaluation was cancelled` |
 | `U1004` | `The input could not be read: {{{message}}}` |
 | `U1005` | `A function passed to ${{{token}}} was called after ${{{token}}} returned` |
+| `U1006` | `The evaluation exceeded its budget of {{value}} steps` |
 | `U2001` | `The input is not valid JSON: {{{message}}}` |
 
 ## Warnings (W)

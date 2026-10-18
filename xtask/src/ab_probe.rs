@@ -38,6 +38,7 @@ pub fn main() {
     let input = read_json(&dir.join(spec["input"].as_str().unwrap_or_default()));
     let doc = Document::new(&input);
     let bindings = Bindings::new();
+    // `cargo xtask ab --b-max-steps` replaces this line.
     let options = Options::default();
     for case in spec["cases"].as_array().into_iter().flatten() {
         let name = case["name"].as_str().unwrap_or_default();
@@ -55,7 +56,7 @@ pub fn main() {
             let result = if document {
                 expr.evaluate_document(black_box(&doc), &bindings, &options)
             } else {
-                expr.evaluate(Some(black_box(&input)), &bindings)
+                expr.evaluate_with(Some(black_box(&input)), &bindings, &options)
             };
             // Every case must succeed, or the probe measures an error path.
             if let Err(e) = result {

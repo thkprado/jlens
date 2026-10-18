@@ -420,6 +420,11 @@ pub(super) fn eval<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'
     // The text may call `$eval` under a name bound outside it.
     ast.root
         .walk_mut(&mut |node| crate::process::mark_frame(node, true));
+    // The text spends the evaluation's budget of steps, so running out of it is no error of
+    // the text's own (ADR 0018).
     ev.eval(&ast.root, &input, c.env)
-        .map_err(|e| Error::new("D3121").with("value", e.message()))
+        .map_err(|e| match e.code() {
+            "U1006" => e,
+            _ => Error::new("D3121").with("value", e.message()),
+        })
 }

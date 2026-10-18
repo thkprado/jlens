@@ -62,7 +62,7 @@ maturin develop && python -m pytest tests        # in crates/jlens-python, after
 - **The conformance baseline only grows.** A case in `tests/conformance/baseline.txt` that starts
   failing is a regression. After fixing cases, run `cargo xtask conformance --update-baseline`.
 - **Errors use JSONata codes** (`S0xxx`, `T`, `D`), defined in `error.rs`.
-  - Limits use `U1001` with a `message`.
+  - Size limits use `U1001` with a `message`; the step limit uses `U1006` (ADR 0018).
   - Warnings use `W` codes.
   - Never match on messages in code or tests; match on codes.
 - **Never panic or overflow the stack on user input.**

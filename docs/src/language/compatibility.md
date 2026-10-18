@@ -47,6 +47,7 @@ error. jlens cannot represent that input, so it skips those two cases.
 |---|---|---|
 | Object key order | JavaScript order: integer-like keys first, ascending, then insertion order | Insertion order, always |
 | Recursion limit | The JavaScript stack (`RangeError`) | `D1011` after `Options::max_depth` evaluation levels (50,000 by default; 500 in Wasm) |
+| Step limit | None | `U1006` once an evaluation has taken `Options::max_steps` steps, the same on every machine ([ADR 0018](../adr/0018-step-limit.md)); no limit by default |
 | Nesting limit | The JavaScript stack: about 2,000 terms in a chain such as `1 + 1 + …` work, 5,000 raise a `RangeError` | `U1001` beyond 1,000 levels of syntax tree: nested subexpressions, and each operator of a chain (a chain of more than 1,000 terms is rejected) |
 | Very long strings and arrays | Limited by the JavaScript engine (a `RangeError`, or running out of memory) | `U1001` beyond `Options::max_string_length` (256 MiB) or `Options::max_array_length` (16,777,216 items) |
 | A very large result, such as an object nested in itself many times | Limited by the JavaScript engine when the result is serialized | `U1001` beyond `Options::max_result_size` (256 MiB of JSON text) |
@@ -83,7 +84,7 @@ error. jlens cannot represent that input, so it skips those two cases.
 | `$random`, `$shuffle` | `Math.random` | A per-evaluation xorshift generator seeded from the clock |
 | The timestamp of `$now` and `$millis` | The clock when the evaluation starts | The clock when the evaluation first needs it, or the seed of `$random`; read once, so it stays fixed for the evaluation. An audited evaluation reads it when it starts |
 | Regular expressions | JavaScript `RegExp` | `jlens-regress`, a fork of `regress` 0.12.0 (ECMAScript syntax and semantics). Match positions are UTF-16 offsets. A pattern matches characters, not UTF-16 code units: `$match('a𝄞', /[^a]/)` matches `𝄞`, where jsonata-js matches its first half, a lone surrogate. A pattern nested more than 256 levels deep is a syntax error (`S0302`) |
-| A regular expression that backtracks catastrophically, such as `/^(a+)+$/` on a long run of `a` followed by `!` | Runs until the match ends, which can take years, and blocks the thread | The same without limits. With `Options::timeout` or a cancellation token, the match stops with `D1012` or `U1003`, like any other step ([ADR 0009](../adr/0009-bounded-regex.md)) |
+| A regular expression that backtracks catastrophically, such as `/^(a+)+$/` on a long run of `a` followed by `!` | Runs until the match ends, which can take years, and blocks the thread | The same without limits. With `Options::timeout` or a cancellation token, the match stops with `D1012` or `U1003`, like any other step ([ADR 0009](../adr/0009-bounded-regex.md)); with `Options::max_steps`, with `U1006`, each 1,024 steps of backtracking spending one ([ADR 0018](../adr/0018-step-limit.md)) |
 
 The suite runner's own guard raises `U1001` for its `timelimit`/`depth` cases; jlens enforces
 the same limits through `Options` and reports `D1011`/`D1012`, which the conformance harness

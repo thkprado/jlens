@@ -6,6 +6,17 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A deterministic step limit (ADR 0018): `Options::max_steps` stops an evaluation with the new
+  code `U1006` once it has taken that many steps. A step is each node evaluated, each function
+  a built-in or a host function calls back, and each 1,024 steps of a regular expression's
+  backtracking, so a catastrophic pattern stops too. The same expression, input and options
+  take the same steps on every machine, with or without a tracer: the fast paths charge the
+  steps they skip. Without a limit, evaluation is as fast as before.
+- The audit header reports `steps`, the steps the evaluation took, given to tracers by the new
+  `Tracer::steps`. The WebAssembly and Python audits have it too.
+
 ## [0.19.0]
 
 jlens gets faster where `jsonatapy`, the Python package of jsonata-core, was ahead: a

@@ -9,6 +9,7 @@ expression: tree
     "inputHash": "9e4a19be212bfd56",
     "timestamp": "[timestamp]",
     "durationMs": "[duration]",
+    "steps": 128,
     "level": "decisions",
     "result": {
       "action": "FREE_SHIPPING",

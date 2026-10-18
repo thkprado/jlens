@@ -347,6 +347,7 @@ fn limits(options: &Options) -> eval::Limits {
     eval::Limits {
         max_depth: options.max_depth.unwrap_or(eval::DEFAULT_MAX_DEPTH),
         timeout: options.timeout,
+        max_steps: options.max_steps,
         max_string_length: options
             .max_string_length
             .unwrap_or(eval::DEFAULT_MAX_STRING_LENGTH),
@@ -447,6 +448,11 @@ pub struct Options {
     /// Maximum evaluation depth (default 50,000; 500 on WebAssembly). Exceeding it raises
     /// `D1011`.
     pub max_depth: Option<usize>,
+    /// Maximum number of steps of one evaluation: each node evaluated, each function called
+    /// back, and one per 1,024 steps of a regular expression's backtracking (ADR 0018). The
+    /// same expression, input and options take the same steps on every machine, with or
+    /// without a tracer. Exceeding it raises `U1006`. Default: no limit.
+    pub max_steps: Option<u64>,
     /// The evaluation's timestamp, in milliseconds since the epoch, for `$now()` and
     /// `$millis()`. Default: the system clock, read once, the first time the evaluation needs
     /// it.
@@ -496,6 +502,13 @@ impl Options {
     /// Sets the maximum evaluation depth (`D1011` when exceeded).
     pub fn max_depth(mut self, max_depth: usize) -> Self {
         self.max_depth = Some(max_depth);
+        self
+    }
+
+    /// Sets the maximum number of steps of one evaluation (`U1006` when exceeded): the
+    /// evaluation that takes `steps` steps succeeds, one that takes more fails.
+    pub fn max_steps(mut self, steps: u64) -> Self {
+        self.max_steps = Some(steps);
         self
     }
 

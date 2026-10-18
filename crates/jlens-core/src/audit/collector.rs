@@ -18,6 +18,7 @@ pub struct AuditCollector {
     input_hash: String,
     timestamp: f64,
     started: Option<Instant>,
+    steps: u64,
     stack: Vec<Frame>,
     root: Option<AuditNode>,
     node_count: usize,
@@ -45,6 +46,7 @@ impl AuditCollector {
             input_hash: fnv1a(&input_text),
             timestamp: 0.0,
             started: None,
+            steps: 0,
             stack: Vec::new(),
             root: None,
             node_count: 0,
@@ -67,6 +69,7 @@ impl AuditCollector {
                 duration_ms: self
                     .started
                     .map_or(0.0, |s| s.elapsed().as_secs_f64() * 1000.0),
+                steps: self.steps,
                 level: self.options.level,
                 result: self.result,
                 error: self.error,
@@ -283,6 +286,10 @@ impl Tracer for AuditCollector {
 
     fn filter_end(&mut self, _predicate: &Node) {
         self.filter_depth = self.filter_depth.saturating_sub(1);
+    }
+
+    fn steps(&mut self, steps: u64) {
+        self.steps = steps;
     }
 
     fn end(&mut self, outcome: Outcome<'_>) {

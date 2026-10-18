@@ -491,6 +491,10 @@ impl Tracer for Tee<'_> {
         self.0.filter_end(predicate);
         self.1.filter_end(predicate);
     }
+    fn steps(&mut self, steps: u64) {
+        self.0.steps(steps);
+        self.1.steps(steps);
+    }
     fn end(&mut self, outcome: audit::Outcome<'_>) {
         self.0.end(outcome);
         self.1.end(outcome);

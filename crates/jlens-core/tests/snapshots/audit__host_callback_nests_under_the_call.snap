@@ -9,6 +9,7 @@ expression: tree
     "inputHash": "cbf29ce484222325",
     "timestamp": "[timestamp]",
     "durationMs": "[duration]",
+    "steps": 8,
     "level": "full",
     "result": 42
   },

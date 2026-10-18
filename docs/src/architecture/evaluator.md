@@ -95,6 +95,7 @@ clears those frames when the evaluation ends.
 |---|---|---|---|
 | Evaluation depth | `Options::max_depth` | `D1011` | 50,000 native, 500 in Wasm |
 | Wall-clock time | `Options::timeout` | `D1012` | none |
+| Steps: nodes evaluated, functions called back, and 1,024 steps of regular expression backtracking each ([ADR 0018](../adr/0018-step-limit.md)) | `Options::max_steps` | `U1006` | none |
 | Cancellation from another thread | `Options::cancel_token` | `U1003` | none |
 | Expression nesting | (fixed) | `U1001` | 1,000 levels of syntax tree, checked by the parser |
 | Value nesting | (fixed) | `U1001` | 1,000 levels of arrays and objects, checked where a value is converted to JSON, compared or serialized |

@@ -54,7 +54,24 @@ fn options() -> Result<()> {
         .evaluate_with(None, &Bindings::new(), &options)
         .unwrap_err();
     assert_eq!(err.code(), "D1012");
+
+    // The same budget stops the same evaluation everywhere: U1006 when spent.
+    let loops = Expression::compile("$sum($map([1..100], function($i) { $i * 2 }))")?;
+    let err = loops
+        .evaluate_with(None, &Bindings::new(), &options.clone().max_steps(500))
+        .unwrap_err();
+    assert_eq!(err.code(), "U1006");
     // ANCHOR_END: options
+
+    // An audit reports the steps an evaluation takes, which the budget then allows.
+    let (_, audit) = loops.evaluate_audited(
+        None,
+        &Bindings::new(),
+        &options,
+        &jlens_core::audit::AuditOptions::decisions(),
+    );
+    let within = options.max_steps(audit.header.steps);
+    assert!(loops.evaluate_with(None, &Bindings::new(), &within).is_ok());
     Ok(())
 }
 

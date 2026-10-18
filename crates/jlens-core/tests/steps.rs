@@ -1,0 +1,154 @@
+//! The step limit (ADR 0018): exact counts that change only on purpose.
+//!
+//! A change to a count shows in this table, and goes in the changelog under its own heading.
+
+use jlens_core::audit::AuditOptions;
+use jlens_core::{Bindings, Expression, HostFunction, Options};
+use serde_json::{Value, json};
+
+fn input() -> Value {
+    json!({
+        "a": {"b": {"c": 1}},
+        "items": [
+            {"price": 1, "code": "x"},
+            {"price": 2, "code": "y"},
+            {"price": 3, "code": "x"}
+        ]
+    })
+}
+
+/// Each expression, evaluated against [`input`], and the steps it takes.
+#[rustfmt::skip]
+const COUNTS: &[(&str, u64)] = &[
+    // A literal is one node.
+    ("1", 1),
+    // A path is a node, and each step a node for each item it is evaluated against.
+    ("a", 2),
+    ("a.b.c", 4),
+    ("$.a.b", 4),
+    // A step that gives nothing ends the path.
+    ("nothing.b.c", 2),
+    ("items.price", 5),
+    ("items.(price * 2)", 17),
+    // A predicate is evaluated for each item, even one that gives the same value for each.
+    ("items[true]", 5),
+    ("items[0 = 0]", 11),
+    ("items[price > 1].code", 16),
+    // An index is not evaluated.
+    ("items[1]", 2),
+    // A string literal compared is a node.
+    (r#"a.b.c = "x""#, 6),
+    (r#""x" != a.b.c"#, 6),
+    // A key is evaluated for each item, a literal key too.
+    ("items{code: $sum(price)}", 17),
+    (r#"items{"total": $sum(price)}"#, 11),
+    (r#"{"a": 1, "b": a.b.c}"#, 8),
+    // A function called back is a step, and its body counts its nodes.
+    ("$map(items, function($v){ $v.price * 2 })", 23),
+    ("$sort(items, function($l, $r){ $l.price < $r.price }).code", 33),
+    // A regular expression is a function too, called back for each search: three that find
+    // an "a" and one that finds none.
+    (r#"$replace("banana", /a/, function($m){ "o" })"#, 15),
+    // The text `$eval` evaluates spends the same budget.
+    (r#"$eval("1 + 2")"#, 6),
+    // One step for each 1,024 steps of the backtracker.
+    (r#"$contains("aaaaaaaaaaaaaaaaaa!", /^(a+)+$/)"#, 644),
+    // A tail call counts the nodes of the body it evaluates.
+    ("($f := function($n){ $n = 0 ? 0 : $f($n - 1) }; $f(10))", 101),
+    ("$sum($map([1..10], function($i){ $sum($map([1..10], function($j){ $i * $j })) }))", 509),
+];
+
+fn evaluate(
+    expr: &Expression,
+    input: &Value,
+    bindings: &Bindings,
+    steps: u64,
+) -> Result<Option<Value>, jlens_core::Error> {
+    expr.evaluate_with(Some(input), bindings, &Options::new().max_steps(steps))
+}
+
+/// Checks that `source` takes exactly `steps` steps: it succeeds with that budget, fails with
+/// `U1006` with one less, and an audit reports that many.
+fn check(source: &str, input: &Value, bindings: &Bindings, steps: u64) -> Vec<String> {
+    let expr = Expression::compile(source).unwrap();
+    let mut failures = Vec::new();
+    let (_, audit) = expr.evaluate_audited(
+        Some(input),
+        bindings,
+        &Options::new(),
+        &AuditOptions::decisions(),
+    );
+    if audit.header.steps != steps {
+        failures.push(format!(
+            "{source}: the audit counts {} steps, not {steps}",
+            audit.header.steps
+        ));
+    }
+    if let Err(e) = evaluate(&expr, input, bindings, steps) {
+        failures.push(format!("{source}: fails with {steps} steps: {e}"));
+    }
+    if let Some(fewer) = steps.checked_sub(1) {
+        match evaluate(&expr, input, bindings, fewer) {
+            Err(e) if e.code() == "U1006" => {
+                assert_eq!(e.value(), Some(&json!(fewer)), "{source}");
+            }
+            outcome => failures.push(format!("{source}: {outcome:?} with {fewer} steps")),
+        }
+    }
+    failures
+}
+
+#[test]
+fn exact_counts() {
+    let input = input();
+    let failures: Vec<String> = COUNTS
+        .iter()
+        .flat_map(|(source, steps)| check(source, &input, &Bindings::new(), *steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn host_callbacks_spend_the_budget() {
+    let twice = HostFunction::new(2, |args, call| {
+        let f = call.function(0).expect("a function");
+        let once = f.call(args.get(1..).unwrap_or_default())?;
+        f.call(&[once])
+    });
+    let bindings = Bindings::new().function("twice", twice);
+    // The call, its name and its arguments, then each call back: a step, and the body's
+    // 3 nodes.
+    let failures = check("$twice(function($x){ $x + 1 }, 1)", &input(), &bindings, 12);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn an_exhausted_budget_fails_every_evaluation() {
+    let expr = Expression::compile("1").unwrap();
+    let err = evaluate(&expr, &input(), &Bindings::new(), 0).unwrap_err();
+    assert_eq!(err.code(), "U1006");
+    assert_eq!(err.value(), Some(&json!(0)));
+}
+
+/// `$eval` reports other errors of its text as `D3121`, but not the budget's.
+#[test]
+fn eval_does_not_hide_an_exhausted_budget() {
+    let expr = Expression::compile(r#"$eval("$sum([1..10].($ * 2))")"#).unwrap();
+    let err = evaluate(&expr, &input(), &Bindings::new(), 10).unwrap_err();
+    assert_eq!(err.code(), "U1006");
+}
+
+/// A regular expression that backtracks catastrophically stops under a step limit alone.
+#[test]
+fn catastrophic_regexes_stop_on_steps() {
+    let source = format!("$contains('{}!', /^(a+)+$/)", "a".repeat(40));
+    let expr = Expression::compile(&source).unwrap();
+    let started = std::time::Instant::now();
+    let err = evaluate(&expr, &input(), &Bindings::new(), 1_000).unwrap_err();
+    assert_eq!(err.code(), "U1006");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+}

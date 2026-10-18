@@ -5,7 +5,7 @@
 //! around sequences, singleton arrays and tuple streams are defined by that code. Evaluation is
 //! synchronous; there is no equivalent of jsonata-js's async functions.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, OnceLock};
@@ -82,6 +82,8 @@ impl<'a> Frame<'a> {
 pub(crate) struct Limits {
     pub max_depth: usize,
     pub timeout: Option<Duration>,
+    /// The budget of steps (ADR 0018); `None` for no limit.
+    pub max_steps: Option<u64>,
     pub max_string_length: usize,
     pub max_array_length: usize,
     pub max_result_size: usize,
@@ -117,6 +119,9 @@ pub(crate) const DEFAULT_MAX_RESULT_SIZE: usize = 1 << 28;
 pub(crate) struct Evaluator<'t, 'a> {
     depth: usize,
     limits: Limits,
+    /// The steps left in the budget (ADR 0018), `u64::MAX` without a limit, so that counting
+    /// takes no branch on whether there is one.
+    steps: Cell<u64>,
     /// When the evaluation started, read only when it has a timeout.
     started: Option<Instant>,
     /// Frames that may be part of reference cycles (a frame binding a closure that captures
@@ -288,6 +293,7 @@ pub(crate) fn evaluate<'a, 'v, R>(
     }
     let mut ev = Evaluator {
         depth: 0,
+        steps: Cell::new(limits.max_steps.unwrap_or(u64::MAX)),
         started: limits.timeout.map(|_| Instant::now()),
         rng: limits.seed.map_or(0, |seed| splitmix64(seed) | 1),
         limits,
@@ -348,7 +354,9 @@ pub(crate) fn evaluate<'a, 'v, R>(
         Err(e) => Err(e),
         Ok(()) => result,
     };
+    let steps = ev.steps_taken();
     if let Some(t) = ev.tracer.as_deref_mut() {
+        t.steps(steps);
         match &result {
             Ok((v, _)) => t.end(Outcome::Value(ValueRef(v))),
             Err(e) => t.end(Outcome::Error(e)),
@@ -427,12 +435,40 @@ impl<'a> Evaluator<'_, 'a> {
         frame
     }
 
+    /// Checks the evaluation's limits, and spends a step: once for each node the general path
+    /// evaluates and each function called back (ADR 0018).
     fn guardrails(&self) -> Result<()> {
         if self.depth > self.limits.max_depth {
             return Err(Error::new("D1011").with("value", self.limits.max_depth));
         }
+        self.charge(1)?;
         self.read_failure()?;
         self.time_limits()
+    }
+
+    /// Spends `steps` of the budget, those the general path would take where a fast path skips
+    /// evaluating nodes. Fails with `U1006` when fewer remain, leaving none, as the general path
+    /// would after spending them one by one.
+    #[inline]
+    fn charge(&self, steps: u64) -> Result<()> {
+        let left = self.steps.get();
+        if left < steps {
+            self.steps.set(0);
+            return Err(self.out_of_steps());
+        }
+        self.steps.set(left - steps);
+        Ok(())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn out_of_steps(&self) -> Error {
+        Error::new("U1006").with("value", self.limits.max_steps.unwrap_or(u64::MAX))
+    }
+
+    /// The steps the evaluation has taken so far.
+    fn steps_taken(&self) -> u64 {
+        self.limits.max_steps.unwrap_or(u64::MAX) - self.steps.get()
     }
 
     /// Fails with `U1004` once a level of the input could not be read from its source.
@@ -459,21 +495,27 @@ impl<'a> Evaluator<'_, 'a> {
         Ok(())
     }
 
-    /// Finds the first match of `re` at or after byte offset `from`. With a timeout or a
-    /// cancellation token, the backtracker polls them and the match fails as an evaluation step
-    /// would (ADR 0009); without either, it runs the unchecked code path.
+    /// Finds the first match of `re` at or after byte offset `from`. With a timeout, a
+    /// cancellation token, a step limit or a tracer, the backtracker polls them, each poll
+    /// spending a step (ADR 0018), and the match fails as an evaluation step would (ADR 0009);
+    /// without any, it runs the unchecked code path.
     pub(crate) fn find_regex(
         &self,
         re: &regress::Regex,
         text: &str,
         from: usize,
     ) -> Result<Option<regress::Match>> {
-        if self.limits.timeout.is_none() && self.limits.cancel_token.is_none() {
+        // A tracer counts the steps too, for the audit to report what a step limit would charge.
+        if self.limits.timeout.is_none()
+            && self.limits.cancel_token.is_none()
+            && self.limits.max_steps.is_none()
+            && self.tracer.is_none()
+        {
             return Ok(re.find_from(text, from).next());
         }
         let mut stopped = None;
         let found = re.find_from_interruptible(text, from, || {
-            stopped = self.time_limits().err();
+            stopped = self.charge(1).and_then(|()| self.time_limits()).err();
             stopped.is_some()
         });
         match found {
@@ -741,7 +783,7 @@ impl<'a> Evaluator<'_, 'a> {
         // the input and each field in sequences, then unwrap the singleton. The last field may
         // hold an array, which the general path returns as it is unless it is a sequence; an
         // array met before the last field takes the general path, which iterates it. The
-        // steps' depth is counted as if they were evaluated.
+        // steps' depth is counted as if they were evaluated, and so are their steps (ADR 0018).
         let plain = !keep_singleton_array
             && !expr.attrs.keep_array
             && expr.attrs.group.is_none()
@@ -756,6 +798,7 @@ impl<'a> Evaluator<'_, 'a> {
         {
             let value = functions::lookup(input, name);
             if !is_sequence(&value) {
+                self.charge(1)?;
                 return Ok(value);
             }
         } else if plain
@@ -767,8 +810,9 @@ impl<'a> Evaluator<'_, 'a> {
                         _ => false,
                     }
             })
-            && let Some(value) = plain_fields(steps, input, env)
+            && let Some((value, taken)) = plain_fields(steps, input, env)
         {
+            self.charge(taken)?;
             return Ok(value);
         }
 
@@ -883,8 +927,14 @@ impl<'a> Evaluator<'_, 'a> {
         for item in items {
             let direct = match field {
                 Some(name) if !item.is_array() => {
-                    self.guardrails()?;
-                    Some(functions::lookup(item, name)).filter(|v| !v.is_array())
+                    // A field that holds an array is evaluated instead, which spends its step.
+                    let value = functions::lookup(item, name);
+                    if value.is_array() {
+                        None
+                    } else {
+                        self.guardrails()?;
+                        Some(value)
+                    }
                 }
                 _ => None,
             };
@@ -1149,7 +1199,12 @@ impl<'a> Evaluator<'_, 'a> {
         let Some(first) = items.first() else {
             return Ok(());
         };
+        let before = self.steps.get();
         let mut res = self.eval(predicate, first, env)?;
+        // Each further item would take the steps of the first: the predicate reads nothing
+        // from it.
+        let each = before - self.steps.get();
+        self.charge(each.saturating_mul(items.len() as u64 - 1))?;
         if res.is_numeric()? {
             res = Value::array(vec![res], 0);
         }
@@ -1218,6 +1273,7 @@ impl<'a> Evaluator<'_, 'a> {
         if self.depth >= self.limits.max_depth {
             return Err(Error::new("D1011").with("value", self.limits.max_depth));
         }
+        self.charge(1)?;
         self.read_failure()?;
         self.time_limits()
     }
@@ -1387,7 +1443,10 @@ impl<'a> Evaluator<'_, 'a> {
                     .filter(|_| self.tracer.is_none() && self.depth < self.limits.max_depth);
                 let mut evaluated: Option<Rc<str>> = None;
                 let key = match literal {
-                    Some(text) => text,
+                    Some(text) => {
+                        self.literal_guardrails()?;
+                        text
+                    }
                     None => match self.eval(key_expr, &context, &frame)? {
                         Value::Undefined => continue,
                         Value::String(s) => {
@@ -1446,7 +1505,10 @@ impl<'a> Evaluator<'_, 'a> {
             let literal = string_literal(key_expr)
                 .filter(|_| self.tracer.is_none() && self.depth < self.limits.max_depth);
             let key = match literal {
-                Some(text) => Rc::from(text),
+                Some(text) => {
+                    self.literal_guardrails()?;
+                    Rc::from(text)
+                }
                 None => match self.eval(key_expr, &item, env)? {
                     Value::Undefined => continue,
                     Value::String(s) => s,
@@ -2017,20 +2079,23 @@ fn variable<'a>(name: &str, input: &Value<'a>, env: &Env<'a>) -> Value<'a> {
 /// The value of a path of field names on a single input, or on a variable when the path starts
 /// with one; `None` when the input, the variable or a field holds an array (which the general
 /// path iterates, flattens or keeps). An undefined field ends the path, as it does in the
-/// general path.
-fn plain_fields<'a>(steps: &[Node], input: &Value<'a>, env: &Env<'a>) -> Option<Value<'a>> {
-    let (mut value, names) = match &steps[0].kind {
-        NodeKind::Variable { name } => (variable(name, input, env), &steps[1..]),
-        _ => (input.clone(), steps),
+/// general path. With the value, the steps the general path would evaluate (ADR 0018).
+fn plain_fields<'a>(steps: &[Node], input: &Value<'a>, env: &Env<'a>) -> Option<(Value<'a>, u64)> {
+    let (mut value, names, mut taken) = match &steps[0].kind {
+        NodeKind::Variable { name } => (variable(name, input, env), &steps[1..], 1),
+        _ => (input.clone(), steps, 0),
     };
     if value.is_array() {
         return None;
     }
     let last = names.len().checked_sub(1);
     for (ii, step) in names.iter().enumerate() {
-        if value.is_undefined() {
+        // The general path evaluates the first step even against nothing, and each further
+        // step only against what the one before gave.
+        if value.is_undefined() && taken > 0 {
             break;
         }
+        taken += 1;
         let NodeKind::Name { name } = &step.kind else {
             return None;
         };
@@ -2039,7 +2104,7 @@ fn plain_fields<'a>(steps: &[Node], input: &Value<'a>, env: &Env<'a>) -> Option<
             return None;
         }
     }
-    Some(value)
+    Some((value, taken))
 }
 
 fn is_sequence(value: &Value) -> bool {

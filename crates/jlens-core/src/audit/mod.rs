@@ -90,6 +90,11 @@ pub trait Tracer {
     fn filter_end(&mut self, predicate: &Node) {
         let _ = predicate;
     }
+    /// The steps the evaluation took, those a step limit counts (ADR 0018), given just before
+    /// [`Tracer::end`].
+    fn steps(&mut self, steps: u64) {
+        let _ = steps;
+    }
     /// The evaluation ended.
     fn end(&mut self, outcome: Outcome<'_>) {
         let _ = outcome;
@@ -272,6 +277,10 @@ pub struct AuditHeader {
     pub timestamp: String,
     /// Wall-clock duration of the evaluation, in milliseconds.
     pub duration_ms: f64,
+    /// The steps the evaluation took, which an untraced evaluation takes too: the number to
+    /// compare with `Options::max_steps` (ADR 0018).
+    #[serde(default)]
+    pub steps: u64,
     /// The level the audit was recorded at.
     pub level: AuditLevel,
     /// The result of the evaluation (absent when undefined or on error).

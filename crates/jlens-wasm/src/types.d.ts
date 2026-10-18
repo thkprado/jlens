@@ -148,6 +148,8 @@ export interface AuditHeader {
   /** The evaluation timestamp (`$now()`), in ISO 8601. */
   timestamp: string;
   durationMs: number;
+  /** The steps the evaluation took, which an evaluation without an audit takes too. */
+  steps: number;
   level: AuditLevel;
   result?: unknown;
   error?: { code: string; message: string };

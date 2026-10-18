@@ -11,6 +11,8 @@
 //! * With `JLENS_CONFORMANCE_REPORT=1` the run writes `tests/conformance/REPORT.md` and never
 //!   fails; adding `JLENS_UPDATE_BASELINE=1` also rewrites the baseline with the passing cases.
 //!   `cargo xtask conformance` wraps both.
+//! * Every case also runs as `steps:<id>`, which checks that the evaluation takes the same
+//!   number of steps with and without a tracer (ADR 0018), whatever its outcome.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -19,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use jlens_core::audit::AuditOptions;
 use jlens_core::{Bindings, Error, Expression, Options};
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde_json::{Map, Value};
@@ -300,6 +303,52 @@ fn run_case(case: &Case, ov: Option<&Override>) -> Result<(), Failed> {
     }
 }
 
+/// Checks that the untraced evaluation takes the steps the audited one reports: it succeeds, or
+/// fails as it would without a limit, with that many steps, and fails with `U1006` with one less.
+fn check_steps(case: &Case) -> Result<(), Failed> {
+    let Ok(expr) = Expression::compile(&case.expr) else {
+        return Ok(());
+    };
+    let input = case.input.as_ref();
+    let (traced, audit) = expr.evaluate_audited(
+        input,
+        &case.bindings,
+        &case.options,
+        &AuditOptions::decisions(),
+    );
+    let timed_out = |outcome: &Result<_, Error>| matches!(outcome, Err(e) if e.code() == "D1012");
+    if timed_out(&traced) {
+        return Ok(());
+    }
+    let steps = audit.header.steps;
+    let run = |steps| {
+        let options = case.options.clone().max_steps(steps);
+        expr.evaluate_with(input, &case.bindings, &options)
+    };
+    let within = run(steps);
+    if timed_out(&within) {
+        return Ok(());
+    }
+    if let Err(e) = &within
+        && e.code() == "U1006"
+    {
+        return Err(format!("the audit counts {steps} steps, the evaluation takes more").into());
+    }
+    if steps > 0 {
+        match run(steps - 1) {
+            Err(e) if e.code() == "U1006" => {}
+            outcome if timed_out(&outcome) => {}
+            outcome => {
+                return Err(format!(
+                    "the audit counts {steps} steps, the evaluation takes fewer: {outcome:?}"
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn write_report(path: &Path, cases: &[Case], passed: &BTreeSet<String>) {
     let mut per_group: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
     for case in cases {
@@ -350,7 +399,7 @@ fn main() {
     let report_mode = std::env::var_os("JLENS_CONFORMANCE_REPORT").is_some();
     let passed = Arc::new(Mutex::new(BTreeSet::new()));
 
-    let trials = cases
+    let mut trials: Vec<Trial> = cases
         .iter()
         .map(|case| {
             let ov = overrides.get(&case.id).cloned();
@@ -373,6 +422,18 @@ fn main() {
             .with_ignored_flag(skip || (!expected_to_pass && !report_mode))
         })
         .collect();
+    if !report_mode {
+        trials.extend(
+            cases
+                .iter()
+                .filter(|case| !matches!(case.expect, Expect::Unloadable(_)))
+                .map(|case| {
+                    let case = case.clone();
+                    Trial::test(format!("steps:{}", case.id), move || check_steps(&case))
+                        .with_kind("steps")
+                }),
+        );
+    }
 
     let mut args = Arguments::from_args();
     if report_mode {
