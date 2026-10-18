@@ -256,7 +256,7 @@ that cost from 350 to 106 ns for `1`, but a path still takes about seven times a
 
 JSONata in Python has a pure-Python port, a wrapper of jsonata-js, a young Rust port of
 jsonata-java and the Python package of jsonata-core (`jsonatapy`). jlens would bring its conformance, audits, schemas and speed to Python, where data
-pipelines and rules live, and more people using it would tell 0.20 which parts of the API to
+pipelines and rules live, and more people using it would tell 0.21 which parts of the API to
 keep. The package follows the WebAssembly package: the same objects, the same errors, beta until
 1.0.
 
@@ -344,12 +344,47 @@ item measures the cases it touches before and after with `cargo xtask ab`, plus
 | 11 | mimalloc as the Python package's allocator. A global allocator in `jlens-python` only, as `jsonatapy` does; the smallest cases measured with and without mimalloc's `local_dynamic_tls`, which suits a library loaded at run time | Every wheel target builds and passes its tests (`wheels.yml`: manylinux, musl, ARM, Windows, macOS, abi3t), with its platform tags unchanged; the wheel sizes before and after; the Python table measured before and after; the decision in ADR 0014 | **done**: mimalloc with `local_dynamic_tls` ([ADR 0014, amended](../adr/0014-python-package.md#amendment-mimalloc-as-the-allocator-019)). With Python values in, ten cases take 4% to 19% less time, `$count(items)` 35% less, `recursion` 7% more (as natively with glibc) and the smallest evaluations 0.02 to 0.07 µs more; plain mimalloc read lists of `dict`s 7 to 11% slower. jlens is now the fastest on ten of the twelve cases with Python values in (`names over items` 23 against 25 µs, the object constructor 151 against 181 µs); `jsonatapy` keeps `path` (0.7 against 0.8 µs) and `recursion` within 2%. Wheels grow by 60 to 70 KB (Linux x86-64 1.23 to 1.30 MB, Windows 1.13 to 1.19 MB); built locally, the Linux wheel needs glibc 2.38 only for `__isoc23_strtol`, from the build machine's C23 headers, which the manylinux 2_28 container of `wheels.yml` does not have. Every wheel target is checked by CI on the next push |
 | 12 | Release 0.19.0 | The release checklist | **done**; the npm channel of the CLI is left out (0.14 #7) |
 
-## 0.20: an API to keep, toward 1.0
+## 0.20: a deterministic step limit
 
-After eighteen releases, nothing says which parts of jlens are meant to last. `cargo
+An application that evaluates expressions written by others needs a ceiling on what one
+evaluation may cost. jlens has three, and none is both general and reproducible. `max_depth`
+stops a deep recursion (`D1011`) and the size limits stop a huge value (`U1001`), the same way
+on every machine, but loops over small arrays nested a few times pass both:
+`$sum($map([1..1000], function($i) { $sum($map([1..1000], function($j) { $i * $j })) }))`
+builds no array longer than 1,000 items. Only the timeout (`D1012`) stops them, and the timeout
+reads the clock: the same expression on the same input passes on a fast machine and fails on a
+slow one, or passes natively and fails in WebAssembly, which is slower. An application that must give the
+same answer everywhere, such as a replay, a test that compares two platforms or a quota charged
+to a user, cannot rely on it. Today's workaround, a tracer that counts `enter` events and
+cancels a `CancelToken`, forces the traced evaluation, which is slower.
+
+0.20 adds `Options::max_steps`, a budget of evaluation steps that fails with its own code once
+spent. The same expression, input and options take the same number of steps on every machine,
+natively and in WebAssembly, with or without a tracer.
+
+Measured while planning, with a prototype that decrements a counter at each step (`u64::MAX`
+without a limit, so there is no branch on an `Option`): `cargo xtask ab` found every case
+between 3.4% faster and 1.3% slower than `HEAD`, which is noise; with a limit set, the code path
+is the same. The prototype also showed a cost the counter can remove. With a timeout, every step
+reads the clock: `$sum($map([1..300000], function($x) { $x * 2 + 1 }))` takes 189 ms with
+`jlens eval --timeout` against 127 to 153 ms without (Windows). Reading the clock every few
+hundred steps would remove most of that cost.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | ADR 0018, the step limit. What a step is. Proposed: each node the general evaluation path evaluates (an `enter` event of a tracer), each call a host function makes through `Callable`, and one step per 1,024 steps of the regular expression backtracker (ADR 0009), so that catastrophic backtracking cannot run unbounded under a step limit alone. The paths that skip evaluating a node (a field looked up in each item, a literal key of a group, a comparison with a string literal, a constant predicate evaluated once) charge the steps they skip, so that the count depends neither on the optimizations nor on a tracer; `$eval` and host callbacks share the evaluation's budget. Also decided: the error code (proposed `U1006`, with the limit as `value`: `U1005` is taken, and an application must be able to tell an exhausted budget from a size limit without reading the message, as `D1011` and `D1012` already allow; the rule "limits use `U1001`" in `AGENTS.md` changes accordingly); what the limit does not bound, which is the work inside one step, already bounded by the size limits (a range, `$sort` without a function, `$string`, deep equality); whether the count may change between versions (proposed: only on purpose, with a changelog note, the table of exact counts of #2 making any change show in review); whether an evaluation reports the steps it took; how often the timeout reads the clock (#3) | The ADR accepted | |
+| 2 | The limit in `jlens-core`: `Options::max_steps`, the counter in `Evaluator`, the paths that charge skipped steps, the regular expression backtracker on its interruptible path when a step limit is set, `U1006` in `error.rs`. `cargo xtask ab` gains `--b-max-steps`, like `--b-allocator`, to measure a limit set against none | A table test of exact counts: each expression succeeds with its count and fails with `U1006` with one step less. Every case of the suite takes the same number of steps with and without a tracer. Property tests (`robustness.rs`): no panic, any limit gives the result or `U1006`, the count the same with a tracer. Conformance unchanged; `gen-docs`; the crate guide. `ab` against `HEAD`, and with `--b-max-steps`: no case more than 2% slower | |
+| 3 | The timeout read every few hundred steps instead of at every step, using the counter of #2; the cancellation token, an atomic load, still read at every step. `ab` gains `--timeout`, for both programs | The `$map` above and the `ab` workload measured with a timeout, before and after, natively and in WebAssembly; the timeout's existing tests green (a loop still stops with `D1012`); the outcome on the performance page | |
+| 4 | `maxSteps` in the WebAssembly package | The JS suite runs the table of exact counts of #2 in Node and the browser and finds the counts Rust finds; `types.d.ts`; the Wasm guide | |
+| 5 | `max_steps` in the Python package, and `--max-steps` in `jlens eval` and `jlens test` | pytest runs the table of exact counts; the stubs; CLI snapshot tests; the Python and CLI guides | |
+| 6 | Release 0.20.0 | The release checklist | |
+
+## 0.21: an API to keep, toward 1.0
+
+After twenty releases, nothing says which parts of jlens are meant to last. `cargo
 semver-checks` runs in CI, but before 1.0 it only asks for a new minor version, and
 `jlens-core` exposes workspace plumbing (`stack`, `debug`, the AST's internals) next to its API.
-0.20 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
+0.21 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
 down. Applications built on jlens are separate projects: they use `jlens-core` as any
 application does, and what they lack comes back here as general features.
 
@@ -363,7 +398,7 @@ from what they needed, missed or worked around, not guessed beforehand.
 | 3 | `jlens-schema` and `jlens-lsp` changes as ADR 0015 says | As #2 | |
 | 4 | The contracts outside Rust, as ADR 0015 says: the Wasm API, the Python package, the JSON of audits and `jlens.json`; a test pins each, so that a change shows in review | Tests that fail on an unintended change of each contract | |
 | 5 | A stability page in the book, from ADR 0015, and the rules for changing a stable item in `CONTRIBUTING.md` | `doc-check` green; the page linked from the introduction | |
-| 6 | Release 0.20.0, the release that breaks once. 1.0.0 follows when ADR 0015's criterion is met | The release checklist, with the migration notes in the release notes | |
+| 6 | Release 0.21.0, the release that breaks once. 1.0.0 follows when ADR 0015's criterion is met | The release checklist, with the migration notes in the release notes | |
 
 ## Not planned
 
