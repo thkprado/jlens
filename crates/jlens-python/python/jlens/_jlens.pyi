@@ -36,6 +36,7 @@ class Expression:
         *,
         timeout: float | None = None,
         max_depth: int | None = None,
+        max_steps: int | None = None,
         max_string_length: int | None = None,
         max_array_length: int | None = None,
         max_result_size: int | None = None,
@@ -47,10 +48,10 @@ class Expression:
         `None` means no input document. Returns `None` for an undefined result or `null`.
 
         `bindings` maps names to values: `{"limit": 10}` defines `$limit`. The options limit the
-        evaluation: `timeout` in seconds, `max_depth`, `max_string_length` (bytes),
-        `max_array_length` (items) and `max_result_size` (bytes of JSON); `now` fixes the clock
-        (milliseconds since the epoch, a `datetime` or an ISO 8601 timestamp) and `seed`
-        `$random()`. Raises a `JlensError` when the evaluation fails."""
+        evaluation: `timeout` in seconds, `max_depth`, `max_steps`, `max_string_length`
+        (bytes), `max_array_length` (items) and `max_result_size` (bytes of JSON); `now` fixes
+        the clock (milliseconds since the epoch, a `datetime` or an ISO 8601 timestamp) and
+        `seed` `$random()`. Raises a `JlensError` when the evaluation fails."""
 
     def evaluate_json(
         self,
@@ -59,6 +60,7 @@ class Expression:
         *,
         timeout: float | None = None,
         max_depth: int | None = None,
+        max_steps: int | None = None,
         max_string_length: int | None = None,
         max_array_length: int | None = None,
         max_result_size: int | None = None,
@@ -77,6 +79,7 @@ class Expression:
         *,
         timeout: float | None = None,
         max_depth: int | None = None,
+        max_steps: int | None = None,
         max_string_length: int | None = None,
         max_array_length: int | None = None,
         max_result_size: int | None = None,
@@ -95,6 +98,7 @@ class Expression:
         limits: CaptureLimits | None = None,
         timeout: float | None = None,
         max_depth: int | None = None,
+        max_steps: int | None = None,
         max_string_length: int | None = None,
         max_array_length: int | None = None,
         max_result_size: int | None = None,

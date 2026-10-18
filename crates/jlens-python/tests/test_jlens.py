@@ -7,6 +7,7 @@ import datetime
 import enum
 import gc
 import json
+import pathlib
 import platform
 import sys
 import threading
@@ -324,6 +325,44 @@ def test_options_of_every_evaluate_method():
         expr.evaluate_with_audit(timeot=1)
     with pytest.raises(TypeError):
         expr.evaluate(None, None, 1)
+
+
+def test_step_limit_takes_the_steps_rust_counts():
+    # The table of exact counts of jlens-core (ADR 0018): each expression succeeds with its
+    # count and fails with U1006 with one step less, whatever reads the input, and an audit
+    # reports that many.
+    path = pathlib.Path(__file__).parents[2] / "jlens-core" / "tests" / "steps.json"
+    table = json.loads(path.read_text(encoding="utf-8"))
+    document = Document(table["input"])
+    text = json.dumps(table["input"])
+
+    def check(expr, steps, bindings=None):
+        expr.evaluate(table["input"], bindings, max_steps=steps)
+        for call in (
+            lambda **options: expr.evaluate(table["input"], bindings, **options),
+            lambda **options: expr.evaluate_json(text, bindings, **options),
+            lambda **options: expr.evaluate_document(document, bindings, **options),
+        ):
+            error = raises("U1006", call, max_steps=steps - 1)
+            assert error.value == steps - 1, expr.source
+        audited = expr.evaluate_with_audit(table["input"], bindings)
+        assert audited["audit"]["header"]["steps"] == steps, f"{expr.source}: audited"
+
+    checked = 0
+    for group in table["groups"]:
+        for source, steps in group["counts"]:
+            check(Expression(source), steps)
+            checked += 1
+    assert checked > 20, "the whole table"
+    # A host function's calls back spend the budget too: the call, its name and its
+    # arguments, then each call back, a step and the body's 3 nodes.
+    check(Expression("$twice(function($x){ $x + 1 }, 1)"), 12, {"twice": lambda f, x: f(f(x))})
+    loop = Expression("$sum([1..1000].($ * 2))")
+    assert loop.evaluate_with_audit(max_steps=100)["error"]["code"] == "U1006"
+    with pytest.raises(ValueError):
+        loop.evaluate(max_steps=-1)
+    with pytest.raises(TypeError):
+        loop.evaluate(max_steps=1.5)
 
 
 def test_document():

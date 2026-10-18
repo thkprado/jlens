@@ -136,7 +136,7 @@ impl Expression {
     // The options are keyword parameters, so that a call builds no `dict` (vectorcall).
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (input=None, bindings=None, *,
-        timeout=None, max_depth=None, max_string_length=None,
+        timeout=None, max_depth=None, max_steps=None, max_string_length=None,
         max_array_length=None, max_result_size=None, now=None, seed=None
     ))]
     fn evaluate<'py>(
@@ -146,6 +146,7 @@ impl Expression {
         bindings: Option<&Bound<'py, PyAny>>,
         timeout: Option<&Bound<'py, PyAny>>,
         max_depth: Option<&Bound<'py, PyAny>>,
+        max_steps: Option<&Bound<'py, PyAny>>,
         max_string_length: Option<&Bound<'py, PyAny>>,
         max_array_length: Option<&Bound<'py, PyAny>>,
         max_result_size: Option<&Bound<'py, PyAny>>,
@@ -156,6 +157,7 @@ impl Expression {
         let options = convert::options(convert::OptionArgs {
             timeout,
             max_depth,
+            max_steps,
             max_string_length,
             max_array_length,
             max_result_size,
@@ -184,7 +186,7 @@ impl Expression {
     /// other Python threads run, and attaches again to call a host function written in Python.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (input=None, bindings=None, *,
-        timeout=None, max_depth=None, max_string_length=None,
+        timeout=None, max_depth=None, max_steps=None, max_string_length=None,
         max_array_length=None, max_result_size=None, now=None, seed=None
     ))]
     fn evaluate_json(
@@ -194,6 +196,7 @@ impl Expression {
         bindings: Option<&Bound<'_, PyAny>>,
         timeout: Option<&Bound<'_, PyAny>>,
         max_depth: Option<&Bound<'_, PyAny>>,
+        max_steps: Option<&Bound<'_, PyAny>>,
         max_string_length: Option<&Bound<'_, PyAny>>,
         max_array_length: Option<&Bound<'_, PyAny>>,
         max_result_size: Option<&Bound<'_, PyAny>>,
@@ -204,6 +207,7 @@ impl Expression {
         let options = convert::options(convert::OptionArgs {
             timeout,
             max_depth,
+            max_steps,
             max_string_length,
             max_array_length,
             max_result_size,
@@ -228,7 +232,7 @@ impl Expression {
     /// other Python threads run.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (document, bindings=None, *,
-        timeout=None, max_depth=None, max_string_length=None,
+        timeout=None, max_depth=None, max_steps=None, max_string_length=None,
         max_array_length=None, max_result_size=None, now=None, seed=None
     ))]
     fn evaluate_document<'py>(
@@ -238,6 +242,7 @@ impl Expression {
         bindings: Option<&Bound<'py, PyAny>>,
         timeout: Option<&Bound<'py, PyAny>>,
         max_depth: Option<&Bound<'py, PyAny>>,
+        max_steps: Option<&Bound<'py, PyAny>>,
         max_string_length: Option<&Bound<'py, PyAny>>,
         max_array_length: Option<&Bound<'py, PyAny>>,
         max_result_size: Option<&Bound<'py, PyAny>>,
@@ -248,6 +253,7 @@ impl Expression {
         let options = convert::options(convert::OptionArgs {
             timeout,
             max_depth,
+            max_steps,
             max_string_length,
             max_array_length,
             max_result_size,
@@ -280,7 +286,7 @@ impl Expression {
     /// a `dict` with `result`, `error`, `audit`, `explanation` and `explanation_text`.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (input=None, bindings=None, *, level=None, limits=None,
-        timeout=None, max_depth=None, max_string_length=None,
+        timeout=None, max_depth=None, max_steps=None, max_string_length=None,
         max_array_length=None, max_result_size=None, now=None, seed=None
     ))]
     fn evaluate_with_audit<'py>(
@@ -292,6 +298,7 @@ impl Expression {
         limits: Option<&Bound<'py, PyDict>>,
         timeout: Option<&Bound<'py, PyAny>>,
         max_depth: Option<&Bound<'py, PyAny>>,
+        max_steps: Option<&Bound<'py, PyAny>>,
         max_string_length: Option<&Bound<'py, PyAny>>,
         max_array_length: Option<&Bound<'py, PyAny>>,
         max_result_size: Option<&Bound<'py, PyAny>>,
@@ -307,6 +314,7 @@ impl Expression {
         let options = convert::options(convert::OptionArgs {
             timeout,
             max_depth,
+            max_steps,
             max_string_length,
             max_array_length,
             max_result_size,

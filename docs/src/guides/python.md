@@ -65,6 +65,8 @@ returns `None` for both:
 ```
 
 - `timeout` (seconds, a `float`) stops the evaluation with `D1012`.
+- `max_steps` (an `int`) stops it with `U1006` once it has taken that many steps, the same on
+  every machine; see [limits](#limits).
 - `max_depth`, `max_string_length`, `max_array_length` and `max_result_size` bound the
   evaluation; see [limits](#limits).
 - `now` fixes `$now()` and `$millis()`: milliseconds since the epoch, a `datetime`, or an
@@ -311,6 +313,7 @@ rendering in a user interface. The input is converted whole first, as for a `Doc
 |---|---|---|
 | Evaluation depth (`max_depth`) | 50,000 | `D1011` |
 | Evaluation time (`timeout`, seconds) | none | `D1012` |
+| Evaluation steps (`max_steps`) | none | `U1006` |
 | Length of a string built (`max_string_length`, bytes of UTF-8) | 256 MiB | `U1001` |
 | Items of an array built (`max_array_length`) | 16,777,216 | `U1001` |
 | Size of the result as JSON text (`max_result_size`, bytes) | 256 MiB | `U1001` |
@@ -320,7 +323,16 @@ rendering in a user interface. The input is converted whole first, as for a `Doc
 The size of the result counts a value each time it appears, as the JSON text does, and also
 limits the arguments passed to a host function. The stack grows as needed, so the depth limit is
 that of the native targets; see the [evaluator chapter](../architecture/evaluator.md#guardrails).
-There is no cancellation from another thread: use `timeout`. The
+There is no cancellation from another thread: use `timeout` or `max_steps`.
+
+A timeout reads the clock, so the same evaluation can pass on one machine and fail on another.
+`max_steps` does not depend on the machine: each node evaluated is a step, and so is each
+function a built-in or a host function calls back, and each 1,024 steps of a regular
+expression's backtracking. The same expression, input and options take the same steps on every
+machine, in WebAssembly too, whichever `evaluate` method reads the input, and fail with `U1006`
+once the budget is spent; the error's `value` is the limit. The header of an audit reports the
+steps an evaluation took (`result["audit"]["header"]["steps"]`), to set a budget from. See
+[ADR 0018](../adr/0018-step-limit.md). The
 [performance chapter](../architecture/performance.md#python-against-the-other-implementations)
 compares the package's speed and its behaviour at these limits with the other JSONata packages
 for Python.

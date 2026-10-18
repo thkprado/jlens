@@ -19,6 +19,8 @@ All notable changes are recorded here. The format follows
 - The WebAssembly package takes the step limit as the option `maxSteps`, and takes the same
   steps as the native engine: its tests run the table of exact counts of `jlens-core`, now in
   `crates/jlens-core/tests/steps.json`, in Node.js and in the browser.
+- The Python package takes the step limit as the keyword argument `max_steps`, and its tests
+  run the same table. `jlens eval` and `jlens test` take it as `--max-steps N`.
 - `cargo xtask ab --timeout MS` measures both revisions with a timeout.
 
 ### Changed

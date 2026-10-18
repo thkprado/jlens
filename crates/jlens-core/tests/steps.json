@@ -1,5 +1,5 @@
 {
-  "about": "The step limit (ADR 0018): exact counts that change only on purpose. Each expression, evaluated against `input`, takes `steps` steps. Read by tests/steps.rs and by the WebAssembly package's JS suite. A change to a count goes in the changelog under its own heading.",
+  "about": "The step limit (ADR 0018): exact counts that change only on purpose. Each expression, evaluated against `input`, takes `steps` steps. Read by tests/steps.rs, by the WebAssembly package's JS suite and by the Python package's pytest. A change to a count goes in the changelog under its own heading.",
   "input": {
     "a": { "b": { "c": 1 } },
     "items": [

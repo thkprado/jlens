@@ -1,0 +1,7 @@
+{
+  "expr": "$sum(items.($ * 2))",
+  "cases": [
+    { "name": "within the budget", "input": { "items": [1, 2] }, "result": 6 },
+    { "name": "beyond the budget", "input": { "items": [1, 2, 3] }, "error": "U1006" }
+  ]
+}

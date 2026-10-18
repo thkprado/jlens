@@ -87,7 +87,9 @@ jobs:
             done
         run: |
           if [ "${{ matrix.manylinux }}" = musllinux_1_2 ]; then
-            docker run --rm -v "$PWD:/w" -w /w ghcr.io/astral-sh/uv:alpine sh -c "$TEST"
+            # The whole checkout, as the tests read crates/jlens-core/tests/steps.json.
+            docker run --rm -v "$GITHUB_WORKSPACE:/w" -w /w/crates/jlens-python \
+              ghcr.io/astral-sh/uv:alpine sh -c "$TEST"
           else
             sh -c "$TEST"
           fi

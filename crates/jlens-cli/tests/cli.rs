@@ -244,6 +244,16 @@ fn eval_size_caps() {
         &["eval", "--no-input", "--max-array-length", "5", "[1..10]"]
     );
     snapshot!(
+        "eval_max_steps",
+        &[
+            "eval",
+            "--no-input",
+            "--max-steps",
+            "100",
+            "$sum($map([1..1000], function($i) { $i }))"
+        ]
+    );
+    snapshot!(
         "eval_max_result_size",
         &[
             "eval",
@@ -447,6 +457,11 @@ fn test() {
             "5",
             "fixtures/cli/test/caps.json"
         ]
+    );
+    // Each item takes 4 steps, and the rest 4: 12 for two items, 16 for three.
+    snapshot!(
+        "test_max_steps",
+        &["test", "--max-steps", "12", "fixtures/cli/test/steps.json"]
     );
     snapshot!(
         "test_invalid",

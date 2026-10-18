@@ -53,6 +53,11 @@ pub struct EvalArgs {
     /// Stop an evaluation nested deeper than this (error D1011).
     #[arg(long, value_name = "N")]
     max_depth: Option<usize>,
+    /// Stop an evaluation after this many steps (error U1006): each node evaluated, each
+    /// function called back and each 1,024 steps of a regular expression's backtracking. The
+    /// same expression, input and options take the same steps on every machine.
+    #[arg(long, value_name = "N")]
+    max_steps: Option<u64>,
     #[command(flatten)]
     caps: SizeCaps,
     /// The time seen by $now() and $millis(): milliseconds since the epoch, or an ISO 8601
@@ -148,6 +153,7 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
     let mut options = Options::new();
     options.timeout = args.timeout.map(Duration::from_millis);
     options.max_depth = args.max_depth;
+    options.max_steps = args.max_steps;
     args.caps.apply(&mut options);
     options.now = args.now;
     options.seed = args.seed;

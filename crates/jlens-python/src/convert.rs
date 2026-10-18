@@ -302,11 +302,12 @@ pub fn bindings<'py>(
 }
 
 /// The evaluation options, as the keyword-only arguments of the `evaluate` methods: `timeout`
-/// (seconds), `max_depth`, `max_string_length`, `max_array_length`, `max_result_size`, `now`
-/// and `seed`. Absent or `None`, an option keeps its default.
+/// (seconds), `max_depth`, `max_steps`, `max_string_length`, `max_array_length`,
+/// `max_result_size`, `now` and `seed`. Absent or `None`, an option keeps its default.
 pub struct OptionArgs<'a, 'py> {
     pub timeout: Option<&'a Bound<'py, PyAny>>,
     pub max_depth: Option<&'a Bound<'py, PyAny>>,
+    pub max_steps: Option<&'a Bound<'py, PyAny>>,
     pub max_string_length: Option<&'a Bound<'py, PyAny>>,
     pub max_array_length: Option<&'a Bound<'py, PyAny>>,
     pub max_result_size: Option<&'a Bound<'py, PyAny>>,
@@ -340,6 +341,7 @@ pub fn options(args: OptionArgs<'_, '_>) -> PyResult<Options> {
         })?);
     }
     out.max_depth = count("max_depth", args.max_depth)?;
+    out.max_steps = count("max_steps", args.max_steps)?.map(|steps| steps as u64);
     out.max_string_length = count("max_string_length", args.max_string_length)?;
     out.max_array_length = count("max_array_length", args.max_array_length)?;
     out.max_result_size = count("max_result_size", args.max_result_size)?;

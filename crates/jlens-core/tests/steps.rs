@@ -7,7 +7,7 @@ use jlens_core::audit::AuditOptions;
 use jlens_core::{Bindings, Expression, HostFunction, Options};
 use serde_json::{Value, json};
 
-/// The table, shared with the WebAssembly package's JS suite.
+/// The table, shared with the WebAssembly package's JS suite and the Python package's pytest.
 const TABLE: &str = include_str!("steps.json");
 
 fn table() -> Value {

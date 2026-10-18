@@ -25,6 +25,11 @@ pub struct TestArgs {
     /// Stop an evaluation after this many milliseconds (error D1012).
     #[arg(long, value_name = "MS")]
     timeout: Option<u64>,
+    /// Stop an evaluation after this many steps (error U1006): each node evaluated, each
+    /// function called back and each 1,024 steps of a regular expression's backtracking. The
+    /// same expression, input and options take the same steps on every machine.
+    #[arg(long, value_name = "N")]
+    max_steps: Option<u64>,
     #[command(flatten)]
     caps: eval::SizeCaps,
 }
@@ -164,6 +169,7 @@ fn load(path: PathBuf, args: &TestArgs) -> Result<Suite> {
     };
     let mut options = Options::new();
     options.timeout = args.timeout.map(Duration::from_millis);
+    options.max_steps = args.max_steps;
     args.caps.apply(&mut options);
     options.seed = file.seed;
     options.now = match &file.now {
