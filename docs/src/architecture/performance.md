@@ -417,27 +417,44 @@ the cyclic input is `{"n": 1, "child": {"parent": <the input>}}`:
   jlens finishes.
 - Otherwise, no package stops an endless evaluation by default: set a timeout.
 
-### What a timeout costs
+### What the limits cost
 
-Until 0.19, a timeout read the clock at every step of the evaluation, which can cost more than
-the step itself. Since 0.20 the step counter of the step limit
-([ADR 0018](../adr/0018-step-limit.md)) paces it: the clock is read every 256 steps, so a
-timeout fires at most 256 steps late. Measured on `$sum($map([1..300000], function($x) { $x *
-2 + 1 }))`, a loop of small steps, with a timeout of 60 s that never expires (the median of 21
-runs of `jlens eval`, and of 15 evaluations in Node.js):
+From 0.20 on, every evaluation counts its steps for the step limit
+([ADR 0018](../adr/0018-step-limit.md)). Without a limit the budget is too large to be spent,
+so a step costs the same comparison with or without one. The timeout reads the clock at every
+256th step rather than at every step, so a timeout fires at most 256 steps late. Measured for
+0.20 against 0.19.0, on the machine above:
 
-| | Before, without | Before, with | After, without | After, with |
-|---|---:|---:|---:|---:|
-| Native (`jlens eval`, whole process) | 139 ms | 204 ms (+47%) | 141 ms | 142 ms (+0.8%) |
-| WebAssembly (Node.js) | 109 ms | 272 ms (+149%) | 104 ms | 105 ms (+1.3%) |
+- **Natively**, `cargo xtask ab v0.19.0 .`, ten rounds: every case between 2.7% faster
+  (`recursion`) and 2.4% slower (`shipping rule`). The three cases above 2% (`filter +
+  aggregate`, `strings` and `shipping rule`) were within 1% of 0.19.0 over 30 rounds. With a
+  step limit (`--b-max-steps 1000000000`, 0.20 with a limit against 0.19.0 without one), every
+  case between 3.0% faster and 1.4% slower. With a timeout of 60 s in both (`--timeout 60000`),
+  0.20 is 5% (`path`) to 38% (`recursion`, `filter + aggregate`, `shipping rule`) faster.
+- **In WebAssembly**, one build per Node.js process, the processes alternating, four each:
+  `evaluate` between 6.3% faster (`recursion`) and 0.8% slower, `evaluateDocument` between 14%
+  faster (`names over items`) and 1.2% slower. With `maxSteps`, `node compare.mjs --max-steps N`
+  gives the times without a limit, plus what an options object costs: the options go through
+  `JSON.stringify` and a parse, about 0.6 µs for `{}` and 1.1 µs for one option, so `path`
+  against a `Document` takes 1.3 µs without options, and 2.4 µs with `{maxSteps}` or
+  `{timeout}`, as in 0.19.0.
+- **In Python**, `python.py speed`, three runs of each: no case more than 1.5% slower than
+  0.19.0, `recursion` 3% faster. `max_steps` (`python.py speed --max-steps N`) costs about
+  40 ns per call, about what `max_depth` costs: `path` against a `Document` takes 0.43 µs
+  without options, 0.47 µs with `max_steps` or `max_depth`, and 0.49 µs with `timeout`.
+
+A loop of small steps shows what the clock cost before. Measured on `$sum($map([1..300000],
+function($x) { $x * 2 + 1 }))`, with a timeout of 60 s that never expires and a step limit of
+10⁹ that is never reached (the median of 21 runs of `jlens eval`, and of 15 evaluations in
+Node.js):
+
+| | 0.19.0, without | 0.19.0, timeout | 0.20, without | 0.20, timeout | 0.20, step limit |
+|---|---:|---:|---:|---:|---:|
+| Native (`jlens eval`, whole process) | 96 ms | 157 ms (+63%) | 92 ms | 92 ms (+0.3%) | 91 ms (−0.3%) |
+| WebAssembly (Node.js) | 105 ms | 270 ms (+156%) | 105 ms | 107 ms (+2.0%) | 106 ms (+1.0%) |
 
 In WebAssembly the clock is `performance.now()`, a call out of the module, which made it the
-larger cost there. On the benchmark workload, `cargo xtask ab HEAD . --timeout 60000` found
-every case 3 to 37% faster with a timeout than before (`recursion` and `filter + aggregate`
-by 37 and 36%), and as fast as without a timeout. Without a timeout, the same comparison found
-`filter + aggregate` and `shipping rule` 3.5% slower and `regex` 3.9% faster, although a step
-does the same work as before: a change to `eval.rs` that adds only an unused field already
-makes those two cases about 3% slower, so the layout of the compiled code moves them.
+larger cost there.
 
 ## Using the API efficiently
 

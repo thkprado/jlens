@@ -3,7 +3,7 @@
 Two of the packages install a module named `jsonata`, so each package lives in a virtual
 environment of its own; this script runs in each of them:
 
-    python python.py speed  jlens=<python> jsonatapy=<python> jsonata-python=<python> ...
+    python python.py speed  [--max-steps N] jlens=<python> jsonatapy=<python> ...
     python python.py limits jlens=<python> jsonatapy=<python> jsonata-python=<python> ...
 
 where each name is a key of IMPLEMENTATIONS (`jlens`, `jsonatapy`, `jsonata-python`,
@@ -13,7 +13,8 @@ standard library is needed.
 `speed` prints, for each case, the median time per evaluation over several rounds, with the
 input as Python values; for the packages that can convert an input once and evaluate against it
 (jlens's `Document`, jsonatapy's `JsonataData`), also that way. It first checks that each
-implementation gives jlens's result.
+implementation gives jlens's result. With `--max-steps N`, jlens evaluates with `max_steps=N`
+(ADR 0018); the other packages have no step limit.
 
 `limits` runs each case of LIMITS in a process of its own, so that a crash ends that process
 only, and prints what came out: a result, an exception, the process killed by a signal, or
@@ -44,14 +45,14 @@ class Jlens:
     def compile(self, source):
         return self.jlens.Expression(source)
 
-    def evaluate(self, compiled, input, timeout=None, max_depth=None):
-        return compiled.evaluate(input, timeout=timeout, max_depth=max_depth)
+    def evaluate(self, compiled, input, timeout=None, max_depth=None, **limits):
+        return compiled.evaluate(input, timeout=timeout, max_depth=max_depth, **limits)
 
     def document(self, input):
         return self.jlens.Document(input)
 
-    def evaluate_document(self, compiled, document):
-        return compiled.evaluate_document(document)
+    def evaluate_document(self, compiled, document, **limits):
+        return compiled.evaluate_document(document, **limits)
 
     def error(self, error):
         if isinstance(error, self.jlens.JlensError):
@@ -202,9 +203,10 @@ def _measure(run, rounds=7, round_s=0.2):
     return statistics.median(times)
 
 
-def speed_child(name):
+def speed_child(name, max_steps=None):
     """Measures one implementation; prints a JSON object on its last line."""
     impl = IMPLEMENTATIONS[name]()
+    limits = {} if max_steps is None else {"max_steps": int(max_steps)}
     input, cases = _cases()
     out = {"version": impl.version, "python": sys.version.split()[0], "cases": {}}
     out["document"] = hasattr(impl, "document")
@@ -213,11 +215,12 @@ def speed_child(name):
         entry = {}
         try:
             compiled = impl.compile(source)
-            entry["result"] = _normalize(impl.evaluate(compiled, input))
-            entry["evaluate"] = _measure(lambda: impl.evaluate(compiled, input))
+            entry["result"] = _normalize(impl.evaluate(compiled, input, **limits))
+            entry["evaluate"] = _measure(lambda: impl.evaluate(compiled, input, **limits))
             if document is not None:
-                assert _normalize(impl.evaluate_document(compiled, document)) == entry["result"]
-                entry["document"] = _measure(lambda: impl.evaluate_document(compiled, document))
+                result = _normalize(impl.evaluate_document(compiled, document, **limits))
+                assert result == entry["result"]
+                entry["document"] = _measure(lambda: impl.evaluate_document(compiled, document, **limits))
         except Exception as error:  # noqa: BLE001 - reported in the table
             entry["error"] = f"{type(error).__name__}: {str(error)[:100]}"
         out["cases"][case] = entry
@@ -232,12 +235,13 @@ def _fmt(us):
     return f"{us:.1f} µs"
 
 
-def speed(pythons):
+def speed(pythons, max_steps=None):
     runs = {}
     for name, python in pythons.items():
         print(f"measuring {name} ...", file=sys.stderr)
+        limits = [max_steps] if max_steps is not None and name == "jlens" else []
         proc = subprocess.run(
-            [python, "-I", str(Path(__file__).resolve()), "speed-child", name],
+            [python, "-I", str(Path(__file__).resolve()), "speed-child", name, *limits],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -248,7 +252,8 @@ def speed(pythons):
         runs[name] = json.loads(proc.stdout.strip().splitlines()[-1])
     reference = runs.get("jlens")
     order = [n for n in runs if n != "jlens"] + (["jlens"] if reference else [])
-    print(", ".join(f"{n} {runs[n]['version']}" for n in order), f"on Python {runs[order[0]]['python']}\n")
+    print(", ".join(f"{n} {runs[n]['version']}" for n in order), f"on Python {runs[order[0]]['python']}")
+    print(f"jlens with max_steps={max_steps}\n" if max_steps is not None else "")
     columns = []  # (name, key)
     for name in order:
         columns.append((name, "evaluate"))
@@ -364,6 +369,8 @@ def main():
         speed_child(*args)
     elif command == "limit-child":
         limit_child(*args)
+    elif command == "speed" and args[:1] == ["--max-steps"]:
+        speed(dict(arg.split("=", 1) for arg in args[2:]), max_steps=args[1])
     else:
         pythons = dict(arg.split("=", 1) for arg in args)
         {"speed": speed, "limits": limits}[command](pythons)
