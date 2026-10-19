@@ -6,13 +6,22 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.21.0]
+
+An application that keeps its state in Rust types gets a document without a
+`serde_json::Value` in between: `Document::from_serialize` serializes the state straight into
+it, in less than half the time, and `evaluate_document_with` binds names to documents, or to
+parts of one, without converting them (ADR 0019). Both are in `jlens-core` only; the
+WebAssembly and Python packages are as in 0.20.0. No case of the benchmarks is more than 2%
+slower than in 0.20.0. The CLI is still not on npm (see 0.14.0).
+
 ### Added
 
 - `Document::from_serialize` serializes any `serde::Serialize` value straight into a document
   (ADR 0019). It builds the document that `Document::new(&serde_json::to_value(value)?)` builds
   and fails where `to_value` fails, except for a value nested more than 1,000 levels deep, which
-  fails instead of overflowing the stack. For ten records of twenty fields it takes 17.3 µs,
-  against 40.0 µs through `to_value` and `Document::new`. The benchmark `host_state` measures
+  fails instead of overflowing the stack. For ten records of twenty fields it takes 17.1 µs,
+  against 40.2 µs through `to_value` and `Document::new`. The benchmark `host_state` measures
   it, and the crate guide shows when `evaluate_source` is the faster choice.
 - Variables bound to documents (ADR 0019): `Expression::evaluate_document_with` binds names to
   `Document`s, which are not converted, where a variable of `Bindings` is converted whole at
@@ -744,7 +753,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/thkprado/jlens/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/thkprado/jlens/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/thkprado/jlens/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/thkprado/jlens/compare/v0.17.0...v0.18.0
