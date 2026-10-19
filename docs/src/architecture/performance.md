@@ -563,14 +563,14 @@ An application that keeps its state in Rust types builds its document with
 ([ADR 0019](../adr/0019-documents-from-rust-values.md)), rather than through a
 `serde_json::Value`. The benchmark `host_state` (`cargo bench -p jlens-core --bench host_state`)
 measures a state of ten records of twenty fields (strings, numbers, booleans, small lists),
-rebuilt at each iteration, on this machine:
+rebuilt at each iteration, on this machine, for 0.21 with the release's other changes in:
 
 | `host build`: building the document | Time |
 |---|---:|
-| `serde_json::to_value` alone, for reference | 21.7 µs |
-| `to_value` + `Document::new` | 40.0 µs |
-| `serde_json::to_string` + `Document::parse` | 36.5 µs |
-| `Document::from_serialize` | 17.3 µs |
+| `serde_json::to_value` alone, for reference | 21.6 µs |
+| `to_value` + `Document::new` | 40.2 µs |
+| `serde_json::to_string` + `Document::parse` | 35.0 µs |
+| `Document::from_serialize` | 17.1 µs |
 
 `host rebuild` builds the document and evaluates the first 1, 4 or 10 of ten small expressions
 (filters, sorts, `[0]`) against it, as an application does between two changes of its state.
@@ -580,12 +580,12 @@ only the fields each expression reaches:
 
 | `host rebuild` | 1 | 4 | 10 |
 |---|---:|---:|---:|
-| `to_value` + `Document::new` + `evaluate_document` | 41.3 µs | 50.1 µs | 70.1 µs |
-| `Document::from_serialize` + `evaluate_document` | 18.8 µs | 27.5 µs | 47.0 µs |
-| `to_value` + `evaluate` | 24.5 µs | 40.0 µs | 69.0 µs |
-| `evaluate_source` | 3.7 µs | 19.9 µs | 53.8 µs |
+| `to_value` + `Document::new` + `evaluate_document` | 40.7 µs | 49.6 µs | 69.7 µs |
+| `Document::from_serialize` + `evaluate_document` | 18.6 µs | 27.2 µs | 46.9 µs |
+| `to_value` + `evaluate` | 24.1 µs | 39.3 µs | 67.8 µs |
+| `evaluate_source` | 3.7 µs | 19.7 µs | 53.7 µs |
 
-For one evaluation per state, a `Source` is the fastest; from about four, a document built with
+For up to four evaluations per state, a `Source` is the fastest; for ten, a document built with
 `from_serialize`.
 
 `host binding` reads one of the ten records through a variable (`$self.score > 50 and
@@ -595,9 +595,16 @@ evaluation; `evaluate_document_with` binds the record's part of the document
 
 | `host binding` | Time |
 |---|---:|
-| `$self` from `Bindings` | 3.18 µs |
+| `$self` from `Bindings` | 3.39 µs |
 | `$self` bound to `doc.pointer("/items/3")` | 0.42 µs |
-| `items[3]` read from the document, for reference | 0.79 µs |
+| `items[3]` read from the document, for reference | 0.80 µs |
+
+The rest of the library runs as fast as in 0.20. `cargo xtask ab v0.20.0 .`, with the 0.21
+code complete and ten rounds, puts every case of `evaluate` between 3.3% faster (`names over
+items`) and 1.5% slower (`group-by`), except `transform` at 3.1% slower, which was 0.7% slower
+over 20 rounds. With `--mode document`, every case is between 1.0% faster and 1.9% slower,
+except `path`, 16% faster (240 ns against 287 ns). That was not looked into: no code on its
+path changed but the order in which variables and functions are bound.
 
 ## Where the time goes
 
