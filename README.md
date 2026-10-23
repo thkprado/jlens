@@ -12,7 +12,7 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 The documentation is at <https://thkprado.github.io/jlens/>, with a
 [web editor](https://thkprado.github.io/jlens/editor/) that runs jlens in your browser.
 
-> **Status: version 0.21.0.** jlens passes 1,688 of the 1,690 cases of the
+> **Status: version 0.21.1.** jlens passes 1,688 of the 1,690 cases of the
 > official JSONata 2.2.2 test suite; the other two are documented overrides. Evaluations can be
 > audited and explained, schemas inferred from samples drive completion and diagnostics, and
 > everything is available in the browser as a WebAssembly ES module. See the

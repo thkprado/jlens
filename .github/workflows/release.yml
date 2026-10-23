@@ -158,8 +158,8 @@ jobs:
   # jlens-cli, which depends on them, so that a published jlens-cli never points to a missing
   # package. A package whose version is already on npm is skipped: re-running the job completes
   # a release that failed halfway through. It runs only when the repository variable
-  # PUBLISH_NPM_CLI is true: npm held back the name jlens-cli-win32-x64 at 0.14.0 (roadmap 0.14
-  # #7), and until it is allowed the job would fail, and the draft with it.
+  # PUBLISH_NPM_CLI is true: npm held back the name jlens-cli-win32-x64 from 0.14.0 to 0.21.0
+  # (roadmap 0.14 #7), and the variable leaves the CLI out of a release while npm refuses it.
   npm-cli:
     name: npm (CLI)
     needs: [binaries, wheels, ci]

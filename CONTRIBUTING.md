@@ -105,8 +105,7 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    `jlens-schema`, `jlens-lsp` and `jlens-cli` to crates.io, in that order, and to npm with provenance `jlens-wasm` and the packages of the
    CLI (ADR 0012: the five `jlens-cli-<os>-<cpu>` packages built by `cargo xtask npm-cli` from
    the archives, then `jlens-cli`; only when the repository variable `PUBLISH_NPM_CLI` is
-   `true`, which waits for npm to allow the name `jlens-cli-win32-x64`), and to PyPI the Python
-   package `jlens` (ADR 0014: fourteen wheels and the source distribution, with attestations),
+   `true`), and to PyPI the Python package `jlens` (ADR 0014: fourteen wheels and the source distribution, with attestations),
    and to ghcr.io the
    container image `ghcr.io/thkprado/jlens`
    (`crates/jlens-cli/Dockerfile`, the two static Linux binaries; tags `X.Y.Z`, `X.Y` and
