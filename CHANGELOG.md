@@ -6,6 +6,19 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.21.2]
+
+The npm packages are published through trusted publishing, without a token. The code is as in
+0.21.0.
+
+### Changed
+
+- `jlens-wasm`, `jlens-cli` and the five `jlens-cli-<os>-<cpu>` packages are published by the
+  release workflow through npm's trusted publishing (OIDC), from the GitHub environment `npm`,
+  with provenance as before. No npm token is stored in the repository any more, and once this
+  release validated the publishers, the packages refuse tokens that bypass two-factor
+  authentication.
+
 ## [0.21.1]
 
 The `jlens` command is on npm at last: npm allowed the name `jlens-cli-win32-x64`, which it had
@@ -764,7 +777,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.21.1...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.21.2...HEAD
+[0.21.2]: https://github.com/thkprado/jlens/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/thkprado/jlens/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/thkprado/jlens/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/thkprado/jlens/compare/v0.19.0...v0.20.0

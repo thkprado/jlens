@@ -114,10 +114,10 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    `PATH`, built by `cargo xtask vscode` from the archives), then attests the binary archives
    and the image (build provenance, through `actions/attest`) and drafts the GitHub release
    with the notes of the version, the archives and their `SHA256SUMS`. It needs the repository
-   secrets `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN`; `NPM_TOKEN` must be allowed to publish all
-   seven npm packages, and to create the CLI's six for their first release. The Python
-   package is published from the environment `pypi`, and the extension from the environment
-   `vscode`, set up as [Publishing the Python package](#publishing-the-python-package) and
+   secret `CARGO_REGISTRY_TOKEN`. The npm packages are published from the environment `npm`,
+   the Python package from the environment `pypi`, and the extension from the environment
+   `vscode`, set up as [Publishing to npm](#publishing-to-npm),
+   [Publishing the Python package](#publishing-the-python-package) and
    [Publishing the VS Code extension](#publishing-the-vs-code-extension) say. The image is
    pushed with the run's `GITHUB_TOKEN`. The provenance and the attestations are signed with
    the run's OIDC token, so they need no secret. If the CLI's npm job, the PyPI job or the
@@ -191,6 +191,23 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    (`gh run list --workflow pages.yml --limit 1`), that the book's introduction names the new
    version, and that the editor evaluates an example. If only the deployment failed, re-run it
    on the tag: `gh workflow run pages.yml --ref vX.Y.Z`.
+
+### Publishing to npm
+
+The `npm` and `npm (CLI)` jobs of the `Release` workflow run in the GitHub environment `npm`,
+whose deployment rules accept only `v*` tags. It holds no secret: npm trusts the run through
+trusted publishing, which needs npm 11.5.1 or later (the jobs use Node.js 24). The seven
+packages, `jlens-wasm`, `jlens-cli` and the five `jlens-cli-<os>-<cpu>`, belong to the
+maintainer's account, and each registers as its trusted publisher (on npmjs.com, in the
+package's **Settings**) GitHub Actions with the owner `thkprado`, the repository `jlens`, the
+workflow `release.yml`, the environment `npm` and the action "Allow npm publish". A new
+connection expires unless a publish validates it within two days, so register it shortly
+before a release tag; the same applies when the workflow file, the environment or the
+repository is renamed. A new package cannot have a trusted publisher until it exists: publish
+its first version by hand or with a short-lived granular token, then register it. Once a
+package has been published through trusted publishing, its **Publishing access** is set to
+"Require two-factor authentication and disallow bypass 2fa tokens", so that no token can
+publish it.
 
 ### Publishing the Python package
 
