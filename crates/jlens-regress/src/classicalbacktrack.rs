@@ -28,7 +28,8 @@ enum BacktrackInsn<Input: InputIndexer> {
     Exhausted,
 
     /// Restore the IP and position.
-    SetPosition { ip: IP, pos: Input::Position },
+    /// IPs here are u32, matching JumpTarget, to keep this enum small.
+    SetPosition { ip: u32, pos: Input::Position },
 
     SetLoopData {
         id: LoopID,
@@ -43,7 +44,7 @@ enum BacktrackInsn<Input: InputIndexer> {
     EnterNonGreedyLoop {
         // The IP of the loop.
         // This is guaranteed to point to an EnterLoopInsn.
-        ip: IP,
+        ip: u32,
         // The input position of the loop before entering it.
         // This is used to set up backtracking that restores this position.
         orig_pos: Input::Position,
@@ -51,13 +52,15 @@ enum BacktrackInsn<Input: InputIndexer> {
     },
 
     GreedyLoop1Char {
-        continuation: IP,
+        // The IP to resume at.
+        continuation: u32,
         min: Input::Position,
         max: Input::Position,
     },
 
     NonGreedyLoop1Char {
-        continuation: IP,
+        // The IP to resume at.
+        continuation: u32,
         min: Input::Position,
         max: Input::Position,
     },
@@ -187,7 +190,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                 let orig_pos = loop_data.entry;
                 loop_data.entry = pos;
                 self.bts.push(BacktrackInsn::EnterNonGreedyLoop {
-                    ip,
+                    ip: ip as u32,
                     orig_pos,
                     data: LoopData {
                         iters: iteration,
@@ -200,7 +203,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                 debug_assert!(loop_fields.greedy, "Should be greedy");
                 // Both arms are viable; backtrack out of the loop.
                 self.bts.push(BacktrackInsn::SetPosition {
-                    ip: loop_not_taken_ip,
+                    ip: loop_not_taken_ip as u32,
                     pos,
                 });
                 Self::prepare_to_enter_loop(&mut self.bts, pos, loop_fields, loop_data, iteration);
@@ -453,13 +456,13 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
             // Backtracking is possible.
             let bti = if greedy {
                 BacktrackInsn::GreedyLoop1Char {
-                    continuation,
+                    continuation: continuation as u32,
                     min: min_pos,
                     max: max_pos,
                 }
             } else {
                 BacktrackInsn::NonGreedyLoop1Char {
-                    continuation,
+                    continuation: continuation as u32,
                     min: min_pos,
                     max: max_pos,
                 }
@@ -545,7 +548,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                     ip: saved_ip,
                     pos: saved_pos,
                 } => {
-                    *ip = *saved_ip;
+                    *ip = *saved_ip as IP;
                     *pos = *saved_pos;
                     self.pop_backtrack();
                     return true;
@@ -564,6 +567,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                     orig_pos,
                     data,
                 } => {
+                    let loop_ip = loop_ip as IP;
                     *ip = loop_ip + 1;
                     *pos = data.entry;
                     let loop_fields = match &self.re.insns.iat(loop_ip) {
@@ -619,7 +623,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                     } else {
                         rs_unreachable!("Should always be able to advance since min != max")
                     }
-                    *ip = *continuation;
+                    *ip = *continuation as IP;
                     return true;
                 }
 
@@ -650,7 +654,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                     } else {
                         rs_unreachable!("Should always be able to advance since min != max")
                     }
-                    *ip = *continuation;
+                    *ip = *continuation as IP;
                     return true;
                 }
             }
@@ -964,7 +968,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
 
                     &Insn::Alt { secondary } => {
                         self.push_backtrack(BacktrackInsn::SetPosition {
-                            ip: secondary as IP,
+                            ip: secondary,
                             pos,
                         });
                         next_or_bt!(true);
