@@ -18,7 +18,7 @@ use crate::scm::SingleCharMatcher;
 use crate::types::{CaptureGroupID, GroupData, IP, LoopData, LoopID, MAX_CAPTURE_GROUPS};
 use crate::util::DebugCheckIndex;
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::ops::Range;
 
 #[derive(Clone, Debug)]
@@ -65,10 +65,10 @@ enum BacktrackInsn<Input: InputIndexer> {
     },
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct State<Position: PositionType> {
-    loops: Vec<LoopData<Position>>,
-    groups: Vec<GroupData<Position>>,
+    loops: Box<[LoopData<Position>]>,
+    groups: Box<[GroupData<Position>]>,
 }
 
 #[derive(Debug)]
@@ -95,8 +95,8 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
             re,
             bts: vec![BacktrackInsn::Exhausted],
             s: State {
-                loops: vec![LoopData::new(entry); re.loops as usize],
-                groups: vec![GroupData::new(); re.groups as usize],
+                loops: vec![LoopData::new(entry); re.loops as usize].into_boxed_slice(),
+                groups: vec![GroupData::new(); re.groups as usize].into_boxed_slice(),
             },
             poll: Poll::new(interrupt),
         }
@@ -515,7 +515,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                 });
             }
         } else {
-            self.s.groups.splice(range, saved_groups);
+            self.s.groups.mat(range).copy_from_slice(&saved_groups);
         }
         matched != negate
     }
