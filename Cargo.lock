@@ -810,6 +810,7 @@ version = "0.21.2"
 dependencies = [
  "hashbrown",
  "memchr",
+ "serde_json",
 ]
 
 [[package]]

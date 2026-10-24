@@ -2,14 +2,56 @@
 
 /// Test that \p pattern fails to parse with default flags.
 pub fn test_parse_fails(pattern: &str) {
+    record(pattern, "", None);
     let res = regress::Regex::new(pattern);
     assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);
 }
 
 /// Test that \p pattern fails to parse with flags.
 pub fn test_parse_fails_flags(pattern: &str, flags: &str) {
+    record(pattern, flags, None);
     let res = regress::Regex::with_flags(pattern, flags);
     assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);
+}
+
+/// jlens-regress: with `JLENS_REGRESS_RECORD` set to a file, appends to it, as a JSON line,
+/// a pattern the tests compile, or a search they run, for `cargo xtask regex-corpus`, which
+/// asks V8 for its answer to each. A search is recorded as JavaScript's `exec` sees it, with
+/// `lastIndex` in UTF-16 code units.
+fn record(pattern: &str, flags: &str, search: Option<(&str, usize)>) {
+    use std::collections::HashSet;
+    use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
+    /// The file, and the lines written to it.
+    type Recorder = Mutex<(std::fs::File, HashSet<String>)>;
+    static RECORDER: OnceLock<Option<Recorder>> = OnceLock::new();
+    let recorder = RECORDER.get_or_init(|| {
+        let path = std::env::var_os("JLENS_REGRESS_RECORD")?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("JLENS_REGRESS_RECORD opens");
+        Some(Mutex::new((file, HashSet::new())))
+    });
+    let Some(recorder) = recorder else { return };
+    // The test binary, `pcre_tests-<hash>`, names the file of the test.
+    let exe = std::env::current_exe().expect("the test binary has a path");
+    let stem = exe.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+    let test = stem.rsplit_once('-').map_or(stem, |(name, _)| name);
+    let mut line = serde_json::json!({ "test": test, "pattern": pattern, "flags": flags });
+    if let Some((input, start)) = search {
+        line["input"] = input.into();
+        line["lastIndex"] = input[..start.min(input.len())]
+            .encode_utf16()
+            .count()
+            .into();
+    }
+    let line = line.to_string();
+    let mut recorder = recorder.lock().unwrap_or_else(|e| e.into_inner());
+    if recorder.1.insert(line.clone()) {
+        writeln!(recorder.0, "{line}").expect("JLENS_REGRESS_RECORD writes");
+    }
 }
 
 /// Format a Match by inserting commas between all capture groups.
@@ -77,12 +119,16 @@ impl VecTestHelpers for Vec<&str> {
 pub struct TestCompiledRegex {
     re: regress::Regex,
     tc: TestConfig,
+    // jlens-regress: what `record` writes.
+    pattern: String,
+    flags: String,
 }
 
 impl TestCompiledRegex {
     /// Search for self in \p input, returning a list of all matches.
     #[track_caller]
     pub fn matches(&'_ self, input: &'_ str, start: usize) -> Vec<regress::Match> {
+        record(&self.pattern, &self.flags, Some((input, start)));
         use regress::backends as rbe;
         #[cfg(feature = "utf16")]
         {
@@ -329,6 +375,7 @@ impl TestConfig {
     /// Compile a pattern to a regex, with given flags.
     #[track_caller]
     pub fn compilef(&self, pattern: &str, flags_str: &str) -> TestCompiledRegex {
+        record(pattern, flags_str, None);
         let mut flags = regress::Flags::from(flags_str);
         flags.no_opt = !self.optimize;
 
@@ -343,6 +390,8 @@ impl TestConfig {
         TestCompiledRegex {
             re: re.unwrap(),
             tc: *self,
+            pattern: pattern.to_string(),
+            flags: flags_str.to_string(),
         }
     }
 

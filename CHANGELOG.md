@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `jlens-regress` is tested against a corpus of V8's answers: the patterns and `exec` calls of
+  test262's RegExp tests and of the crate's own tests, 18,954 cases replayed in Node.js 24.19.
+  `cargo xtask regex-corpus` rebuilds it; `cargo test` checks every case. The cases where the
+  crate differs from V8 are listed with their reason.
+
 ### Changed
 
 - `jlens-regress` is jlens's own fork of `regress`, no longer a temporary one (ADR 0020): jlens
@@ -30,6 +37,9 @@ All notable changes are recorded here. The format follows
   - Class sets with the `v` flag: a single `&` keeps its first operand, negated sets that contain
     strings are corrected, and case is folded before a nested set is inverted. jsonata-js never
     uses the `v` flag, but `jlens-regress` users may.
+- Regular expressions: `\u{...}` is no longer a code point escape, as in jsonata-js, which never
+  sets the `u` flag: `\u` is the letter `u` and the braces a quantifier or themselves, so
+  `/\u{2}/` matches `"uu"` and `/\u{41}/` no longer matches `"A"`. Found by the corpus of V8's answers.
 
 ## [0.21.2]
 

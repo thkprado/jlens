@@ -23,14 +23,39 @@ assert!(re.find_from_interruptible(&text, 0, || Instant::now() >= deadline).is_e
 ```
 
 The library keeps upstream's name, `regress`. Everything else is regress 0.12.0, under the same
-licences (MIT or Apache-2.0, see `LICENSE-MIT` and `LICENSE-APACHE`), apart from the upstream
-commits ported below.
+licences (MIT or Apache-2.0, see `LICENSE-MIT` and `LICENSE-APACHE`), apart from the fixes and
+the upstream commits ported below.
 
 The fork is jlens's own and is maintained with jlens
 ([ADR 0020](https://github.com/thkprado/jlens/blob/main/docs/src/adr/0020-own-regress-fork.md)):
 it is not rebased onto new regress versions. jlens ports upstream's fixes one commit at a time,
 and keeps its own changes to the interrupt and to bugs it finds. Report every problem with this
 crate at jlens, not at regress.
+
+## Tested against V8
+
+Besides upstream's tests, a corpus of V8's own answers checks the engine
+([`tests/corpus`](https://github.com/thkprado/jlens/tree/main/crates/jlens-regress/tests/corpus)).
+`cargo xtask regex-corpus` runs test262's `built-ins/RegExp` and `annexB/built-ins/RegExp`
+tests in Node.js, recording every pattern they compile and every `exec` they call, and the
+patterns and searches of this crate's own tests; then it asks V8 for its answer to each. The
+corpus holds 18,954 cases from test262 commit `d53ebc8` and Node.js 24.19 (V8 13.6): 3,898
+patterns that compile or not, and 15,056 searches with their match and groups. 7,300 of them
+(39 %) have neither the `u` nor the `v` flag, the mode JavaScript uses by default.
+
+`cargo test` runs every case, through `find_from_interruptible` on a `&str`. 60 cases are not
+compared, because a `&str` cannot hold them: a lone surrogate in the pattern or the input, or a
+match that starts or ends between the halves of a surrogate pair. 12 cases differ, each listed
+with its reason in `differences.txt`: without `u` or `v`, JavaScript matches UTF-16 code units
+and this crate matches characters, so `/^.$/` does not match `"𐌀"` in V8; and a V8 bug with
+`[^\q{a|b}]` under the flags `v` and `i`.
+
+## Fixed in jlens-regress
+
+- Without the `u` or `v` flag, `\u{...}` is no longer a code point escape: as in JavaScript,
+  `\u` is the letter `u` and the braces a quantifier or themselves, so `/\u{2}/` matches `"uu"`
+  and `/\u{3f}/` matches `"u{3f}"`. Named groups take `\u{...}` in every mode. Found by the
+  corpus above; upstream's tests ran test262's examples of the escape without their `u` flag.
 
 ## Ported from upstream
 

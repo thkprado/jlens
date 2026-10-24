@@ -1,0 +1,14 @@
+# Cases of v8.json where jlens-regress differs from V8, one per line: the case as
+# tests/corpus.rs prints it, a tab, then "# " and the reason.
+{"pattern":"^.$","flags":"s","input":"𐌀"}	# without u or v, V8 matches UTF-16 code units: "𐌀" is two to it, so "^.$" fails; regress matches characters
+{"pattern":"^.$","flags":"ms","input":"𐌀"}	# without u or v, V8 matches UTF-16 code units: "𐌀" is two to it, so "^.$" fails; regress matches characters
+{"pattern":"^.$","flags":"","input":"𐌀"}	# without u or v, V8 matches UTF-16 code units: "𐌀" is two to it, so "^.$" fails; regress matches characters
+{"pattern":"^.$","flags":"m","input":"𐌀"}	# without u or v, V8 matches UTF-16 code units: "𐌀" is two to it, so "^.$" fails; regress matches characters
+{"pattern":"(?s:^.$)","flags":"","input":"𐌀"}	# without u or v, V8 matches UTF-16 code units: "𐌀" is two to it, so "^.$" fails; regress matches characters
+{"pattern":"(?s-:^.$)","flags":"","input":"𐌀"}	# without u or v, V8 matches UTF-16 code units: "𐌀" is two to it, so "^.$" fails; regress matches characters
+{"pattern":"(?-s:^.$)","flags":"s","input":"𐌀"}	# without u or v, V8 matches UTF-16 code units: "𐌀" is two to it, so "^.$" fails; regress matches characters
+{"pattern":"(?-s:(?s:^.$))","flags":"s","input":"𐌀"}	# without u or v, V8 matches UTF-16 code units: "𐌀" is two to it, so "^.$" fails; regress matches characters
+{"pattern":"(?-s:(?s-:^.$))","flags":"s","input":"𐌀"}	# without u or v, V8 matches UTF-16 code units: "𐌀" is two to it, so "^.$" fails; regress matches characters
+{"pattern":"(?s:(?-s:^.$))","flags":"","input":"𐌀"}	# without u or v, V8 matches UTF-16 code units: "𐌀" is two to it, so "^.$" fails; regress matches characters
+{"pattern":"(?s-:(?-s:^.$))","flags":"","input":"𐌀"}	# without u or v, V8 matches UTF-16 code units: "𐌀" is two to it, so "^.$" fails; regress matches characters
+{"pattern":"[^\\q{a|b}]","flags":"vig","input":"A","lastIndex":0}	# a V8 bug: with v and i, [^\q{a|b}] is the complement of {a, b} after case folding (CharacterComplement), so "A" folds to "a" and does not match; V8 matches it, as it does /[^\q{a}]/vi but not /[^a]/vi

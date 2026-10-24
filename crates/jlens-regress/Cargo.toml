@@ -49,3 +49,7 @@ memchr = { version = "2.4.0", default-features = false }
 # Upstream code that newer clippy versions flag; left as is to keep the diff small.
 [lints.clippy]
 single_range_in_vec_init = "allow"
+
+# jlens-regress: reads the corpus of V8's answers (tests/corpus.rs).
+[dev-dependencies]
+serde_json.workspace = true

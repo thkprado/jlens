@@ -1585,7 +1585,10 @@ where
             }
             // CharacterEscape :: RegExpUnicodeEscapeSequence
             'u' => {
-                if let Some(c) = self.try_escape_unicode_sequence() {
+                // jlens-regress: `\u{...}` only in Unicode mode; without it, `\u` is `u` and
+                // `{...}` a quantifier or literal braces, as in JavaScript (Annex B).
+                let braces = self.flags.unicode || self.flags.unicode_sets;
+                if let Some(c) = self.try_escape_unicode_sequence(braces) {
                     Ok(c)
                 } else if !self.flags.unicode {
                     // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
@@ -1798,11 +1801,12 @@ where
     }
 
     #[allow(clippy::branches_sharing_code)]
-    fn try_escape_unicode_sequence(&mut self) -> Option<u32> {
+    fn try_escape_unicode_sequence(&mut self, braces: bool) -> Option<u32> {
         let mut orig_input = self.input.clone();
 
         // Support \u{X..X} (Unicode CodePoint)
-        if self.try_consume('{') {
+        // jlens-regress: only where `braces` says so. Group names take it in any mode.
+        if braces && self.try_consume('{') {
             let mut s = String::new();
             loop {
                 match self.next().and_then(char::from_u32) {
@@ -1897,7 +1901,10 @@ where
 
         if let Some(mut c) = self.next().and_then(char::from_u32) {
             if c == '\\' && self.try_consume('u') {
-                if let Some(escaped) = self.try_escape_unicode_sequence().and_then(char::from_u32) {
+                if let Some(escaped) = self
+                    .try_escape_unicode_sequence(true)
+                    .and_then(char::from_u32)
+                {
                     c = escaped;
                 } else {
                     self.input = orig_input;
@@ -1919,8 +1926,9 @@ where
         loop {
             if let Some(mut c) = self.next().and_then(char::from_u32) {
                 if c == '\\' && self.try_consume('u') {
-                    if let Some(escaped) =
-                        self.try_escape_unicode_sequence().and_then(char::from_u32)
+                    if let Some(escaped) = self
+                        .try_escape_unicode_sequence(true)
+                        .and_then(char::from_u32)
                     {
                         c = escaped;
                     } else {

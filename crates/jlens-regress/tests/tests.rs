@@ -1478,13 +1478,25 @@ fn run_regexp_unicode_escape() {
 #[rustfmt::skip]
 fn run_regexp_unicode_escape_tc(tc: TestConfig) {
     // From 262 test/language/literals/regexp/u-unicode-esc.js
-    tc.compilef(r#"\u{0}"#, "").test_succeeds("\u{0}");
-    tc.compilef(r#"\u{1}"#, "").test_succeeds("\u{1}");
-    tc.compilef(r#"\u{1}"#, "").test_fails("u");
-    tc.compilef(r#"\u{3f}"#, "").test_succeeds("?");
-    tc.compilef(r#"\u{000000003f}"#, "").test_succeeds("?");
-    tc.compilef(r#"\u{3F}"#, "").test_succeeds("?");
-    tc.compilef(r#"\u{10ffff}"#, "").test_succeeds("\u{10ffff}");
+    // jlens-regress: with its `u` flag, which upstream leaves out.
+    tc.compilef(r#"\u{0}"#, "u").test_succeeds("\u{0}");
+    tc.compilef(r#"\u{1}"#, "u").test_succeeds("\u{1}");
+    tc.compilef(r#"\u{1}"#, "u").test_fails("u");
+    tc.compilef(r#"\u{3f}"#, "u").test_succeeds("?");
+    tc.compilef(r#"\u{000000003f}"#, "u").test_succeeds("?");
+    tc.compilef(r#"\u{3F}"#, "u").test_succeeds("?");
+    tc.compilef(r#"\u{10ffff}"#, "u").test_succeeds("\u{10ffff}");
+
+    // jlens-regress: without it, `\u` is `u`, and the braces a quantifier or themselves.
+    tc.compilef(r#"\u{1}"#, "").match1f("u").test_eq("u");
+    tc.compilef(r#"\u{2}"#, "").match1f("uuu").test_eq("uu");
+    tc.compilef(r#"x\u{0}"#, "").match1f("xu").test_eq("x");
+    tc.compilef(r#"\u{3f}"#, "").test_fails("?");
+    tc.compilef(r#"\u{3f}"#, "").match1f("u{3f}").test_eq("u{3f}");
+    tc.compilef(r#"[\u{41}]"#, "").test_fails("A");
+    tc.compilef(r#"[\u{41}]+"#, "").match1f("{u4}1").test_eq("{u4}1");
+    tc.compilef(r#"[\u{41}]"#, "v").test_succeeds("A");
+    tc.compilef(r#"(?<\u{61}>b)"#, "").match1_named_group("b", "a").test_eq("b");
 }
 
 #[test]
@@ -1784,14 +1796,16 @@ fn test_escapes_folding() {
 
 fn test_escapes_folding_tc(tc: TestConfig) {
     // Regression test for failing to fold characters which come from escapes.
-    tc.test_match_fails(r"\u{41}", "", "a");
-    tc.test_match_succeeds(r"\u{41}", "", "A");
-    tc.test_match_fails(r"\u{61}", "", "A");
-    tc.test_match_succeeds(r"\u{61}", "", "a");
-    tc.test_match_succeeds(r"\u{41}", "i", "a");
-    tc.test_match_succeeds(r"\u{41}", "i", "A");
-    tc.test_match_succeeds(r"\u{61}", "i", "a");
-    tc.test_match_succeeds(r"\u{61}", "i", "A");
+    // jlens-regress: `A` rather than upstream's `\u{41}`, which is `\u` and `{41}` without
+    // the `u` flag. Likewise below.
+    tc.test_match_fails(r"\u0041", "", "a");
+    tc.test_match_succeeds(r"\u0041", "", "A");
+    tc.test_match_fails(r"\u0061", "", "A");
+    tc.test_match_succeeds(r"\u0061", "", "a");
+    tc.test_match_succeeds(r"\u0041", "i", "a");
+    tc.test_match_succeeds(r"\u0041", "i", "A");
+    tc.test_match_succeeds(r"\u0061", "i", "a");
+    tc.test_match_succeeds(r"\u0061", "i", "A");
 }
 
 #[test]
@@ -1803,38 +1817,38 @@ fn test_high_folds_tc(tc: TestConfig) {
     // Regression test for bogus folding.
     // We incorrectly folded certain characters in delta blocks:
     // we folded U+100 to U+101 (correctly) but then U+101 to U+102 (wrong).
-    tc.test_match_succeeds(r"\u{100}", "", "\u{100}");
-    tc.test_match_succeeds(r"\u{100}", "i", "\u{100}");
+    tc.test_match_succeeds(r"\u0100", "", "\u{100}");
+    tc.test_match_succeeds(r"\u0100", "i", "\u{100}");
 
-    tc.test_match_fails(r"\u{100}", "", "\u{101}");
-    tc.test_match_succeeds(r"\u{100}", "i", "\u{101}");
+    tc.test_match_fails(r"\u0100", "", "\u{101}");
+    tc.test_match_succeeds(r"\u0100", "i", "\u{101}");
 
-    tc.test_match_succeeds(r"\u{101}", "", "\u{101}");
-    tc.test_match_succeeds(r"\u{101}", "i", "\u{101}");
+    tc.test_match_succeeds(r"\u0101", "", "\u{101}");
+    tc.test_match_succeeds(r"\u0101", "i", "\u{101}");
 
-    tc.test_match_fails(r"\u{101}", "", "\u{102}");
-    tc.test_match_fails(r"\u{101}", "i", "\u{102}");
+    tc.test_match_fails(r"\u0101", "", "\u{102}");
+    tc.test_match_fails(r"\u0101", "i", "\u{102}");
 
     // Exercise a "mod 4 range":
     //   U+1B8 folds to U+1B9
     //   U+1BC folds to U+1BD
     // Codepoints between fold to themselves.
-    tc.test_match_succeeds(r"\u{1B8}", "", "\u{1B8}");
-    tc.test_match_succeeds(r"\u{1B8}", "i", "\u{1B8}");
-    tc.test_match_fails(r"\u{1B8}", "", "\u{1B9}");
-    tc.test_match_succeeds(r"\u{1B8}", "i", "\u{1B9}");
-    tc.test_match_succeeds(r"\u{1B9}", "", "\u{1B9}");
-    tc.test_match_succeeds(r"\u{1B9}", "i", "\u{1B9}");
-    tc.test_match_fails(r"\u{1B9}", "", "\u{1BA}");
-    tc.test_match_fails(r"\u{1B9}", "i", "\u{1BA}");
-    tc.test_match_succeeds(r"\u{1BC}", "", "\u{1BC}");
-    tc.test_match_succeeds(r"\u{1BC}", "i", "\u{1BC}");
-    tc.test_match_fails(r"\u{1BC}", "", "\u{1BD}");
-    tc.test_match_succeeds(r"\u{1BC}", "i", "\u{1BD}");
-    tc.test_match_succeeds(r"\u{1BD}", "", "\u{1BD}");
-    tc.test_match_succeeds(r"\u{1BD}", "i", "\u{1BD}");
-    tc.test_match_fails(r"\u{1BD}", "", "\u{1BE}");
-    tc.test_match_fails(r"\u{1BD}", "i", "\u{1BE}");
+    tc.test_match_succeeds(r"\u01B8", "", "\u{1B8}");
+    tc.test_match_succeeds(r"\u01B8", "i", "\u{1B8}");
+    tc.test_match_fails(r"\u01B8", "", "\u{1B9}");
+    tc.test_match_succeeds(r"\u01B8", "i", "\u{1B9}");
+    tc.test_match_succeeds(r"\u01B9", "", "\u{1B9}");
+    tc.test_match_succeeds(r"\u01B9", "i", "\u{1B9}");
+    tc.test_match_fails(r"\u01B9", "", "\u{1BA}");
+    tc.test_match_fails(r"\u01B9", "i", "\u{1BA}");
+    tc.test_match_succeeds(r"\u01BC", "", "\u{1BC}");
+    tc.test_match_succeeds(r"\u01BC", "i", "\u{1BC}");
+    tc.test_match_fails(r"\u01BC", "", "\u{1BD}");
+    tc.test_match_succeeds(r"\u01BC", "i", "\u{1BD}");
+    tc.test_match_succeeds(r"\u01BD", "", "\u{1BD}");
+    tc.test_match_succeeds(r"\u01BD", "i", "\u{1BD}");
+    tc.test_match_fails(r"\u01BD", "", "\u{1BE}");
+    tc.test_match_fails(r"\u01BD", "i", "\u{1BE}");
 }
 
 #[test]
@@ -1888,12 +1902,12 @@ fn test_unicode_folding() {
 
 /// 262 test/language/literals/regexp/u-case-mapping.js
 fn test_unicode_folding_tc(tc: TestConfig) {
-    tc.test_match_fails(r"\u{212A}", "i", "k");
-    tc.test_match_fails(r"\u{212A}", "i", "K");
-    tc.test_match_fails(r"\u{212A}", "u", "k");
-    tc.test_match_fails(r"\u{212A}", "u", "K");
-    tc.test_match_succeeds(r"\u{212A}", "iu", "k");
-    tc.test_match_succeeds(r"\u{212A}", "iu", "K");
+    tc.test_match_fails(r"\u212A", "i", "k");
+    tc.test_match_fails(r"\u212A", "i", "K");
+    tc.test_match_fails(r"\u212A", "u", "k");
+    tc.test_match_fails(r"\u212A", "u", "K");
+    tc.test_match_succeeds(r"\u212A", "iu", "k");
+    tc.test_match_succeeds(r"\u212A", "iu", "K");
 }
 
 #[test]

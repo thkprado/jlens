@@ -17,7 +17,7 @@ in `docs/`.
 | `crates/jlens-python` | the Python package `jlens` (ADR 0014), PyO3 bindings built by maturin; its Rust code is not unit-tested by `cargo test`; its own rules are in `crates/jlens-python/AGENTS.md` |
 | `tests/jsonata-suite` | the vendored official suite (do not edit by hand; `cargo xtask update-suite` replaces it and applies `SUITE_EDITS`) |
 | `docs/src` | the book; `language/functions.md` and `language/errors.md` are generated |
-| `xtask/src` | `cargo xtask` commands: conformance, gen-docs, doc-check, differential, fuzz-seed, fuzz-replay, homebrew, npm-cli, vscode, wasm, wasm-test, serve, site, ab |
+| `xtask/src` | `cargo xtask` commands: conformance, gen-docs, doc-check, differential, regex-corpus, fuzz-seed, fuzz-replay, homebrew, npm-cli, vscode, wasm, wasm-test, serve, site, ab |
 | `benches/` | the benchmark workload; `cargo xtask ab` compares two revisions; `benches/compare` compares jlens with jsonata-js (npm): speed, the book's examples, and `cargo xtask differential` |
 | `editors/vscode` | the VS Code extension (ADR 0013; outside the Cargo workspace); its grammar test tokenizes the suite and the book; its own rules are in `editors/vscode/AGENTS.md` |
 | `fuzz/` | cargo-fuzz targets (nightly, Linux; outside the workspace), their bodies in `src/targets.rs`; corpora seeded by `cargo xtask fuzz-seed`, run weekly by `.github/workflows/fuzz.yml`; `cargo xtask fuzz-replay` reruns saved inputs on any platform |

@@ -206,3 +206,31 @@ counts them apart:
 
 The `Differential` workflow runs 20,000 cases from a new seed every week, and on demand with a
 chosen number of cases and seed. When it fails, the cases and outcomes are attached to the run.
+
+## The regular expression engine
+
+The suite and the differential test reach `jlens-regress` only through JSONata, with the
+patterns their expressions happen to hold. The engine has its own judge: a corpus of V8's
+answers in `crates/jlens-regress/tests/corpus/v8.json`, which `cargo test` runs. Each case
+compiles a pattern, which V8 accepted or rejected, or runs one `exec`: the pattern, the flags,
+the input, `lastIndex`, and V8's match with the ranges of its groups, in UTF-16 code units.
+
+```sh
+cargo xtask regex-corpus          # rebuild it from the test262 commit it came from
+cargo xtask regex-corpus main     # or from test262's latest commit
+```
+
+The command fetches test262's `built-ins/RegExp` and `annexB/built-ins/RegExp` tests into
+`target/test262` and runs each in a fresh Node.js realm, whose `RegExp.prototype.exec` and
+`RegExp` constructor record their calls. `test`, `match`, `replace`, `split` and the other
+methods all go through `exec`, and whether a test passes does not matter, only what it calls.
+The negative syntax tests contribute their literal. It also records the patterns and searches of
+the crate's own tests (`JLENS_REGRESS_RECORD`). Then V8 answers each call in a realm nobody
+touched. A loop over every code point with one pattern is sampled: every rare answer is kept,
+and an even sample of the common ones.
+
+The test runs the cases as jlens does, with `find_from_interruptible` on a `&str`. A case with a
+lone surrogate, or whose match starts or ends inside a surrogate pair, is counted and skipped:
+a `&str` cannot hold it. Any other difference fails the test unless
+`tests/corpus/differences.txt` lists it with its reason, and a listed case that agrees again
+fails it too.
