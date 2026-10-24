@@ -6,10 +6,20 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.22.0]
+
+Regular expressions behave more like JavaScript's: `jlens-regress` becomes jlens's own fork of
+`regress` for good (ADR 0020), ports upstream's fixes, and is checked against V8 with a corpus of
+test262's answers and a differential test of generated patterns, which found ten bugs, among
+them case-insensitive matching without the `u` flag, the mode jsonata-js uses. The engine has a
+benchmark of its own, and the interrupt that bounds a match costs 1.7 % on it instead of 2.5 %.
+Patterns with a backreference are about 15 % slower, the cost of a correctness fix; no other
+case of the benchmarks is more than 2 % slower than in 0.21.2.
+
 ### Added
 
 - `jlens-regress` is tested against a corpus of V8's answers: the patterns and `exec` calls of
-  test262's RegExp tests and of the crate's own tests, 18,954 cases replayed in Node.js 24.19.
+  test262's RegExp tests and of the crate's own tests, 19,108 cases replayed in Node.js 24.19.
   `cargo xtask regex-corpus` rebuilds it; `cargo test` checks every case. The cases where the
   crate differs from V8 are listed with their reason.
 - `cargo xtask regex-differential` compares `jlens-regress` with V8 on generated regular
@@ -843,7 +853,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.21.2...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/thkprado/jlens/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/thkprado/jlens/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/thkprado/jlens/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/thkprado/jlens/compare/v0.20.0...v0.21.0
