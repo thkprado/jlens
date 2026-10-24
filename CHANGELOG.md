@@ -16,6 +16,10 @@ All notable changes are recorded here. The format follows
   expressions: whether each compiles, and every match of a few inputs with its groups. Most
   patterns have neither `u` nor `v`, as in jsonata-js. The `Differential` workflow runs 20,000
   of them every week.
+- `jlens-regress` has a benchmark of its own (`cargo bench -p jlens-regress --bench engine`):
+  17 searches and 3 compilations, with and without an interrupt, and V8's times for the same
+  through Node.js. The performance page records them, and how to measure a change to the
+  engine.
 
 ### Changed
 
@@ -27,6 +31,9 @@ All notable changes are recorded here. The format follows
   which jlens does not need. The fork's README lists every commit, ported or skipped, with its
   reason. Patterns with a backreference are slower, by about 15 % for `(\w+)\s+\1` over prose:
   this is the cost of the fix to the capture state below.
+- A regular expression matched under a timeout or a cancellation token counts its steps in a
+  register instead of in memory. The check costs 1.7 % on average on the engine's benchmark,
+  against 2.5 % before, and no longer 7 to 11 % on lookaheads or case-insensitive Unicode text.
 
 ### Fixed
 

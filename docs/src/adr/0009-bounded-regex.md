@@ -62,8 +62,19 @@ Choices to make:
      costs 2 to 4.5 % on ordinary matches (the anchored one is 6 % faster with it). That is the
      cost this decision accepts. The 2 % target holds at jlens's level, where `cargo xtask ab`
      measures the evaluations that match through the check (`regex` 2.7 % faster across the
-     engine fixes of 0.22 item 4). The engine's benchmark (0.22) measures it aligned, and looks
-     for what would bring the check under 2 %.
+     engine fixes of 0.22 item 4).
+   - Measured with the engine's benchmark (0.22, `crates/jlens-regress/benches/engine.rs`), whose
+     two variants are binaries of their own: in one binary, two copies of the backtracker that
+     both count nothing differed by up to 16 %, so the example's comparison measured how each
+     copy was inlined more than the check. The counter was a field in memory, and every step
+     waited for the store of the one before: 2.5 % on average over 17 cases, 7 to 11 % on some.
+     Each attempt now counts on a local copy, kept in a register and written back when the
+     attempt ends or enters a lookaround: 1.7 % on average, from 4.6 % faster to 9.5 % slower.
+     The check itself costs about 7 % on a backreference that backtracks one character at a
+     time; the rest of the spread is register allocation, which any change to the backtracker
+     redraws: a variant with the interrupt's code that counts nothing is 12.8 % slower on one
+     case and 9 % faster on another. The 2 % target holds on average; the performance page
+     records each case.
    - jlens passes a check only when the evaluation has a timeout or a cancellation token. Without
      either, the match runs the unchanged code path (the check is a type parameter, so the
      "no check" version compiles to the current code). As with the tracer (ADR 0004), a feature

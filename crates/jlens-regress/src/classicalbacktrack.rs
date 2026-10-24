@@ -656,9 +656,29 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
     fn try_at_pos<Dir: Direction>(
         &mut self,
         inp: Input,
+        ip: IP,
+        pos: Input::Position,
+        dir: Dir,
+    ) -> Option<Input::Position> {
+        // jlens-regress: the attempt counts its steps on a local copy of the counter.
+        if !I::ENABLED {
+            return self.attempt(inp, ip, pos, dir, &mut 0);
+        }
+        let mut countdown = self.poll.countdown;
+        let result = self.attempt(inp, ip, pos, dir, &mut countdown);
+        self.poll.countdown = countdown;
+        result
+    }
+
+    /// The body of `try_at_pos`, which counts its steps on `countdown` (jlens-regress).
+    #[inline(always)]
+    fn attempt<Dir: Direction>(
+        &mut self,
+        inp: Input,
         mut ip: IP,
         mut pos: Input::Position,
         dir: Dir,
+        countdown: &mut u32,
     ) -> Option<Input::Position> {
         debug_assert!(
             self.bts.len() == 1,
@@ -911,6 +931,11 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                         end_group,
                         continuation,
                     } => {
+                        // jlens-regress: the lookaround's attempt counts on, and
+                        // interrupts through, `self.poll`.
+                        if I::ENABLED {
+                            self.poll.countdown = *countdown;
+                        }
                         let matched = self.run_lookaround::<Forward>(
                             input,
                             ip + 1,
@@ -919,9 +944,12 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                             end_group,
                             negate,
                         );
-                        if I::ENABLED && self.poll.interrupted {
-                            self.bts.truncate(1);
-                            return None;
+                        if I::ENABLED {
+                            *countdown = self.poll.countdown;
+                            if self.poll.interrupted {
+                                self.bts.truncate(1);
+                                return None;
+                            }
                         }
                         if matched {
                             ip = continuation as IP;
@@ -937,6 +965,11 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                         end_group,
                         continuation,
                     } => {
+                        // jlens-regress: the lookaround's attempt counts on, and
+                        // interrupts through, `self.poll`.
+                        if I::ENABLED {
+                            self.poll.countdown = *countdown;
+                        }
                         let matched = self.run_lookaround::<Backward>(
                             input,
                             ip + 1,
@@ -945,9 +978,12 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                             end_group,
                             negate,
                         );
-                        if I::ENABLED && self.poll.interrupted {
-                            self.bts.truncate(1);
-                            return None;
+                        if I::ENABLED {
+                            *countdown = self.poll.countdown;
+                            if self.poll.interrupted {
+                                self.bts.truncate(1);
+                                return None;
+                            }
                         }
                         if matched {
                             ip = continuation as IP;
@@ -977,7 +1013,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                     }
 
                     &Insn::LoopAgain { begin } => {
-                        if I::ENABLED && self.poll.tick() {
+                        if I::ENABLED && self.poll.tick(countdown) {
                             self.bts.truncate(1);
                             return None;
                         }
@@ -1026,7 +1062,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
 
             // This after the backtrack loop.
             // A break 'backtrack will jump here.
-            if I::ENABLED && self.poll.tick() {
+            if I::ENABLED && self.poll.tick(countdown) {
                 self.bts.truncate(1);
                 return None;
             }

@@ -50,6 +50,12 @@ memchr = { version = "2.4.0", default-features = false }
 [lints.clippy]
 single_range_in_vec_init = "allow"
 
-# jlens-regress: reads the corpus of V8's answers (tests/corpus.rs).
+# jlens-regress: reads the corpus of V8's answers (tests/corpus.rs) and the cases of the
+# benchmark.
 [dev-dependencies]
 serde_json.workspace = true
+
+# jlens-regress: the benchmark of the engine (benches/engine.rs).
+[[bench]]
+name = "engine"
+harness = false

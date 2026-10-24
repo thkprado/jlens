@@ -20,6 +20,7 @@ cargo bench -p jlens-core                     # criterion, native
 cargo xtask ab main .                         # two revisions against each other, native
 cargo xtask wasm && cd benches/compare && npm install && node compare.mjs   # against jsonata-js
 python benches/compare/python.py speed jlens=<python> ...   # against the Python packages
+cargo bench -p jlens-regress --bench engine   # the regular expression engine alone (below)
 ```
 
 ### Comparing two revisions
@@ -420,6 +421,83 @@ the cyclic input is `{"n": 1, "child": {"parent": <the input>}}`:
   jlens finishes.
 - Otherwise, no package stops an endless evaluation by default: set a timeout.
 
+### The regular expression engine
+
+`jlens-regress`, jlens's fork of `regress` ([ADR 0020](../adr/0020-own-regress-fork.md)), has a
+benchmark of its own, `crates/jlens-regress/benches/engine.rs`, whose cases are in
+`engine.json` beside it. Each case finds every match of a pattern in a text, as jlens does: from
+the end of the previous match, without an interrupt, or with one (when the evaluation has a
+timeout or a cancellation token). The texts are 200 lines of a log (15 KB), a sentence of English
+repeated to 12 KB, and a sentence of Portuguese, Greek and Japanese repeated to 20 KB of UTF-8.
+`engine.mjs` runs the same cases in Node.js, with `exec` and the flag `g`, as jsonata-js does.
+
+Each variant is a binary of its own, built with functions and blocks aligned, in a target
+directory of its own:
+
+```sh
+export RUSTFLAGS="-C llvm-args=-align-all-functions=6 -C llvm-args=-align-all-nofallthru-blocks=5"
+export CARGO_TARGET_DIR=target/aligned
+cargo bench -p jlens-regress --bench engine            # without an interrupt
+JLENS_REGRESS_INTERRUPT=1 cargo bench -p jlens-regress --bench engine
+node crates/jlens-regress/benches/engine.mjs           # V8
+```
+
+Each run saves its times and prints what the check costs against the last run of the other
+variant. These numbers are the baseline of the engine: a change to it is measured the same way,
+aligned, against the revision before. Without the alignment, a change that runs no differently
+moves cases by up to 8 % ([ADR 0009](../adr/0009-bounded-regex.md)). Measured for 0.22 (the
+median of 31 samples of at least 5 ms; V8 13.6, Node.js 24.19):
+
+| Case | Pattern | Matches | `jlens-regress` | With an interrupt | V8 |
+|---|---|---:|---:|---:|---:|
+| literal | `status=200` | 200 | 11.7 µs | 12.3 µs (+5.2%) | 16.5 µs |
+| literal, no match | `status=500` | 0 | 392 ns | 393 ns (+0.3%) | 5.5 µs |
+| case-insensitive literal | `lazy dog`, `i` | 200 | 13.7 µs | 15.0 µs (+9.5%) | 12.8 µs |
+| classes | `\d{4}-\d{2}-\d{2}T[\d:]+Z` | 200 | 48.6 µs | 47.9 µs (−1.5%) | 22.9 µs |
+| classes, no match | `\d{3}-\d{4}` | 0 | 5.9 µs | 5.9 µs (0.0%) | 1.5 µs |
+| alternation of words | `\b(?:fox\|dog\|cat)s?\b` | 400 | 190 µs | 190 µs (−0.3%) | 21.2 µs |
+| words | `\b\w+\b` | 2,400 | 366 µs | 380 µs (+3.8%) | 114 µs |
+| captures | `user=(\w+) id=(\d+)` | 200 | 60.6 µs | 57.8 µs (−4.6%) | 15.4 µs |
+| lazy | `path=(.*?) ` | 200 | 65.2 µs | 62.7 µs (−3.8%) | 11.8 µs |
+| lines | `^.*status=200$`, `m` | 200 | 49.6 µs | 51.4 µs (+3.6%) | 17.0 µs |
+| backreference, no match | `(\w+)\s+\1` | 0 | 568 µs | 620 µs (+9.1%) | 142 µs |
+| lookahead | `\w+(?=,)` | 200 | 1.42 ms | 1.42 ms (+0.3%) | 133 µs |
+| lookbehind | `(?<=the )\w+` | 200 | 511 µs | 517 µs (+1.2%) | 48.7 µs |
+| Unicode text | `\S+` | 2,000 | 300 µs | 296 µs (−1.4%) | 113 µs |
+| Unicode text, case-insensitive | `γράμματα`, `i` | 200 | 34.2 µs | 34.7 µs (+1.4%) | 11.0 µs |
+| Unicode property | `\p{L}+`, `u` | 2,000 | 389 µs | 390 µs (+0.2%) | 426 µs |
+| anchored, short text | `^1[0-9]$` on `17` | 1 | 98 ns | 105 ns (+6.9%) | 54 ns |
+
+| Compilation | Pattern | `jlens-regress` | V8 `new RegExp` | V8, and a first `exec` |
+|---|---|---:|---:|---:|
+| date-time | `^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z\|[+-]\d{2}:\d{2})$` | 12.1 µs | 2.6 µs | 24.1 µs |
+| e-mail, case-insensitive | `^[a-z0-9._%+-]+@(?:[a-z0-9-]+\.)+[a-z]{2,}$`, `i` | 8.5 µs | 1.8 µs | 37.5 µs |
+| Unicode property | `\p{L}+`, `u` | 3.9 µs | 39.2 µs | 80.6 µs |
+
+- V8 compiles a pattern to machine code, and is 2 to 11 times faster wherever the engine runs
+  its instructions at many positions of the text: alternations, classes, lookarounds,
+  backreferences. `jlens-regress` is a backtracker that interprets its instructions. It is
+  faster where it can search for a literal first (`memchr`): 1.4 times on `literal`, 14 times
+  on a literal that does not occur; and on `\p{L}+`. The lookarounds are the slowest against
+  V8, 10 times its time; each one allocates a backtracking stack of its own.
+- V8's `new RegExp` only parses the pattern; the first `exec` compiles it, and V8 keeps both by
+  the pattern's source, so the benchmark gives each compilation a pattern V8 has not seen (with
+  an alternative `|<n>` added). jlens compiles a pattern once per expression, when the
+  expression is compiled.
+- **The interrupt** costs 1.7 % over these 17 cases (the geometric mean), from 4.6 % faster to
+  9.5 % slower. Most of that spread is not the check: in a variant that has the interrupt's code
+  but counts no step, `literal` is 12.8 % slower, and `words` 9 % faster. The backtracker is one
+  large function, and any change to it, the check included, makes the compiler allocate its
+  registers anew. Counting itself costs about 7 % on `(\w+)\s+\1`, which backtracks one
+  character at a time, in steps of a few instructions, each with a decrement and a branch more.
+  In 0.21 the counter was in memory, so every step waited for the store of the one before: the
+  check cost about 2.5 % on average, 7 to 11 % on the lookahead, the backreference and
+  case-insensitive Unicode text. Each attempt now counts on a copy that the compiler keeps in a
+  register.
+- Two copies of the backtracker in one binary, as `find_from` and `find_from_interruptible`
+  build, are inlined differently: two copies that both count nothing differ by up to 16 % there.
+  That is why each variant is a binary of its own.
+
 ### What the limits cost
 
 From 0.20 on, every evaluation counts its steps for the step limit
@@ -482,11 +560,8 @@ In WebAssembly the clock is `performance.now()`, a call out of the module, which
 larger cost there.
 
 A regular expression matched under a timeout or a cancellation token checks it every 1,024
-steps of the backtracker ([ADR 0009](../adr/0009-bounded-regex.md)). `jlens-regress`'s
-`interrupt_cost` example compares a match with the check and without it: aligned so that code
-placement does not decide the result, the check costs 2 to 4.5 % on ordinary matches (measured
-for 0.22). Unaligned, the same build moves by up to 8 % from one change of the crate to the
-next, either way, so a revision of the engine is compared aligned, as the ADR shows.
+steps of the backtracker ([ADR 0009](../adr/0009-bounded-regex.md)): 1.7 % on average on the
+[engine's benchmark](#the-regular-expression-engine), with its spread explained there.
 
 ## Using the API efficiently
 

@@ -1,0 +1,49 @@
+{
+  "texts": {
+    "log": {
+      "repeat": "2026-10-11T04:03:31Z INFO user=alice id=1234 path=/api/v1/orders status=200\n",
+      "times": 200
+    },
+    "prose": {
+      "repeat": "The quick brown fox jumps over the lazy dog, again and again. ",
+      "times": 200
+    },
+    "unicode": {
+      "repeat": "São Paulo é o coração da cidade; Ελληνικά γράμματα; 日本語のテキスト。 ",
+      "times": 200
+    },
+    "short": { "repeat": "17", "times": 1 }
+  },
+  "matches": [
+    { "name": "literal", "pattern": "status=200", "flags": "", "text": "log" },
+    { "name": "literal, no match", "pattern": "status=500", "flags": "", "text": "log" },
+    { "name": "case-insensitive literal", "pattern": "lazy dog", "flags": "i", "text": "prose" },
+    { "name": "classes", "pattern": "\\d{4}-\\d{2}-\\d{2}T[\\d:]+Z", "flags": "", "text": "log" },
+    { "name": "classes, no match", "pattern": "\\d{3}-\\d{4}", "flags": "", "text": "prose" },
+    { "name": "alternation of words", "pattern": "\\b(?:fox|dog|cat)s?\\b", "flags": "", "text": "prose" },
+    { "name": "words", "pattern": "\\b\\w+\\b", "flags": "", "text": "prose" },
+    { "name": "captures", "pattern": "user=(\\w+) id=(\\d+)", "flags": "", "text": "log" },
+    { "name": "lazy", "pattern": "path=(.*?) ", "flags": "", "text": "log" },
+    { "name": "lines", "pattern": "^.*status=200$", "flags": "m", "text": "log" },
+    { "name": "backreference, no match", "pattern": "(\\w+)\\s+\\1", "flags": "", "text": "prose" },
+    { "name": "lookahead", "pattern": "\\w+(?=,)", "flags": "", "text": "prose" },
+    { "name": "lookbehind", "pattern": "(?<=the )\\w+", "flags": "", "text": "prose" },
+    { "name": "Unicode text", "pattern": "\\S+", "flags": "", "text": "unicode" },
+    { "name": "Unicode text, case-insensitive", "pattern": "γράμματα", "flags": "i", "text": "unicode" },
+    { "name": "Unicode property", "pattern": "\\p{L}+", "flags": "u", "text": "unicode" },
+    { "name": "anchored, short text", "pattern": "^1[0-9]$", "flags": "", "text": "short" }
+  ],
+  "compiles": [
+    {
+      "name": "compile: date-time",
+      "pattern": "^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.(\\d+))?(Z|[+-]\\d{2}:\\d{2})$",
+      "flags": ""
+    },
+    {
+      "name": "compile: e-mail, case-insensitive",
+      "pattern": "^[a-z0-9._%+-]+@(?:[a-z0-9-]+\\.)+[a-z]{2,}$",
+      "flags": "i"
+    },
+    { "name": "compile: Unicode property", "pattern": "\\p{L}+", "flags": "u" }
+  ]
+}

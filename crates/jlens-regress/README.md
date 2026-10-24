@@ -62,6 +62,11 @@ neither `u` nor `v`. Both engines compile each pattern and search each input as
 agree. jlens's `Differential` workflow runs 20,000 patterns every week. What it found is fixed
 below, and recorded in the corpus by `tests/v8_differential.rs`, V8's bugs included.
 
+A benchmark, `cargo bench --bench engine`, times 17 searches and 3 compilations, with and
+without an interrupt, and `benches/engine.mjs` times the same in V8. How to run it so that its
+numbers can be compared, and the numbers, are on jlens's
+[performance page](https://github.com/thkprado/jlens/blob/main/docs/src/architecture/performance.md#the-regular-expression-engine).
+
 ## Fixed in jlens-regress
 
 - Without the `u` or `v` flag, `\u{...}` is no longer a code point escape: as in JavaScript,

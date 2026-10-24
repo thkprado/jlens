@@ -82,7 +82,10 @@ impl std::error::Error for Interrupted {}
 /// The step counter of one match.
 pub(crate) struct Poll<I> {
     interrupt: I,
-    countdown: u32,
+    /// The steps left before the next check, between two attempts. An attempt counts on a
+    /// copy of its own, which the compiler keeps in a register: a counter in memory makes
+    /// every step wait on its last store.
+    pub(crate) countdown: u32,
     pub(crate) interrupted: bool,
 }
 
@@ -95,17 +98,20 @@ impl<I: Interrupt> Poll<I> {
         }
     }
 
-    /// Counts a step and returns whether the match stops. Callers test `I::ENABLED` first.
+    /// Counts a step on `countdown`, an attempt's copy of the counter, and returns whether the
+    /// match stops. Callers test `I::ENABLED` first.
     #[inline(always)]
-    pub(crate) fn tick(&mut self) -> bool {
-        self.countdown -= 1;
-        self.countdown == 0 && self.check()
+    pub(crate) fn tick(&mut self, countdown: &mut u32) -> bool {
+        *countdown -= 1;
+        *countdown == 0 && {
+            *countdown = INTERRUPT_INTERVAL;
+            self.check()
+        }
     }
 
     #[cold]
     #[inline(never)]
     fn check(&mut self) -> bool {
-        self.countdown = INTERRUPT_INTERVAL;
         self.interrupted = self.interrupted || self.interrupt.should_stop();
         self.interrupted
     }
