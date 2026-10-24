@@ -11,6 +11,25 @@ All notable changes are recorded here. The format follows
 - `jlens-regress` is jlens's own fork of `regress`, no longer a temporary one (ADR 0020): jlens
   no longer plans to go back to `regress`, and ports upstream's fixes one commit at a time instead
   of rebasing the fork onto new versions. Report every problem with the crate at jlens.
+- `jlens-regress` ports 11 of the 22 commits that `regress` made after 0.12.0, reviewed up to
+  `4f2bfeb`. The others are upstream's CI and its backtracking budget (`find_from_budgeted`),
+  which jlens does not need. The fork's README lists every commit, ported or skipped, with its
+  reason. Patterns with a backreference are slower, by about 15 % for `(\w+)\s+\1` over prose:
+  this is the cost of the fix to the capture state below.
+
+### Fixed
+
+- Regular expressions, from the commits ported from `regress`:
+  - Some nested loops, such as `/(?:(?:a?)*)*b/` against `"aa"`, no longer hang, and no longer
+    fail to match where they should, such as `/^(?:(?:x(?:a??))+)+$/` against `"xa"`.
+  - A backreference no longer sees the capture of a path that was backtracked out of:
+    `/(a|a\1)c/` against `"aac"` matches `"ac"` with the group `"a"`, as in JavaScript, not
+    `"aac"`.
+  - A backreference to a duplicate named group refers to whichever group matched:
+    `/(?:(?<a>x)|(?<a>y))\k<a>/` matches `"yy"`.
+  - Class sets with the `v` flag: a single `&` keeps its first operand, negated sets that contain
+    strings are corrected, and case is folded before a nested set is inverted. jsonata-js never
+    uses the `v` flag, but `jlens-regress` users may.
 
 ## [0.21.2]
 

@@ -24,7 +24,7 @@ assert!(re.find_from_interruptible(&text, 0, || Instant::now() >= deadline).is_e
 
 The library keeps upstream's name, `regress`. Everything else is regress 0.12.0, under the same
 licences (MIT or Apache-2.0, see `LICENSE-MIT` and `LICENSE-APACHE`), apart from the upstream
-fixes ported below.
+commits ported below.
 
 The fork is jlens's own and is maintained with jlens
 ([ADR 0020](https://github.com/thkprado/jlens/blob/main/docs/src/adr/0020-own-regress-fork.md)):
@@ -34,7 +34,33 @@ crate at jlens, not at regress.
 
 ## Ported from upstream
 
-Last upstream commit reviewed: `aae35de` (0.12.0). No commit ported yet.
+Last upstream commit reviewed: `4f2bfeb` (2026-10-19, unreleased after 0.12.0). Each port is
+a jlens commit named `jlens-regress: <upstream subject>`, which names the upstream commit.
+
+| Upstream commit | Subject | Ported? |
+|---|---|---|
+| `f830464` | Bump taiki-e/install-action from 2.86.3 to 2.86.5 | Skipped: upstream's CI; jlens's CI tests this crate |
+| `a879f89` | Bump taiki-e/install-action from 2.86.5 to 2.87.3 | Skipped: upstream's CI |
+| `50bead7` | Add an optional backtracking budget | Skipped: `find_from_budgeted`, a feature jlens does not need (the interrupt follows a deadline and a cancellation, ADR 0009) |
+| `9b82b9e` | Drop the u64::MAX sentinel check in charge_backtrack | Skipped: budget code |
+| `a4c1b83` | Merge two impl blocks | Skipped: budget code |
+| `c9c2bad` | Bump taiki-e/install-action from 2.87.3 to 2.87.8 | Skipped: upstream's CI |
+| `771e6c8` | Bump taiki-e/install-action from 2.87.8 to 2.87.11 | Skipped: upstream's CI |
+| `0328ab6` | Bump taiki-e/install-action from 2.87.11 to 2.87.27 | Skipped: upstream's CI |
+| `9247c44` | Keep the first operand before a single & in a class set | Ported |
+| `e182704` | Correct negated class sets that contain strings | Ported |
+| `b1bda4d` | Clarify and improve test coverage of may_contain_strings | Ported |
+| `2d80955` | Fold case before inverting a nested class set | Ported |
+| `7cff490` | Match backreferences to duplicate named groups | Ported |
+| `6f6ff20` | Restore Match doc comment and derive Debug for BudgetedMatch | Skipped: budget code |
+| `c4c3e66` | Abort the entire match after backtracking budget exhaustion | Skipped: budget code |
+| `941e2d8` | Fix a hang in certain nested loops | Ported |
+| `b00b68b` | Fix some clipplies | Ported |
+| `6afa770` | Store backtrack-stack IPs as u32 | Ported: a refactoring of the backtracker, kept to make later ports cheap; no change in speed beyond noise |
+| `452f230` | Save capture group state when exiting a group | Ported. A correctness fix that costs speed: `(\w+)\s+\1` over prose is about 15 % slower |
+| `e99bee9` | Simplify re-entering a non-greedy loop | Ported: as `6afa770` |
+| `1acdb5d` | Backtracking: make loops and groups into boxed slices | Ported: as `6afa770`, without its hunk in the budget code |
+| `4f2bfeb` | CI: install cross via cargo instead of taiki-e/install-action | Skipped: upstream's CI |
 
 The upstream README follows.
 
