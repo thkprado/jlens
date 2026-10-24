@@ -193,8 +193,8 @@ fn uppercase(cu: u32) -> u32 {
 
 // Add all folded characters in the given interval to the given code point set.
 // This skips characters which fold to themselves.
-fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
-    let overlaps = FOLDS.equal_range_by(|tr| {
+fn fold_interval(table: &[FoldRange], iv: Interval, recv: &mut CodePointSet) {
+    let overlaps = table.equal_range_by(|tr| {
         if tr.first() > iv.last {
             Ordering::Greater
         } else if tr.last() < iv.first {
@@ -203,7 +203,7 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
             Ordering::Equal
         }
     });
-    for fr in &FOLDS[overlaps] {
+    for fr in &table[overlaps] {
         debug_assert!(
             fr.transformed_from().overlaps(iv),
             "Interval does not overlap transform"
@@ -238,10 +238,10 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
 
 /// Find all characters that fold into the given interval and add them to the given code point set.
 /// This skips characters which fold to themselves.
-fn unfold_interval(iv: Interval, recv: &mut CodePointSet) {
+fn unfold_interval(table: &[FoldRange], iv: Interval, recv: &mut CodePointSet) {
     // Note: We still need to check all ranges because the relationship between
     // transformed_from and transformed_to intervals can be complex
-    for tr in FOLDS.iter() {
+    for tr in table.iter() {
         if !iv.overlaps(tr.transformed_to()) {
             continue;
         }
@@ -335,18 +335,60 @@ pub(crate) fn expand_code_point(c: u32, icase: bool, unicode: bool) -> Vec<u32> 
 }
 
 // Fold every character in \p input, then find all the prefolds.
-pub fn add_icase_code_points(mut input: CodePointSet) -> CodePointSet {
+pub fn add_icase_code_points(input: CodePointSet) -> CodePointSet {
+    add_case_variants(input, true)
+}
+
+/// jlens-regress: `add_icase_code_points` in either mode. Without `u` or `v`, the variants are
+/// those of Canonicalize's uppercase, not of case folding: `[k]` matches `K`, not the Kelvin sign.
+pub(crate) fn add_case_variants(mut input: CodePointSet, unicode: bool) -> CodePointSet {
+    let table: &[FoldRange] = if unicode { &FOLDS } else { &TO_UPPERCASE };
     let mut folded = input.clone();
     for iv in input.intervals() {
-        fold_interval(*iv, &mut folded)
+        fold_interval(table, *iv, &mut folded)
     }
 
     // Reuse input storage.
     input.clone_from(&folded);
     for iv in folded.intervals() {
-        unfold_interval(*iv, &mut input);
+        unfold_interval(table, *iv, &mut input);
     }
     input
+}
+
+/// jlens-regress: MaybeSimpleCaseFolding of a set, for a class set with the `v` and `i` flags:
+/// the simple case folding of each of its characters.
+pub(crate) fn fold_set(mut cps: CodePointSet) -> CodePointSet {
+    let mut folded = CodePointSet::new();
+    for iv in cps.intervals() {
+        fold_interval(&FOLDS, *iv, &mut folded);
+    }
+    cps.remove(folding_characters().intervals());
+    folded.add_set(cps);
+    folded
+}
+
+/// jlens-regress: the complement of a folded set among the characters that fold to themselves
+/// (CharacterComplement, whose AllCharacters are those with the `v` and `i` flags).
+pub(crate) fn folded_complement(mut cps: CodePointSet) -> CodePointSet {
+    cps.add_set(folding_characters());
+    cps.inverted()
+}
+
+/// The characters whose simple case folding is another character.
+fn folding_characters() -> CodePointSet {
+    let mut result = CodePointSet::new();
+    for fr in FOLDS.iter() {
+        let modulo = fr.predicate_mask() + 1;
+        let mut cp = fr.first();
+        while cp <= fr.last() {
+            if fr.apply(cp) != cp {
+                result.add_one(cp);
+            }
+            cp += modulo;
+        }
+    }
+    result
 }
 
 pub(crate) enum PropertyEscapeKind {
@@ -586,7 +628,7 @@ mod tests {
                     }
                 }
                 let mut cps = CodePointSet::default();
-                fold_interval(Interval { first, last }, &mut cps);
+                fold_interval(&FOLDS, Interval { first, last }, &mut cps);
                 assert_eq!(cps.intervals(), expected.intervals());
 
                 from = last;

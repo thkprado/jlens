@@ -396,16 +396,60 @@ fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet
 
 /// \return a Bracket for a given character escape (positive or negative).
 /// For icase mode, we expand the positive set first, then invert if needed.
-fn make_bracket_class(ct: CharacterClassType, positive: bool, icase: bool) -> ir::Node {
+fn make_bracket_class(
+    ct: CharacterClassType,
+    positive: bool,
+    icase: bool,
+    unicode: bool,
+) -> ir::Node {
     // Get the positive (non-inverted) set, perform any icase expansion, then maybe invert.
     let mut cps = codepoints_from_class_positive(ct);
     if icase {
-        cps = unicode::add_icase_code_points(cps);
+        cps = unicode::add_case_variants(cps, unicode);
     }
     if !positive {
         cps = cps.inverted();
     }
     ir::Node::Bracket(BracketContents { invert: false, cps })
+}
+
+/// jlens-regress: an operand of a class set with the `v` flag, with the `i` flag folded
+/// (MaybeSimpleCaseFolding), so that unions, intersections and subtractions compare characters
+/// by their case folding. A nested class and the complement of an escape are folded already.
+fn fold_operand(icase: bool, operand: ClassSetOperand) -> ClassSetOperand {
+    if !icase {
+        return operand;
+    }
+    match operand {
+        ClassSetOperand::ClassSetCharacter(c) => {
+            ClassSetOperand::ClassSetCharacter(unicode::fold(c))
+        }
+        ClassSetOperand::CharacterClassEscape(cps) => {
+            ClassSetOperand::CharacterClassEscape(unicode::fold_set(cps))
+        }
+        ClassSetOperand::Class(class) => ClassSetOperand::Class(class),
+        ClassSetOperand::ClassStringDisjunction(strings, may_contain_strings) => {
+            let folded = strings
+                .0
+                .into_iter()
+                .map(|s| s.iter().map(|&c| unicode::fold(c)).collect())
+                .collect();
+            ClassSetOperand::ClassStringDisjunction(
+                ClassSetAlternativeStrings(folded),
+                may_contain_strings,
+            )
+        }
+    }
+}
+
+/// jlens-regress: the range `first-last` of a class set, folded with the `i` flag.
+fn fold_range(icase: bool, first: CodePoint, last: CodePoint) -> CodePointSet {
+    let range = CodePointSet::from_sorted_disjoint_intervals(Vec::from([Interval { first, last }]));
+    if icase {
+        unicode::fold_set(range)
+    } else {
+        range
+    }
 }
 
 fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom) {
@@ -435,24 +479,35 @@ struct LookaroundParams {
 /// Represents an alternative path in a regex pattern.
 /// For example, in `/(?<a>x)|(?<a>y)/`, the two occurrences of 'a' are in different
 /// alternative paths (separated by |), so they don't conflict.
-/// Each element in the vector is (depth, alternative_index) where:
-/// - depth: parenthesis nesting level (0 = top level)
-/// - alternative_index: which alternative at that depth (0 = first, 1 = second after |, etc.)
+/// Each element in the vector is (group, alternative_index) where:
+/// - group: which group the disjunction belongs to, numbered in the order the groups open
+///   (0 = the pattern itself); jlens-regress: not the nesting depth, which two sibling groups
+///   share
+/// - alternative_index: which alternative of that group (0 = first, 1 = second after |, etc.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AlternativePath {
-    /// Vector of (depth, alternative_index) pairs representing the path through alternatives
+    /// Vector of (group, alternative_index) pairs representing the path through alternatives
     segments: Vec<(usize, usize)>,
 }
 
 impl AlternativePath {
     /// Check if two alternative paths conflict (i.e., are in the same alternative branch).
-    /// Two paths conflict if they share the same alternative indices at all common depth levels.
+    /// Two paths conflict unless, where they first part, they are in different alternatives of
+    /// the same group.
     /// Example:
     ///   - [(0, 0)] and [(0, 0), (1, 0)] conflict (second is nested within first)
-    ///   - [(0, 0)] and [(0, 1)] don't conflict (different alternatives at depth 0)
+    ///   - [(0, 0)] and [(0, 1)] don't conflict (different alternatives of the pattern)
+    ///   - [(0, 0), (1, 0)] and [(0, 0), (2, 1)] conflict (groups 1 and 2 follow each other)
     fn conflicts_with(&self, other: &AlternativePath) -> bool {
-        let min_len = self.segments.len().min(other.segments.len());
-        self.segments[..min_len] == other.segments[..min_len]
+        match self
+            .segments
+            .iter()
+            .zip(&other.segments)
+            .find(|(a, b)| a != b)
+        {
+            Some((a, b)) => a.0 != b.0,
+            None => true,
+        }
     }
 }
 
@@ -624,6 +679,8 @@ where
                                 invert: false,
                                 unicode_icase: self.flags.unicode && self.flags.icase,
                             });
+                            // jlens-regress: an assertion takes no quantifier, in any mode.
+                            quantifier_allowed = false;
                         }
                         // Term :: Assertion :: \B
                         'B' => {
@@ -632,6 +689,7 @@ where
                                 invert: true,
                                 unicode_icase: self.flags.unicode && self.flags.icase,
                             });
+                            quantifier_allowed = false;
                         }
                         // Term :: Atom :: \ AtomEscape :: CharacterEscape :: c AsciiLetter
                         // Term :: ExtendedAtom :: \ [lookahead = c]
@@ -905,7 +963,7 @@ where
                 Some(']') => {
                     self.consume(']');
                     if self.flags.icase {
-                        result.cps = unicode::add_icase_code_points(result.cps);
+                        result.cps = unicode::add_case_variants(result.cps, self.flags.unicode);
                     }
                     return Ok(ir::Node::Bracket(result));
                 }
@@ -1050,6 +1108,16 @@ where
                     // ClassEscape :: CharacterClassEscape :: W
                     'W' => {
                         self.consume('W');
+                        // jlens-regress: with `u` and `i`, the word characters include the
+                        // Kelvin sign and the long s (WordCharacters), so `\W` leaves them out.
+                        if self.flags.unicode && self.flags.icase {
+                            return Ok(Some(ClassAtom::Range {
+                                iv: unicode::add_icase_code_points(codepoints_from_class_positive(
+                                    CharacterClassType::Words,
+                                )),
+                                negate: true,
+                            }));
+                        }
                         Ok(Some(ClassAtom::CharacterClass {
                             class_type: CharacterClassType::Words,
                             positive: false,
@@ -1082,6 +1150,7 @@ where
 
     // CharacterClass :: ClassContents :: ClassSetExpression
     fn consume_class_set_expression(&mut self) -> Result<ClassSet, Error> {
+        let icase = self.flags.icase;
         let mut result = ClassSet::new();
 
         let first = match self.peek() {
@@ -1104,18 +1173,18 @@ where
         let op = match self.peek() {
             Some(0x5D /* ] */) => {
                 self.consume(']');
-                result.union_operand(first);
+                result.union_operand(fold_operand(icase, first));
                 return Ok(result);
             }
             Some(0x26 /* & */) if self.try_consume_str("&&") => {
-                result.union_operand(first.clone());
+                result.union_operand(fold_operand(icase, first.clone()));
                 ClassSetOperator::Intersection
             }
             Some(0x2D /* - */) => {
                 self.consume('-');
                 if self.peek() == Some(0x2D /* - */) {
                     self.consume('-');
-                    result.union_operand(first.clone());
+                    result.union_operand(fold_operand(icase, first.clone()));
                     ClassSetOperator::Subtraction
                 } else {
                     match first {
@@ -1128,7 +1197,7 @@ where
                             if first > last {
                                 return error("Invalid class set range");
                             }
-                            result.codepoints.add(Interval { first, last });
+                            result.codepoints.add_set(fold_range(icase, first, last));
                         }
                         _ => {
                             return error("Invalid class set range");
@@ -1138,7 +1207,7 @@ where
                 }
             }
             Some(_) => {
-                result.union_operand(first.clone());
+                result.union_operand(fold_operand(icase, first.clone()));
                 ClassSetOperator::Union
             }
             None => {
@@ -1169,14 +1238,14 @@ where
                                 if first > last {
                                     return error("Invalid class set range");
                                 }
-                                result.codepoints.add(Interval { first, last });
+                                result.codepoints.add_set(fold_range(icase, first, last));
                             }
                             _ => {
                                 return error("Invalid class set range");
                             }
                         };
                     } else {
-                        result.union_operand(operand);
+                        result.union_operand(fold_operand(icase, operand));
                     }
                 }
             }
@@ -1184,7 +1253,7 @@ where
             ClassSetOperator::Intersection => {
                 loop {
                     let operand = self.consume_class_set_operand()?;
-                    result.intersect_operand(operand);
+                    result.intersect_operand(fold_operand(icase, operand));
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
                         Some(0x26 /* & */) => {}
@@ -1200,7 +1269,7 @@ where
             ClassSetOperator::Subtraction => {
                 loop {
                     let operand = self.consume_class_set_operand()?;
-                    result.subtract_operand(operand);
+                    result.subtract_operand(fold_operand(icase, operand));
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
                         Some(0x2D /* - */) => {}
@@ -1234,11 +1303,13 @@ where
                 if negate_set {
                     result.prepare_negation()?;
                     // With the i flag, the complement is computed after case
-                    // folding, so close the set under case before inverting.
-                    if self.flags.icase {
-                        result.codepoints = unicode::add_icase_code_points(result.codepoints);
-                    }
-                    result.codepoints = result.codepoints.inverted();
+                    // folding. jlens-regress: the set is folded already, and its complement is
+                    // taken among the characters that fold to themselves.
+                    result.codepoints = if self.flags.icase {
+                        unicode::folded_complement(result.codepoints)
+                    } else {
+                        result.codepoints.inverted()
+                    };
                 }
                 self.depth -= 1;
                 Ok(Class(result))
@@ -1294,7 +1365,7 @@ where
                     // CharacterClassEscape :: D
                     0x44 /* D */ => {
                         self.consume('D');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Digits, false)))
+                        Ok(CharacterClassEscape(self.class_set_complement(codepoints_from_class_positive(CharacterClassType::Digits))))
                     }
                     // CharacterClassEscape :: s
                     0x73 /* s */ => {
@@ -1304,7 +1375,7 @@ where
                     // CharacterClassEscape :: S
                     0x53 /* S */ => {
                         self.consume('S');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Spaces, false)))
+                        Ok(CharacterClassEscape(self.class_set_complement(codepoints_from_class_positive(CharacterClassType::Spaces))))
                     }
                     // CharacterClassEscape :: w
                     0x77 /* w */ => {
@@ -1314,7 +1385,7 @@ where
                     // CharacterClassEscape :: W
                     0x57 /* W */ => {
                         self.consume('W');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Words, false)))
+                        Ok(CharacterClassEscape(self.class_set_complement(codepoints_from_class_positive(CharacterClassType::Words))))
                     }
                     // CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
                     0x70 /* p */ => {
@@ -1335,16 +1406,18 @@ where
                         self.consume('P');
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(s) => {
-                                Ok(CharacterClassEscape(CodePointSet::from_sorted_disjoint_intervals(
-                                    s.to_vec(),
-                                ).inverted()))
+                                Ok(CharacterClassEscape(self.class_set_complement(
+                                    CodePointSet::from_sorted_disjoint_intervals(s.to_vec()),
+                                )))
                             }
                             PropertyEscapeKind::StringSet(_) => error("Invalid character escape"),
                         }
                     }
                     // ClassSetCharacter:: \b
                     0x62 /* b */ => {
-                        Ok(ClassSetCharacter(self.consume(cp)))
+                        // jlens-regress: `\b` is the backspace, U+0008.
+                        self.consume(cp);
+                        Ok(ClassSetCharacter(0x08))
                     }
                     // ClassSetCharacter:: \ ClassSetReservedPunctuator
                     _ if Self::is_class_set_reserved_punctuator(cp) => Ok(ClassSetCharacter(self.consume(cp))),
@@ -1371,7 +1444,8 @@ where
                 match cp {
                     // \b
                     0x62 /* b */ => {
-                        Ok(self.consume(cp))
+                        self.consume(cp);
+                        Ok(0x08)
                     }
                     // \ ClassSetReservedPunctuator
                     _ if Self::is_class_set_reserved_punctuator(cp) => Ok(self.consume(cp)),
@@ -1390,6 +1464,17 @@ where
                         }
                 Ok(cp)
             }
+        }
+    }
+
+    /// jlens-regress: the complement of a class escape (`\D`, `\S`, `\W`, `\P{...}`) in a class
+    /// set. With the `i` flag, it is computed after case folding (CharacterComplement of
+    /// MaybeSimpleCaseFolding), among the characters that fold to themselves.
+    fn class_set_complement(&self, cps: CodePointSet) -> CodePointSet {
+        if self.flags.icase {
+            unicode::folded_complement(unicode::fold_set(cps))
+        } else {
+            cps.inverted()
         }
     }
 
@@ -1652,6 +1737,7 @@ where
                     CharacterClassType::Digits,
                     c == 'd' as u32,
                     self.flags.icase,
+                    self.flags.unicode,
                 ))
             }
 
@@ -1661,6 +1747,7 @@ where
                     CharacterClassType::Spaces,
                     c == 's' as u32,
                     self.flags.icase,
+                    self.flags.unicode,
                 ))
             }
 
@@ -1670,6 +1757,7 @@ where
                     CharacterClassType::Words,
                     c == 'w' as u32,
                     self.flags.icase,
+                    self.flags.unicode,
                 ))
             }
 
@@ -1686,7 +1774,10 @@ where
                             // Per ES2024: apply SimpleCaseFolding to the property set first.
                             // For \P (inverted): complement before expansion so that case
                             // variants of the complement are included (existential quantifier).
-                            if negate {
+                            // jlens-regress: with `v`, the complement comes after case folding.
+                            if negate && self.flags.unicode_sets {
+                                cps = unicode::add_icase_code_points(cps).inverted();
+                            } else if negate {
                                 cps = unicode::add_icase_code_points(cps.inverted());
                             } else {
                                 cps = unicode::add_icase_code_points(cps);
@@ -1852,10 +1943,12 @@ where
                         // Found a high surrogate. Try to parse a low surrogate next
                         // to see if we can rebuild the original `char`
 
+                        // jlens-regress: back to before the `\u`, which may start another
+                        // escape (`\u{...}`) when no low surrogate follows.
+                        orig_input = self.input.clone();
                         if !self.try_consume_str("\\u") {
                             return Some(u as u32);
                         }
-                        orig_input = self.input.clone();
 
                         // A poor man's try block to handle the backtracking
                         // in a single place instead of every time we want to return.
@@ -1983,6 +2076,9 @@ where
         // Map from depth to current alternative index at that depth
         let mut alt_indices: HashMap<usize, usize> = HashMap::new();
         alt_indices.insert(0, 0);
+        // jlens-regress: the number of the group open at each depth, and of the next one.
+        let mut groups: Vec<usize> = Vec::from([0]);
+        let mut next_group = 1;
 
         // Map from group name to all alternative paths where it appears
         let mut named_group_locations: HashMap<String, Vec<AlternativePath>> = HashMap::new();
@@ -2042,8 +2138,8 @@ where
                     if let Some(name) = group_name {
                         // Build current alternative path from depth 0 to current depth.
                         let mut segments = Vec::new();
-                        for d in 0..=paren_depth {
-                            segments.push((d, *alt_indices.get(&d).unwrap_or(&0)));
+                        for (d, &group) in groups.iter().enumerate() {
+                            segments.push((group, *alt_indices.get(&d).unwrap_or(&0)));
                         }
 
                         // Record this location.
@@ -2071,12 +2167,15 @@ where
                     // Entering a new group.
                     paren_depth += 1;
                     alt_indices.insert(paren_depth, 0);
+                    groups.push(next_group);
+                    next_group += 1;
                 }
                 Some(')') => {
                     // Exiting a group
                     if paren_depth > 0 {
                         alt_indices.remove(&paren_depth);
                         paren_depth -= 1;
+                        groups.pop();
                     }
                 }
                 Some('|') => {

@@ -273,7 +273,11 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
     ) -> Option<(Input::Position, Input::Position)> {
         match re.insns.iat(ip + 1) {
             &Insn::Char(c) => {
-                let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
+                // jlens-regress: a character the input cannot hold (a lone surrogate in a
+                // `&str`) matches nowhere, so the loop matches it zero times, if it may.
+                let Some(c) = <<Input as InputIndexer>::Element as ElementType>::try_from(c) else {
+                    return (min == 0).then_some((pos, pos));
+                };
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::Char { c })
             }
             &Insn::Bracket(idx) => {
@@ -346,7 +350,9 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
     ) -> Option<Input::Position> {
         let result = match re.insns.iat(ip + 1) {
             &Insn::Char(c) => {
-                let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
+                let Some(c) = <<Input as InputIndexer>::Element as ElementType>::try_from(c) else {
+                    return Some(pos);
+                };
                 Self::compute_max_pos(input, pos, limit, dir, scm::Char { c })
             }
             &Insn::Bracket(idx) => {

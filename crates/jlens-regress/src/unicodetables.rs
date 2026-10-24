@@ -25389,19 +25389,20 @@ pub(crate) fn script_extensions_value_ranges(
     }
 }
 
-pub(crate) const TO_UPPERCASE: [FoldRange; 202] = [
+// jlens-regress: without the mappings that Canonicalize leaves out: from a non-ASCII character
+// to an ASCII one (U+0131 and U+017F), and of a character whose full uppercase is two (the Greek
+// letters with ypogegrammeni, U+1F80-U+1FAF, U+1FB3, U+1FC3, U+1FF3).
+pub(crate) const TO_UPPERCASE: [FoldRange; 194] = [
     FoldRange::from(0x61, 26, -32, 1),
     FoldRange::from(0xB5, 1, 743, 1),
     FoldRange::from(0xE0, 23, -32, 1),
     FoldRange::from(0xF8, 7, -32, 1),
     FoldRange::from(0xFF, 1, 121, 1),
     FoldRange::from(0x101, 47, -1, 2),
-    FoldRange::from(0x131, 1, -232, 1),
     FoldRange::from(0x133, 5, -1, 2),
     FoldRange::from(0x13A, 15, -1, 2),
     FoldRange::from(0x14B, 45, -1, 2),
     FoldRange::from(0x17A, 5, -1, 2),
-    FoldRange::from(0x17F, 1, -300, 1),
     FoldRange::from(0x180, 1, 195, 1),
     FoldRange::from(0x183, 3, -1, 2),
     FoldRange::from(0x188, 5, -1, 4),
@@ -25535,17 +25536,11 @@ pub(crate) const TO_UPPERCASE: [FoldRange; 202] = [
     FoldRange::from(0x1F78, 2, 128, 1),
     FoldRange::from(0x1F7A, 2, 112, 1),
     FoldRange::from(0x1F7C, 2, 126, 1),
-    FoldRange::from(0x1F80, 8, 8, 1),
-    FoldRange::from(0x1F90, 8, 8, 1),
-    FoldRange::from(0x1FA0, 8, 8, 1),
     FoldRange::from(0x1FB0, 2, 8, 1),
-    FoldRange::from(0x1FB3, 1, 9, 1),
     FoldRange::from(0x1FBE, 1, -7205, 1),
-    FoldRange::from(0x1FC3, 1, 9, 1),
     FoldRange::from(0x1FD0, 2, 8, 1),
     FoldRange::from(0x1FE0, 2, 8, 1),
     FoldRange::from(0x1FE5, 1, 7, 1),
-    FoldRange::from(0x1FF3, 1, 9, 1),
     FoldRange::from(0x214E, 1, -28, 1),
     FoldRange::from(0x2170, 16, -16, 1),
     FoldRange::from(0x2184, 1, -1, 1),

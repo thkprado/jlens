@@ -39,16 +39,19 @@ Besides upstream's tests, a corpus of V8's own answers checks the engine
 `cargo xtask regex-corpus` runs test262's `built-ins/RegExp` and `annexB/built-ins/RegExp`
 tests in Node.js, recording every pattern they compile and every `exec` they call, and the
 patterns and searches of this crate's own tests; then it asks V8 for its answer to each. The
-corpus holds 18,954 cases from test262 commit `d53ebc8` and Node.js 24.19 (V8 13.6): 3,898
-patterns that compile or not, and 15,056 searches with their match and groups. 7,300 of them
-(39 %) have neither the `u` nor the `v` flag, the mode JavaScript uses by default.
+corpus holds 19,108 cases from test262 commit `d53ebc8` and Node.js 24.19 (V8 13.6): 3,987
+patterns that compile or not, and 15,121 searches with their match and groups. 7,350 of them
+(38 %) have neither the `u` nor the `v` flag, the mode JavaScript uses by default.
 
 `cargo test` runs every case, through `find_from_interruptible` on a `&str`. 60 cases are not
 compared, because a `&str` cannot hold them: a lone surrogate in the pattern or the input, or a
-match that starts or ends between the halves of a surrogate pair. 12 cases differ, each listed
-with its reason in `differences.txt`: without `u` or `v`, JavaScript matches UTF-16 code units
-and this crate matches characters, so `/^.$/` does not match `"𐌀"` in V8; and a V8 bug with
-`[^\q{a|b}]` under the flags `v` and `i`.
+match that starts or ends between the halves of a surrogate pair. 18 cases differ, each listed
+with its reason in `differences.txt`. In 11, without `u` or `v`, JavaScript matches UTF-16 code
+units and this crate matches characters, so `/^.$/` does not match `"𐌀"` in V8. The other 7
+are V8 bugs, where this crate follows the specification: with the flags `v` and `i`, V8 does
+not fold the strings of `\q{...}` for some characters, nor `\p{ASCII}`; it accepts two groups of
+the same name that both take part in a match when one is in an alternative of a group the
+other is not in; and after a group `(?-i:...)`, `\W` loses the `i` flag.
 
 ## Fixed in jlens-regress
 
@@ -56,6 +59,33 @@ and this crate matches characters, so `/^.$/` does not match `"𐌀"` in V8; and
   `\u` is the letter `u` and the braces a quantifier or themselves, so `/\u{2}/` matches `"uu"`
   and `/\u{3f}/` matches `"u{3f}"`. Named groups take `\u{...}` in every mode. Found by the
   corpus above; upstream's tests ran test262's examples of the escape without their `u` flag.
+
+Found by the differential test:
+
+- Without `u` or `v`, case-insensitive matching follows JavaScript's Canonicalize, which takes
+  the uppercase of a character, except that a non-ASCII character never maps to an ASCII one,
+  and a character whose uppercase is two characters maps to itself. The table of uppercases no
+  longer maps `ı` to `I`, `ſ` to `S`, or the Greek letters with ypogegrammeni, and classes and
+  `\w` close over these uppercases instead of Unicode's case folding: `/[a-z]/i` and `/\w/i` no
+  longer match `ſ` or the Kelvin sign.
+- The `v` flag is Unicode mode: with it, as with `u`, Annex B's escapes, lone braces and octal
+  escapes are syntax errors, and characters match by code point, with Unicode's case folding.
+- `\b` and `\B` take no quantifier, in any mode.
+- A lone surrogate written as an escape, in a loop that allows zero iterations, no longer makes
+  the whole search fail: it matches nothing in a `&str`, so the loop matches it zero times.
+- A lead surrogate escape followed by `\u{...}` compiles: the parser went back to after the `\u`
+  when no trail surrogate followed.
+- Two groups of the same name are rejected when both can take part in a match, also when they
+  are in different groups at the same depth, such as `/(?<a>x)(y|(?<a>z))/`: the check told
+  disjunctions apart by depth, not by group.
+- With `u` and `i`, `\W` in a class leaves out the Kelvin sign and the long s, which are word
+  characters in that mode.
+- With `v` and `i`, complements (`\P{...}`, `\W`, `\D`, `\S`, a negated nested class) are taken
+  after case folding, among the characters that fold to themselves, and the operands of `&&`,
+  `--` and unions are folded before they are combined (MaybeSimpleCaseFolding).
+- With `v`, `\b` in a class is the backspace, not `b`.
+- `Match::named_group` gives, of groups with the same name, the one that took part in the
+  match, as `Match::named_groups` does.
 
 ## Ported from upstream
 

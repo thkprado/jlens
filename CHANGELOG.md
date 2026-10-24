@@ -40,6 +40,26 @@ All notable changes are recorded here. The format follows
 - Regular expressions: `\u{...}` is no longer a code point escape, as in jsonata-js, which never
   sets the `u` flag: `\u` is the letter `u` and the braces a quantifier or themselves, so
   `/\u{2}/` matches `"uu"` and `/\u{41}/` no longer matches `"A"`. Found by the corpus of V8's answers.
+- Regular expressions, found by the differential test against V8:
+  - Case-insensitive matching follows JavaScript's rules without the `u` flag, as in jsonata-js:
+    a character matches another when both have the same uppercase, except that a non-ASCII
+    character never matches an ASCII one, and a character whose uppercase is two characters
+    matches only itself. `/ı/i` no longer matches `"I"`, nor `/ſ/i` `"S"`; `/[a-z]/i` and `/\w/i`
+    no longer match `"ſ"` or the Kelvin sign (U+212A), which classes matched through Unicode's case
+    folding; `/[\W]/i` no longer matches `"k"`.
+  - `\b` and `\B` take no quantifier: `/\b+/` is a syntax error, as in JavaScript.
+  - A lone surrogate written as an escape, under a quantifier that allows none of it, no longer
+    makes every search fail: it matches nothing in a string, so its loop matches zero times.
+  - Two groups of the same name are rejected when both can take part in a match, also when one
+    is in an alternative of a group the other is not in: `/(?<a>x)(y|(?<a>z))/`.
+  - For `jlens-regress` users, who may set the `u` and `v` flags that jsonata-js never sets: the
+    `v` flag is Unicode mode, with the syntax of `u` (no Annex B escapes, lone braces or octal
+    escapes) and its matching by code point and Unicode case folding; with `u` and `i`, `\W` in
+    a class leaves out the Kelvin sign and the long s, which are word characters there; with `v`
+    and `i`, complements (`\P{...}`, `\W`, a negated class) are taken after case folding, and the
+    operands of `&&` and `--` are folded before they are combined; with `v`, `\b` in a class is
+    the backspace; a lead surrogate escape followed by `\u{...}` compiles; `Match::named_group`
+    gives, of groups with the same name, the one that took part in the match.
 
 ## [0.21.2]
 

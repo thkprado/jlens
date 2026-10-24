@@ -182,7 +182,8 @@ for (const file of files) await runTest(file);
 
 let regress = 0;
 if (fs.existsSync(regressCases)) {
-  for (const line of fs.readFileSync(regressCases, "utf8").split("\n")) {
+  // Sorted, since the tests run in parallel and record in any order.
+  for (const line of fs.readFileSync(regressCases, "utf8").split("\n").sort()) {
     if (!line.trim()) continue;
     const c = JSON.parse(line);
     regress++;

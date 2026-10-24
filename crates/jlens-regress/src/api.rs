@@ -183,8 +183,13 @@ impl Match {
         if name.is_empty() {
             return None;
         }
-        let pos = self.group_names.iter().position(|s| s.as_ref() == name)?;
-        self.captures[pos].clone()
+        // jlens-regress: of groups with the same name, the one that took part in the match, as
+        // `named_groups` gives it.
+        self.group_names
+            .iter()
+            .zip(&self.captures)
+            .filter(|(s, _)| s.as_ref() == name)
+            .find_map(|(_, r)| r.clone())
     }
 
     /// Return an iterator over the named groups of a Match.
@@ -424,7 +429,10 @@ impl Regex {
         I: Iterator<Item = u32> + Clone,
         F: Into<Flags>,
     {
-        let flags = flags.into();
+        let mut flags: Flags = flags.into();
+        // jlens-regress: `v` is Unicode mode too, with `u`'s syntax and matching (code points,
+        // simple case folding), and its own classes on top.
+        flags.unicode |= flags.unicode_sets;
         let mut ire = parse::try_parse(pattern, flags)?;
         if !flags.no_opt {
             optimizer::optimize(&mut ire);
