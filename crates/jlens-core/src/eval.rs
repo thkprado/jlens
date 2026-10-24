@@ -1662,7 +1662,10 @@ impl<'a> Evaluator<'_, 'a> {
         };
         let order = functions::merge_sort((0..items.len()).collect(), &mut swap)?;
         let sorted = order.into_iter().map(|i| items[i].clone()).collect();
-        Ok(Value::array(sorted, 0))
+        // jsonata-js returns a plain array, so a filter or group-by after the sort takes its
+        // tuples for items and `$` shows them; jlens keeps the tuple stream (compatibility.md).
+        let flags = if is_tuple { SEQUENCE | TUPLE_STREAM } else { 0 };
+        Ok(Value::array(sorted, flags))
     }
 
     // -----------------------------------------------------------------------------------------

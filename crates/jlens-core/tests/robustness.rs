@@ -1501,6 +1501,17 @@ fn json_value() -> impl Strategy<Value = serde_json::Value> {
     })
 }
 
+/// Expressions the property tests below found reading more than their reads.
+#[test]
+fn found_reads_keep_what_an_evaluation_needs() {
+    // An order-by in a tuple stream, before a group-by whose `$` showed the tuples (CI run
+    // 40123411245).
+    for source in ["items@$o.{}^(1){'s'[$]: $}", "items@$o.{}^(1){'s': $o}"] {
+        let expr = Expression::compile(source).unwrap();
+        agrees_when_cut(&expr, &expr.reads()).unwrap();
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(2000))]
 

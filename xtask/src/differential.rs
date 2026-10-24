@@ -24,6 +24,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
+use jlens_core::ast::Stage;
 use jlens_core::{Bindings, Expression, Node, NodeKind, Options};
 use serde_json::{Value as JsonValue, json};
 
@@ -359,7 +360,9 @@ fn wildcard_first(expr: &str) -> bool {
 /// string literal, which jsonata-js matches as JavaScript's `String(value)`; `$formatNumber` with
 /// a literal picture whose integer part has irregular grouping (`'#,##,##0'`), where jsonata-js
 /// places separators with no digit on their left; and `$substringBefore` or `$substringAfter`
-/// whose `chars` is not a string literal, which jsonata-js searches as "undefined" when missing.
+/// whose `chars` is not a string literal, which jsonata-js searches as "undefined" when missing;
+/// and an order-by after a step that binds `@`, `#` or an ancestor, filtered or ending a path
+/// with a group-by, where jsonata-js gives the filter or group-by its internal tuples.
 fn dropped_quirk(expr: &str) -> bool {
     let Ok(compiled) = Expression::compile(expr) else {
         return false;
@@ -367,6 +370,16 @@ fn dropped_quirk(expr: &str) -> bool {
     let mut found = false;
     compiled.ast().root.walk(&mut |node: &Node| {
         found |= match &node.kind {
+            NodeKind::Path { steps, .. } => steps.iter().enumerate().any(|(ii, step)| {
+                matches!(step.kind, NodeKind::Sort { .. })
+                    && steps[..ii].iter().any(|s| s.attrs.tuple)
+                    && (step
+                        .attrs
+                        .stages
+                        .iter()
+                        .any(|s| matches!(s, Stage::Filter { .. }))
+                        || ii + 1 == steps.len() && node.attrs.group.is_some())
+            }),
             NodeKind::Apply { lhs, rhs } => {
                 matches!(rhs.kind, NodeKind::Regex { .. })
                     && !matches!(lhs.kind, NodeKind::String { .. })

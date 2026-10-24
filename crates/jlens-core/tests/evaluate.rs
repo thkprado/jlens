@@ -448,6 +448,21 @@ fn group_by_joins_each_group_as_jsonata_js_appends_it() {
 }
 
 #[test]
+fn an_order_by_keeps_the_tuple_stream() {
+    // jsonata-js gives a filter or group-by after the sort its internal tuples, unless the
+    // stream has a single item (compatibility.md); jlens keeps the tuple stream.
+    let input = json!({"items": [{"p": 2, "t": "a"}, {"p": 1, "t": "b"}, {"p": 3, "t": "a"}]});
+    for (expr, expected) in [
+        ("items@$o^($o.p){'s': $o.p}", json!({"s": [1, 2, 3]})),
+        ("items@$o^($o.p){$o.t: $o.p}", json!({"b": 1, "a": [2, 3]})),
+        ("items@$o.{}^(1){'s': $}", json!({"s": [{}, {}, {}]})),
+        ("items@$o^(>$o.p)[$o.p > 1].$o.t", json!(["a", "a"])),
+    ] {
+        assert_eq!(eval(expr, input.clone()), Some(expected), "{expr}");
+    }
+}
+
+#[test]
 fn blocks_scope_the_variables_they_bind() {
     // Results from jsonata-js 2.2.2. A block binds in a frame of its own only when it may
     // bind; these check that the others still see, and never leak, the variables around them.
