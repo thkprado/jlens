@@ -498,6 +498,15 @@ median of 31 samples of at least 5 ms; V8 13.6, Node.js 24.19):
   build, are inlined differently: two copies that both count nothing differ by up to 16 % there.
   That is why each variant is a binary of its own.
 
+Through jlens, the engine's changes leave the library as fast as in 0.21. `cargo xtask ab
+v0.21.2 HEAD`, with the 0.22 code complete and ten rounds, puts every case of `evaluate` between
+2.8% faster (`transform`) and 1.4% slower (`filter + aggregate`); `regex` is 0.2% faster. With
+`--mode document`, every case is between 3.8% faster and 1.5% slower, except `path` at 3.0% and
+`filter + aggregate` at 2.0% slower, still 2.6% and 2.2% over 20 rounds. Neither runs code that
+changed in 0.22. Built with functions and blocks aligned, as above, `filter + aggregate` is
+0.6% slower and `path` 13.5% faster (238 ns against 275 ns): the difference is where the code
+lies, not what it does.
+
 ### What the limits cost
 
 From 0.20 on, every evaluation counts its steps for the step limit
