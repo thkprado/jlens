@@ -70,3 +70,4 @@
   - [0017 Results in another representation](adr/0017-result-builder.md)
   - [0018 A deterministic step limit](adr/0018-step-limit.md)
   - [0019 Documents serialized from Rust values](adr/0019-documents-from-rust-values.md)
+  - [0020 Our own fork of regress](adr/0020-own-regress-fork.md)

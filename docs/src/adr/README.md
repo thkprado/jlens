@@ -14,7 +14,7 @@ earlier one instead.
 | [0006](0006-host-functions.md) | Host functions with a JSON boundary | Accepted; extended by [0011](0011-host-callbacks.md) |
 | [0007](0007-language-server.md) | A language server on the language service, configured by `jlens.json` | Accepted |
 | [0008](0008-cli-machine-contract.md) | A machine contract for the CLI: `--json` envelopes, exit codes, stdout for data | Accepted |
-| [0009](0009-bounded-regex.md) | Regular expressions stop within the evaluation's limits, through a fork of `regress` | Accepted |
+| [0009](0009-bounded-regex.md) | Regular expressions stop within the evaluation's limits, through a fork of `regress` | Accepted; the fork made permanent by [0020](0020-own-regress-fork.md) |
 | [0010](0010-lazy-input.md) | Input documents converted lazily, one level at a time | Accepted |
 | [0011](0011-host-callbacks.md) | Host functions call the functions they receive, through a handle that borrows the call | Accepted |
 | [0012](0012-npm-distribution.md) | The CLI on npm: a launcher package and one package per platform | Accepted |
@@ -24,3 +24,4 @@ earlier one instead.
 | [0017](0017-result-builder.md) | Results written straight into another representation, through a builder the core walks | Accepted |
 | [0018](0018-step-limit.md) | A deterministic step limit: each evaluated node and callback is a step, fast paths charge what they skip, `U1006` | Accepted |
 | [0019](0019-documents-from-rust-values.md) | Documents serialized straight from Rust values, as `serde_json::to_value` and `Document::new` would build them | Accepted |
+| [0020](0020-own-regress-fork.md) | `jlens-regress` is jlens's own fork of `regress`: upstream fixes ported, not rebased | Accepted |

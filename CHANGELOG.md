@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `jlens-regress` is jlens's own fork of `regress`, no longer a temporary one (ADR 0020): jlens
+  no longer plans to go back to `regress`, and ports upstream's fixes one commit at a time instead
+  of rebasing the fork onto new versions. Report every problem with the crate at jlens.
+
 ## [0.21.2]
 
 The npm packages are published through trusted publishing, without a token. The code is as in

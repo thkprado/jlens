@@ -1,6 +1,7 @@
 # 0009 — Regular expressions that stop within the evaluation's limits
 
-**Status:** Accepted
+**Status:** Accepted; [ADR 0020](0020-own-regress-fork.md) makes the fork permanent, superseding
+the plan in decision 3 to go back to `regress`
 
 ## Context
 

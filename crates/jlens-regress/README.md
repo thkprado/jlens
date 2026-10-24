@@ -23,10 +23,18 @@ assert!(re.find_from_interruptible(&text, 0, || Instant::now() >= deadline).is_e
 ```
 
 The library keeps upstream's name, `regress`. Everything else is regress 0.12.0, under the same
-licences (MIT or Apache-2.0, see `LICENSE-MIT` and `LICENSE-APACHE`). The same API is to be
-proposed upstream; once a regress release offers an equivalent, jlens goes back to regress and
-this crate is deprecated. Report problems with the interrupt at jlens, and anything else at
-regress.
+licences (MIT or Apache-2.0, see `LICENSE-MIT` and `LICENSE-APACHE`), apart from the upstream
+fixes ported below.
+
+The fork is jlens's own and is maintained with jlens
+([ADR 0020](https://github.com/thkprado/jlens/blob/main/docs/src/adr/0020-own-regress-fork.md)):
+it is not rebased onto new regress versions. jlens ports upstream's fixes one commit at a time,
+and keeps its own changes to the interrupt and to bugs it finds. Report every problem with this
+crate at jlens, not at regress.
+
+## Ported from upstream
+
+Last upstream commit reviewed: `aae35de` (0.12.0). No commit ported yet.
 
 The upstream README follows.
 

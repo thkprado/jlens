@@ -12,7 +12,7 @@ in `docs/`.
 | Path | What lives there |
 |---|---|
 | `crates/jlens-core/src` | `lexer.rs`, `parser.rs` (Pratt, recover mode), `process.rs` (raw tree → `Ast`), `eval.rs` (interpreter), `value.rs` (value and sequence model), `functions/` (library and catalog), `datetime.rs`, `regex.rs`, `signature.rs`, `error.rs` (codes and messages), `audit/` (tracer, collector, explain), `document.rs`, `input.rs` (the `Source` trait, ADR 0010), `stack.rs` |
-| `crates/jlens-regress` | fork of `regress` 0.12.0 with interruptible matches (ADR 0009); keep the diff to upstream small, mark changes `jlens-regress` |
+| `crates/jlens-regress` | jlens's own fork of `regress` 0.12.0 with interruptible matches (ADR 0009, 0020); upstream fixes are ported one commit at a time, never rebased; keep the diff to upstream small, mark changes `jlens-regress` |
 | `crates/jlens-wasm` | wasm-bindgen bindings; `src/source.rs` reads `evaluate`'s input object (a JavaScript helper per level); `src/types.d.ts` holds the hand-written TypeScript declarations; `tests/` holds the JS suite (`suite.mjs`), shared by Node and the browser; its own rules are in `crates/jlens-wasm/AGENTS.md` |
 | `crates/jlens-python` | the Python package `jlens` (ADR 0014), PyO3 bindings built by maturin; its Rust code is not unit-tested by `cargo test`; its own rules are in `crates/jlens-python/AGENTS.md` |
 | `tests/jsonata-suite` | the vendored official suite (do not edit by hand; `cargo xtask update-suite` replaces it and applies `SUITE_EDITS`) |
