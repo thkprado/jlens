@@ -41,13 +41,12 @@ enum BacktrackInsn<Input: InputIndexer> {
         data: GroupData<Input::Position>,
     },
 
+    /// Resume by entering a non-greedy loop whose body was skipped.
     EnterNonGreedyLoop {
         // The IP of the loop.
         // This is guaranteed to point to an EnterLoopInsn.
         ip: u32,
-        // The input position of the loop before entering it.
-        // This is used to set up backtracking that restores this position.
-        orig_pos: Input::Position,
+        // The iteration to enter, and the position to enter it at.
         data: LoopData<Input::Position>,
     },
 
@@ -187,11 +186,8 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
             }
             (true, true) if !loop_fields.greedy => {
                 // Both arms are viable; backtrack into the loop.
-                let orig_pos = loop_data.entry;
-                loop_data.entry = pos;
                 self.bts.push(BacktrackInsn::EnterNonGreedyLoop {
                     ip: ip as u32,
-                    orig_pos,
                     data: LoopData {
                         iters: iteration,
                         entry: pos,
@@ -562,11 +558,8 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                     self.pop_backtrack();
                 }
 
-                &mut BacktrackInsn::EnterNonGreedyLoop {
-                    ip: loop_ip,
-                    orig_pos,
-                    data,
-                } => {
+                &mut BacktrackInsn::EnterNonGreedyLoop { ip: loop_ip, data } => {
+                    self.pop_backtrack();
                     let loop_ip = loop_ip as IP;
                     *ip = loop_ip + 1;
                     *pos = data.entry;
@@ -575,16 +568,8 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                         _ => rs_unreachable!("EnterNonGreedyLoop must point at a loop instruction"),
                     };
                     let loop_data = self.s.loops.mat(loop_fields.loop_id as usize);
-                    // Need to restore the position should we backtrack out of the loop (#131).
-                    // Also restore the count (#206).
-                    *bt = BacktrackInsn::SetLoopData {
-                        id: loop_fields.loop_id,
-                        data: LoopData {
-                            entry: orig_pos,
-                            iters: loop_data.iters,
-                        },
-                    };
-                    *loop_data = data;
+                    // prepare_to_enter_loop saves the current loop data (#131, #206)
+                    // before overwriting it for this iteration.
                     Self::prepare_to_enter_loop(
                         &mut self.bts,
                         *pos,
@@ -967,10 +952,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                     }
 
                     &Insn::Alt { secondary } => {
-                        self.push_backtrack(BacktrackInsn::SetPosition {
-                            ip: secondary,
-                            pos,
-                        });
+                        self.push_backtrack(BacktrackInsn::SetPosition { ip: secondary, pos });
                         next_or_bt!(true);
                     }
 
