@@ -52,6 +52,18 @@ Choices to make:
      on every word (`(\w+)\s+\1` on prose), 10 % slower than `find_from` against 0 % on 0.10.5.
      The code paths are the same; the difference comes from how the compiler inlines the
      backtracker once the check is in. It applies only to evaluations with a timeout or a token.
+   - Measured again for 0.22 (2026-10-24): the example's two sides are two copies of the
+     backtracker in one binary, which the release profile (`lto = true`, `codegen-units = 1`)
+     inlines and places anew on every change to the crate. A change that runs no differently on
+     these patterns moved `find_from` by 4 to 7 %, and the interruptible side of one case by
+     34 % when a single file was reverted. With functions and blocks aligned
+     (`RUSTFLAGS="-C llvm-args=-align-all-functions=6 -C llvm-args=-align-all-nofallthru-blocks=5"`),
+     which takes the placement out, two revisions measure the same within 1 %, and the check
+     costs 2 to 4.5 % on ordinary matches (the anchored one is 6 % faster with it). That is the
+     cost this decision accepts. The 2 % target holds at jlens's level, where `cargo xtask ab`
+     measures the evaluations that match through the check (`regex` 2.7 % faster across the
+     engine fixes of 0.22 item 4). The engine's benchmark (0.22) measures it aligned, and looks
+     for what would bring the check under 2 %.
    - jlens passes a check only when the evaluation has a timeout or a cancellation token. Without
      either, the match runs the unchanged code path (the check is a type parameter, so the
      "no check" version compiles to the current code). As with the tracer (ADR 0004), a feature

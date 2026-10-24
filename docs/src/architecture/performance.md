@@ -481,6 +481,13 @@ Node.js):
 In WebAssembly the clock is `performance.now()`, a call out of the module, which made it the
 larger cost there.
 
+A regular expression matched under a timeout or a cancellation token checks it every 1,024
+steps of the backtracker ([ADR 0009](../adr/0009-bounded-regex.md)). `jlens-regress`'s
+`interrupt_cost` example compares a match with the check and without it: aligned so that code
+placement does not decide the result, the check costs 2 to 4.5 % on ordinary matches (measured
+for 0.22). Unaligned, the same build moves by up to 8 % from one change of the crate to the
+next, either way, so a revision of the engine is compared aligned, as the ADR shows.
+
 ## Using the API efficiently
 
 - **Compile once.** `Expression::compile` (`new Expression` in JavaScript) parses and
