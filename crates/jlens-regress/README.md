@@ -53,6 +53,15 @@ not fold the strings of `\q{...}` for some characters, nor `\p{ASCII}`; it accep
 the same name that both take part in a match when one is in an alternative of a group the
 other is not in; and after a group `(?-i:...)`, `\W` loses the `i` flag.
 
+A differential test compares the engine with V8 beyond the corpus: `cargo xtask
+regex-differential` generates patterns from the grammar of ECMAScript's regular expressions,
+with Annex B's leniencies and pieces that are syntax errors, and inputs from the characters they
+name, among them the letters whose case folding differs between the modes. Most patterns have
+neither `u` nor `v`. Both engines compile each pattern and search each input as
+`String.prototype.matchAll` does; whether a pattern compiles, every match and every group must
+agree. jlens's `Differential` workflow runs 20,000 patterns every week. What it found is fixed
+below, and recorded in the corpus by `tests/v8_differential.rs`, V8's bugs included.
+
 ## Fixed in jlens-regress
 
 - Without the `u` or `v` flag, `\u{...}` is no longer a code point escape: as in JavaScript,

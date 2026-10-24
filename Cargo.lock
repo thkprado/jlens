@@ -1773,6 +1773,7 @@ dependencies = [
  "anyhow",
  "flate2",
  "jlens-core",
+ "jlens-regress",
  "serde_json",
 ]
 

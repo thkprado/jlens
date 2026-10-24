@@ -3,7 +3,10 @@ name: Differential
 # Generated expressions run in jlens and in jsonata-js 2.2.2, which must agree on the result or
 # the error code (`cargo xtask differential`; see "Differential testing" in
 # docs/src/architecture/conformance.md). Each run draws a new seed, which it prints: a failure is
-# reproduced locally with `cargo xtask differential --cases <N> --seed <S>`.
+# reproduced locally with `cargo xtask differential --cases <N> --seed <S>`. Generated regular
+# expressions run in jlens-regress and in V8, which must agree on syntax errors and matches
+# (`cargo xtask regex-differential`, reproduced the same way; see "The regular expression
+# engine" in the same page).
 
 on:
   schedule:
@@ -12,6 +15,9 @@ on:
     inputs:
       cases:
         description: "How many expressions to generate"
+        default: "20000"
+      regex_cases:
+        description: "How many regular expressions to generate"
         default: "20000"
       seed:
         description: "The seed (empty: a new one)"
@@ -48,3 +54,24 @@ jobs:
         with:
           name: differential
           path: target/differential/
+
+  regex:
+    name: jlens-regress against V8
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Compare
+        env:
+          CASES: ${{ inputs.regex_cases || '20000' }}
+          SEED: ${{ inputs.seed }}
+        run: cargo xtask regex-differential --cases "$CASES" ${SEED:+--seed "$SEED"}
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: regex-differential
+          path: target/regex-differential/

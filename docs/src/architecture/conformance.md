@@ -234,3 +234,45 @@ lone surrogate, or whose match starts or ends inside a surrogate pair, is counte
 a `&str` cannot hold it. Any other difference fails the test unless
 `tests/corpus/differences.txt` lists it with its reason, and a listed case that agrees again
 fails it too.
+
+The corpus holds the patterns that test262's authors wrote. A differential test generates
+others, and compares the engine with V8 on them:
+
+```sh
+cargo xtask regex-differential                     # 1,000 patterns, from a seed it prints
+cargo xtask regex-differential --cases 20000 --seed 42
+```
+
+The patterns come from the grammar of ECMAScript's regular expressions: alternatives,
+quantifiers (lazy, and some out of order), groups (capturing, named with names that repeat,
+non-capturing, with modifiers such as `(?-i:...)`), lookarounds, backreferences (to groups that
+exist, come later or do not exist), classes with ranges and escapes, set operations and
+`\q{...}` with the `v` flag, property escapes, and pieces that only Annex B accepts or nothing
+does. Their characters are those whose case folding differs between the modes (the Kelvin sign,
+the long s, the dotless and dotted i, `ß` and `ẞ`, the sigmas), line terminators, spaces, and
+characters outside the BMP. Most have neither `u` nor `v`, as jsonata-js compiles every
+pattern; about half have `i`. Each pattern searches three inputs drawn from the characters it
+names. The command writes the cases to `target/regex-differential/cases.json`, and
+`crates/jlens-regress/tests/differential.mjs` runs them in Node.js 24 or later, under a
+timeout. Both engines search each input as `String.prototype.matchAll` does, up to 20 matches.
+Whether the pattern compiles, and every match with the ranges of its groups in UTF-16 code
+units, must agree. The divergences are printed and written to
+`target/regex-differential/divergences.json`, and the command fails when there are any.
+
+Four kinds of disagreement are counted apart:
+
+- **V8 timed out**, or **jlens-regress was interrupted**: a search did not finish within a
+  second in V8, or within about ten million backtracking steps in jlens-regress.
+- **UTF-16 code units**: without `u` or `v`, the case has a character outside the BMP, which V8
+  matches as two code units and jlens-regress as one character. A search that V8 would go on
+  inside a surrogate pair is compared up to there.
+- **Known V8 bugs**, where jlens-regress follows the specification, each recorded in the corpus:
+  two groups of the same name that both take part in a match, which V8 accepts when one is in an
+  alternative of a group the other is not in; a group that changes the `i` flag, around which
+  V8 folds case wrongly in places; and, with the flags `v` and `i`, `\p{ASCII}` and the strings
+  of `\q{...}`, which V8 does not always fold.
+
+The `Differential` workflow runs 20,000 patterns from a new seed every week, next to the
+JSONata expressions. Its first runs found ten bugs in the engine, among them the case folding
+of `ı`, `ſ` and the Kelvin sign without `u`, which jsonata-js patterns reach; they are fixed,
+and `tests/v8_differential.rs` keeps them in the corpus.

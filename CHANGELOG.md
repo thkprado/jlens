@@ -12,6 +12,10 @@ All notable changes are recorded here. The format follows
   test262's RegExp tests and of the crate's own tests, 18,954 cases replayed in Node.js 24.19.
   `cargo xtask regex-corpus` rebuilds it; `cargo test` checks every case. The cases where the
   crate differs from V8 are listed with their reason.
+- `cargo xtask regex-differential` compares `jlens-regress` with V8 on generated regular
+  expressions: whether each compiles, and every match of a few inputs with its groups. Most
+  patterns have neither `u` nor `v`, as in jsonata-js. The `Differential` workflow runs 20,000
+  of them every week.
 
 ### Changed
 

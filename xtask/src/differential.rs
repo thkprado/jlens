@@ -763,7 +763,7 @@ fn codec_call(rng: &mut Rng, depth: u32) -> String {
 }
 
 /// SplitMix64: small, fast, and the same on every platform.
-struct Rng(u64);
+pub(crate) struct Rng(pub(crate) u64);
 
 impl Rng {
     fn next(&mut self) -> u64 {
@@ -774,11 +774,11 @@ impl Rng {
         z ^ (z >> 31)
     }
 
-    fn below(&mut self, n: usize) -> usize {
+    pub(crate) fn below(&mut self, n: usize) -> usize {
         (self.next() % n as u64) as usize
     }
 
-    fn pick(&mut self, items: &[&'static str]) -> &'static str {
+    pub(crate) fn pick(&mut self, items: &[&'static str]) -> &'static str {
         items[self.below(items.len())]
     }
 }

@@ -16,6 +16,7 @@ mod fuzz;
 mod homebrew;
 mod npm;
 mod regex_corpus;
+mod regex_differential;
 mod release;
 mod scoop;
 mod site;
@@ -36,6 +37,9 @@ commands:
   regex-corpus [<test262 commit>]   rebuild jlens-regress's corpus of V8's answers from test262's
                                     RegExp tests at the commit (the corpus's, or e.g. main) and
                                     from jlens-regress's tests (needs git and Node.js)
+  regex-differential [--cases N] [--seed S]
+                                    run N generated regular expressions (1000) in jlens-regress
+                                    and V8 and report where they differ (needs Node.js 24+)
   fuzz-seed                         seed the corpora of the fuzz targets with the JSONata suite
   fuzz-replay <target> <path>...    run saved inputs (files, or directories of them) through a
                                     fuzz target, without libFuzzer, on any platform
@@ -78,6 +82,7 @@ fn main() -> Result<()> {
         Some("doc-check") => docs::check(),
         Some("differential") => differential::run(&args[1..]),
         Some("regex-corpus") => regex_corpus::run(&args[1..]),
+        Some("regex-differential") => regex_differential::run(&args[1..]),
         Some("fuzz-seed") => fuzz::seed(),
         Some("fuzz-replay") => fuzz::replay(&args[1..]),
         Some("homebrew") => match args.get(1) {
