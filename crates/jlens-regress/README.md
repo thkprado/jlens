@@ -146,8 +146,3 @@ You can see how things get compiled with the `dump-phases` cli flag:
 You can run a little benchmark too, for example:
 
     > cargo run --release -- 'abcd' --flags 'i' --bench ~/3200.txt
-
-
-## No AI slop
-
-As written.
