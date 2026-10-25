@@ -377,3 +377,52 @@ The full tables, Linux included, are in the spike's `bench/results-*.md`.
   - With Panama: about 1 MB per platform, so about 7 MB for one JAR with the seven
     targets, or about 1 MB per platform JAR with a Maven classifier.
   - Both are about the size of a Python wheel (1.1 to 1.3 MB, ADR 0014).
+
+**Item 4** (2026-10-25, the same versions; the module linked with a 4 MiB stack, as
+`jlens-wasm` is).
+
+- **Method.** The shapes are those of the WebAssembly guide's depth table, plus a recursion
+  through `$map`, each with and without a full audit. Each probe runs a fresh instance with a
+  given depth limit and records whether the evaluation stops with `D1011` or overflows the
+  JVM's stack (`StackOverflowError`).
+  - The JVM's own stack is used: 1 MiB for the main thread and for a new platform thread,
+    and its default for virtual threads.
+  - In one JVM, three passes search every shape: the first runs cold, the later ones once the
+    JIT has compiled more of the module. Each shape then runs 20 times at the smallest depth
+    found.
+  - Separately, each shape runs alone in a new JVM.
+- **The worst case comes while the JIT is warming up**, neither cold nor warm. The smallest
+  depth that fits was 273 on Windows and 263 on Linux, for the order-by
+  (`[$n, $n]^($f($n - 1))`). It was the same within 4% on virtual threads, on platform
+  threads and with `-XX:-DontCompileHugeMethods`.
+  - A shape that runs alone in a new JVM fits more: 494 to 606 for the order-by and the
+    `$map` recursion.
+  - Once warm, most shapes fit 600 to 1,500.
+  - At a limit of 250, every shape stopped with `D1011` in a new JVM, on Windows and Linux,
+    on the main thread and on a virtual thread.
+- **So on the JVM's default stacks, Chicory needs a default depth near 200**, against
+  WebAssembly's 500 in V8 and 50,000 natively. 200 leaves the margin that 500 leaves against
+  V8's 670. `DEFAULT_MAX_DEPTH` is chosen by `target_arch` alone, and V8 and Chicory both run
+  `wasm32`, so the C API would pass its own default in `Options`.
+- **Or the package evaluates on threads of its own, with larger stacks.** On a platform
+  thread with an 8 MiB stack, the worst case fits 2,468 in a new JVM: the order-by, audited.
+  - Once the JIT is warm, no shape overflows at all: the module's own guard, which watches its
+    4 MiB stack, stops every evaluation with `D1011` first.
+  - The cost is a handoff to that pool for each evaluation, from a virtual thread too. Items 6
+    and 7 can measure it.
+- **After a `StackOverflowError`, the instance still answers, but it is damaged.**
+  - `1 + 1` and recursions within their limit still work.
+  - The trap skips the code that restores the module's stack pointer, the `__stack_pointer`
+    global. Each overflow left 420 to 715 KB of the 4 MiB stack in use, so a few overflows use
+    it up.
+  - What the evaluation held on the heap is lost, and an overflow in the middle of the
+    allocator would leave it inconsistent.
+  - The host can save the pointer before each call and restore it after an overflow; the
+    spike did, and the stack was whole again. That does not repair the heap, so the package
+    drops the instance instead, and its pool makes a new one.
+- **The `__stack_pointer` at rest is 4,194,304, the size of the stack.** So the stack sits at
+  the start of linear memory and grows down to address 0, as `--stack-first` places it and as
+  `stack::exhausted` assumes. That answers the first half of item 5.
+- **Panama** stops every shape, audited or not, at the default depth of 50,000 with `D1011`.
+  That holds on the main thread, on a new platform thread and on a virtual thread, whose
+  carrier's stack `stacker` extends.
