@@ -46,8 +46,12 @@ and the options are a record with a builder.
 The exports take `#[unsafe(no_mangle)]`, which the workspace lint refuses. No generator writes
 them for us, as wasm-bindgen and PyO3 do. Two ways out:
 
-- A crate-level exception in the C API crate only, for that attribute. It is recorded here,
-  and a test checks that the crate has no `unsafe` block.
+- An exception in the C API crate only. `forbid` cannot be lowered by an inner `allow`, so the
+  crate declares its own lints instead of `workspace = true`: the workspace's, with
+  `unsafe_code = "deny"`. The exports module alone carries `#[allow(unsafe_code)]`. That
+  `allow` covers the bodies of the module's functions too, so a `macro_rules!` writes each
+  export as one call to a safe function, and a test checks that `unsafe` appears nowhere in
+  the crate's code but in that attribute. The spike measured both halves (below).
 - A small proc-macro crate that writes the exports. ADR 0014's spike showed that code expanded
   from another crate's macro does not trip the lint. That hides the exception rather than
   states it, so the first way is preferred.
@@ -216,3 +220,37 @@ the release build:
 7. Throughput with virtual threads: many concurrent evaluations of one `Expression`, Panama
    (pinned carriers) against a Chicory pool, and the warning Java 25 prints without
    `--enable-native-access`.
+
+### Results
+
+**Item 1** (2026-10-25; Rust 1.99.1, Chicory 1.7.5 with its interpreter; Windows x86-64 with
+Temurin 25.0.4, and Linux x86-64 (Ubuntu 26.04 on WSL 2) with Ubuntu's OpenJDK 25.0.4, with the
+same results on both). The crate had five exports: `jlens_buffer_new`,
+`jlens_buffer_address`, `jlens_buffer_len`, `jlens_buffer_free`, and `jlens_evaluate`, which
+takes the handles of an expression and an input in JSON and returns a buffer with
+`{"result": ...}` or `{"error": {"code", "position", "message"}}`.
+
+- **The lint.** With the crate's own lints (`unsafe_code = "deny"`) and `#[allow(unsafe_code)]`
+  on the exports module, `cargo clippy --all-targets` reports no warning.
+  - An `unsafe {}` block elsewhere in the crate fails (`error: usage of an unsafe block`).
+  - The same block inside the exports module compiles, as expected.
+  - The source test catches the second case. It must scan every Rust file of the crate, not
+    only `src/`: a `#[path]` module outside `src/` escaped a scan of `src/` alone.
+- **Buffers by handle.** The table is global behind a `Mutex`, not thread-local, since a
+  virtual thread can change carriers between two calls. A buffer is a `Vec<u8>` that is never
+  resized, so its address stays valid until it is freed. The address is handed out with
+  `expose_provenance`, since foreign code writes through it. The crate has no other `unsafe`.
+- **Panama.** Java wrote the inputs with `MemorySegment.ofAddress(address).reinterpret(len)`
+  and read the results the same way, through `invokeExact` downcalls. The results were right,
+  including `é`, `☕` and `😀` in both directions, and an error envelope with `S0207`. 1,000
+  virtual threads each made their own evaluation, sharing the table, with no wrong result.
+  Without `--enable-native-access` Java 25 printed four lines, starting with `WARNING: A
+  restricted method in java.lang.foreign.SymbolLookup has been called`, and ran on.
+- **Chicory.** The same crate built for `wasm32-wasip1` with no change. The module exports
+  `memory` and the five functions, with no `_initialize`. It imports six WASI functions from
+  Rust's standard library: `random_get`, `environ_get`, `environ_sizes_get`,
+  `clock_time_get`, `fd_write` and `proc_exit`. Chicory's `WasiPreview1` provides them.
+  Through `Memory.write` and `readBytes`, the same cases gave the same results, `$millis()`
+  read the clock through WASI, and 1,000 evaluations in a row gave no wrong result.
+- **Sizes**, in a release build with `lto`, unstripped and not tuned: 2.2 MB for the Windows
+  DLL, 2.6 MB for the Linux `.so`, 1.7 MB for the WebAssembly module.
