@@ -117,5 +117,8 @@
     "vscode-languageclient": "10.1.2",
     "vscode-oniguruma": "2.0.1",
     "vscode-textmate": "9.3.2"
+  },
+  "overrides": {
+    "@azure/msal-node": "^7.1.1"
   }
 }

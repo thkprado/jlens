@@ -23,6 +23,13 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # The vsce of editors/vscode's lockfile, the one release.yml publishes with.
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - working-directory: editors/vscode
+        run: npm ci
       - uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -36,4 +43,4 @@ jobs:
           --resource 499b84ac-1321-427f-aa17-267ca6975798 --query authenticatedUser.id
           --output tsv
       - name: The application may publish as thkprado
-        run: npx --yes @vscode/vsce@4.0.0 verify-pat --azure-credential thkprado
+        run: node editors/vscode/node_modules/@vscode/vsce/vsce verify-pat --azure-credential thkprado
