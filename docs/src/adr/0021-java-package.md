@@ -426,3 +426,21 @@ The full tables, Linux included, are in the spike's `bench/results-*.md`.
 - **Panama** stops every shape, audited or not, at the default depth of 50,000 with `D1011`.
   That holds on the main thread, on a new platform thread and on a virtual thread, whose
   carrier's stack `stacker` extends.
+
+**Item 5** (2026-10-25, the same versions; Chicory with HotSpot's default flags).
+
+- **`--stack-first`**: yes, as item 4 showed. The `__stack_pointer` at rest equals the stack's
+  size.
+- **The workload** is `$sum([1..200].($sum([1..100000].($ * 2))))`, about 20 million steps.
+  It takes 32.0 s on Chicory and 2.3 s through Panama on Windows, and 29.1 s and 1.9 s on
+  Linux.
+- **The timeout fires through the WASI clock.** On Chicory, `Instant::now` reads WASI's
+  `clock_time_get`, which `WasiPreview1` provides.
+  - Timeouts of 10, 100 and 1,000 ms stopped the evaluation with `D1012` every time, 5 runs
+    each.
+  - On Chicory the error came at most 5.1 ms late on Windows and 9.2 ms late on Linux.
+    Through Panama it came at most 1.4 ms and 0.6 ms late.
+  - The instance answered `1 + 1` afterwards: `D1012` is an ordinary error, not a trap.
+- **Reading the clock costs nothing measurable.** The clock is read every 256 steps (ADR
+  0018). Against no timeout at all, a timeout of an hour changed the time by -0.6% to +0.1% on
+  Chicory and by +0.6% to +1.8% through Panama, within the noise of a single run.
