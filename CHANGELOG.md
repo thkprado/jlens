@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.23.0]
+
+Regular expressions with a lookahead or a lookbehind take less than half the time they did on
+Windows, where allocating was most of their cost, and 5 to 8 % less on Linux; on the engine's
+benchmark they now take 5 times V8's time instead of 10. No case of the benchmarks is more than
+2 % slower than in 0.22.0, once code placement is set aside.
+
 ### Changed
 
 - Regular expressions with a lookahead or a lookbehind are faster: a lookaround no longer
@@ -860,7 +867,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/thkprado/jlens/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/thkprado/jlens/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/thkprado/jlens/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/thkprado/jlens/compare/v0.21.0...v0.21.1

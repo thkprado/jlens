@@ -48,6 +48,7 @@ The [changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md) lists 
 | 0.21.1 | The `jlens` command on npm, `npx jlens-cli` ([ADR 0012](../adr/0012-npm-distribution.md)), now that npm allowed the name of its Windows package |
 | 0.21.2 | The npm packages published through trusted publishing (OIDC), without a token |
 | 0.22.0 | `jlens-regress` kept as jlens's own fork ([ADR 0020](../adr/0020-own-regress-fork.md)), with upstream's fixes ported; checked against V8 by a corpus of test262's answers and a differential test, which found ten bugs; a benchmark of the engine, and a cheaper interrupt |
+| 0.23.0 | Faster lookarounds in regular expressions: the matcher reuses their backtracking stacks and saved groups instead of allocating them each time |
 
 ## Priorities
 
@@ -454,7 +455,7 @@ text.
 |---|---|---|---|
 | 1 | Exploration: where the time of a lookaround goes, from a profile of the two cases; then the fix. Proposed: keep the stack and the saved groups in the matcher and reuse them from one lookaround to the next, nested ones included, instead of allocating them each time. A change in `jlens-regress` marked as jlens's, kept small for the ports from upstream | The engine's benchmark before and after, aligned, both variants: the lookarounds faster, no other case slower beyond the run's noise; `interrupt_cost` within ADR 0009's 1 ms; `cargo test -p jlens-regress` (the V8 corpus), and `cargo xtask regex-differential` with 20,000 cases locally; the performance page's tables and `CHANGELOG.md` | **done**: a quarter of the time was in `malloc` and `free`. The matcher keeps the stacks and the saved groups behind a pointer (as plain fields they changed the main loop's code); lookahead 55 % and lookbehind 52 % faster on Windows, 5 and 8 % on Linux, now 5 times V8's time. The other cases move by −12 to +5 %, both ways, with the main loop's instructions unchanged: code placement |
 | 2 | The performance of the release: `cargo xtask ab` against 0.22.0, as in 0.22 #6 | The measurements on the performance page; every case within 2%, or its cause found and recorded | **done**: every case of `evaluate` within 2% over 20 rounds; with `--mode document`, `sort + map`, `recursion` and `filter + aggregate` 2.2 to 2.9% slower, which run no regular expression: built aligned, all three within 1.8% |
-| 3 | Release 0.23.0 | The release checklist | |
+| 3 | Release 0.23.0 | The release checklist | **done**; the native, WebAssembly and Python tables of [the performance page](performance.md) measured again for 0.23.0 |
 
 ## 0.24: an API to keep, toward 1.0
 
