@@ -299,3 +299,19 @@ read nothing of `$x`, so the bindings cut by its `Reads` dropped `$x`, and the e
 `$merge` now reads its arguments as `$count` does, needed: a cut keeps each item and its kind,
 which is all the check looks at. The places of its value are unchanged. The other four accept
 any value.
+
+## Amendment: a focus and a tail call (0.24)
+
+A run of the property tests with `PROPTEST_CASES=100000` found two more expressions whose
+input, cut by their `Reads`, gave another result (roadmap 0.24 #7). Two rules change.
+
+- **`step@$v`** (decision 4) now needs the places of the step's value. The path makes one
+  tuple for each of its items, whether `$v` is used or not, and the next step goes on with the
+  context once for each. `$x@$v#$j` read nothing of `$x`, so the cut bindings left it out, and
+  the expression gave nothing where it gave the input once for each item of `$x`. A cut that
+  keeps each item, as `$count` needs, is enough.
+- **A tail call** of a lambda's body is what the trampoline evaluates: the function and its
+  arguments, and nothing else. A group-by written on the call is not applied, in jsonata-js as
+  in jlens: in `function($y) { $zip(items){1: 1} }` the value is the result of `$zip`. The
+  analysis applied the group-by, so the value had no places, and `items` was only needed where
+  the result held it whole. It now analyses the call alone, as the evaluator runs it.

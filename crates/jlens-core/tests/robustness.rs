@@ -1696,6 +1696,15 @@ fn found_reads_keep_what_an_evaluation_needs() {
     // And a predicate evaluated once, whose steps overflowed across a read of the clock.
     let expr = Expression::compile("items@$o.$x.($k := $; $x.$$.o.p[$k])").unwrap();
     agrees_when_cut_with(&expr, &expr.reads_with(&without_input(bindings())), true).unwrap();
+    // A focus binds a tuple for each item of its step, so the step's value is needed even
+    // when only the context goes on.
+    let expr = Expression::compile("$x@$v#$j").unwrap();
+    agrees_when_cut(&expr, &expr.reads()).unwrap();
+    // A call in tail position runs without the group-by written on it, in both engines, so
+    // its value is the result.
+    let expr =
+        Expression::compile("($f := function($y){ $zip(items){1: 1} }; $f(items@$o.'s'))").unwrap();
+    agrees_when_cut(&expr, &expr.reads()).unwrap();
 }
 
 proptest! {

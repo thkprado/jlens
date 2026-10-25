@@ -52,6 +52,10 @@ All notable changes are recorded here. The format follows
 - `Expression::reads` reads the argument of `$merge` even when its value is not used, as
   `$merge` fails with `T0412` on an item that is not an object: `($y := $merge($x); a)` no
   longer leaves `$x` out of its reads (ADR 0016, amended).
+- `Expression::reads` needs the value of a step that binds `@`, which makes a tuple for each of
+  its items: `$x@$v#$j` no longer leaves `$x` out. And it analyses a call in tail position of a
+  lambda as the evaluator runs it, without the group-by written on it, which neither engine
+  applies: `function($y) { $zip(items){1: 1} }` now reads `items` whole (ADR 0016, amended).
 
 ## [0.23.0]
 

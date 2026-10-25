@@ -731,8 +731,16 @@ impl<'n> Analysis<'n> {
                 Vec::new()
             }
             NodeKind::Variable { name } => self.variable(name, context, scope),
-            // A tail call, evaluated where it stands.
-            NodeKind::Lambda(def) if def.thunk => self.eval(&def.body, context, scope),
+            // A tail call, evaluated where it stands. The trampoline makes the call alone, as
+            // jsonata-js does: a group-by on it is not applied, and the call's value is the
+            // result.
+            NodeKind::Lambda(def) if def.thunk => match &def.body.kind {
+                NodeKind::Function { procedure, args } => {
+                    let args = args.iter().map(Arg::Node).collect();
+                    self.call(procedure, args, context, scope)
+                }
+                _ => self.eval(&def.body, context, scope),
+            },
             NodeKind::Lambda(def) => {
                 self.defer(Body::Lambda(def), context, scope);
                 Vec::new()
@@ -801,6 +809,8 @@ impl<'n> Analysis<'n> {
             }
             match &step.attrs.focus {
                 Some(focus) => {
+                    // A tuple for each item of the value, whether its variable is used or not.
+                    self.need(&value);
                     let seq = self.next_seq();
                     self.bind(scope, focus, value, seq);
                 }
