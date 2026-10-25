@@ -58,7 +58,7 @@ abstract class Engine {
     /** The JSON text of a result, {@code null} when it is undefined. */
     abstract String json(Object result) throws Exception;
 
-    /** jlens: results come out as JSON text, so their time includes writing it. */
+    /** jlens: results come out as Java objects (maps, lists, boxed values), as the others'. */
     static final class Jlens extends Engine {
         String key() { return "jlens"; }
 
@@ -67,17 +67,17 @@ abstract class Engine {
         Compiled compile(String source) {
             Expression expression = Expression.compile(source);
             return new Compiled() {
-                public Object evaluate(Object converted) {
-                    return expression.evaluateJson((Document) converted);
-                }
+                public Object evaluate(Object converted) { return expression.evaluate((Document) converted); }
 
-                public Object evaluateText(String json) { return expression.evaluateJson(json); }
+                public Object evaluateText(String json) { return expression.evaluateFromJson(json); }
             };
         }
 
         boolean threadSafe() { return true; }
 
-        String json(Object result) { return (String) result; }
+        String json(Object result) throws Exception {
+            return result == null ? null : JACKSON.writeValueAsString(result);
+        }
     }
 
     /** jsonata-java (Dashjoin), over maps, lists and boxed values. */

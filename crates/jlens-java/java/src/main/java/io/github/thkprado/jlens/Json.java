@@ -8,7 +8,7 @@ import java.util.Map;
 
 /**
  * The JSON the package reads and writes itself: error envelopes, reads and options. Results are
- * the caller's JSON text, which this class never parses. The text comes from the C API, so a
+ * the caller's JSON text, which this class never parses, or values ({@link Values}). The text comes from the C API, so a
  * malformed one is a bug, reported as an {@link IllegalStateException}.
  */
 final class Json {

@@ -46,9 +46,11 @@ export! {
     /// Frees a document: 1 when it was live, 0 for an unknown or freed handle.
     jlens_document_free(document: u64) -> u32 = crate::api::document_free, crate::zero;
     /// Evaluates an expression against the JSON text in buffer `input` (0 for no input), with
-    /// options `options` (0 for the defaults): a reply with the result or the error.
-    jlens_evaluate(expression: u64, input: u64, options: u64) -> u64 = crate::api::evaluate, crate::api::panicked;
+    /// options `options` (0 for the defaults): a reply with the result, as JSON text (`result`
+    /// 0) or values (`result` 1), or the error.
+    jlens_evaluate(expression: u64, input: u64, options: u64, result: u32) -> u64 = crate::api::evaluate, crate::api::panicked;
     /// Evaluates an expression against a document, with options `options` (0 for the
-    /// defaults): a reply with the result or the error.
-    jlens_evaluate_document(expression: u64, document: u64, options: u64) -> u64 = crate::api::evaluate_document, crate::api::panicked;
+    /// defaults): a reply with the result, as JSON text (`result` 0) or values (`result` 1),
+    /// or the error.
+    jlens_evaluate_document(expression: u64, document: u64, options: u64, result: u32) -> u64 = crate::api::evaluate_document, crate::api::panicked;
 }

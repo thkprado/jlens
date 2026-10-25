@@ -11,7 +11,7 @@ import java.nio.charset.StandardCharsets;
  * {@snippet :
  * try (Expression expression = Expression.compile("items[0].name");
  *      Document document = Document.fromJson(text, expression.reads().input())) {
- *     String name = expression.evaluateJson(document);
+ *     Object name = expression.evaluate(document);
  * }
  * }
  *

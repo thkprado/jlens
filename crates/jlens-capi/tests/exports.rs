@@ -2,8 +2,10 @@
 //! these tests fill them with `buffers::insert`, which needs no pointer.
 
 use jlens_capi::exports::*;
-use jlens_capi::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, buffers};
+use jlens_capi::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, REPLY_VALUES, buffers};
 use serde_json::{Value, json};
+
+mod values;
 
 #[derive(Debug, PartialEq)]
 enum Reply {
@@ -11,6 +13,7 @@ enum Reply {
     Json(String),
     Error(Value),
     Handle(u64),
+    Values(Vec<u8>),
 }
 
 /// Reads and frees a reply.
@@ -22,6 +25,7 @@ fn reply(handle: u64) -> Reply {
         REPLY_JSON => Reply::Json(String::from_utf8(rest.to_vec()).unwrap()),
         REPLY_ERROR => Reply::Error(serde_json::from_slice(rest).unwrap()),
         REPLY_HANDLE => Reply::Handle(u64::from_le_bytes(rest.try_into().unwrap())),
+        REPLY_VALUES => Reply::Values(rest.to_vec()),
         status => panic!("unknown status {status}"),
     }
 }
@@ -46,7 +50,7 @@ fn evaluate(expression: u64, input: Option<&str>) -> Reply {
 
 fn evaluate_with(expression: u64, input: Option<&str>, options: u64) -> Reply {
     let input = input.map_or(0, buffer);
-    let result = reply(jlens_evaluate(expression, input, options));
+    let result = reply(jlens_evaluate(expression, input, options, 0));
     if input != 0 {
         assert_eq!(jlens_buffer_free(input), 1);
     }
@@ -82,7 +86,7 @@ fn document(text: &str, read: Option<&str>) -> u64 {
 }
 
 fn on_document(expression: u64, document: u64, options: u64) -> Reply {
-    reply(jlens_evaluate_document(expression, document, options))
+    reply(jlens_evaluate_document(expression, document, options, 0))
 }
 
 fn json(reply: Reply) -> Value {
@@ -190,7 +194,10 @@ fn input_that_is_not_json_or_not_utf8_fails_with_u2001() {
     let expression = compile("a");
     assert_eq!(code(&evaluate(expression, Some("{\"a\": "))), "U2001");
     let bytes = buffers::insert(b"{\"a\": \"\xff\"}".to_vec());
-    assert_eq!(code(&reply(jlens_evaluate(expression, bytes, 0))), "U2001");
+    assert_eq!(
+        code(&reply(jlens_evaluate(expression, bytes, 0, 0))),
+        "U2001"
+    );
     jlens_buffer_free(bytes);
 }
 
@@ -216,9 +223,12 @@ fn unknown_and_freed_handles_fail_with_u2002() {
     let expression = compile("1");
     let input = buffer("{}");
     jlens_buffer_free(input);
-    assert_eq!(code(&reply(jlens_evaluate(expression, input, 0))), "U2002");
+    assert_eq!(
+        code(&reply(jlens_evaluate(expression, input, 0, 0))),
+        "U2002"
+    );
     assert_eq!(code(&reply(jlens_compile(input))), "U2002");
-    assert_eq!(code(&reply(jlens_evaluate(u64::MAX, 0, 0))), "U2002");
+    assert_eq!(code(&reply(jlens_evaluate(u64::MAX, 0, 0, 0))), "U2002");
     assert_eq!(code(&reply(jlens_compile(0))), "U2002");
 }
 
@@ -566,4 +576,101 @@ fn a_thread_drops_a_freed_documents_conversion_at_its_next_call_of_any_export() 
         (1, 0),
         "kept until the call, dropped by it"
     );
+}
+
+/// Evaluates with the result as values: the decoded value, `None` when undefined.
+fn values_of(expression: u64, input: Option<&str>, options: u64) -> Option<Value> {
+    let input = input.map_or(0, buffer);
+    let replied = reply(jlens_evaluate(expression, input, options, 1));
+    if input != 0 {
+        assert_eq!(jlens_buffer_free(input), 1);
+    }
+    match replied {
+        Reply::Values(bytes) => Some(values::decode(&bytes)),
+        Reply::Undefined => None,
+        other => panic!("not values: {other:?}"),
+    }
+}
+
+#[test]
+fn values_hold_each_kind_of_value() {
+    let expression = compile(
+        r#"{"null": null, "false": false, "true": true, "int": 5, "neg": -3, "frac": 1.5,
+            "big": 1e20, "huge": 1e300, "edge": 9007199254740993, "s": "é😀",
+            "list": [1, "a", null, $u], "empty": [], "object": {}, "undefined": $u,
+            "rows": [{"k": 1, "j": [true]}, {"k": 2}]}"#,
+    );
+    let got = values_of(expression, None, 0).unwrap();
+    assert_eq!(
+        got,
+        json!({"null": null, "false": false, "true": true, "int": 5, "neg": -3, "frac": 1.5,
+               "big": 1e20, "huge": 1e300, "edge": 9_007_199_254_740_992_i64, "s": "é😀",
+               "list": [1, "a", null], "empty": [], "object": {},
+               "rows": [{"k": 1, "j": [true]}, {"k": 2}]})
+    );
+    // Integral numbers in the range of an `i64` are integers, the others floats.
+    assert!(got["int"].is_i64() && got["neg"].is_i64() && got["edge"].is_i64());
+    assert!(got["frac"].is_f64() && got["big"].is_f64() && got["huge"].is_f64());
+    // The fields come in their order, the undefined one left out.
+    let keys: Vec<&str> = got
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(keys[..3], ["null", "false", "true"]);
+    assert!(!keys.contains(&"undefined"));
+    assert_eq!(jlens_expression_free(expression), 1);
+}
+
+#[test]
+fn values_write_each_key_once() {
+    use jlens_capi::values::{ARRAY, INTEGER, OBJECT, STRING};
+    let expression = compile(r#"[{"a": 1}, {"a": "b"}]"#);
+    let bytes = match reply(jlens_evaluate(expression, 0, 0, 1)) {
+        Reply::Values(bytes) => bytes,
+        other => panic!("not values: {other:?}"),
+    };
+    let mut expected = vec![ARRAY, 2, 0, 0, 0];
+    // The first object: its value, then its key, new (index 0, then its text).
+    expected.extend([OBJECT, 1, 0, 0, 0, INTEGER]);
+    expected.extend(1i64.to_le_bytes());
+    expected.extend([0, 0, 0, 0, 1, 0, 0, 0, b'a']);
+    // The second: the same key, by its index alone.
+    expected.extend([OBJECT, 1, 0, 0, 0, STRING, 1, 0, 0, 0, b'b', 0, 0, 0, 0]);
+    assert_eq!(bytes, expected);
+    assert_eq!(jlens_expression_free(expression), 1);
+}
+
+#[test]
+fn values_come_from_text_documents_and_no_input_within_the_limits() {
+    let expression = compile("items.name");
+    let text = r#"{"items": [{"name": "x"}, {"name": "y"}]}"#;
+    assert_eq!(
+        values_of(expression, Some(text), 0),
+        Some(json!(["x", "y"]))
+    );
+    assert_eq!(values_of(expression, Some("{}"), 0), None);
+    let doc = document(text, None);
+    match reply(jlens_evaluate_document(expression, doc, 0, 1)) {
+        Reply::Values(bytes) => assert_eq!(values::decode(&bytes), json!(["x", "y"])),
+        other => panic!("not values: {other:?}"),
+    }
+    let small = options(r#"{"maxResultSize": 4}"#);
+    assert_eq!(
+        code(&reply(jlens_evaluate_document(expression, doc, small, 1))),
+        "U1001"
+    );
+    // A format that is neither 0 nor 1.
+    assert_eq!(
+        code(&reply(jlens_evaluate_document(expression, doc, 0, 2))),
+        "U2005"
+    );
+    assert_eq!(code(&reply(jlens_evaluate(expression, 0, 0, 7))), "U2005");
+    let failing = compile("$x()");
+    assert_eq!(code(&reply(jlens_evaluate(failing, 0, 0, 1))), "T1006");
+    assert_eq!(jlens_options_free(small), 1);
+    assert_eq!(jlens_document_free(doc), 1);
+    assert_eq!(jlens_expression_free(expression), 1);
+    assert_eq!(jlens_expression_free(failing), 1);
 }

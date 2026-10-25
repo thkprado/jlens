@@ -72,7 +72,8 @@ The parts (all of them when none is given):
 `documents` and `cases` print microseconds per evaluation, the best of five runs of 0.3 s after
 a second of warm-up, with two columns per engine: on the input converted once, and on JSON text
 parsed at each evaluation. A result that differs from jlens's shows as `differs`, an exception as
-`error`, and what they were goes to the standard error. jlens returns its result as JSON text, so
-its times include writing it; the others return their own objects, which are not serialized.
+`error`, and what they were goes to the standard error. Each engine returns its result as its own
+objects, which are not serialized: jlens as maps, lists and boxed values (`Expression.evaluate`,
+`evaluateFromJson`).
 
 Keep the machine idle while it runs: every part takes about 20 minutes in all.

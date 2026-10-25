@@ -26,8 +26,8 @@ import java.util.concurrent.atomic.LongAdder;
  * </ul>
  *
  * <p>Each engine is timed on an input converted once and on JSON text parsed at each call,
- * after its result is checked against jlens's. jlens returns its result as JSON text, so its
- * times include writing it; the others return their own objects (until 0.25 #5).
+ * after its result is checked against jlens's. Each returns its result as its own objects: jlens
+ * as maps, lists and boxed values (0.25 #5).
  */
 public final class Compare {
     static final Path BENCHES = Path.of("..", "..");

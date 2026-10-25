@@ -17,6 +17,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 jlens-core.workspace = true
+foldhash.workspace = true
 mimalloc = { workspace = true, features = ["local_dynamic_tls"] }
 serde.workspace = true
 serde_json.workspace = true

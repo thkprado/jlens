@@ -3,9 +3,11 @@
 //! returns an error or a result, never a panic (which the exports would turn into `U2004`).
 
 use jlens_capi::exports::*;
-use jlens_capi::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, buffers};
+use jlens_capi::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, REPLY_VALUES, buffers};
 use proptest::prelude::*;
 use serde_json::Value;
+
+mod values;
 
 /// Expressions, inputs, options and reads that are valid, nearly valid, or bytes of any kind.
 fn bytes() -> impl Strategy<Value = Vec<u8>> {
@@ -142,6 +144,9 @@ fn reply(handle: u64) -> Result<Replied, TestCaseError> {
         REPLY_JSON => {
             serde_json::from_slice::<Value>(rest).expect("JSON text");
         }
+        REPLY_VALUES => {
+            values::decode(rest);
+        }
         REPLY_HANDLE => {
             let handle = u64::from_le_bytes(rest.try_into().expect("8 bytes"));
             prop_assert_ne!(handle, 0);
@@ -233,7 +238,7 @@ proptest! {
                     let Some(expression) = pick(&expressions, expression) else { continue };
                     let (input, input_live) = optional(&buffers_made, input);
                     let (given, given_live) = optional(&options, given);
-                    let replied = reply(jlens_evaluate(expression.handle, input, given))?;
+                    let replied = reply(jlens_evaluate(expression.handle, input, given, 0))?;
                     if !expression.live || !input_live || !given_live {
                         prop_assert_eq!(replied, unknown());
                     }
@@ -243,7 +248,7 @@ proptest! {
                     let Some(document) = pick(&documents, document) else { continue };
                     let (given, given_live) = optional(&options, given);
                     let replied =
-                        reply(jlens_evaluate_document(expression.handle, document.handle, given))?;
+                        reply(jlens_evaluate_document(expression.handle, document.handle, given, 0))?;
                     if !expression.live || !document.live || !given_live {
                         prop_assert_eq!(replied, unknown());
                     } else {
@@ -290,7 +295,7 @@ proptest! {
                         4 => prop_assert_eq!(jlens_options_free(handle), 0),
                         5 => prop_assert_eq!(jlens_document_free(handle), 0),
                         6 => prop_assert_eq!(reply(jlens_compile(handle))?, unknown()),
-                        7 => prop_assert_eq!(reply(jlens_evaluate(handle, some, 0))?, unknown()),
+                        7 => prop_assert_eq!(reply(jlens_evaluate(handle, some, 0, 0))?, unknown()),
                         8 => prop_assert_eq!(reply(jlens_options_new(handle))?, unknown()),
                         9 => prop_assert_eq!(reply(jlens_document_new(handle, 0))?, unknown()),
                         10 => prop_assert_eq!(reply(jlens_document_new(some, handle))?, unknown()),
@@ -298,18 +303,18 @@ proptest! {
                         12 => prop_assert_eq!(reply(jlens_union_reads(handle))?, unknown()),
                         13 => {
                             let Some(document) = document else { continue };
-                            let replied = reply(jlens_evaluate_document(handle, document, 0))?;
+                            let replied = reply(jlens_evaluate_document(handle, document, 0, 0))?;
                             prop_assert_eq!(replied, unknown());
                         }
                         14 => {
                             let Some(expression) = expression else { continue };
-                            prop_assert_eq!(reply(jlens_evaluate(expression, handle, 0))?, unknown());
-                            let replied = reply(jlens_evaluate_document(expression, handle, 0))?;
+                            prop_assert_eq!(reply(jlens_evaluate(expression, handle, 0, 0))?, unknown());
+                            let replied = reply(jlens_evaluate_document(expression, handle, 0, 0))?;
                             prop_assert_eq!(replied, unknown());
                         }
                         _ => {
                             let Some(expression) = expression else { continue };
-                            prop_assert_eq!(reply(jlens_evaluate(expression, 0, handle))?, unknown());
+                            prop_assert_eq!(reply(jlens_evaluate(expression, 0, handle, 0))?, unknown());
                         }
                     }
                 }
@@ -336,27 +341,88 @@ proptest! {
         // the tables are separate. Whatever it names, the call does not panic.
         let source = buffers::insert(source);
         let input = buffers::insert(input);
-        reply(jlens_evaluate(source, input, input))?;
-        reply(jlens_evaluate(input, 0, source))?;
-        reply(jlens_evaluate_document(source, input, 0))?;
+        reply(jlens_evaluate(source, input, input, 0))?;
+        reply(jlens_evaluate(source, input, 0, 1))?;
+        reply(jlens_evaluate(source, input, 0, u32::MAX))?;
+        reply(jlens_evaluate(input, 0, source, 0))?;
+        reply(jlens_evaluate_document(source, input, 0, 0))?;
         reply(jlens_reads(source))?;
         if let Replied::Handle(options) = reply(jlens_options_new(input))? {
-            reply(jlens_evaluate(source, input, options))?;
+            reply(jlens_evaluate(source, input, options, 0))?;
             reply(jlens_document_new(options, options))?;
             prop_assert_eq!(jlens_options_free(options), 1);
         }
         if let Replied::Handle(document) = reply(jlens_document_new(input, 0))? {
-            reply(jlens_evaluate(document, document, document))?;
+            reply(jlens_evaluate(document, document, document, 0))?;
             reply(jlens_union_reads(document))?;
             prop_assert_eq!(jlens_document_free(document), 1);
         }
         if let Replied::Handle(expression) = reply(jlens_compile(source))? {
             reply(jlens_compile(expression))?;
-            reply(jlens_evaluate(expression, expression, expression))?;
-            reply(jlens_evaluate_document(expression, expression, expression))?;
+            reply(jlens_evaluate(expression, expression, expression, 0))?;
+            reply(jlens_evaluate(expression, 0, 0, 1))?;
+            reply(jlens_evaluate_document(expression, expression, expression, 0))?;
             prop_assert_eq!(jlens_expression_free(expression), 1);
         }
         prop_assert_eq!(jlens_buffer_free(source), 1);
         prop_assert_eq!(jlens_buffer_free(input), 1);
     }
+
+    #[test]
+    fn values_and_json_text_give_the_same_result(input in json(), expression in prop::sample::select(vec![
+        "$", "$.*", "**", "$string($)", "$keys($)", "[$]", "{'v': $}", "$ ~> | $ | {'x': 1} |",
+    ])) {
+        let text = input.to_string();
+        let expression = {
+            let source = buffers::insert(expression.as_bytes().to_vec());
+            let Replied::Handle(handle) = reply(jlens_compile(source))? else {
+                return Err(TestCaseError::fail("compiles"));
+            };
+            prop_assert_eq!(jlens_buffer_free(source), 1);
+            handle
+        };
+        let buffer = buffers::insert(text.into_bytes());
+        let as_json = buffers::take(jlens_evaluate(expression, buffer, 0, 0)).unwrap();
+        let as_values = buffers::take(jlens_evaluate(expression, buffer, 0, 1)).unwrap();
+        match (as_json[0], as_values[0]) {
+            (REPLY_JSON, REPLY_VALUES) => {
+                let json: Value = serde_json::from_slice(&as_json[1..]).unwrap();
+                prop_assert_eq!(values::as_f64(values::decode(&as_values[1..])), values::as_f64(json));
+            }
+            (json, values) => prop_assert_eq!(json, values, "the same kind of reply"),
+        }
+        prop_assert_eq!(jlens_buffer_free(buffer), 1);
+        prop_assert_eq!(jlens_expression_free(expression), 1);
+    }
+}
+
+/// JSON values of every kind: numbers integral or not, small and large, strings beyond ASCII,
+/// keys repeated across objects, nested arrays and objects.
+fn json() -> impl Strategy<Value = Value> {
+    let leaf = prop_oneof![
+        Just(Value::Null),
+        any::<bool>().prop_map(Value::Bool),
+        any::<i64>().prop_map(Value::from),
+        any::<f64>()
+            .prop_filter("finite", |f| f.is_finite())
+            .prop_map(Value::from),
+        prop::sample::select(vec![
+            0.5,
+            -0.0,
+            1e20,
+            1e21,
+            2f64.powi(63) - 1024.0,
+            2f64.powi(63),
+            -2f64.powi(63)
+        ])
+        .prop_map(Value::from),
+        r"[a-c]{0,3}|\PC{0,4}".prop_map(Value::String),
+    ];
+    leaf.prop_recursive(4, 48, 6, |inner| {
+        prop_oneof![
+            prop::collection::vec(inner.clone(), 0..6).prop_map(Value::Array),
+            prop::collection::vec((r"[a-d]|\PC{1,3}", inner), 0..6)
+                .prop_map(|fields| Value::Object(fields.into_iter().collect())),
+        ]
+    })
 }

@@ -4,6 +4,8 @@
 use std::any::Any;
 use std::sync::{Arc, LazyLock};
 
+use jlens_core::input::{Sink, Source};
+use jlens_core::output::Output;
 use jlens_core::reads::{Read, Reads};
 use jlens_core::{Bindings, Document, Error, Expression, Options};
 use serde_json::{Map, Value};
@@ -11,7 +13,8 @@ use serde_json::{Map, Value};
 use crate::documents::{self, DOCUMENTS};
 use crate::handles::Table;
 use crate::options::{self, OPTIONS};
-use crate::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, buffers};
+use crate::values::Encoder;
+use crate::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, REPLY_VALUES, buffers};
 
 /// A compiled expression, with its source (for the offsets of its errors) and the fields it
 /// reads of its input (for the pruned parse of ADR 0016).
@@ -147,15 +150,41 @@ pub fn document_free(document: u64) -> u32 {
     u32::from(live)
 }
 
-/// Evaluates expression `expression` against the JSON text in buffer `input` (0 for no
-/// input), which stays the caller's, with options `options` (0 for the defaults), and replies
-/// with the result or the error. The fields of the input that the expression does not read are
-/// skipped while parsing.
-pub fn evaluate(expression: u64, input: u64, options: u64) -> u64 {
-    reply(evaluate_text(expression, input, options))
+/// How an evaluation gives its result.
+enum Format {
+    /// As JSON text.
+    Json,
+    /// As values ([`crate::values`]).
+    Values,
 }
 
-fn evaluate_text(expression: u64, input: u64, options: u64) -> Result<Vec<u8>, Vec<u8>> {
+impl Format {
+    /// The format named by an export's `result` argument: 0 for JSON text, 1 for values.
+    fn named(result: u32) -> Result<Format, Vec<u8>> {
+        match result {
+            0 => Ok(Format::Json),
+            1 => Ok(Format::Values),
+            _ => Err(invalid("result", format!("no result format {result}"))),
+        }
+    }
+}
+
+/// Evaluates expression `expression` against the JSON text in buffer `input` (0 for no
+/// input), which stays the caller's, with options `options` (0 for the defaults), and replies
+/// with the result as JSON text (`result` 0) or as values (`result` 1), or with the error. The
+/// fields of the input that the expression does not read are skipped while parsing.
+pub fn evaluate(expression: u64, input: u64, options: u64, result: u32) -> u64 {
+    reply(
+        Format::named(result).and_then(|format| evaluate_text(expression, input, options, format)),
+    )
+}
+
+fn evaluate_text(
+    expression: u64,
+    input: u64,
+    options: u64,
+    format: Format,
+) -> Result<Vec<u8>, Vec<u8>> {
     let compiled = EXPRESSIONS
         .get(expression)
         .ok_or_else(|| unknown("expression", expression))?;
@@ -171,16 +200,26 @@ fn evaluate_text(expression: u64, input: u64, options: u64) -> Result<Vec<u8>, V
         &compiled,
         document.as_ref(),
         options.as_deref().unwrap_or(&DEFAULTS),
+        format,
     )
 }
 
 /// Evaluates expression `expression` against document `document` with options `options` (0
-/// for the defaults), and replies with the result or the error.
-pub fn evaluate_document(expression: u64, document: u64, options: u64) -> u64 {
-    reply(evaluate_on_document(expression, document, options))
+/// for the defaults), and replies with the result as JSON text (`result` 0) or as values
+/// (`result` 1), or with the error.
+pub fn evaluate_document(expression: u64, document: u64, options: u64, result: u32) -> u64 {
+    reply(
+        Format::named(result)
+            .and_then(|format| evaluate_on_document(expression, document, options, format)),
+    )
 }
 
-fn evaluate_on_document(expression: u64, document: u64, options: u64) -> Result<Vec<u8>, Vec<u8>> {
+fn evaluate_on_document(
+    expression: u64,
+    document: u64,
+    options: u64,
+    format: Format,
+) -> Result<Vec<u8>, Vec<u8>> {
     let compiled = EXPRESSIONS
         .get(expression)
         .ok_or_else(|| unknown("expression", expression))?;
@@ -193,6 +232,7 @@ fn evaluate_on_document(expression: u64, document: u64, options: u64) -> Result<
         &compiled,
         Some(&document),
         options.as_deref().unwrap_or(&DEFAULTS),
+        format,
     )
 }
 
@@ -214,17 +254,40 @@ fn run(
     compiled: &Compiled,
     document: Option<&Document>,
     options: &Options,
+    format: Format,
 ) -> Result<Vec<u8>, Vec<u8>> {
     let bindings = Bindings::new();
-    let result = match document {
-        Some(document) => compiled
-            .expression
-            .evaluate_document(document, &bindings, options),
-        None => compiled.expression.evaluate_with(None, &bindings, options),
+    let expression = &compiled.expression;
+    let result = match format {
+        Format::Json => match document {
+            Some(document) => expression.evaluate_document(document, &bindings, options),
+            None => expression.evaluate_with(None, &bindings, options),
+        }
+        .map(|value| value.map(|value| json_reply(&value))),
+        Format::Values => {
+            let write = |output: Output<'_, '_>| {
+                let mut encoder = Encoder::new(vec![REPLY_VALUES]);
+                Ok(output.write(&mut encoder)?.map(|()| encoder.out))
+            };
+            match document {
+                Some(document) => {
+                    expression.evaluate_document_to(document, &bindings, options, write)
+                }
+                None => expression.evaluate_source_to(&NoInput, &bindings, options, write),
+            }
+        }
     };
-    match result.map_err(|e| failure(&e, &compiled.source))? {
-        Some(value) => Ok(json_reply(&value)),
-        None => Ok(vec![REPLY_UNDEFINED]),
+    Ok(result
+        .map_err(|e| failure(&e, &compiled.source))?
+        .unwrap_or_else(|| vec![REPLY_UNDEFINED]))
+}
+
+/// No input: an evaluation of [`evaluate`] given none.
+struct NoInput;
+
+impl Source<'_> for NoInput {
+    fn read(&self, _sink: &mut Sink<'_, '_>) -> Result<(), String> {
+        Ok(())
     }
 }
 

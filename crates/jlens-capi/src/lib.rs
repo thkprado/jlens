@@ -24,6 +24,7 @@
 //! | 1 | [`REPLY_JSON`] | the result, as UTF-8 JSON text |
 //! | 2 | [`REPLY_ERROR`] | the error envelope, as UTF-8 JSON text |
 //! | 3 | [`REPLY_HANDLE`] | a handle, as 8 bytes little-endian |
+//! | 4 | [`REPLY_VALUES`] | the result, as values ([`values`]) |
 //!
 //! The envelope is an object with the error's `code` and `message`, and, when the error has
 //! them, `position`, `start`, `end` (the range of the expression's source), `token` and
@@ -67,6 +68,7 @@ pub mod documents;
 pub mod exports;
 pub mod handles;
 mod options;
+pub mod values;
 
 /// The first byte of a reply whose result is undefined.
 pub const REPLY_UNDEFINED: u8 = 0;
@@ -76,6 +78,8 @@ pub const REPLY_JSON: u8 = 1;
 pub const REPLY_ERROR: u8 = 2;
 /// The first byte of a reply holding a handle.
 pub const REPLY_HANDLE: u8 = 3;
+/// The first byte of a reply holding the result as values ([`values`]).
+pub const REPLY_VALUES: u8 = 4;
 
 /// Runs `f`, and `fallback` with the panic's payload if `f` panics, so that no panic unwinds
 /// into the caller of an export. First, this thread drops its conversions of the documents

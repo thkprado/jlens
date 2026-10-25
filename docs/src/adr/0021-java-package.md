@@ -732,3 +732,53 @@ Measured on Windows x86-64, Java 25.0.4, the machine of the spike:
 - **`$` is still the case to watch.** jsonata-java and the two Jackson engines return their
   input; jlens writes the whole document as JSON text (1,092 µs on 1,000 items, 128 ms on
   100,000). That is #5's to measure.
+
+### Results as Java objects (0.25 #5)
+
+Three ways of building a result as Java objects were measured with #4's harness, each against a
+`Document`, on the maintainer's Windows machine:
+
+- **Upcalls**: the result builder (ADR 0017) calls one Java function for each value, key and
+  end of an array or object, and Java builds the objects on a stack of its own.
+- **JSON text decoded in Java**: the C API writes JSON text, as before, and Jackson's
+  `readValue(text, Object.class)` decodes it, a well-optimized decoder the package would not
+  depend on, so the upper bound of this way.
+- **Values**: the result builder writes a tagged binary encoding into the reply, which Java
+  decodes with no parser and no upcall: a tag byte for each value, lengths and numbers
+  little-endian, and each distinct key once, then by its index, so that Java makes one `String`
+  per key for the whole result.
+
+Microseconds per evaluation, the best of five runs of 0.3 s after a second of warm-up:
+
+| Items | Expression | JSON text, not decoded | Values | Upcalls | JSON text + Jackson |
+|---:|---|---:|---:|---:|---:|
+| 1,000 | `items[0].name` | 0.85 | 0.84 | 0.95 | 0.97 |
+| 1,000 | `items[price > 98].id` | 116 | 119 | 121 | 117 |
+| 1,000 | `$` | 1,134 | 498 | 2,644 | 1,878 |
+| 100,000 | `$sum(items.price)` | 5,863 | 5,715 | 5,797 | 5,805 |
+| 100,000 | `$` | 132,685 | 56,450 | 282,832 | 206,302 |
+
+On `benches/cases.json` the values are within the noise of JSON text on small results, and
+faster on large ones: `object constructor` 126 µs against 163 (214 with Jackson), `transform`
+485 against 570 (677).
+
+- **Values are kept**: they are the fastest, or within the noise of the fastest, on every
+  case, and on large results faster even than JSON text that is not decoded at all, since a
+  value is written with no formatting and a key once. Upcalls cost
+  about 25 ns each and one is made for each value and key, so they are the slowest on large
+  results; decoding JSON text pays for writing it and parsing it again.
+- **The C API** takes the format as an argument of `jlens_evaluate` and
+  `jlens_evaluate_document`: 0 for JSON text, 1 for values, whose reply starts with byte 4.
+  The encoding is documented in `jlens-capi`'s `values` module.
+- **The Java types**: objects are `LinkedHashMap`s, their fields in order; arrays `ArrayList`s;
+  integral numbers in a `long`'s range `Long`s, the others `Double`s. A `BigDecimal` was set
+  aside: jlens's numbers are `f64`s, so it would be slower and suggest a precision the value
+  does not have, and `Double.toString` already prints the shortest decimal that reads back
+  the same. The Python package's bound of 10^21 for an `int` does not fit a `long`; past
+  2^63 a number is a `Double`. Undefined and `null` are both `null`, as in Python;
+  `evaluateJson` tells them apart. The objects are made for each evaluation, and the caller may
+  modify them.
+- **`$` on a `Document`** now takes 502 µs on 1,000 items, against 154 for jsonata-java, and
+  56.6 ms on 100,000, against 67.1 ms. The Jackson engines take 0.02 to 0.08 µs because they
+  return their input. jlens can do the same only when its input is Java objects, which #6 adds:
+  a result that is the input unchanged is then returned as is.

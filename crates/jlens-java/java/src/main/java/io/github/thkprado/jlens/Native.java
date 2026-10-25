@@ -56,9 +56,16 @@ final class Native {
     private static final MethodHandle OPTIONS_FREE = function("jlens_options_free", U32, U64);
     private static final MethodHandle DOCUMENT_NEW = function("jlens_document_new", U64, U64, U64);
     private static final MethodHandle DOCUMENT_FREE = function("jlens_document_free", U32, U64);
-    private static final MethodHandle EVALUATE = function("jlens_evaluate", U64, U64, U64, U64);
+    private static final MethodHandle EVALUATE = function("jlens_evaluate", U64, U64, U64, U64, U32);
     private static final MethodHandle EVALUATE_DOCUMENT =
-            function("jlens_evaluate_document", U64, U64, U64, U64);
+            function("jlens_evaluate_document", U64, U64, U64, U64, U32);
+
+    /** The result format of the evaluations: JSON text. */
+    static final int JSON = 0;
+    /** The result format of the evaluations: values ({@link Values}). */
+    static final int VALUES = 1;
+
+    private static final byte REPLY_VALUES = 4;
 
     private static MethodHandle function(String name, ValueLayout result, ValueLayout... arguments) {
         MemorySegment symbol = LIBRARY.find(name)
@@ -133,17 +140,17 @@ final class Native {
         }
     }
 
-    static long evaluate(long expression, long input, long options) {
+    static long evaluate(long expression, long input, long options, int format) {
         try {
-            return (long) EVALUATE.invokeExact(expression, input, options);
+            return (long) EVALUATE.invokeExact(expression, input, options, format);
         } catch (Throwable e) {
             throw failed(e);
         }
     }
 
-    static long evaluateDocument(long expression, long document, long options) {
+    static long evaluateDocument(long expression, long document, long options, int format) {
         try {
-            return (long) EVALUATE_DOCUMENT.invokeExact(expression, document, options);
+            return (long) EVALUATE_DOCUMENT.invokeExact(expression, document, options, format);
         } catch (Throwable e) {
             throw failed(e);
         }
@@ -185,6 +192,20 @@ final class Native {
         return switch (bytes[0]) {
             case REPLY_UNDEFINED -> null;
             case REPLY_JSON -> new String(bytes, 1, bytes.length - 1, StandardCharsets.UTF_8);
+            case REPLY_ERROR -> throw error(bytes);
+            default -> throw unexpected(bytes);
+        };
+    }
+
+    /**
+     * Reads and frees reply {@code reply}: the result it holds as values, decoded, or {@code null}
+     * when it is undefined. A reply holding an error throws it.
+     */
+    static Object values(long reply) {
+        byte[] bytes = take(reply);
+        return switch (bytes[0]) {
+            case REPLY_UNDEFINED -> null;
+            case REPLY_VALUES -> Values.decode(bytes, 1);
             case REPLY_ERROR -> throw error(bytes);
             default -> throw unexpected(bytes);
         };
