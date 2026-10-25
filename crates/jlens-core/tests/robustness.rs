@@ -130,6 +130,10 @@ fn valid() -> impl Strategy<Value = String> {
             (inner.clone(), inner.clone())
                 .prop_map(|(v, f)| format!("{v} ~> $map(function($e){{ {f} }})")),
             inner.clone().prop_map(|v| format!("items#$i[$i < 2].{v}")),
+            (inner.clone(), inner.clone()).prop_map(|(v, p)| format!("($k := {v}; {p}[$k])")),
+            inner
+                .clone()
+                .prop_map(|v| format!("items#$i[[$i, $x[0]]].{v}")),
             inner.clone().prop_map(|v| format!("items@$o.{v}")),
             (inner.clone(), inner).prop_map(|(v, u)| format!("{v} ~> |items|{{'p': {u}}}|")),
         ]
@@ -677,15 +681,22 @@ fn field_paths_agree_with_an_audit() {
     }
 }
 
-/// A predicate of literals alone is evaluated once without a tracer, and once per item in an
-/// audit. The results and errors are the same.
+/// A predicate of literals and variables is evaluated once without a tracer, and once per item
+/// in an audit; in a tuple stream, one that reads a variable is evaluated once per item. The
+/// results and errors are the same.
 #[test]
 fn constant_predicates_agree_with_an_audit() {
     let input = json!({
         "items": [{"n": [1, 2]}, {"n": 3}, [4, 5], "six", {"n": [7]}],
         "one": {"n": 1}
     });
-    let bindings = Bindings::new().var("x", json!([1, [2, 3], 4]));
+    let bindings = Bindings::new()
+        .var("x", json!([1, [2, 3], 4]))
+        .var("n", json!(1))
+        .var("ns", json!([3, -1, 0]))
+        .var("s", json!("x"))
+        .var("t", json!(true))
+        .var("o", json!({"n": 1}));
     let sources = [
         "items[[0..2]]",
         "items[[2, 0, 0, -1]]",
@@ -718,6 +729,35 @@ fn constant_predicates_agree_with_an_audit() {
         "$x[[0, 1]]",
         "$x[[1..9]]",
         "$string(items[[0]])",
+        "items[$n]",
+        "items[$ns]",
+        "items[[$n, $n + 1]]",
+        "items[-$n]",
+        "items[$s]",
+        "items[$t]",
+        "items[$o]",
+        "items[$x]",
+        "items[$missing]",
+        "items[$string]",
+        "items[$n + 'a']",
+        "[][$n + 'a']",
+        "items[($n; $ns)]",
+        "items[$]",
+        "items[$ = 'six']",
+        "items[$$]",
+        "items[$$.one.n]",
+        "one[$n - 1]",
+        "($j := 2; items[$j])",
+        "$map([0, 4, 9], function($j) { items[$j] })",
+        "items.n[$n]",
+        "items#$i[$i]",
+        "items#$i[[$i, 0]].{'i': $i}",
+        "items#$i[$n].{'i': $i}",
+        "items#$i[$i = $n].{'i': $i}",
+        "items[[0, 1]]#$i[$i].{'i': $i}",
+        "items@$v[$v = 'six'].$v",
+        "items@$v[$n].$v",
+        "items@$v[[0, 1]].$v",
     ];
     for source in sources {
         let expr = Expression::compile(source).unwrap();
@@ -968,13 +1008,19 @@ fn an_index_reads_one_item() {
             reads("a[[3, 0, 3]].*"),
             (Ok(Some(json!([1, {"d": 5}, {"d": 5}]))), 4, 3)
         );
-        // An index held in a variable is tested against each item: the level is read whole.
-        assert_eq!(reads("($i := -1; a[$i].c.d)"), (Ok(Some(json!(5))), 2, 3));
-        // Up to 16 items are read alone, more with their level; the predicate is evaluated
-        // against the first item, read alone too.
+        // So does an index held in a variable.
+        assert_eq!(reads("($i := -1; a[$i].c.d)"), (Ok(Some(json!(5))), 1, 4));
+        assert_eq!(
+            reads("$map([0, 3], function($i) { a[$i].* })"),
+            (Ok(Some(json!([1, {"d": 5}]))), 4, 3)
+        );
+        // `$` is the item tested, and a variable of `#` is bound for each: the level is read whole.
+        assert_eq!(reads("a[$ = 4]"), (Ok(Some(json!(4))), 2, 1));
+        assert_eq!(reads("a#$i[$i = 2]"), (Ok(Some(json!(4))), 2, 1));
+        // Up to 16 items are read alone, more with their level; the predicate reads no item.
         let picked = |n: i32| Ok(Some(json!((1..=n).collect::<Vec<_>>())));
-        assert_eq!(reads("long[[0..15]]"), (picked(16), 1, 18));
-        assert_eq!(reads("long[[0..16]]"), (picked(17), 2, 2));
+        assert_eq!(reads("long[[0..15]]"), (picked(16), 1, 17));
+        assert_eq!(reads("long[[0..16]]"), (picked(17), 2, 1));
         // An item read alone is kept, and so is it when the array is read whole later: `a[0]`,
         // `a[3]` and `c` are read alone once, `b` three times, and the array whole once.
         assert_eq!(
@@ -1014,6 +1060,8 @@ fn an_index_reads_one_item() {
         "[a[0].b, a[0].b, $count(a), a[3].c.d, a]",
         "a[0] ~> |b|{'x': 1}|",
         "$map([0..3], function($i) { a[$i] })",
+        "($i := [3, 0]; a[$i])",
+        "a#$i[$i = 1]",
     ] {
         let expr = Expression::compile(source).unwrap();
         let document = expr.evaluate_document(&Document::new(&input), &Bindings::new(), &options);

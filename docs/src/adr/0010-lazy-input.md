@@ -336,3 +336,12 @@ step read one field of an object; an index had no such way.
   `Document`, is unchanged.
 - The WebAssembly and Python packages' sources do not implement the methods yet: roadmap 0.24
   #6 and #7.
+
+### Follow-up: an index held in a variable (0.24 #5)
+
+Decision 2 left out an index held in a variable. Roadmap 0.24 #5 counts a variable as a
+literal there: a predicate built from literals and variables gives the same value for each
+item, so `items[$i]` reads the items it picks, unless the predicate reads `$`, the item, or its
+input is a tuple stream, whose variables (`#$i`, `@$o`) change from item to item. Such a
+predicate is evaluated without an item, so none is read for it. `($i := 0; items[$i].code)`
+over 10,000 items takes 1.97 µs instead of 2.29 ms with `evaluate`.

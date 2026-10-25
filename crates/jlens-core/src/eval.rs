@@ -1185,8 +1185,13 @@ impl<'a> Evaluator<'_, 'a> {
             return Ok(Value::array(results, flags));
         }
 
-        // A tracer is given each item's test, so it sees the predicate evaluated per item.
-        if constant && self.tracer.is_none() {
+        // A tracer is given each item's test, so it sees the predicate evaluated per item. A
+        // tuple stream binds variables for each item, so a predicate that reads one is tested
+        // against each.
+        if constant
+            && self.tracer.is_none()
+            && (!is_tuple || crate::process::constant_from(predicate, false))
+        {
             self.filter_constant(predicate, &input, env, &mut results)?;
             return Ok(Value::array(results, flags));
         }
@@ -1250,7 +1255,7 @@ impl<'a> Evaluator<'_, 'a> {
     }
 
     /// Tests the items against a predicate that gives the same value for each: evaluated once,
-    /// against the first item, and not at all when there is none, as when each item is tested.
+    /// and not at all when there is no item, as when each item is tested.
     /// The items pass in their order, an item given by several indexes once for each.
     fn filter_constant(
         &mut self,
@@ -1271,9 +1276,9 @@ impl<'a> Evaluator<'_, 'a> {
             return Ok(());
         }
         let before = self.steps.get();
-        let mut res = self.eval(predicate, &item(0), env)?;
-        // Each further item would take the steps of the first: the predicate reads nothing
-        // from it.
+        // The predicate reads nothing from the items, so none is read for it.
+        let mut res = self.eval(predicate, &Value::Undefined, env)?;
+        // Each further item would take the steps of the first.
         let each = before - self.steps.get();
         self.charge(each.saturating_mul(len as u64 - 1))?;
         if res.is_numeric()? {

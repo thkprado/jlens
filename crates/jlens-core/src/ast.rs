@@ -468,8 +468,9 @@ pub enum Stage {
         expr: Box<Node>,
         /// Byte span of the predicate including brackets.
         span: Span,
-        /// The predicate is built from literals alone, so it gives the same value for every
-        /// item, and is evaluated once rather than once per item.
+        /// The predicate is built from literals and variables, so it gives the same value for
+        /// every item, and is evaluated once rather than once per item. In a tuple stream, which
+        /// binds variables for each item, only a predicate of literals is.
         #[serde(skip)]
         constant: bool,
     },

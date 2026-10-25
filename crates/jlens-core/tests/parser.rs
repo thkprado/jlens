@@ -203,7 +203,7 @@ fn constant_filters(src: &str) -> Vec<bool> {
 }
 
 #[test]
-fn predicates_of_literals_alone_are_constant() {
+fn predicates_of_literals_and_variables_are_constant() {
     let constant = [
         "items[[0..19]]",
         "items[0]",
@@ -215,6 +215,11 @@ fn predicates_of_literals_alone_are_constant() {
         "items[1 > 2 or 3 in [1, 3]]",
         "items[1 + 'a']",
         "[1, 2][[0]]",
+        "items[$v]",
+        "items[[0..$n]]",
+        "items[-$i]",
+        "items[$$]",
+        "items[($v; $w)]",
     ];
     for src in constant {
         assert_eq!(constant_filters(src), [true], "{src}");
@@ -222,8 +227,10 @@ fn predicates_of_literals_alone_are_constant() {
     let per_item = [
         "items[price > 1]",
         "items[$]",
-        "items[$v]",
-        "items[[0..$n]]",
+        "items[$ = 1]",
+        "items[$v.a]",
+        "items[$v[0]]",
+        "items[$f()]",
         "items[$count([1])]",
         "items[[1, 2][0]]",
         "items[[1, 2]{'a': 1}]",

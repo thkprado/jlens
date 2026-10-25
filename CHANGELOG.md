@@ -20,6 +20,14 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- An index held in a variable, as in `items[$i]` or `$map([0..9], function($i) { items[$i] })`,
+  is evaluated once instead of once per item, and reads the items it picks as a number index
+  does. `($i := 0; items[$i].code)` over 10,000 items takes 1.97 µs instead of 2.29 ms with
+  `evaluate`, 2.30 µs instead of 2.31 ms through a source, and 1.28 µs instead of 1.70 ms
+  against a `Document`. A predicate that reads a variable is still tested against each item of
+  a tuple stream, whose `#$i` and `@$o` change from item to item, and so is one that reads `$`.
+  A predicate that gives the same value for each item no longer reads the first item to be
+  evaluated.
 - A predicate reads its array where it is instead of copying it first, so an index such as
   `items[0]` no longer costs time in proportion to the array. `items[0].name` on a `Document` of
   100,000 items takes 1.3 µs instead of 2.6 ms, and 1.3 µs instead of 4.8 µs on 1,000 items;

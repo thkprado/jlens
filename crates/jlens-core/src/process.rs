@@ -720,9 +720,17 @@ fn ancestry(value: &Node) -> Vec<SlotId> {
 }
 
 /// Whether a predicate gives the same value for every item it is tested against: it is built
-/// from literals, negations, binary operators, array constructors and parentheses alone, so it
-/// reads neither its context nor a variable, and calls no function.
+/// from literals, variables, negations, binary operators, array constructors and parentheses
+/// alone, so it reads no context (`$` is the item) and calls no function.
 fn is_constant(node: &Node) -> bool {
+    constant_from(node, true)
+}
+
+/// Whether a predicate is built as [`is_constant`] says, with `variables` or without them. A
+/// variable holds one value for every item of a sequence but a tuple stream, which binds the
+/// variables of `#` and `@` for each item: `filter` tests those items one by one unless the
+/// predicate reads no variable.
+pub(crate) fn constant_from(node: &Node, variables: bool) -> bool {
     let attrs = &node.attrs;
     if !attrs.stages.is_empty() || !attrs.predicate.is_empty() || attrs.group.is_some() {
         return false;
@@ -730,13 +738,14 @@ fn is_constant(node: &Node) -> bool {
     match &node.kind {
         NodeKind::Number { .. } | NodeKind::String { .. } | NodeKind::Bool { .. } => true,
         NodeKind::Null => true,
-        NodeKind::Negate { expr } => crate::stack::grow(|| is_constant(expr)),
+        NodeKind::Variable { name } => variables && !name.is_empty(),
+        NodeKind::Negate { expr } => crate::stack::grow(|| constant_from(expr, variables)),
         NodeKind::Binary { lhs, rhs, .. } => {
-            crate::stack::grow(|| is_constant(lhs) && is_constant(rhs))
+            crate::stack::grow(|| constant_from(lhs, variables) && constant_from(rhs, variables))
         }
-        NodeKind::Array { items } | NodeKind::Block { exprs: items, .. } => {
-            items.iter().all(|i| crate::stack::grow(|| is_constant(i)))
-        }
+        NodeKind::Array { items } | NodeKind::Block { exprs: items, .. } => items
+            .iter()
+            .all(|i| crate::stack::grow(|| constant_from(i, variables))),
         _ => false,
     }
 }

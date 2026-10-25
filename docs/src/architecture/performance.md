@@ -7,15 +7,15 @@ performance is measured, what the numbers are, and how to use the API to get the
 
 The workload is in `benches/` at the repository root. It is shared by the native benchmarks and
 by the comparisons with jsonata-js and with the other Python packages:
-- `benches/cases.json` lists thirteen expressions: path navigation, a name mapped over the
+- `benches/cases.json` lists fourteen expressions: path navigation, a name mapped over the
   items, filters with aggregation, grouping, sorting, string and regex functions, number formatting, an object constructor, a
-  transform, a recursive function, the shipping rule from the guides, and an index into a long
-  array.
+  transform, a recursive function, the shipping rule from the guides, and two indexes into a
+  long array, one of them held in a variable.
 - `benches/orders-200.json` is a 24 KB store order with 200 items, the input of every case but
-  the last.
-- `benches/items-10000.json` is an array of 10,000 small items, the input of the last case,
-  `items[0].code`: it costs little only when an index does not touch the other items, which 200
-  items would hide.
+  the last two.
+- `benches/items-10000.json` is an array of 10,000 small items, the input of the last two
+  cases, `items[0].code` and `($i := 0; items[$i].code)`: they cost little only when an index
+  does not touch the other items, which 200 items would hide.
 - `crates/jlens-core/benches/host_state.rs` builds a document from Rust values again and again,
   as an application that keeps its state in Rust types does
   ([below](#documents-built-from-rust-values)). It is native only.
@@ -857,7 +857,16 @@ path changed but the order in which variables and functions are bound.
   revision before, `items[0].code` over 10,000 items takes 1.31 µs instead of 618 µs with
   `evaluate`, and 1.95 µs instead of 609 µs with `--mode source`, near the 0.67 µs it takes
   against a `Document`; the other cases are within 2%. A predicate that picks more than 16 items
-  reads the array whole at once, and an index held in a variable (`items[$i]`) is tested against
-  every item, so it reads the whole array.
+  reads the array whole at once.
+
+  An index held in a variable (`items[$i]`) does the same since 0.24 #5: a predicate built from
+  literals and variables gives the same value for each item, so it is evaluated once and picks
+  its items, unless it reads `$` (the item) or its input is a tuple stream, which binds `#$i`
+  and `@$o` for each item. Before, it was tested against every item: `($i := 0;
+  items[$i].code)` over 10,000 items took 2.29 ms with `evaluate`, 2.31 ms with `--mode source`
+  and 1.70 ms against a `Document`, and takes 1.97 µs, 2.30 µs and 1.28 µs, built aligned
+  against the revision before. The other cases are within 2% in every mode; against a `Document`,
+  `path` and `object constructor`, 2.6% and 5.3% slower over 10 rounds, were within 0.1% over
+  20.
 - **Deep copies.** A transform (`|...|`) copies its input with `$clone` before changing it, as
   jsonata-js does. That makes transforms of large documents comparatively expensive.
