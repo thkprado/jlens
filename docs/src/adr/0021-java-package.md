@@ -254,3 +254,91 @@ takes the handles of an expression and an input in JSON and returns a buffer wit
   read the clock through WASI, and 1,000 evaluations in a row gave no wrong result.
 - **Sizes**, in a release build with `lto`, unstripped and not tuned: 2.2 MB for the Windows
   DLL, 2.6 MB for the Linux `.so`, 1.7 MB for the WebAssembly module.
+
+**Item 2** (2026-10-25, the same machine and versions; jsonata-java 0.9.10; the system
+allocator, not mimalloc).
+
+- **Method.** One thread, one second of warm-up, then the best of five runs of at least 0.3 s
+  each. The document has `n` items with five fields each: `id`, `name` (`"item 17"`), `price`
+  (0 to 99.99), `tags` (two strings) and `stock` (an object with two fields). That makes 97 KB
+  of JSON for 1,000 items and 10.1 MB for 100,000.
+- **What each column includes.**
+  - Every jlens column returns its result as JSON text, decoded into a Java `String`.
+    jsonata-java returns Java objects.
+  - "JSON text" starts from a Java `String`: it encodes it in UTF-8, copies it into a Rust
+    buffer, and parses only the fields the expression reads (ADR 0016).
+  - "Source" reads the `Map`s and `List`s that jsonata-java's own parser (`Json.parseJson`)
+    built. It makes one upcall per level, and Java encodes the level into a Rust buffer.
+  - "Document" is parsed once, before the timing.
+  - "jsonata-java, parsing" parses the `String` and then evaluates.
+- **Chicory** runs the module that its build-time compiler turned into JVM classes. Every
+  function compiled: none was left to the interpreter. The generated files take 2.4 MB, 1.7 MB
+  of it in one class. With HotSpot's defaults, its methods exceed the 8,000 bytes of bytecode
+  above which HotSpot does not JIT-compile (`DontCompileHugeMethods`), so they run in the
+  JVM's own interpreter. The table gives Chicory with `-XX:-DontCompileHugeMethods`. Without
+  that flag, JSON text takes 13 to 25 ms on 1,000 items (4 to 5.5 times longer, but for `$`)
+  and 1.8 to 2.0 s on 100,000, and a `Document` up to 2.5 times longer (2.9 on Linux).
+
+Microseconds per evaluation on Windows x86-64:
+
+| Expression | Panama, JSON text | Panama, Source | Panama, Document | Chicory, JSON text | Chicory, Document | jsonata-java | jsonata-java, parsing |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1,000 items (97 KB) | | | | | | | |
+| `items[0].name` | 529 | 120 | 4.8 | 3,535 | 42 | 78 | 759 |
+| `$count(items)` | 277 | 113 | 1.2 | 2,391 | 5.9 | 80 | 756 |
+| `$sum(items.price)` | 482 | 1,490 | 34 | 4,106 | 606 | 146 | 820 |
+| `items[price > 98].id` | 633 | 1,601 | 127 | 6,095 | 1,085 | 324 | 1,004 |
+| `$` | 3,255 | 4,521 | 1,858 | 17,713 | 9,751 | 145 | 803 |
+| 100,000 items (10.1 MB) | | | | | | | |
+| `items[0].name` | 63,183 | 18,391 | 2,362 | 354,761 | 3,708 | 33,594 | 76,769 |
+| `$sum(items.price)` | 62,936 | 217,786 | 12,844 | 410,671 | 39,213 | 51,672 | 92,613 |
+| `$` | 464,131 | 641,011 | 264,827 | 1,992,563 | 1,008,859 | 66,108 | 86,128 |
+
+Linux x86-64 (WSL 2) gives the same picture.
+
+- Panama takes 2 to 43% less time there, and 2.7 times less on `items[0].name` over the
+  100,000-item `Document` (885 µs against 2,362).
+- Chicory without the flag takes within 7% of the Windows times. With it, it mostly takes
+  within 17% of them, but `$sum(items.price)` on a `Document` of 1,000 items takes 313 µs
+  against 606.
+- jsonata-java takes within 12% of the Windows times. The exception is parsing and summing
+  the large document, which takes 1.9 times longer.
+- The difference points at Windows' system allocator, which the native library would replace
+  with mimalloc, as the Python wheels do (ADR 0014, amendment).
+
+What this says:
+
+- **Panama on a `Document` beats jsonata-java on its own Java objects** in every case but `$`.
+  On 1,000 items it is 16 times faster on `items[0].name`, about 70 times on `$count(items)`, 4.3
+  times on `$sum(items.price)` and 2.6 times on the filter. On 100,000 items it is 14 times
+  faster on `items[0].name` and 4 times on `$sum(items.price)`.
+- **`$` is not a fair comparison.** jsonata-java returns its input object, while jlens
+  serializes the whole document and Java decodes it. A result written straight into Java
+  objects (ADR 0017's builder, through upcalls) is the fair comparison, and it is not measured
+  yet.
+- **Panama on JSON text beats jsonata-java when both start from a `String`.**
+  - On 1,000 items it is 1.4 to 2.7 times faster.
+  - On 100,000 items, `items[0].name` is 1.2 times faster and `$sum(items.price)` 1.5
+    times.
+  - Only `$`, which returns the whole document, is slower.
+- **A `Source` over Java objects only pays when the expression reads little.**
+  - `items[0].name` and `$count(items)` take 120 and 113 µs, against 529 and 277 µs from
+    JSON text.
+  - Reading every item costs about 1.5 µs per level (one upcall, plus encoding in Java). So
+    `$sum(items.price)` takes 3 times longer than from JSON text, and 10 times longer than
+    jsonata-java. Python's level reading was close (1,770 µs for the same case).
+  - The package would therefore take Java objects as an input, but neither as its default
+    nor as its fast path.
+- **Chicory fails the decision's condition for a sole backend.**
+  - JSON text, the common case, is 3 to 6 times slower than jsonata-java parsing, even with
+    the flag (22 times for `$`).
+  - A `Document` is faster than jsonata-java when the expression reads little (`$count`,
+    `items[0].name`). When it reads every item, it is 3 to 4 times slower on 1,000 items, and
+    faster on 100,000 (`$sum(items.price)`: 39 ms against 52).
+  - Chicory also needs a JVM flag to reach these numbers, which removes its one advantage
+    over Panama: no launch flag.
+- **The path `items[0]` on a `Document` of 100,000 items costs 0.9 to 2.4 ms**, as it did in
+  Python (2,480 µs, ADR 0014). The core builds the whole sequence of items before taking the
+  first. That belongs to `jlens-core`, outside this ADR.
+
+The full tables, Linux included, are in the spike's `bench/results-*.md`.
