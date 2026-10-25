@@ -882,5 +882,14 @@ path changed but the order in which variables and functions are bound.
   against a `Document`; the other cases are within 2.3%. Built without the alignment flags,
   `names over items`, which reads no item alone, measured 4.6% slower in every run; aligned, it
   takes 21.9 µs in both builds.
+
+  Against 0.23.0 (`cargo xtask ab v0.23.0 HEAD`, the 0.24 code complete, ten rounds), the two
+  index cases are the only large change. With `evaluate`, `--mode document` and `--mode source`,
+  `items[0].code` takes 1.29 µs, 682 ns and 1.89 µs, against 887 µs, 40.1 µs and 830 µs, and
+  `($i := 0; items[$i].code)` 1.93 µs, 1.27 µs and 2.30 µs, against 2.38 ms, 1.58 ms and
+  2.39 ms. Every other case is between 5.0% faster (`object constructor` against a `Document`)
+  and 1.9% slower (`transform` with `evaluate`), except `strings` with `--mode source`, 5.1%
+  slower over ten rounds and 1.3% faster over 20. `names over items` is 4.7% faster with
+  `evaluate` and 2.3% with `--mode source`, from the hasher seed the lazy objects now share.
 - **Deep copies.** A transform (`|...|`) copies its input with `$clone` before changing it, as
   jsonata-js does. That makes transforms of large documents comparatively expensive.
