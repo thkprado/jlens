@@ -1,3 +1,5 @@
 * text=auto eol=lf
 *.wasm binary
 *.png binary
+# Batch files need CRLF: cmd.exe misreads labels in LF files.
+*.cmd text eol=crlf
