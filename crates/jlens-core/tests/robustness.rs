@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use jlens_core::input::{Sink, Source, Sources};
-use jlens_core::output::Builder;
+use jlens_core::output::{Builder, Member};
 use jlens_core::reads::{Read, Reads};
 use jlens_core::{Bindings, CancelToken, Document, Error, Expression, HostFunction, Options};
 use proptest::prelude::*;
@@ -565,6 +565,18 @@ proptest! {
                 });
                 if !timed_out(&json) && !timed_out(&built) {
                     prop_assert_eq!(format!("{built:?}"), format!("{json:?}"));
+                }
+                // A builder that returns the input's arrays and objects whole, as the host's
+                // own: what the input holds is what the evaluation would write.
+                let tree = Tree::new(&input);
+                let json = expr.evaluate_source(&TreeRoot(tree.clone()), &bindings, &options);
+                let whole = expr.evaluate_source_to(&TreeRoot(tree.clone()), &bindings, &options, |out| {
+                    out.write(&mut Whole(&tree))
+                });
+                // Only the size limit differs: an input returned whole is not built.
+                let too_large = json.as_ref().is_err_and(|e| e.code() == "U1001");
+                if !timed_out(&json) && !timed_out(&whole) && !too_large {
+                    prop_assert_eq!(format!("{whole:?}"), format!("{json:?}"));
                 }
             }
         }
@@ -1410,6 +1422,180 @@ impl Builder for Rebuilt {
     ) -> serde_json::Value {
         Rebuilt::built(object.into())
     }
+}
+
+/// JSON read one level at a time, every array and object a member of the one `Tree` of the
+/// evaluation, known by its index, as the Java package reads its objects.
+struct Tree<'j> {
+    nodes: std::cell::RefCell<Vec<&'j serde_json::Value>>,
+    this: std::rc::Weak<Tree<'j>>,
+}
+
+/// The input of a [`Tree`]: its root, the only value of its level.
+struct TreeRoot<'j>(Rc<Tree<'j>>);
+
+impl<'j> Tree<'j> {
+    fn new(root: &'j serde_json::Value) -> Rc<Tree<'j>> {
+        Rc::new_cyclic(|this| Tree {
+            nodes: std::cell::RefCell::new(vec![root]),
+            this: this.clone(),
+        })
+    }
+
+    fn write(&self, sink: &mut Sink<'_, 'j>, json: &'j serde_json::Value) {
+        let this = self.this.upgrade().expect("a live tree");
+        let member = |sink: &mut Sink<'_, 'j>, array: bool| {
+            let mut nodes = self.nodes.borrow_mut();
+            nodes.push(json);
+            let index = nodes.len() as u32 - 1;
+            match array {
+                true => sink.array_of(&this, index),
+                false => sink.object_of(&this, index),
+            }
+        };
+        match json {
+            serde_json::Value::Null => sink.null(),
+            serde_json::Value::Bool(b) => sink.bool(*b),
+            serde_json::Value::Number(n) => sink.number(n.as_f64().unwrap_or(f64::NAN)),
+            serde_json::Value::String(s) => sink.string(s),
+            serde_json::Value::Array(_) => member(sink, true),
+            serde_json::Value::Object(_) => member(sink, false),
+        }
+    }
+}
+
+impl<'j> Source<'j> for TreeRoot<'j> {
+    fn read(&self, sink: &mut Sink<'_, 'j>) -> Result<(), String> {
+        let root = self.0.nodes.borrow()[0];
+        self.0.write(sink, root);
+        Ok(())
+    }
+}
+
+impl<'j> Sources<'j> for Tree<'j> {
+    fn read(&self, index: u32, sink: &mut Sink<'_, 'j>) -> Result<(), String> {
+        let node = self.nodes.borrow()[index as usize];
+        match node {
+            serde_json::Value::Array(items) => items.iter().for_each(|item| self.write(sink, item)),
+            serde_json::Value::Object(fields) => fields.iter().for_each(|(key, value)| {
+                sink.key(key);
+                self.write(sink, value);
+            }),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn read_field(&self, index: u32, key: &str, sink: &mut Sink<'_, 'j>) -> Result<bool, String> {
+        let node = self.nodes.borrow()[index as usize];
+        if let Some(value) = node.get(key) {
+            self.write(sink, value);
+        }
+        Ok(true)
+    }
+
+    fn length(&self, index: u32) -> Option<usize> {
+        self.nodes.borrow()[index as usize].as_array().map(Vec::len)
+    }
+
+    fn read_item(&self, index: u32, item: usize, sink: &mut Sink<'_, 'j>) -> Result<bool, String> {
+        let node = self.nodes.borrow()[index as usize];
+        if let Some(value) = node.get(item) {
+            self.write(sink, value);
+        }
+        Ok(true)
+    }
+}
+
+/// Builds as [`Rebuilt`] does, but for the arrays and objects of its [`Tree`] left unchanged,
+/// which it returns whole, as the Java package returns its input's own objects.
+struct Whole<'t, 'j>(&'t Rc<Tree<'j>>);
+
+impl Builder for Whole<'_, '_> {
+    type Value = serde_json::Value;
+    type Array = Vec<serde_json::Value>;
+    type Object = serde_json::Map<String, serde_json::Value>;
+
+    fn null(&mut self) -> serde_json::Value {
+        Rebuilt.null()
+    }
+    fn bool(&mut self, value: bool) -> serde_json::Value {
+        Rebuilt.bool(value)
+    }
+    fn number(&mut self, value: f64) -> serde_json::Value {
+        Rebuilt.number(value)
+    }
+    fn string(&mut self, value: &str) -> serde_json::Value {
+        Rebuilt.string(value)
+    }
+    fn array(&mut self, len: usize) -> Vec<serde_json::Value> {
+        Rebuilt.array(len)
+    }
+    fn push(&mut self, array: &mut Vec<serde_json::Value>, item: serde_json::Value) {
+        Rebuilt.push(array, item);
+    }
+    fn end_array(&mut self, array: Vec<serde_json::Value>) -> serde_json::Value {
+        Rebuilt.end_array(array)
+    }
+    fn object(&mut self, len: usize) -> serde_json::Map<String, serde_json::Value> {
+        Rebuilt.object(len)
+    }
+    fn insert(
+        &mut self,
+        object: &mut serde_json::Map<String, serde_json::Value>,
+        key: &str,
+        value: serde_json::Value,
+    ) {
+        Rebuilt.insert(object, key, value);
+    }
+    fn end_object(
+        &mut self,
+        object: serde_json::Map<String, serde_json::Value>,
+    ) -> serde_json::Value {
+        Rebuilt.end_object(object)
+    }
+    fn input(&mut self, member: Member) -> Option<serde_json::Value> {
+        let nodes = self.0.nodes.borrow();
+        member
+            .of(self.0)
+            .then(|| nodes[member.index() as usize].clone())
+    }
+}
+
+/// A builder that returns its input's arrays and objects whole is given each one the
+/// evaluation leaves unchanged, read or not, and none it built; it skips the size limit, since
+/// nothing is built (ADR 0021, 0.25 #6).
+#[test]
+fn a_builder_returns_the_input_whole() {
+    let input = input();
+    let write = |source: &str, options: &Options| {
+        let expr = Expression::compile(source).unwrap();
+        let tree = Tree::new(&input);
+        BUILT.with(|built| built.set(0));
+        let result =
+            expr.evaluate_source_to(&TreeRoot(tree.clone()), &Bindings::new(), options, |out| {
+                out.write(&mut Whole(&tree))
+            });
+        (result.unwrap(), BUILT.with(|built| built.get()))
+    };
+    let small = Options::new().max_result_size(10);
+    assert_eq!(write("$", &small), (Some(input.clone()), 0));
+    assert_eq!(write("o.p", &small), (Some(input["o"]["p"].clone()), 0));
+    assert_eq!(write("items[0]", &small).1, 0);
+    // An array of the input's objects is built, its objects are not.
+    assert_eq!(
+        write("items[$type(price) = 'number']", &Options::new()).1,
+        1
+    );
+    // A sequence of one is unwrapped: the object itself.
+    assert_eq!(
+        write("items[a = 'p']", &small),
+        (Some(input["items"][0].clone()), 0)
+    );
+    // A copy is built.
+    let (result, built) = write("o ~> |p|{'r': 1}|", &Options::new());
+    assert_eq!(result, Some(json!({"p": {"q": [1], "r": 1}})));
+    assert!(built > 1, "{built}");
 }
 
 /// A builder stops at the size and nesting limits of a result, writing reads what the evaluation

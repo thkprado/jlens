@@ -14,8 +14,10 @@ import java.util.Map;
  * Decodes a result written as values by the C API ({@code values.rs} in {@code jlens-capi}):
  * a tag byte per value, integers little-endian, each distinct key once. Objects become {@link
  * LinkedHashMap}s in their order, arrays {@link ArrayList}s, integral numbers in a {@code
- * long}'s range {@link Long}s and the others {@link Double}s. The walk keeps its own stack, so
- * a result nested 1,000 levels deep decodes on a thread with a small stack.
+ * long}'s range {@link Long}s and the others {@link Double}s. An array or object of the input
+ * that the result holds unchanged is the input's own object ({@code INPUT}, by its number). The
+ * walk keeps its own stack, so a result nested 1,000 levels deep decodes on a thread with a small
+ * stack.
  */
 final class Values {
     static final byte NULL = 0;
@@ -26,6 +28,7 @@ final class Values {
     static final byte STRING = 5;
     static final byte ARRAY = 6;
     static final byte OBJECT = 7;
+    static final byte INPUT = 8;
 
     private static final VarHandle I32 =
             MethodHandles.byteArrayViewVarHandle(int[].class, ByteOrder.LITTLE_ENDIAN);
@@ -35,18 +38,28 @@ final class Values {
             MethodHandles.byteArrayViewVarHandle(double[].class, ByteOrder.LITTLE_ENDIAN);
 
     private final byte[] bytes;
+    private final Object[] input;
     private int at;
     private String[] keys = new String[16];
     private int keyCount;
 
-    private Values(byte[] bytes, int at) {
+    private Values(byte[] bytes, int at, Object[] input) {
         this.bytes = bytes;
         this.at = at;
+        this.input = input;
     }
 
     /** The value written in {@code bytes} from offset {@code at}. */
     static Object decode(byte[] bytes, int at) {
-        return new Values(bytes, at).decode();
+        return decode(bytes, at, null);
+    }
+
+    /**
+     * The value written in {@code bytes} from offset {@code at}, its arrays and objects of the
+     * input taken from {@code input}, by their numbers.
+     */
+    static Object decode(byte[] bytes, int at, Object[] input) {
+        return new Values(bytes, at, input).decode();
     }
 
     @SuppressWarnings("unchecked")
@@ -108,6 +121,10 @@ final class Values {
                 yield value;
             }
             case STRING -> text();
+            case INPUT -> {
+                if (input == null) throw new IllegalStateException("jlens: an input value with no input");
+                yield input[u32()];
+            }
             default -> throw new IllegalStateException("jlens: unknown value tag " + tag + " at " + (at - 1));
         };
     }

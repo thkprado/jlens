@@ -10,6 +10,8 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.ref.Cleaner;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
@@ -59,6 +61,23 @@ final class Native {
     private static final MethodHandle EVALUATE = function("jlens_evaluate", U64, U64, U64, U64, U32);
     private static final MethodHandle EVALUATE_DOCUMENT =
             function("jlens_evaluate_document", U64, U64, U64, U64, U32);
+    private static final MethodHandle EVALUATE_SOURCE = function("jlens_evaluate_source",
+            U64, U64, U64, ValueLayout.ADDRESS, U64, U64, U32);
+
+    /** The function the C API calls back to read Java objects: {@link Reader#read}. */
+    static final MemorySegment READER;
+
+    static {
+        try {
+            MethodHandle read = MethodHandles.lookup().findStatic(Reader.class, "read",
+                    MethodType.methodType(long.class, long.class, int.class, int.class, long.class,
+                            long.class, long.class));
+            READER = Linker.nativeLinker().upcallStub(read,
+                    FunctionDescriptor.of(U64, U64, U32, U32, U64, USIZE, USIZE), Arena.global());
+        } catch (ReflectiveOperationException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+    }
 
     /** The result format of the evaluations: JSON text. */
     static final int JSON = 0;
@@ -156,6 +175,44 @@ final class Native {
         }
     }
 
+    /**
+     * Evaluates against Java objects: {@code input} is the buffer of the input's level, and the C
+     * API reads the rest through {@link #READER}.
+     */
+    static long evaluateSource(long expression, long input, long options, int format) {
+        try {
+            return (long) EVALUATE_SOURCE.invokeExact(expression, input, READER, 0L, options, format);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /** A new buffer of {@code size} bytes: its handle, which the caller frees. */
+    static long bufferNew(long size) {
+        try {
+            long buffer = (long) BUFFER_NEW.invokeExact(size);
+            if (buffer == 0) throw new OutOfMemoryError("jlens: no buffer of " + size + " bytes");
+            return buffer;
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /** The {@code size} bytes of buffer {@code buffer}, valid until it is freed. */
+    static MemorySegment bufferBytes(long buffer, long size) {
+        try {
+            long address = (long) BUFFER_ADDRESS.invokeExact(buffer);
+            return MemorySegment.ofAddress(address).reinterpret(size);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /** A copy of the {@code length} bytes at {@code address}, which the C API gave. */
+    static byte[] bytesAt(long address, long length) {
+        return MemorySegment.ofAddress(address).reinterpret(length).toArray(ValueLayout.JAVA_BYTE);
+    }
+
     /** A new buffer holding {@code bytes}: its handle, which the caller frees. */
     static long buffer(byte[] bytes) {
         try {
@@ -202,10 +259,18 @@ final class Native {
      * when it is undefined. A reply holding an error throws it.
      */
     static Object values(long reply) {
+        return values(reply, null);
+    }
+
+    /**
+     * Reads and frees reply {@code reply} as {@link #values(long)} does, its arrays and objects of
+     * the input taken from {@code input}, by their numbers.
+     */
+    static Object values(long reply, Object[] input) {
         byte[] bytes = take(reply);
         return switch (bytes[0]) {
             case REPLY_UNDEFINED -> null;
-            case REPLY_VALUES -> Values.decode(bytes, 1);
+            case REPLY_VALUES -> Values.decode(bytes, 1, input);
             case REPLY_ERROR -> throw error(bytes);
             default -> throw unexpected(bytes);
         };

@@ -92,9 +92,9 @@ public final class Compare {
             System.out.printf("| %,d items (%,d KB of JSON) |%s%n", n, json.length() / 1000,
                 " |".repeat(2 * engines.size()));
             List<String> expressions = n <= 1000
-                ? List.of("items[0].name", "$count(items)", "$sum(items.price)",
-                    "items[price > 98].id", "$")
-                : List.of("items[0].name", "$sum(items.price)", "$");
+                ? List.of("items[0].name", "($i := 0; items[$i].name)", "$count(items)",
+                    "$sum(items.price)", "items[price > 98].id", "$")
+                : List.of("items[0].name", "($i := 0; items[$i].name)", "$sum(items.price)", "$");
             Map<Engine, Object> converted = new HashMap<>();
             for (Engine e : engines) converted.put(e, e.convert(json));
             for (String expression : expressions)

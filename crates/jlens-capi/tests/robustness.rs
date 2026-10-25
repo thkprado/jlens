@@ -7,6 +7,7 @@ use jlens_capi::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, REPLY_V
 use proptest::prelude::*;
 use serde_json::Value;
 
+mod host;
 mod values;
 
 /// Expressions, inputs, options and reads that are valid, nearly valid, or bytes of any kind.
@@ -425,4 +426,113 @@ fn json() -> impl Strategy<Value = Value> {
                 .prop_map(|fields| Value::Object(fields.into_iter().collect())),
         ]
     })
+}
+
+/// Evaluates `expression` against `input` as the host's own values, read in mode `context`:
+/// the reply's bytes, and the host's nodes.
+fn on_host(expression: u64, input: &Value, context: u64, result: u32) -> (Vec<u8>, Vec<Value>) {
+    let level = host::Host::start(input);
+    let reply = jlens_evaluate_source(expression, level, Some(host::READER), context, 0, result);
+    host::Host::finish();
+    assert_eq!(jlens_buffer_free(level), 1);
+    let nodes = host::HOST.with_borrow_mut(|host| std::mem::take(&mut host.nodes));
+    (buffers::take(reply).expect("a reply"), nodes)
+}
+
+fn compiled(source: &str) -> u64 {
+    let buffer = buffers::insert(source.as_bytes().to_vec());
+    let reply = buffers::take(jlens_compile(buffer)).unwrap();
+    assert_eq!(jlens_buffer_free(buffer), 1);
+    assert_eq!(reply[0], REPLY_HANDLE, "{source}");
+    u64::from_le_bytes(reply[1..].try_into().unwrap())
+}
+
+/// The expressions of the tests over the host's values, and the keys they name, which the
+/// test's reader must know to find a field ([`host`]).
+const EXPRESSIONS: &[&str] = &[
+    "$",
+    "a",
+    "a.b",
+    "*",
+    "**",
+    "$.*[0]",
+    "a[0]",
+    "a[-1].b",
+    "($i := 1; a[$i])",
+    "$count(a)",
+    "$string($)",
+    "$keys($)",
+    "[$]",
+    "{'v': a}",
+    "$ ~> | $ | {'x': 1} |",
+    "a[b = 1]",
+    "$sort(a)",
+];
+
+proptest! {
+    /// The host's values give what their JSON text gives, as JSON text or as values, whether
+    /// the reader reads one field or item alone or not.
+    #[test]
+    fn the_hosts_values_give_what_their_json_text_gives(
+        input in json(),
+        expression in prop::sample::select(EXPRESSIONS),
+    ) {
+        host::Host::know(&["a", "b", "x", "v"]);
+        let expression = compiled(expression);
+        let text = buffers::insert(input.to_string().into_bytes());
+        let as_text = buffers::take(jlens_evaluate(expression, text, 0, 0)).unwrap();
+        prop_assert_eq!(jlens_buffer_free(text), 1);
+        for context in [host::PLAIN, host::WHOLE] {
+            let (as_json, _) = on_host(expression, &input, context, 0);
+            prop_assert_eq!(&as_json, &as_text);
+            let (as_values, nodes) = on_host(expression, &input, context, 1);
+            match (as_text[0], as_values[0]) {
+                (REPLY_JSON, REPLY_VALUES) => {
+                    let json: Value = serde_json::from_slice(&as_text[1..]).unwrap();
+                    let values = values::decode_with(&as_values[1..], &nodes);
+                    prop_assert_eq!(values::as_f64(values), values::as_f64(json));
+                }
+                (text, values) => prop_assert_eq!(text, values, "the same kind of reply"),
+            }
+        }
+        prop_assert_eq!(jlens_expression_free(expression), 1);
+    }
+
+    /// A reader that returns any bytes, levels nearly in their form included, makes the
+    /// evaluation fail with `U1004` or give a result, never panic.
+    #[test]
+    fn a_reader_returning_any_bytes_fails_cleanly(
+        garbage in prop_oneof![
+            bytes(),
+            (any::<u8>(), any::<u32>(), bytes()).prop_map(|(kind, count, rest)| {
+                let mut level = Vec::new();
+                level.extend_from_slice(&((5 + rest.len()) as u32).to_le_bytes());
+                level.push(kind % 5);
+                level.extend_from_slice(&(count % 4).to_le_bytes());
+                level.extend(rest);
+                level
+            }),
+        ],
+        expression in prop::sample::select(EXPRESSIONS),
+        result in 0u32..2,
+    ) {
+        host::HOST.with_borrow_mut(|host| host.garbage = garbage);
+        let expression = compiled(expression);
+        let input = serde_json::json!({"a": [{"b": 1}, {"b": [2]}]});
+        let (reply, nodes) = on_host(expression, &input, host::GARBAGE, result);
+        match reply[0] {
+            REPLY_ERROR => {
+                let error: Value = serde_json::from_slice(&reply[1..]).expect("an envelope");
+                prop_assert_ne!(&error["code"], "U2004", "a panic: {}", error);
+            }
+            REPLY_VALUES => {
+                values::decode_with(&reply[1..], &nodes);
+            }
+            REPLY_JSON => {
+                serde_json::from_slice::<Value>(&reply[1..]).expect("JSON text");
+            }
+            status => prop_assert_eq!(status, REPLY_UNDEFINED),
+        }
+        prop_assert_eq!(jlens_expression_free(expression), 1);
+    }
 }

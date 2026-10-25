@@ -1013,6 +1013,20 @@ impl<'a> Value<'a> {
         }
     }
 
+    /// The member of sources an array or object of the input was read from: whether read or
+    /// not, it stands for the source's value, since an evaluation never changes its input.
+    fn member(&self) -> Option<crate::output::Member> {
+        let (pending, index) = match self {
+            Value::Array(a) => a.lazy.as_ref().map(|lazy| (&lazy.pending, lazy.member))?,
+            Value::Object(o) => (o.pending.as_ref()?, o.member),
+            _ => return None,
+        };
+        match &pending.origin {
+            Origin::Source(sources) => Some(crate::output::Member::new(sources, index)),
+            Origin::Json(_) => None,
+        }
+    }
+
     /// Converts a result into JSON, following `JSON.stringify`: undefined and functions are
     /// dropped from objects and become `null` in arrays; a top-level one yields `None`. It has
     /// no nesting limit: it converts documents, whose depth their JSON bounds.
@@ -1083,6 +1097,11 @@ impl<'a> Value<'a> {
     ) -> std::result::Result<Option<B::Value>, TooLarge> {
         if let Some(json) = self.unread() {
             return write_json_within(json, builder, budget, depth).map(Some);
+        }
+        if let Some(member) = self.member()
+            && let Some(built) = builder.input(member)
+        {
+            return Ok(Some(built));
         }
         if matches!(self, Value::Array(_) | Value::Object(_)) && depth >= MAX_NESTING {
             return Err(TooLarge::Nesting);

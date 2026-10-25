@@ -53,4 +53,9 @@ export! {
     /// defaults): a reply with the result, as JSON text (`result` 0) or values (`result` 1),
     /// or the error.
     jlens_evaluate_document(expression: u64, document: u64, options: u64, result: u32) -> u64 = crate::api::evaluate_document, crate::api::panicked;
+    /// Evaluates an expression against the host's own values: buffer `input` holds the input
+    /// as a level, and `reader`, given `context`, writes the levels of its arrays and objects
+    /// (the `source` module). With options `options` (0 for the defaults): a reply with the
+    /// result, as JSON text (`result` 0) or values (`result` 1), or the error.
+    jlens_evaluate_source(expression: u64, input: u64, reader: Option<crate::source::Reader>, context: u64, options: u64, result: u32) -> u64 = crate::api::evaluate_source, crate::api::panicked;
 }

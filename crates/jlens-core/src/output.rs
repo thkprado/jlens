@@ -63,6 +63,8 @@
 //! assert_eq!(result.unwrap().as_deref(), Some(r#"{"total":5.5}"#));
 //! ```
 
+use std::rc::Rc;
+
 use crate::Result;
 use crate::value::{Shared, Value};
 
@@ -119,6 +121,45 @@ pub trait Builder {
 
     /// Finishes an object.
     fn end_object(&mut self, object: Self::Object) -> Self::Value;
+
+    /// Builds an array or object of the input, which a source wrote as `member` of a
+    /// [`Sources`](crate::input::Sources) and the evaluation left unchanged, as a whole: `None`,
+    /// the default, builds it value by value instead. A builder over the objects its input was
+    /// read from can return the object itself, as a member stands for its source's object. Such
+    /// a value is not counted against the size limit or the nesting limit, since nothing of it
+    /// is built, and what of it was left unread stays unread.
+    fn input(&mut self, member: Member) -> Option<Self::Value> {
+        let _ = member;
+        None
+    }
+}
+
+/// An array or object of the input, read from a [`Sources`](crate::input::Sources): what
+/// [`Builder::input`] is given.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Member {
+    /// The address of the sources, which identifies them while they live.
+    sources: usize,
+    index: u32,
+}
+
+impl Member {
+    pub(crate) fn new<S: ?Sized>(sources: &Rc<S>, index: u32) -> Member {
+        Member {
+            sources: Rc::as_ptr(sources).cast::<()>().addr(),
+            index,
+        }
+    }
+
+    /// Whether the member is one of `sources`: the sources a builder's input was read from.
+    pub fn of<S: ?Sized>(&self, sources: &Rc<S>) -> bool {
+        Rc::as_ptr(sources).cast::<()>().addr() == self.sources
+    }
+
+    /// The member's index among its sources.
+    pub fn index(&self) -> u32 {
+        self.index
+    }
 }
 
 /// The result of an evaluation, not written yet. [`Output::write`] writes it.

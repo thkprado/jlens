@@ -13,6 +13,7 @@ use serde_json::{Map, Value};
 use crate::documents::{self, DOCUMENTS};
 use crate::handles::Table;
 use crate::options::{self, OPTIONS};
+use crate::source::{self, Host, Reader};
 use crate::values::Encoder;
 use crate::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, REPLY_VALUES, buffers};
 
@@ -196,9 +197,13 @@ fn evaluate_text(
                 .ok_or_else(|| unknown("buffer", input))??,
         ),
     };
+    let input = match &document {
+        Some(document) => Input::Document(document),
+        None => Input::None,
+    };
     run(
         &compiled,
-        document.as_ref(),
+        input,
         options.as_deref().unwrap_or(&DEFAULTS),
         format,
     )
@@ -230,10 +235,41 @@ fn evaluate_on_document(
     let document = documents::converted(&text).map_err(|e| not_json(e.to_string()))?;
     run(
         &compiled,
-        Some(&document),
+        Input::Document(&document),
         options.as_deref().unwrap_or(&DEFAULTS),
         format,
     )
+}
+
+/// Evaluates expression `expression` against the host's own values, read through `reader`
+/// ([`source`]), with options `options` (0 for the defaults), and replies with the result as
+/// JSON text (`result` 0) or as values (`result` 1), or with the error. Buffer `input` holds
+/// the input as a level of one value, and stays the caller's; `reader` is given `context` at
+/// each call. In values, an array or object of the input that the result holds unchanged is
+/// written as its number. A `reader` of 0 fails with `U2005`.
+pub fn evaluate_source(
+    expression: u64,
+    input: u64,
+    reader: Option<Reader>,
+    context: u64,
+    options: u64,
+    result: u32,
+) -> u64 {
+    reply(Format::named(result).and_then(|format| {
+        let compiled = EXPRESSIONS
+            .get(expression)
+            .ok_or_else(|| unknown("expression", expression))?;
+        let options = find_options(options)?;
+        buffers::with(input, |_| ()).ok_or_else(|| unknown("buffer", input))?;
+        let reader = reader.ok_or_else(|| invalid("reader", "no reader".into()))?;
+        let host = Host::new(reader, context);
+        run(
+            &compiled,
+            Input::Source(source::Input { host: &host, input }),
+            options.as_deref().unwrap_or(&DEFAULTS),
+            format,
+        )
+    }))
 }
 
 /// The options of handle `options`, or `None` for 0, the defaults.
@@ -250,30 +286,49 @@ fn find_options(options: u64) -> Result<Option<Arc<Options>>, Vec<u8>> {
 /// The default options, shared by the evaluations given none.
 static DEFAULTS: LazyLock<Options> = LazyLock::new(Options::default);
 
+/// The input of an evaluation.
+enum Input<'i> {
+    None,
+    Document(&'i Document),
+    /// The host's values, read through its reader.
+    Source(source::Input<'i>),
+}
+
 fn run(
     compiled: &Compiled,
-    document: Option<&Document>,
+    input: Input<'_>,
     options: &Options,
     format: Format,
 ) -> Result<Vec<u8>, Vec<u8>> {
     let bindings = Bindings::new();
     let expression = &compiled.expression;
     let result = match format {
-        Format::Json => match document {
-            Some(document) => expression.evaluate_document(document, &bindings, options),
-            None => expression.evaluate_with(None, &bindings, options),
+        Format::Json => match &input {
+            Input::Document(document) => expression.evaluate_document(document, &bindings, options),
+            Input::None => expression.evaluate_with(None, &bindings, options),
+            Input::Source(source) => expression.evaluate_source(source, &bindings, options),
         }
         .map(|value| value.map(|value| json_reply(&value))),
         Format::Values => {
-            let write = |output: Output<'_, '_>| {
-                let mut encoder = Encoder::new(vec![REPLY_VALUES]);
-                Ok(output.write(&mut encoder)?.map(|()| encoder.out))
+            let mut encoder = match &input {
+                Input::Source(source) => {
+                    Encoder::with_input(vec![REPLY_VALUES], source.host.clone())
+                }
+                _ => Encoder::new(vec![REPLY_VALUES]),
             };
-            match document {
-                Some(document) => {
+            let write = |output: Output<'_, '_>| {
+                Ok(output
+                    .write(&mut encoder)?
+                    .map(|()| std::mem::take(&mut encoder.out)))
+            };
+            match &input {
+                Input::Document(document) => {
                     expression.evaluate_document_to(document, &bindings, options, write)
                 }
-                None => expression.evaluate_source_to(&NoInput, &bindings, options, write),
+                Input::None => expression.evaluate_source_to(&NoInput, &bindings, options, write),
+                Input::Source(source) => {
+                    expression.evaluate_source_to(source, &bindings, options, write)
+                }
             }
         }
     };
@@ -336,7 +391,8 @@ fn not_json(message: String) -> Vec<u8> {
     failure(&Error::new("U2001").with("message", message), "")
 }
 
-/// The `U2005` reply for an argument (`options`, `read`, `reads`) that is not in its form.
+/// The `U2005` reply for an argument (`options`, `read`, `reads`, `result`, `reader`) that is
+/// not in its form.
 fn invalid(kind: &str, message: String) -> Vec<u8> {
     failure(
         &Error::new("U2005")

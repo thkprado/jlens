@@ -2,9 +2,12 @@
 //! these tests fill them with `buffers::insert`, which needs no pointer.
 
 use jlens_capi::exports::*;
+use jlens_capi::source::{DECLINED, INPUT, ITEM, LENGTH, READ};
+use jlens_capi::values::ARRAY;
 use jlens_capi::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, REPLY_VALUES, buffers};
 use serde_json::{Value, json};
 
+mod host;
 mod values;
 
 #[derive(Debug, PartialEq)]
@@ -673,4 +676,209 @@ fn values_come_from_text_documents_and_no_input_within_the_limits() {
     assert_eq!(jlens_document_free(doc), 1);
     assert_eq!(jlens_expression_free(expression), 1);
     assert_eq!(jlens_expression_free(failing), 1);
+}
+
+/// Evaluates `expression` against `input` as the host's own values, read in mode `context`
+/// ([`host`]): the reply, the reader's calls and the host's nodes.
+fn on_host(
+    expression: u64,
+    input: &Value,
+    context: u64,
+    result: u32,
+) -> (Reply, Vec<(u32, u32)>, Vec<Value>) {
+    let level = host::Host::start(input);
+    let replied = reply(jlens_evaluate_source(
+        expression,
+        level,
+        Some(host::READER),
+        context,
+        0,
+        result,
+    ));
+    host::Host::finish();
+    assert_eq!(jlens_buffer_free(level), 1);
+    host::HOST.with_borrow_mut(|host| {
+        (
+            replied,
+            std::mem::take(&mut host.calls),
+            std::mem::take(&mut host.nodes),
+        )
+    })
+}
+
+/// The host's values give what their JSON text gives, as JSON text or values, whether the
+/// reader reads one field or item alone or declines to.
+#[test]
+fn the_hosts_values_give_what_their_json_text_gives() {
+    let input = json!({
+        "items": [
+            {"name": "pen", "price": 1.5, "tags": ["a", "b"]},
+            {"name": "ink", "price": 4, "tags": []},
+            {"name": "é𝄞", "price": -0.25, "stock": {"qty": 3}}
+        ],
+        "total": 9007199254740993u64,
+        "none": null,
+        "yes": true
+    });
+    let text = input.to_string();
+    for source in [
+        "$",
+        "items[0].name",
+        "items[-1].stock.qty",
+        "($i := 1; items[$i].name)",
+        "$sum(items.price)",
+        "items[price > 1].name",
+        "$count(items)",
+        "total",
+        "[none, yes]",
+        "items.tags",
+        "$keys($)",
+        "items ~> |$|{'name': 'x'}|",
+        "$string(items[0])",
+        "nothing",
+    ] {
+        let expression = compile(source);
+        let expected = evaluate(expression, Some(&text));
+        for context in [host::PLAIN, host::WHOLE] {
+            let (json, _, _) = on_host(expression, &input, context, 0);
+            assert_eq!(json, expected, "{source} as JSON text");
+            let (values, _, nodes) = on_host(expression, &input, context, 1);
+            match (values, &expected) {
+                (Reply::Values(bytes), Reply::Json(text)) => assert_eq!(
+                    values::as_f64(values::decode_with(&bytes, &nodes)),
+                    values::as_f64(serde_json::from_str(text).unwrap()),
+                    "{source} as values"
+                ),
+                (got, expected) => assert_eq!(&got, expected, "{source} as values"),
+            }
+        }
+        assert_eq!(jlens_expression_free(expression), 1);
+    }
+}
+
+/// A path and an index read one field and one item at a time, not the levels they pass
+/// through; a reader that declines has them read whole.
+#[test]
+fn one_field_or_item_is_read_alone() {
+    let input = json!({"items": [{"name": "pen", "qty": 1}, {"name": "ink", "qty": 2}]});
+    for source in ["items[0].name", "($i := 0; items[$i].name)"] {
+        let expression = compile(source);
+        let (reply, calls, _) = on_host(expression, &input, host::PLAIN, 1);
+        assert!(matches!(reply, Reply::Values(_)), "{source}: {reply:?}");
+        let ops: Vec<u32> = calls.iter().map(|&(op, _)| op).collect();
+        assert!(!ops.contains(&READ), "{source}: {calls:?}");
+        assert!(
+            ops.contains(&LENGTH) && ops.contains(&ITEM),
+            "{source}: {calls:?}"
+        );
+        let (_, calls, _) = on_host(expression, &input, host::WHOLE, 1);
+        assert!(
+            calls.iter().any(|&(op, _)| op == READ),
+            "{source}: {calls:?}"
+        );
+        assert_eq!(jlens_expression_free(expression), 1);
+    }
+}
+
+/// An array or object of the input that the result holds unchanged comes back as its number,
+/// so that the host returns its own; a value built is written in full.
+#[test]
+fn a_result_that_is_the_input_is_its_number() {
+    let input = json!({"items": [{"name": "pen"}, {"name": "ink"}], "o": {"p": [1]}});
+    let numbers = |source: &str| {
+        let expression = compile(source);
+        let (reply, _, nodes) = on_host(expression, &input, host::PLAIN, 1);
+        assert_eq!(jlens_expression_free(expression), 1);
+        match reply {
+            Reply::Values(bytes) => (bytes, nodes),
+            other => panic!("{source}: {other:?}"),
+        }
+    };
+    let (bytes, nodes) = numbers("$");
+    assert_eq!(bytes, [INPUT, 0, 0, 0, 0]);
+    assert_eq!(nodes[0], input);
+    let (bytes, nodes) = numbers("o.p");
+    assert_eq!(bytes[0], INPUT);
+    assert_eq!(values::decode_with(&bytes, &nodes), json!([1]));
+    // An array built of the input's objects: the array in full, each object by its number.
+    let (bytes, nodes) = numbers("items[name != 'x']");
+    assert_eq!(bytes[0], ARRAY);
+    assert_eq!(bytes.iter().filter(|&&b| b == INPUT).count(), 2);
+    assert_eq!(values::decode_with(&bytes, &nodes), input["items"]);
+    // A copy is built.
+    let (bytes, _) = numbers("o ~> |$|{'q': 1}|");
+    assert!(!bytes.contains(&INPUT));
+    // As JSON text, the input is written in full.
+    let expression = compile("$");
+    let (reply, _, _) = on_host(expression, &input, host::PLAIN, 0);
+    assert_eq!(json(reply), input);
+    assert_eq!(jlens_expression_free(expression), 1);
+}
+
+/// A reader that fails, or returns a level not in its form, stops the evaluation with `U1004`;
+/// input nested too deep for the result fails with `U1001`; no reader is `U2005` and an unknown
+/// input buffer `U2002`.
+#[test]
+fn the_reader_fails_cleanly() {
+    let input = json!({"a": {"b": 1}});
+    let expression = compile("a.b");
+    for garbage in [
+        host::failed("no such thing"),
+        vec![],
+        vec![9, 0, 0, 0, 0, 1, 0, 0, 0, 99, 0, 0, 0, 0],
+        vec![1, 0, 0, 0, DECLINED],
+        vec![200, 0, 0, 0, 0],
+    ] {
+        host::HOST.with_borrow_mut(|host| host.garbage = garbage.clone());
+        let (reply, _, _) = on_host(expression, &input, host::GARBAGE, 0);
+        assert_eq!(code(&reply), "U1004", "{garbage:?}: {reply:?}");
+    }
+    host::HOST.with_borrow_mut(|host| host.garbage = host::failed("no such thing"));
+    let (reply, _, _) = on_host(expression, &input, host::GARBAGE, 1);
+    match reply {
+        Reply::Error(error) => {
+            let message = error["message"].as_str().unwrap();
+            assert!(message.ends_with("no such thing"), "{message}");
+        }
+        other => panic!("{other:?}"),
+    }
+    // The test's host clones a level's values recursively, inside the core's recursion: a stack
+    // of its own for it.
+    let (stringify, whole) = std::thread::Builder::new()
+        .stack_size(256 << 20)
+        .spawn(|| {
+            let mut deep = json!(1);
+            for _ in 0..2000 {
+                deep = Value::Array(vec![deep]);
+            }
+            let stringify = compile("$string($)");
+            let (reply, _, _) = on_host(stringify, &deep, host::PLAIN, 0);
+            assert_eq!(code(&reply), "U1001", "{reply:?}");
+            let whole = compile("$");
+            let (reply, _, _) = on_host(whole, &deep, host::PLAIN, 0);
+            assert_eq!(code(&reply), "U1001", "{reply:?}");
+            // As values, the input is returned whole, never built.
+            let (reply, _, _) = on_host(whole, &deep, host::PLAIN, 1);
+            assert_eq!(reply, Reply::Values(vec![INPUT, 0, 0, 0, 0]));
+            (stringify, whole)
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    let level = host::Host::start(&input);
+    let no_reader = crate::reply(jlens_evaluate_source(expression, level, None, 0, 0, 0));
+    assert_eq!(code(&no_reader), "U2005");
+    assert_eq!(jlens_buffer_free(level), 1);
+    let unknown = crate::reply(jlens_evaluate_source(
+        expression,
+        level,
+        Some(host::READER),
+        0,
+        0,
+        0,
+    ));
+    assert_eq!(code(&unknown), "U2002");
+    for expression in [expression, stringify, whole] {
+        assert_eq!(jlens_expression_free(expression), 1);
+    }
 }

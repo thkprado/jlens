@@ -31,10 +31,11 @@
 //! `value`. Its offsets count UTF-16 code units, as `position` does in jsonata-js. The C API's
 //! own failures use `U` codes: `U2001` for input that is not valid JSON (or not UTF-8),
 //! `U2002` for an unknown or freed handle, `U2003` for an expression that is not UTF-8,
-//! `U2004` for a panic, `U2005` for options or reads that are not in their form (its `token`
-//! says which: `options`, `read` or `reads`), and `U1001` when a table of handles is full. An
-//! unknown handle is reported before anything wrong with what the other handles hold. A reply
-//! handle of 0 means that no buffer could be made for the reply.
+//! `U2004` for a panic, `U2005` for an argument that is not in its form (its `token` says
+//! which: `options`, `read`, `reads`, `result` or `reader`), and `U1001` when a table of
+//! handles is full. An unknown handle is reported before anything wrong with what the other
+//! handles hold. A reply handle of 0 means that no buffer could be made for the reply. A
+//! reader that fails, or writes a level not in its form, fails the evaluation with `U1004`.
 //!
 //! # Objects
 //!
@@ -44,6 +45,9 @@
 //! defaults. A document is JSON text parsed once, kept behind an `Arc` and converted once per
 //! thread that evaluates against it ([`documents`]); it can be pruned to the fields that
 //! [`api::reads`] or [`api::union_reads`] give.
+//!
+//! The host's own values can be the input too, read one level at a time as the evaluation
+//! reaches them, through a function of the host that Rust calls back ([`source`]).
 //!
 //! # Panics
 //!
@@ -68,6 +72,7 @@ pub mod documents;
 pub mod exports;
 pub mod handles;
 mod options;
+pub mod source;
 pub mod values;
 
 /// The first byte of a reply whose result is undefined.

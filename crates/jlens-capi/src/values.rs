@@ -13,6 +13,7 @@
 //! | 5 | [`STRING`] | a `u32` length, then that many bytes of UTF-8 |
 //! | 6 | [`ARRAY`] | a `u32` count, then that many values |
 //! | 7 | [`OBJECT`] | a `u32` count, then that many fields: a value, then its key |
+//! | 8 | [`INPUT`] | a `u32`: the number of an array or object of the input, unchanged ([`crate::source`]) |
 //!
 //! A key is a `u32` index into the keys of the result, in the order they first came: an index
 //! equal to the number of keys so far is a new key, whose `u32` length and UTF-8 bytes follow.
@@ -20,9 +21,12 @@
 //! comes before its key because the core builds a value before it inserts it.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use foldhash::fast::RandomState;
-use jlens_core::output::Builder;
+use jlens_core::output::{Builder, Member};
+
+use crate::source::{Host, INPUT};
 
 /// The tag of `null`.
 pub const NULL: u8 = 0;
@@ -51,6 +55,8 @@ pub struct Encoder {
     pub out: Vec<u8>,
     /// The index of each key written so far.
     keys: HashMap<Box<str>, u32, RandomState>,
+    /// The host's arrays and objects the input was read from, written by their numbers.
+    input: Option<Rc<Host>>,
 }
 
 impl Encoder {
@@ -59,6 +65,16 @@ impl Encoder {
         Encoder {
             out,
             keys: HashMap::default(),
+            input: None,
+        }
+    }
+
+    /// An encoder that writes after `out`, and writes the arrays and objects of `input` the
+    /// result holds unchanged by their numbers ([`INPUT`]).
+    pub fn with_input(out: Vec<u8>, input: Rc<Host>) -> Self {
+        Encoder {
+            input: Some(input),
+            ..Encoder::new(out)
         }
     }
 
@@ -161,5 +177,14 @@ impl Builder for Encoder {
 
     fn end_object(&mut self, object: Open) {
         self.patch(object.at, object.count);
+    }
+
+    fn input(&mut self, member: Member) -> Option<()> {
+        if !member.of(self.input.as_ref()?) {
+            return None;
+        }
+        self.out.push(INPUT);
+        self.out.extend_from_slice(&member.index().to_le_bytes());
+        Some(())
     }
 }

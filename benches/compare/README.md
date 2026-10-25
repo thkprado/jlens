@@ -49,6 +49,7 @@ The engines (`--engines`, jlens first, as the reference):
 | Name | Package | Its input |
 |---|---|---|
 | `jlens` | `io.github.thkprado:jlens`, this repository | a `Document`, or JSON text |
+| `jlens-objects` | the same, over Java objects (`Expression.evaluate(Object)`), read one level at a time | maps, lists and boxed values, which Jackson 2 parses |
 | `jsonata-java` | `com.dashjoin:jsonata`, a port of jsonata-js to Java objects | maps, lists and boxed values |
 | `jsonata4java` | `com.ibm.jsonata4java:JSONata4Java`, IBM's | Jackson 3's `JsonNode` |
 | `jsonata-jvm-compiler` | `io.github.vlad-public-code:jsonata-jvm-compiler`, which compiles an expression to a Java class with `javac` at run time | Jackson 2's `JsonNode` |
@@ -62,7 +63,7 @@ the engines above; and the WebJars of jsonata-js.
 The parts (all of them when none is given):
 
 - `documents`: the documents of ADR 0021's spike, 1,000 and 100,000 items of five fields each
-  (`--sizes` picks others), and the spike's expressions.
+  (`--sizes` picks others), the spike's expressions and `($i := 0; items[$i].name)`.
 - `cases`: the workload of `../cases.json`.
 - `threads`: evaluations per second of `$sum(items.price)` on the JSON text of 100 items, on 1
   to all hardware threads and on 1,000 virtual threads, as in the spike. An engine whose

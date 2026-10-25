@@ -104,3 +104,35 @@ Three facts bound the design:
   each key once. The object constructor case evaluates against a `Document` in 305 µs instead
   of 466 µs. `evaluateJson` still builds `serde_json` values: a builder gets each key after
   its value, so it cannot write the JSON text in order.
+
+## Amendment: the input returned as itself (0.25)
+
+### Context
+
+jsonata-java returns its input object when the result is the input, as `$` is, and the Java
+package's results are Java objects (ADR 0021, 0.25 #5). A builder sees only JSON, so `$` over
+Java objects read through a `Source` would read and copy all of them, value by value, where
+jsonata-java returns at once.
+
+### Decision
+
+1. `Builder` gains a provided method, `input(member)`, called for an array or object of the
+   input that a source wrote as a member of a `Sources` (ADR 0010, amended), before it is built.
+   A builder that returns `Some` gives it whole; the default `None` builds it as before.
+2. The member (`output::Member`) is opaque: it tells which sources it belongs to
+   (`Member::of(&rc)`, by the address of the `Rc` the builder's own input was read from) and its
+   index among them. A builder that did not read the input itself never matches it.
+3. Such a value stands for the source's object, read or not, since an evaluation never changes
+   its input. It is not counted against the size limit or the nesting limit, as nothing of it is
+   built, and what of it was not read stays unread.
+
+### Consequences
+
+- A builder still does not see the evaluation's values: only a member's identity.
+- The walk asks once per array or object of a source, and the default inlines to nothing, so
+  JSON input and the other builders pay nothing. Lazy JSON is written from its text, as before.
+- The C API writes such a member as its number (`INPUT`), and the Java package returns its own
+  map or list: `$` over Java objects returns the input itself, as jsonata-java does. The
+  Python and WebAssembly packages could do the same; they do not yet.
+- A property test checks that a builder returning every member whole gives what `evaluate`
+  gives, for any expression (`crates/jlens-core/tests/robustness.rs`).

@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `output::Builder::input` and `output::Member`: a builder can return an array or object of
+  its input, read through a `Sources` and unchanged by the evaluation, as its own object instead
+  of building a copy (ADR 0017, amended). The Java package returns its input's maps and lists
+  this way.
+
 ## [0.24.0]
 
 An index into a long array reads the items it picks instead of the whole array, whether it is a

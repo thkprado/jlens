@@ -3,6 +3,7 @@ package io.github.thkprado.jlens;
 import java.lang.ref.Cleaner;
 import java.lang.ref.Reference;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 /**
  * A compiled JSONata expression. Compile it once and evaluate it as often as needed, from any
@@ -114,6 +115,60 @@ public final class Expression implements AutoCloseable {
      */
     public Object evaluate(Document input, Options options) {
         return Native.values(onDocument(input, options, Native.VALUES));
+    }
+
+    /**
+     * Evaluates the expression against Java objects, read as JSON values one level at a time as
+     * the evaluation reaches them: a path reads one entry of a map, an index one item of a list.
+     * The objects read are:
+     *
+     * <ul>
+     *   <li>a {@link Map} with {@link String} keys, as an object, its fields in the map's order;
+     *   <li>a {@link java.util.List}, as an array;
+     *   <li>a {@link String}, a {@link Boolean} and {@code null}, as themselves;
+     *   <li>an {@link Integer}, {@link Long}, {@link Short}, {@link Byte}, {@link Double}, {@link
+     *       Float}, {@link java.math.BigInteger} or {@link java.math.BigDecimal}, as a number, a
+     *       {@code double}; one that is not finite as {@code null}, as JSON has none.
+     * </ul>
+     *
+     * <p>Any other object, a key that is not a string, or a map or list inside itself fails the
+     * evaluation with {@code U1004} when it is read. A string is a JSON string, not JSON text:
+     * {@link #evaluateFromJson(String)} parses text. A {@link Document} is evaluated as one.
+     *
+     * <p>A map or list of the input that the result holds unchanged is returned as itself, not
+     * copied, as {@code $} returns the input: modifying it modifies the input. The objects must
+     * not change during the evaluation.
+     *
+     * @param input the input
+     * @return the result as Java objects, {@code null} when it is undefined or {@code null}
+     * @throws JlensException when the input cannot be read ({@code U1004}) or the evaluation
+     *     fails
+     */
+    public Object evaluate(Object input) {
+        return evaluate(input, Options.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against Java objects, with options, as {@link #evaluate(Object)}
+     * does.
+     *
+     * @param input the input
+     * @param options the options of the evaluation
+     * @return the result as Java objects, {@code null} when it is undefined or {@code null}
+     * @throws JlensException when the input cannot be read ({@code U1004}) or the evaluation
+     *     fails
+     */
+    public Object evaluate(Object input, Options options) {
+        if (input instanceof Document document) return evaluate(document, options);
+        long expression = live();
+        try (Reader reader = new Reader()) {
+            long level = reader.input(input);
+            long reply = ScopedValue.where(Reader.CURRENT, reader).call(() -> options.evaluate(
+                    o -> Native.evaluateSource(expression, level, o, Native.VALUES)));
+            return Native.values(reply, reader.nodes());
+        } finally {
+            Reference.reachabilityFence(this);
+        }
     }
 
     /**

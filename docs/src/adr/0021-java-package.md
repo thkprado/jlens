@@ -782,3 +782,58 @@ faster on large ones: `object constructor` 126 µs against 163 (214 with Jackson
   56.6 ms on 100,000, against 67.1 ms. The Jackson engines take 0.02 to 0.08 µs because they
   return their input. jlens can do the same only when its input is Java objects, which #6 adds:
   a result that is the input unchanged is then returned as is.
+
+### Java objects as input (0.25 #6)
+
+`Expression.evaluate(Object)` reads maps, lists, strings, numbers, booleans and `null` one level
+at a time, as the evaluation reaches them, through one upcall per level (`source.rs` in
+`jlens-capi`):
+
+- **One `Sources` per evaluation.** Java numbers each map and list as it meets them, and every
+  array or object of the input is a member of one `Sources` in Rust, known by its number: a
+  level costs Rust no allocation of its own, the levers of the spike's item 6 and of the
+  amendment above. Each level written gives its size to `Sink::reserve`.
+- **One field or one item alone.** The reader has four operations: a whole level, one field of
+  a map (`read_field`; Java gets the key's UTF-8 bytes from Rust's memory), the length of a list
+  and one of its items (`length`, `read_item`), so a path or an index reads what it picks. A list
+  that is not `RandomAccess` (a `LinkedList`) tells no length, and is read whole. A reader may
+  also decline a field or an item; the level is then read whole.
+- **One buffer.** Java encodes a level into a byte array and copies it into one C API buffer per
+  evaluation, made larger when a level does not fit: a level costs one upcall and no downcall.
+- **The input returned as itself.** A map or list the result holds unchanged comes back as the
+  object itself, through `Builder::input` ([ADR 0017, amended](0017-result-builder.md#amendment-the-input-returned-as-itself-025)):
+  `$` returns the input, as jsonata-java does, and a filter returns a new list of the input's
+  maps.
+- **Failures.** A type the reader does not read (a `Date`, an `int[]`), a key that is not a
+  string, or a map or list inside itself fails with `U1004` when the evaluation reads it, with
+  a message that names it; an exception never crosses the upcall. A cycle is detected through
+  the chain of levels a value was read from, as `json.dumps` does in Python. Input nested deeper
+  than a result may be fails with `U1001` when it is written; returned as itself, it is not
+  written. On threads of 128 KiB to 1 MiB, inputs nested 100,000 levels deep stop with `U1001`
+  or give their result, with the upcalls made from the stack segments jlens grows into
+  (`jlens_core::stack`): the JVM runs them there.
+
+Microseconds per evaluation with #4's harness on the maintainer's Windows machine, Java 25.0.4;
+"objects" reads the maps and lists that Jackson's `readValue(json, Object.class)` built, and the
+spike's "Source" column (above) is repeated for comparison:
+
+| Items | Expression | Spike, Source | Objects | `Document` | jsonata-java | jsonata-jvm-compiler |
+|---:|---|---:|---:|---:|---:|---:|
+| 1,000 | `items[0].name` | 120 | 2.52 | 0.86 | 83.7 | 0.03 |
+| 1,000 | `($i := 0; items[$i].name)` | | 2.92 | 1.22 | 149 | 0.65 |
+| 1,000 | `$count(items)` | 113 | 1.94 | 0.85 | 89.0 | 0.03 |
+| 1,000 | `$sum(items.price)` | 1,490 | 327 | 27.5 | 152 | 8.0 |
+| 1,000 | `items[price > 98].id` | 1,601 | 398 | 117 | 329 | 15.4 |
+| 1,000 | `$` | 4,521 | 0.80 | 483 | 157 | 0.03 |
+| 100,000 | `items[0].name` | 18,391 | 2.59 | 0.89 | 33,685 | 0.04 |
+| 100,000 | `($i := 0; items[$i].name)` | | 2.90 | 1.23 | 40,436 | 217 |
+| 100,000 | `$sum(items.price)` | 217,786 | 48,241 | 5,736 | 55,551 | 4,142 |
+| 100,000 | `$` | 641,011 | 0.80 | 54,329 | 66,889 | 0.02 |
+
+- **What reads little costs the same whatever the size**: `items[0].name` takes 2.5 µs on 1,000
+  or 100,000 items, against 120 µs and 18 ms in the spike, which read each level whole, and
+  34 ms for jsonata-java. `$` takes 0.8 µs, the cost of an evaluation that returns its input.
+- **What reads everything costs 0.3 to 0.5 µs a level**, against the spike's 1.5:
+  `$sum(items.price)` takes 327 µs on 1,000 items, 4.5 times less than in the spike but twice
+  jsonata-java's 152 µs, and 48 ms on 100,000, ahead of its 56 ms. A `Document` stays the fast
+  way for an input evaluated many times, or read whole.

@@ -3,16 +3,24 @@
 // Each test binary uses part of it.
 #![allow(dead_code)]
 
+use jlens_capi::source::INPUT;
 use jlens_capi::values::{ARRAY, FALSE, FLOAT, INTEGER, NULL, OBJECT, STRING, TRUE};
 use serde_json::{Map, Value};
 
 /// The value encoded in `bytes`, after a reply's status byte. Panics on bytes not in the
 /// encoding, or left over.
 pub fn decode(bytes: &[u8]) -> Value {
+    decode_with(bytes, &[])
+}
+
+/// The value encoded in `bytes`, its arrays and objects of the input ([`INPUT`]) taken from
+/// `nodes`, by their numbers.
+pub fn decode_with(bytes: &[u8], nodes: &[Value]) -> Value {
     let mut decoder = Decoder {
         bytes,
         at: 0,
         keys: Vec::new(),
+        nodes,
     };
     let value = decoder.value();
     assert_eq!(decoder.at, bytes.len(), "bytes left over");
@@ -39,6 +47,7 @@ struct Decoder<'b> {
     bytes: &'b [u8],
     at: usize,
     keys: Vec<String>,
+    nodes: &'b [Value],
 }
 
 impl Decoder<'_> {
@@ -98,6 +107,10 @@ impl Decoder<'_> {
                     assert!(fields.insert(key, value).is_none(), "a key twice");
                 }
                 Value::Object(fields)
+            }
+            INPUT => {
+                let node = self.u32();
+                self.nodes[node].clone()
             }
             tag => panic!("unknown tag {tag}"),
         }

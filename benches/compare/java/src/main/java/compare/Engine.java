@@ -36,7 +36,8 @@ abstract class Engine {
 
     /** The engines, by the names the command line uses. */
     static List<Engine> all() {
-        return List.of(new Jlens(), new JsonataJava(), new Jsonata4Java(), new JvmCompiler());
+        return List.of(new Jlens(), new JlensObjects(), new JsonataJava(), new Jsonata4Java(),
+            new JvmCompiler());
     }
 
     /** The name the command line uses. */
@@ -70,6 +71,35 @@ abstract class Engine {
                 public Object evaluate(Object converted) { return expression.evaluate((Document) converted); }
 
                 public Object evaluateText(String json) { return expression.evaluateFromJson(json); }
+            };
+        }
+
+        boolean threadSafe() { return true; }
+
+        String json(Object result) throws Exception {
+            return result == null ? null : JACKSON.writeValueAsString(result);
+        }
+    }
+
+    /**
+     * jlens over Java objects, the maps, lists and boxed values Jackson parses, read one level
+     * at a time (0.25 #6); from JSON text, Jackson parses them first.
+     */
+    static final class JlensObjects extends Engine {
+        String key() { return "jlens-objects"; }
+
+        String title() { return "jlens " + VERSIONS.getProperty("jlens") + " (objects)"; }
+
+        Object convert(String json) throws Exception { return JACKSON.readValue(json, Object.class); }
+
+        Compiled compile(String source) {
+            Expression expression = Expression.compile(source);
+            return new Compiled() {
+                public Object evaluate(Object converted) { return expression.evaluate(converted); }
+
+                public Object evaluateText(String json) throws Exception {
+                    return expression.evaluate(JACKSON.readValue(json, Object.class));
+                }
             };
         }
 
