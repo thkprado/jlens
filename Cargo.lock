@@ -744,7 +744,9 @@ name = "jlens-capi"
 version = "0.24.0"
 dependencies = [
  "jlens-core",
+ "mimalloc",
  "proptest",
+ "serde",
  "serde_json",
 ]
 

@@ -631,3 +631,43 @@ a level read through the `Sink` ([performance](../architecture/performance.md#wh
 - An index into a long array reads the array's whole level, so `items[0]` costs as much as
   writing every item. A reader that could write one item alone, as `Source::read_field`
   writes one field, would avoid it: roadmap 0.24 #4 measures it.
+
+## Results: the C API (0.25)
+
+### Options and documents (0.25 #2)
+
+- **Options are an object of the C API**, made once from JSON text with the names of the
+  WebAssembly package's options (`timeout` in milliseconds, `maxDepth`, `maxSteps`,
+  `maxStringLength`, `maxArrayLength`, `maxResultSize`, `now`, `seed`) and passed to each
+  evaluation by handle, 0 for the defaults. An evaluation then reads no options: an
+  application sets them once and evaluates many times. Options that are not in their form
+  fail with `U2005`, an unknown name included, so that a misspelt limit does not pass
+  unnoticed.
+- **Documents** are JSON text behind an `Arc`, converted once per OS thread, as decided. A
+  thread drops its conversion of a freed document the next time it makes, frees or evaluates
+  against a document; a carrier thread that never does keeps it until it exits.
+- **The reads** come back as the JSON of `Expression::reads`, and their union is made from a
+  JSON array of them, as `union_reads` does in Python. A document is pruned to the `input` of
+  either.
+
+### mimalloc (0.25 #2)
+
+`jlens_evaluate` on JSON text, called through the exports from Rust on the maintainer's
+Windows machine, with the spike's documents and expressions. Each evaluation copies the text
+into a buffer first, as the Java package will. Microseconds; the best of two alternated runs,
+each the best of five runs of 0.3 s after a second of warm-up.
+
+| Items | Expression | System allocator | mimalloc | Change |
+|---:|---|---:|---:|---:|
+| 1,000 | `items[0].name` | 465 | 338 | −27% |
+| 1,000 | `$count(items)` | 253 | 220 | −13% |
+| 1,000 | `$sum(items.price)` | 459 | 362 | −21% |
+| 1,000 | `items[price > 98].id` | 613 | 503 | −18% |
+| 1,000 | `$` | 2,976 | 1,953 | −34% |
+| 100,000 | `items[0].name` | 56,892 | 37,237 | −35% |
+| 100,000 | `$sum(items.price)` | 58,507 | 40,012 | −32% |
+| 100,000 | `$` | 452,303 | 225,514 | −50% |
+
+On a `Document`, where nothing is parsed, the same cases take 7 to 53% less: `$sum(items.price)`
+over 100,000 items 5,646 µs against 12,021, and `$` 128,301 against 252,318. mimalloc is the
+library's global allocator, with `local_dynamic_tls`, as in the Python package.

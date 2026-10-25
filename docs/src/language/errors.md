@@ -140,7 +140,7 @@ Raised while evaluating, for other run-time problems.
 
 ## Guardrail errors (U)
 
-Raised when an evaluation exceeds its configured limits, is cancelled, or needs what jlens does not support. `U2001` is raised by `jlens eval --json` for an input document that is not valid JSON. The C API under the Java package raises `U2001` for input that is not valid JSON, `U2002` for a handle that is unknown or freed, `U2003` for an expression that is not UTF-8, and `U2004` for an internal error.
+Raised when an evaluation exceeds its configured limits, is cancelled, or needs what jlens does not support. `U2001` is raised by `jlens eval --json` for an input document that is not valid JSON. The C API under the Java package raises `U2001` for input that is not valid JSON, `U2002` for a handle that is unknown or freed, `U2003` for an expression that is not UTF-8, `U2004` for an internal error, and `U2005` for options or reads that are not in their form.
 
 | Code | Message |
 |---|---|
@@ -154,6 +154,7 @@ Raised when an evaluation exceeds its configured limits, is cancelled, or needs 
 | `U2002` | `The {{{token}}} handle {{value}} is unknown: it was never created, or it was freed` |
 | `U2003` | `The expression is not valid UTF-8: {{{message}}}` |
 | `U2004` | `Internal error in jlens, please report it: {{{message}}}` |
+| `U2005` | `Invalid {{{token}}}: {{{message}}}` |
 
 ## Warnings (W)
 

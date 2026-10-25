@@ -41,12 +41,55 @@ fn compile(source: &str) -> u64 {
 }
 
 fn evaluate(expression: u64, input: Option<&str>) -> Reply {
+    evaluate_with(expression, input, 0)
+}
+
+fn evaluate_with(expression: u64, input: Option<&str>, options: u64) -> Reply {
     let input = input.map_or(0, buffer);
-    let result = reply(jlens_evaluate(expression, input));
+    let result = reply(jlens_evaluate(expression, input, options));
     if input != 0 {
         assert_eq!(jlens_buffer_free(input), 1);
     }
     result
+}
+
+/// Calls `export` with a buffer holding `text`, and frees the buffer.
+fn with_buffer(text: &str, export: impl FnOnce(u64) -> u64) -> Reply {
+    let buffer = buffer(text);
+    let result = reply(export(buffer));
+    assert_eq!(jlens_buffer_free(buffer), 1);
+    result
+}
+
+fn handle(reply: Reply) -> u64 {
+    match reply {
+        Reply::Handle(handle) => handle,
+        other => panic!("not a handle: {other:?}"),
+    }
+}
+
+fn options(json: &str) -> u64 {
+    handle(with_buffer(json, |b| jlens_options_new(b)))
+}
+
+fn document(text: &str, read: Option<&str>) -> u64 {
+    let read = read.map_or(0, buffer);
+    let made = with_buffer(text, |text| jlens_document_new(text, read));
+    if read != 0 {
+        assert_eq!(jlens_buffer_free(read), 1);
+    }
+    handle(made)
+}
+
+fn on_document(expression: u64, document: u64, options: u64) -> Reply {
+    reply(jlens_evaluate_document(expression, document, options))
+}
+
+fn json(reply: Reply) -> Value {
+    match reply {
+        Reply::Json(text) => serde_json::from_str(&text).unwrap(),
+        other => panic!("not JSON: {other:?}"),
+    }
 }
 
 fn code(reply: &Reply) -> &str {
@@ -147,7 +190,7 @@ fn input_that_is_not_json_or_not_utf8_fails_with_u2001() {
     let expression = compile("a");
     assert_eq!(code(&evaluate(expression, Some("{\"a\": "))), "U2001");
     let bytes = buffers::insert(b"{\"a\": \"\xff\"}".to_vec());
-    assert_eq!(code(&reply(jlens_evaluate(expression, bytes))), "U2001");
+    assert_eq!(code(&reply(jlens_evaluate(expression, bytes, 0))), "U2001");
     jlens_buffer_free(bytes);
 }
 
@@ -173,9 +216,9 @@ fn unknown_and_freed_handles_fail_with_u2002() {
     let expression = compile("1");
     let input = buffer("{}");
     jlens_buffer_free(input);
-    assert_eq!(code(&reply(jlens_evaluate(expression, input))), "U2002");
+    assert_eq!(code(&reply(jlens_evaluate(expression, input, 0))), "U2002");
     assert_eq!(code(&reply(jlens_compile(input))), "U2002");
-    assert_eq!(code(&reply(jlens_evaluate(u64::MAX, 0))), "U2002");
+    assert_eq!(code(&reply(jlens_evaluate(u64::MAX, 0, 0))), "U2002");
     assert_eq!(code(&reply(jlens_compile(0))), "U2002");
 }
 
@@ -240,4 +283,259 @@ fn an_expression_freed_during_an_evaluation_finishes_it() {
         result == Reply::Json("2000000".into()) || code(&result) == "U2002",
         "{result:?}"
     );
+}
+
+#[test]
+fn each_limit_stops_the_evaluation_with_its_code() {
+    let cases = [
+        (
+            "$sum($map([1..300000], function($x) { $x }))",
+            r#"{"timeout": 1}"#,
+            "D1012",
+        ),
+        (
+            "($f := function($n) { $n = 0 ? 0 : 1 + $f($n - 1) }; $f(100))",
+            r#"{"maxDepth": 10}"#,
+            "D1011",
+        ),
+        (
+            "$sum($map([1..100], function($x) { $x }))",
+            r#"{"maxSteps": 10}"#,
+            "U1006",
+        ),
+        (
+            "$join([1..100].$string(), \"\")",
+            r#"{"maxStringLength": 10}"#,
+            "U1001",
+        ),
+        ("[1..100]", r#"{"maxArrayLength": 10}"#, "U1001"),
+        ("[1..100]", r#"{"maxResultSize": 10}"#, "U1001"),
+    ];
+    for (source, given, expected) in cases {
+        let expression = compile(source);
+        let options = options(given);
+        assert!(
+            !matches!(evaluate(expression, None), Reply::Error(_)),
+            "{source} without {given}"
+        );
+        let error = evaluate_with(expression, None, options);
+        assert_eq!(code(&error), expected, "{source} with {given}");
+        let document = document("{}", None);
+        let error = on_document(expression, document, options);
+        assert_eq!(code(&error), expected, "{source} on a document");
+        jlens_document_free(document);
+        assert_eq!(jlens_options_free(options), 1);
+        assert_eq!(jlens_options_free(options), 0);
+        jlens_expression_free(expression);
+    }
+    let limited = options(r#"{"maxSteps": 10}"#);
+    let Reply::Error(error) = evaluate_with(
+        compile("$sum($map([1..100], function($x) { $x }))"),
+        None,
+        limited,
+    ) else {
+        panic!()
+    };
+    assert_eq!(error["value"], json!(10));
+}
+
+#[test]
+fn the_clock_and_the_seed_are_options() {
+    let fixed = options(r#"{"now": 1000, "seed": 42}"#);
+    let now = compile("[$millis(), $now()]");
+    assert_eq!(
+        json(evaluate_with(now, None, fixed)),
+        json!([1000, "1970-01-01T00:00:01.000Z"])
+    );
+    let random = compile("[$random(), $shuffle([1..20])]");
+    let first = json(evaluate_with(random, None, fixed));
+    assert_eq!(json(evaluate_with(random, None, fixed)), first);
+    let document = document("[]", None);
+    assert_eq!(json(on_document(random, document, fixed)), first);
+    let other = options(r#"{"seed": 43, "timeout": null}"#);
+    assert_ne!(json(evaluate_with(random, None, other)), first);
+    jlens_document_free(document);
+}
+
+#[test]
+fn options_not_in_their_form_fail_with_u2005() {
+    for given in [
+        r#"{"maxdepth": 10}"#,
+        r#"{"timeout": -1}"#,
+        r#"{"maxSteps": -1}"#,
+        r#"{"seed": 1.5}"#,
+        r#"{"now": "2026-10-25"}"#,
+        "[]",
+        "{",
+    ] {
+        let error = with_buffer(given, |b| jlens_options_new(b));
+        assert_eq!(code(&error), "U2005", "{given}");
+        let Reply::Error(error) = error else {
+            unreachable!()
+        };
+        assert_eq!(error["token"], "options");
+    }
+    let bytes = buffers::insert(b"{\"seed\": \xff}".to_vec());
+    assert_eq!(code(&reply(jlens_options_new(bytes))), "U2005");
+    jlens_buffer_free(bytes);
+    assert_eq!(code(&reply(jlens_options_new(0))), "U2002");
+    // Freed options are unknown, not the defaults.
+    let freed = options("{}");
+    jlens_options_free(freed);
+    let Reply::Error(error) = evaluate_with(compile("1"), None, freed) else {
+        panic!()
+    };
+    assert_eq!(
+        (&error["code"], &error["token"]),
+        (&json!("U2002"), &json!("options"))
+    );
+}
+
+#[test]
+fn documents_are_evaluated_and_freed_once() {
+    let text = r#"{"items":[{"price":2},{"price":3.5}]}"#;
+    let document = document(text, None);
+    let sum = compile("$sum(items.price)");
+    assert_eq!(on_document(sum, document, 0), Reply::Json("5.5".into()));
+    assert_eq!(
+        on_document(compile("$"), document, 0),
+        Reply::Json(text.into())
+    );
+    assert_eq!(
+        on_document(compile("missing"), document, 0),
+        Reply::Undefined
+    );
+    assert_eq!(jlens_document_free(document), 1);
+    assert_eq!(jlens_document_free(document), 0);
+    let Reply::Error(error) = on_document(sum, document, 0) else {
+        panic!()
+    };
+    assert_eq!(
+        (&error["code"], &error["token"]),
+        (&json!("U2002"), &json!("document"))
+    );
+}
+
+#[test]
+fn a_document_that_is_not_json_or_not_utf8_fails_with_u2001() {
+    let error = with_buffer("{\"a\": ", |text| jlens_document_new(text, 0));
+    assert_eq!(code(&error), "U2001");
+    let bytes = buffers::insert(b"\"\xff\"".to_vec());
+    assert_eq!(code(&reply(jlens_document_new(bytes, 0))), "U2001");
+    jlens_buffer_free(bytes);
+    assert_eq!(code(&reply(jlens_document_new(0, 0))), "U2002");
+}
+
+#[test]
+fn reads_are_json_and_their_union_prunes_a_document() {
+    let (a, c) = (compile("a.b"), compile("$sum(c)"));
+    let reads_a = json(reply(jlens_reads(a)));
+    assert_eq!(
+        reads_a,
+        json!({"input": {"a": {"b": true}}, "bindings": {}})
+    );
+    let reads_c = json(reply(jlens_reads(c)));
+    let all = json!([reads_a, reads_c]).to_string();
+    let union = json(with_buffer(&all, |b| jlens_union_reads(b)));
+    assert_eq!(union["input"], json!({"a": {"b": true}, "c": true}));
+    let none = json(with_buffer("[]", |b| jlens_union_reads(b)));
+    assert_eq!(none, json!({"bindings": {}}));
+
+    let input = r#"{"a": {"b": 1, "x": 2}, "c": [1, 2], "d": 3}"#;
+    let pruned = document(input, Some(&union["input"].to_string()));
+    assert_eq!(on_document(a, pruned, 0), Reply::Json("1".into()));
+    assert_eq!(on_document(c, pruned, 0), Reply::Json("3".into()));
+    // What the read leaves out is not in the document, as with Python's `read=`.
+    assert_eq!(on_document(compile("d"), pruned, 0), Reply::Undefined);
+    assert_eq!(on_document(compile("a.x"), pruned, 0), Reply::Undefined);
+    let whole = document(input, None);
+    assert_eq!(on_document(compile("d"), whole, 0), Reply::Json("3".into()));
+    // An expression that does not read its input reads no field of it.
+    let constant = json(reply(jlens_reads(compile("1 + 1"))));
+    assert_eq!(constant, json!({"bindings": {}}));
+    jlens_document_free(pruned);
+    jlens_document_free(whole);
+    assert_eq!(code(&reply(jlens_reads(u64::MAX))), "U2002");
+}
+
+#[test]
+fn reads_not_in_their_form_fail_with_u2005() {
+    for given in ["{}", "[{\"input\": 1}]", "[{\"inputs\": true}]", "["] {
+        let Reply::Error(error) = with_buffer(given, |b| jlens_union_reads(b)) else {
+            panic!("{given}")
+        };
+        assert_eq!(
+            (&error["code"], &error["token"]),
+            (&json!("U2005"), &json!("reads")),
+            "{given}"
+        );
+    }
+    for given in ["false", "1", "{\"a\": 1}", "[", "\"a\""] {
+        let read = buffer(given);
+        let error = with_buffer("{}", |text| jlens_document_new(text, read));
+        jlens_buffer_free(read);
+        let Reply::Error(error) = error else {
+            panic!("{given}")
+        };
+        assert_eq!(
+            (&error["code"], &error["token"]),
+            (&json!("U2005"), &json!("read")),
+            "{given}"
+        );
+    }
+    let freed = buffer("true");
+    jlens_buffer_free(freed);
+    let error = with_buffer("{}", |text| jlens_document_new(text, freed));
+    assert_eq!(code(&error), "U2002");
+}
+
+#[test]
+fn threads_share_a_document_each_with_its_own_conversion() {
+    let items: Vec<_> = (0..100).map(|p| json!({ "price": p })).collect();
+    let document = document(&json!({ "items": items }).to_string(), None);
+    let expression = compile("$count(items[price > 49])");
+    let limited = options(r#"{"maxSteps": 5}"#);
+    let threads: Vec<_> = (0..8)
+        .map(|_| {
+            std::thread::spawn(move || {
+                assert_eq!(jlens_capi::documents::cached(), 0);
+                for _ in 0..100 {
+                    let result = on_document(expression, document, 0);
+                    assert_eq!(result, Reply::Json("50".into()));
+                    assert_eq!(code(&on_document(expression, document, limited)), "U1006");
+                }
+                // One conversion per thread, kept between evaluations.
+                assert_eq!(jlens_capi::documents::cached(), 1);
+            })
+        })
+        .collect();
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    assert_eq!(jlens_capi::documents::cached(), 1, "made on this thread");
+    assert_eq!(jlens_document_free(document), 1);
+    assert_eq!(jlens_capi::documents::cached(), 0, "dropped by the free");
+}
+
+#[test]
+fn a_thread_drops_the_conversions_of_freed_documents() {
+    let first = document("[1]", None);
+    let expression = compile("$sum($)");
+    let (made, made_rx) = std::sync::mpsc::channel();
+    let (freed, freed_rx) = std::sync::mpsc::channel::<()>();
+    let worker = std::thread::spawn(move || {
+        assert_eq!(on_document(expression, first, 0), Reply::Json("1".into()));
+        made.send(jlens_capi::documents::cached()).unwrap();
+        freed_rx.recv().unwrap();
+        // The next document this thread makes drops the conversion of the one freed meanwhile.
+        let second = document("[2]", None);
+        assert_eq!(jlens_capi::documents::cached(), 1);
+        assert_eq!(on_document(expression, second, 0), Reply::Json("2".into()));
+        jlens_document_free(second);
+        jlens_capi::documents::cached()
+    });
+    assert_eq!(made_rx.recv().unwrap(), 1);
+    jlens_document_free(first);
+    freed.send(()).unwrap();
+    assert_eq!(worker.join().unwrap(), 0);
 }

@@ -123,6 +123,7 @@ Guardrail errors (U):
   U2002  The {{{token}}} handle {{value}} is unknown: it was never created, or it was freed
   U2003  The expression is not valid UTF-8: {{{message}}}
   U2004  Internal error in jlens, please report it: {{{message}}}
+  U2005  Invalid {{{token}}}: {{{message}}}
 
 Warnings (W):
   W0101  This annotation is not attached to an expression and will be ignored

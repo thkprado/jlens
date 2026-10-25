@@ -1,12 +1,16 @@
-//! The safe functions behind the exports: expressions and their evaluations, and the replies.
+//! The safe functions behind the exports: expressions, documents, options and evaluations, and
+//! the replies.
 
 use std::any::Any;
+use std::sync::{Arc, LazyLock};
 
-use jlens_core::reads::Read;
+use jlens_core::reads::{Read, Reads};
 use jlens_core::{Bindings, Document, Error, Expression, Options};
 use serde_json::{Map, Value};
 
+use crate::documents::{self, DOCUMENTS};
 use crate::handles::Table;
+use crate::options::{self, OPTIONS};
 use crate::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, buffers};
 
 /// A compiled expression, with its source (for the offsets of its errors) and the fields it
@@ -14,6 +18,7 @@ use crate::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, buffers};
 struct Compiled {
     expression: Expression,
     source: String,
+    reads: Reads,
     read: Read,
 }
 
@@ -33,21 +38,19 @@ fn compile_text(source: u64) -> Result<Vec<u8>, Vec<u8>> {
     .ok_or_else(|| unknown("buffer", source))?
     .map_err(|e| failure(&Error::new("U2003").with("message", e.to_string()), ""))?;
     let expression = Expression::compile(&text).map_err(|e| failure(&e, &text))?;
+    let reads = expression.reads();
     // An expression that does not read its input needs none of its fields.
-    let read = expression
-        .reads()
+    let read = reads
         .input()
         .cloned()
         .unwrap_or_else(|| Read::Fields(Default::default()));
     let compiled = Compiled {
         expression,
         source: text,
+        reads,
         read,
     };
-    let handle = EXPRESSIONS.insert(compiled).ok_or_else(full)?;
-    let mut reply = vec![REPLY_HANDLE];
-    reply.extend_from_slice(&handle.to_le_bytes());
-    Ok(reply)
+    handle_reply(EXPRESSIONS.insert(compiled))
 }
 
 /// Frees an expression: 1 when it was live, 0 for an unknown or freed handle. An evaluation
@@ -56,17 +59,107 @@ pub fn expression_free(expression: u64) -> u32 {
     u32::from(EXPRESSIONS.remove(expression).is_some())
 }
 
-/// Evaluates expression `expression` against the JSON text in buffer `input` (0 for no
-/// input), which stays the caller's, and replies with the result or the error. The fields of
-/// the input that the expression does not read are skipped while parsing.
-pub fn evaluate(expression: u64, input: u64) -> u64 {
-    reply(evaluate_text(expression, input))
+/// Replies with what expression `expression` reads (ADR 0016), as `Expression::reads` gives
+/// it: an object whose `input` is the `read` of `document_new`.
+pub fn reads(expression: u64) -> u64 {
+    reply(
+        EXPRESSIONS
+            .get(expression)
+            .ok_or_else(|| unknown("expression", expression))
+            .map(|compiled| json_reply(&serde_json::to_value(&compiled.reads).unwrap_or_default())),
+    )
 }
 
-fn evaluate_text(expression: u64, input: u64) -> Result<Vec<u8>, Vec<u8>> {
+/// Replies with the union of the reads in buffer `reads`, a JSON array of what `reads` replies
+/// with: what any of several expressions reads.
+pub fn union_reads(reads: u64) -> u64 {
+    reply(union_text(reads))
+}
+
+fn union_text(reads: u64) -> Result<Vec<u8>, Vec<u8>> {
+    let all: Vec<Reads> = buffers::with(reads, |bytes| serde_json::from_slice(bytes))
+        .ok_or_else(|| unknown("buffer", reads))?
+        .map_err(|e| invalid("reads", e.to_string()))?;
+    let union = all
+        .iter()
+        .fold(Reads::default(), |union, reads| union.union(reads));
+    Ok(json_reply(
+        &serde_json::to_value(&union).unwrap_or_default(),
+    ))
+}
+
+/// Makes options from the JSON text in buffer `options`, which stays the caller's, and replies
+/// with their handle or a `U2005` error. The text is an object with `timeout` (milliseconds),
+/// `maxDepth`, `maxSteps`, `maxStringLength`, `maxArrayLength`, `maxResultSize`, `now`
+/// (milliseconds since the epoch) and `seed`, each optional.
+pub fn options_new(options: u64) -> u64 {
+    reply(
+        buffers::with(options, |bytes| options::parse(bytes))
+            .ok_or_else(|| unknown("buffer", options))
+            .and_then(|parsed| parsed.map_err(|message| invalid("options", message)))
+            .and_then(|parsed| handle_reply(OPTIONS.insert(parsed))),
+    )
+}
+
+/// Frees options: 1 when they were live, 0 for an unknown or freed handle.
+pub fn options_free(options: u64) -> u32 {
+    u32::from(OPTIONS.remove(options).is_some())
+}
+
+/// Parses the JSON text in buffer `text` into a document, keeping the fields of the JSON
+/// `read` in buffer `read` (the `input` of `reads` or `union_reads`; 0 keeps them all), and
+/// replies with its handle or the error. Both buffers stay the caller's. This thread keeps
+/// its conversion; each other thread converts the text the first time it evaluates against it.
+pub fn document_new(text: u64, read: u64) -> u64 {
+    reply(document_text(text, read))
+}
+
+fn document_text(text: u64, read: u64) -> Result<Vec<u8>, Vec<u8>> {
+    // The handles are checked before what they hold, so that an unknown one is always `U2002`.
+    let text = buffers::with(text, |bytes| String::from_utf8(bytes.clone()))
+        .ok_or_else(|| unknown("buffer", text))?;
+    let read = match read {
+        0 => None,
+        read => Some(
+            buffers::with(read, |bytes| serde_json::from_slice::<Read>(bytes))
+                .ok_or_else(|| unknown("buffer", read))?
+                .map_err(|e| invalid("read", e.to_string()))?,
+        ),
+    };
+    let text = text.map_err(|e| not_json(e.utf8_error().to_string()))?;
+    let text = Arc::new(documents::Text::new(text, read));
+    // Parsed now, to fail on text that is not JSON.
+    documents::converted(&text).map_err(|e| not_json(e.to_string()))?;
+    let Some(handle) = DOCUMENTS.insert_arc(text) else {
+        documents::sweep();
+        return Err(full());
+    };
+    handle_reply(Some(handle))
+}
+
+/// Frees a document: 1 when it was live, 0 for an unknown or freed handle. An evaluation
+/// running on another thread keeps it until it returns.
+pub fn document_free(document: u64) -> u32 {
+    let freed = DOCUMENTS.remove(document);
+    let live = freed.is_some();
+    drop(freed);
+    documents::sweep();
+    u32::from(live)
+}
+
+/// Evaluates expression `expression` against the JSON text in buffer `input` (0 for no
+/// input), which stays the caller's, with options `options` (0 for the defaults), and replies
+/// with the result or the error. The fields of the input that the expression does not read are
+/// skipped while parsing.
+pub fn evaluate(expression: u64, input: u64, options: u64) -> u64 {
+    reply(evaluate_text(expression, input, options))
+}
+
+fn evaluate_text(expression: u64, input: u64, options: u64) -> Result<Vec<u8>, Vec<u8>> {
     let compiled = EXPRESSIONS
         .get(expression)
         .ok_or_else(|| unknown("expression", expression))?;
+    let options = find_options(options)?;
     let document = match input {
         0 => None,
         input => Some(
@@ -74,21 +167,63 @@ fn evaluate_text(expression: u64, input: u64) -> Result<Vec<u8>, Vec<u8>> {
                 .ok_or_else(|| unknown("buffer", input))??,
         ),
     };
-    let (bindings, options) = (Bindings::new(), Options::default());
-    let result = match &document {
+    run(
+        &compiled,
+        document.as_ref(),
+        options.as_deref().unwrap_or(&DEFAULTS),
+    )
+}
+
+/// Evaluates expression `expression` against document `document` with options `options` (0
+/// for the defaults), and replies with the result or the error.
+pub fn evaluate_document(expression: u64, document: u64, options: u64) -> u64 {
+    reply(evaluate_on_document(expression, document, options))
+}
+
+fn evaluate_on_document(expression: u64, document: u64, options: u64) -> Result<Vec<u8>, Vec<u8>> {
+    let compiled = EXPRESSIONS
+        .get(expression)
+        .ok_or_else(|| unknown("expression", expression))?;
+    let options = find_options(options)?;
+    let text = DOCUMENTS
+        .get(document)
+        .ok_or_else(|| unknown("document", document))?;
+    let document = documents::converted(&text).map_err(|e| not_json(e.to_string()))?;
+    run(
+        &compiled,
+        Some(&document),
+        options.as_deref().unwrap_or(&DEFAULTS),
+    )
+}
+
+/// The options of handle `options`, or `None` for 0, the defaults.
+fn find_options(options: u64) -> Result<Option<Arc<Options>>, Vec<u8>> {
+    match options {
+        0 => Ok(None),
+        options => OPTIONS
+            .get(options)
+            .map(Some)
+            .ok_or_else(|| unknown("options", options)),
+    }
+}
+
+/// The default options, shared by the evaluations given none.
+static DEFAULTS: LazyLock<Options> = LazyLock::new(Options::default);
+
+fn run(
+    compiled: &Compiled,
+    document: Option<&Document>,
+    options: &Options,
+) -> Result<Vec<u8>, Vec<u8>> {
+    let bindings = Bindings::new();
+    let result = match document {
         Some(document) => compiled
             .expression
-            .evaluate_document(document, &bindings, &options),
-        None => compiled.expression.evaluate_with(None, &bindings, &options),
+            .evaluate_document(document, &bindings, options),
+        None => compiled.expression.evaluate_with(None, &bindings, options),
     };
     match result.map_err(|e| failure(&e, &compiled.source))? {
-        Some(value) => {
-            let text = jlens_core::format_json(&value, false);
-            let mut reply = Vec::with_capacity(1 + text.len());
-            reply.push(REPLY_JSON);
-            reply.extend_from_slice(text.as_bytes());
-            Ok(reply)
-        }
+        Some(value) => Ok(json_reply(&value)),
         None => Ok(vec![REPLY_UNDEFINED]),
     }
 }
@@ -96,9 +231,8 @@ fn evaluate_text(expression: u64, input: u64) -> Result<Vec<u8>, Vec<u8>> {
 /// Parses JSON text for the fields `read` names; text that is not UTF-8 is not JSON either
 /// (RFC 8259).
 fn parse(bytes: &[u8], read: &Read) -> Result<Document, Vec<u8>> {
-    let invalid = |message: String| failure(&Error::new("U2001").with("message", message), "");
-    let text = std::str::from_utf8(bytes).map_err(|e| invalid(e.to_string()))?;
-    Document::parse_cut(text, read).map_err(|e| invalid(e.to_string()))
+    let text = std::str::from_utf8(bytes).map_err(|e| not_json(e.to_string()))?;
+    Document::parse_cut(text, read).map_err(|e| not_json(e.to_string()))
 }
 
 /// The reply of a panic caught at an export: a `U2004` error with the panic's message.
@@ -115,6 +249,38 @@ pub fn panicked(payload: Box<dyn Any + Send>) -> u64 {
 
 fn reply(reply: Result<Vec<u8>, Vec<u8>>) -> u64 {
     buffers::insert(reply.unwrap_or_else(|error| error))
+}
+
+/// The reply holding `handle`, or the `U1001` error when its table was full.
+fn handle_reply(handle: Option<u64>) -> Result<Vec<u8>, Vec<u8>> {
+    let handle = handle.ok_or_else(full)?;
+    let mut reply = vec![REPLY_HANDLE];
+    reply.extend_from_slice(&handle.to_le_bytes());
+    Ok(reply)
+}
+
+/// The reply holding `value` as compact JSON text.
+fn json_reply(value: &Value) -> Vec<u8> {
+    let text = jlens_core::format_json(value, false);
+    let mut reply = Vec::with_capacity(1 + text.len());
+    reply.push(REPLY_JSON);
+    reply.extend_from_slice(text.as_bytes());
+    reply
+}
+
+/// The `U2001` reply for input that is not JSON.
+fn not_json(message: String) -> Vec<u8> {
+    failure(&Error::new("U2001").with("message", message), "")
+}
+
+/// The `U2005` reply for an argument (`options`, `read`, `reads`) that is not in its form.
+fn invalid(kind: &str, message: String) -> Vec<u8> {
+    failure(
+        &Error::new("U2005")
+            .with("token", kind)
+            .with("message", message),
+        "",
+    )
 }
 
 /// The `U2002` reply for a handle that names no live object of its `kind`.

@@ -36,7 +36,13 @@ impl<T> Table<T> {
     /// Adds `value` and returns its handle, or `None` when the table is full (`u32::MAX - 1`
     /// live objects).
     pub fn insert(&self, value: T) -> Option<u64> {
-        let value = Some(Arc::new(value));
+        self.insert_arc(Arc::new(value))
+    }
+
+    /// Adds the object behind `value`, as [`Table::insert`] does, for a caller that keeps a
+    /// reference to it too.
+    pub fn insert_arc(&self, value: Arc<T>) -> Option<u64> {
+        let value = Some(value);
         let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
         let index = match slots.free.pop() {
             Some(index) => index,

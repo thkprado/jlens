@@ -30,7 +30,25 @@ export! {
     jlens_compile(source: u64) -> u64 = crate::api::compile, crate::api::panicked;
     /// Frees an expression: 1 when it was live, 0 for an unknown or freed handle.
     jlens_expression_free(expression: u64) -> u32 = crate::api::expression_free, crate::zero;
-    /// Evaluates an expression against the JSON text in buffer `input` (0 for no input): a
-    /// reply with the result or the error.
-    jlens_evaluate(expression: u64, input: u64) -> u64 = crate::api::evaluate, crate::api::panicked;
+    /// What an expression reads: a reply with its reads as JSON text, or the error.
+    jlens_reads(expression: u64) -> u64 = crate::api::reads, crate::api::panicked;
+    /// The union of the reads in buffer `reads`, a JSON array: a reply with the union as JSON
+    /// text, or the error.
+    jlens_union_reads(reads: u64) -> u64 = crate::api::union_reads, crate::api::panicked;
+    /// Makes options from the JSON text in buffer `options`: a reply with their handle or the
+    /// error.
+    jlens_options_new(options: u64) -> u64 = crate::api::options_new, crate::api::panicked;
+    /// Frees options: 1 when they were live, 0 for an unknown or freed handle.
+    jlens_options_free(options: u64) -> u32 = crate::api::options_free, crate::zero;
+    /// Parses the JSON text in buffer `text` into a document, keeping the fields of the read in
+    /// buffer `read` (0 for all): a reply with the document's handle or the error.
+    jlens_document_new(text: u64, read: u64) -> u64 = crate::api::document_new, crate::api::panicked;
+    /// Frees a document: 1 when it was live, 0 for an unknown or freed handle.
+    jlens_document_free(document: u64) -> u32 = crate::api::document_free, crate::zero;
+    /// Evaluates an expression against the JSON text in buffer `input` (0 for no input), with
+    /// options `options` (0 for the defaults): a reply with the result or the error.
+    jlens_evaluate(expression: u64, input: u64, options: u64) -> u64 = crate::api::evaluate, crate::api::panicked;
+    /// Evaluates an expression against a document, with options `options` (0 for the
+    /// defaults): a reply with the result or the error.
+    jlens_evaluate_document(expression: u64, document: u64, options: u64) -> u64 = crate::api::evaluate_document, crate::api::panicked;
 }

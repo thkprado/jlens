@@ -7,7 +7,7 @@ use jlens_capi::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, buffers
 use proptest::prelude::*;
 use serde_json::Value;
 
-/// Expressions and inputs that are valid, nearly valid, or bytes of any kind.
+/// Expressions, inputs, options and reads that are valid, nearly valid, or bytes of any kind.
 fn bytes() -> impl Strategy<Value = Vec<u8>> {
     prop_oneof![
         prop::sample::select(vec![
@@ -17,6 +17,7 @@ fn bytes() -> impl Strategy<Value = Vec<u8>> {
             "items[0].name",
             "$count($)",
             "$string($)",
+            "$random()",
             "{\"a\": 1, \"items\": [{\"price\": 2, \"name\": \"x\"}]}",
             "[1, 2, 3]",
             "\"é😀\"",
@@ -24,6 +25,17 @@ fn bytes() -> impl Strategy<Value = Vec<u8>> {
             "(",
             "$x(",
             "1e400",
+            "{\"maxSteps\": 3}",
+            "{\"timeout\": 1000, \"seed\": 7, \"now\": 0}",
+            "{\"maxDepth\": 2, \"maxResultSize\": 4}",
+            "{\"timeout\": -1}",
+            "{\"maxSteps\": null}",
+            "true",
+            "{\"a\": true, \"items\": {\"price\": true}}",
+            "{\"a\": {}}",
+            "[{\"input\": true}]",
+            "[{\"input\": {\"a\": true}}, {\"bindings\": {}}]",
+            "[{\"input\": 1}]",
         ])
         .prop_map(|s| s.as_bytes().to_vec()),
         "[ -~]{0,24}".prop_map(String::into_bytes),
@@ -39,10 +51,23 @@ enum Call {
     Zeroed(u8),
     /// Compiles one of the buffers made (by index, modulo their number).
     Compile(usize),
-    /// Evaluates one of the expressions made against one of the buffers, or no input.
-    Evaluate(usize, Option<usize>),
+    /// Makes options from one of the buffers.
+    Options(usize),
+    /// Makes a document from one of the buffers, pruned by another or not.
+    Document(usize, Option<usize>),
+    /// Evaluates one of the expressions against one of the buffers, or no input, with one of
+    /// the options made, or none.
+    Evaluate(usize, Option<usize>, Option<usize>),
+    /// Evaluates one of the expressions against one of the documents.
+    EvaluateDocument(usize, usize, Option<usize>),
+    /// What one of the expressions reads.
+    Reads(usize),
+    /// The union of the reads in one of the buffers.
+    UnionReads(usize),
     FreeBuffer(usize),
     FreeExpression(usize),
+    FreeOptions(usize),
+    FreeDocument(usize),
     /// A handle that was never made, passed where any handle goes.
     Stranger(u32, u32, u8),
 }
@@ -52,9 +77,18 @@ fn call() -> impl Strategy<Value = Call> {
         3 => bytes().prop_map(Call::Buffer),
         1 => any::<u8>().prop_map(Call::Zeroed),
         3 => any::<usize>().prop_map(Call::Compile),
-        4 => (any::<usize>(), any::<Option<usize>>()).prop_map(|(e, i)| Call::Evaluate(e, i)),
+        2 => any::<usize>().prop_map(Call::Options),
+        2 => (any::<usize>(), any::<Option<usize>>()).prop_map(|(t, r)| Call::Document(t, r)),
+        4 => (any::<usize>(), any::<Option<usize>>(), any::<Option<usize>>())
+            .prop_map(|(e, i, o)| Call::Evaluate(e, i, o)),
+        3 => (any::<usize>(), any::<usize>(), any::<Option<usize>>())
+            .prop_map(|(e, d, o)| Call::EvaluateDocument(e, d, o)),
+        1 => any::<usize>().prop_map(Call::Reads),
+        1 => any::<usize>().prop_map(Call::UnionReads),
         2 => any::<usize>().prop_map(Call::FreeBuffer),
         2 => any::<usize>().prop_map(Call::FreeExpression),
+        1 => any::<usize>().prop_map(Call::FreeOptions),
+        1 => any::<usize>().prop_map(Call::FreeDocument),
         1 => (any::<u32>(), any::<u32>(), any::<u8>()).prop_map(|(g, i, w)| Call::Stranger(g, i, w)),
     ]
 }
@@ -69,8 +103,37 @@ fn pick(made: &[Made], index: usize) -> Option<&Made> {
     (!made.is_empty()).then(|| &made[index % made.len()])
 }
 
-/// Reads and frees a reply, and returns the code of its error, if any.
-fn reply(handle: u64) -> Result<Option<String>, TestCaseError> {
+/// The handle of `index` among `made`, if any, and whether it is live; 0 and live for none.
+fn optional(made: &[Made], index: Option<usize>) -> (u64, bool) {
+    index
+        .and_then(|i| pick(made, i))
+        .map_or((0, true), |m| (m.handle, m.live))
+}
+
+/// Frees the handle of `index` among `made` with `free`, which returns 1 only for a live one.
+fn free(
+    made: &mut [Made],
+    index: usize,
+    free: extern "C" fn(u64) -> u32,
+) -> Result<(), TestCaseError> {
+    let len = made.len().max(1);
+    if let Some(made) = made.get_mut(index % len) {
+        prop_assert_eq!(free(made.handle), u32::from(made.live));
+        made.live = false;
+    }
+    Ok(())
+}
+
+/// What a reply holds: an error's code, a handle, or neither.
+#[derive(Debug, PartialEq)]
+enum Replied {
+    Value,
+    Handle(u64),
+    Error(String),
+}
+
+/// Reads and frees a reply, checking its form.
+fn reply(handle: u64) -> Result<Replied, TestCaseError> {
     prop_assert_ne!(handle, 0, "a reply is always made");
     let bytes = buffers::take(handle).expect("the reply is live");
     let (status, rest) = bytes.split_first().expect("a status byte");
@@ -79,17 +142,25 @@ fn reply(handle: u64) -> Result<Option<String>, TestCaseError> {
         REPLY_JSON => {
             serde_json::from_slice::<Value>(rest).expect("JSON text");
         }
-        REPLY_HANDLE => prop_assert_eq!(rest.len(), 8),
+        REPLY_HANDLE => {
+            let handle = u64::from_le_bytes(rest.try_into().expect("8 bytes"));
+            prop_assert_ne!(handle, 0);
+            return Ok(Replied::Handle(handle));
+        }
         REPLY_ERROR => {
             let error: Value = serde_json::from_slice(rest).expect("an envelope");
             let code = error["code"].as_str().expect("a code").to_owned();
             prop_assert!(error["message"].is_string());
             prop_assert_ne!(&code, "U2004", "a panic: {}", error);
-            return Ok(Some(code));
+            return Ok(Replied::Error(code));
         }
         status => prop_assert!(false, "unknown status {}", status),
     }
-    Ok(None)
+    Ok(Replied::Value)
+}
+
+fn unknown() -> Replied {
+    Replied::Error("U2002".to_owned())
 }
 
 /// A handle no table has made: its generation is beyond any this test reaches.
@@ -104,6 +175,8 @@ proptest! {
     fn calls_in_any_order_fail_cleanly(calls in prop::collection::vec(call(), 1..40)) {
         let mut buffers_made: Vec<Made> = Vec::new();
         let mut expressions: Vec<Made> = Vec::new();
+        let mut options: Vec<Made> = Vec::new();
+        let mut documents: Vec<Made> = Vec::new();
         for call in calls {
             match call {
                 Call::Buffer(bytes) => {
@@ -122,58 +195,121 @@ proptest! {
                     let Some(source) = pick(&buffers_made, index) else { continue };
                     let (handle, live) = (source.handle, source.live);
                     let utf8 = buffers::with(handle, |b| std::str::from_utf8(b).is_ok());
-                    let reply_handle = jlens_compile(handle);
-                    let bytes = buffers::with(reply_handle, |b| b.clone()).unwrap();
-                    let code = reply(reply_handle)?;
-                    match (live, utf8) {
-                        (false, _) => prop_assert_eq!(code.as_deref(), Some("U2002")),
-                        (true, Some(false)) => prop_assert_eq!(code.as_deref(), Some("U2003")),
-                        _ => {
-                            if bytes[0] == REPLY_HANDLE {
-                                let expression = u64::from_le_bytes(bytes[1..].try_into().unwrap());
-                                expressions.push(Made { handle: expression, live: true });
-                            } else {
-                                prop_assert_eq!(bytes[0], REPLY_ERROR);
-                                prop_assert!(code.unwrap().starts_with('S'));
-                            }
+                    match (reply(jlens_compile(handle))?, live, utf8) {
+                        (replied, false, _) => prop_assert_eq!(replied, unknown()),
+                        (replied, true, Some(false)) => {
+                            prop_assert_eq!(replied, Replied::Error("U2003".to_owned()));
+                        }
+                        (Replied::Handle(handle), ..) => {
+                            expressions.push(Made { handle, live: true });
+                        }
+                        (Replied::Error(code), ..) => prop_assert!(code.starts_with('S')),
+                        (Replied::Value, ..) => prop_assert!(false, "a value from compile"),
+                    }
+                }
+                Call::Options(index) => {
+                    let Some(source) = pick(&buffers_made, index) else { continue };
+                    match (reply(jlens_options_new(source.handle))?, source.live) {
+                        (replied, false) => prop_assert_eq!(replied, unknown()),
+                        (Replied::Handle(handle), true) => options.push(Made { handle, live: true }),
+                        (replied, true) => {
+                            prop_assert_eq!(replied, Replied::Error("U2005".to_owned()));
                         }
                     }
                 }
-                Call::Evaluate(expression, input) => {
+                Call::Document(text, read) => {
+                    let Some(text) = pick(&buffers_made, text) else { continue };
+                    let (read, read_live) = optional(&buffers_made, read);
+                    match (reply(jlens_document_new(text.handle, read))?, text.live && read_live) {
+                        (replied, false) => prop_assert_eq!(replied, unknown()),
+                        (Replied::Handle(handle), true) => documents.push(Made { handle, live: true }),
+                        (Replied::Error(code), true) => {
+                            prop_assert!(code == "U2001" || code == "U2005", "{}", code);
+                        }
+                        (Replied::Value, true) => prop_assert!(false, "a value from a document"),
+                    }
+                }
+                Call::Evaluate(expression, input, given) => {
                     let Some(expression) = pick(&expressions, expression) else { continue };
-                    let input = input.and_then(|i| pick(&buffers_made, i));
-                    let code = reply(jlens_evaluate(expression.handle, input.map_or(0, |i| i.handle)))?;
-                    if !expression.live || input.is_some_and(|i| !i.live) {
-                        prop_assert_eq!(code.as_deref(), Some("U2002"));
+                    let (input, input_live) = optional(&buffers_made, input);
+                    let (given, given_live) = optional(&options, given);
+                    let replied = reply(jlens_evaluate(expression.handle, input, given))?;
+                    if !expression.live || !input_live || !given_live {
+                        prop_assert_eq!(replied, unknown());
+                    }
+                }
+                Call::EvaluateDocument(expression, document, given) => {
+                    let Some(expression) = pick(&expressions, expression) else { continue };
+                    let Some(document) = pick(&documents, document) else { continue };
+                    let (given, given_live) = optional(&options, given);
+                    let replied =
+                        reply(jlens_evaluate_document(expression.handle, document.handle, given))?;
+                    if !expression.live || !document.live || !given_live {
+                        prop_assert_eq!(replied, unknown());
+                    } else {
+                        prop_assert!(!matches!(replied, Replied::Handle(_)));
+                    }
+                }
+                Call::Reads(index) => {
+                    let Some(expression) = pick(&expressions, index) else { continue };
+                    let replied = reply(jlens_reads(expression.handle))?;
+                    match expression.live {
+                        true => prop_assert_eq!(replied, Replied::Value),
+                        false => prop_assert_eq!(replied, unknown()),
+                    }
+                }
+                Call::UnionReads(index) => {
+                    let Some(reads) = pick(&buffers_made, index) else { continue };
+                    match (reply(jlens_union_reads(reads.handle))?, reads.live) {
+                        (replied, false) => prop_assert_eq!(replied, unknown()),
+                        (Replied::Value, true) => {}
+                        (replied, true) => {
+                            prop_assert_eq!(replied, Replied::Error("U2005".to_owned()));
+                        }
                     }
                 }
                 Call::FreeBuffer(index) => {
-                    let len = buffers_made.len().max(1);
-                    let Some(made) = buffers_made.get_mut(index % len) else { continue };
-                    prop_assert_eq!(jlens_buffer_free(made.handle), u32::from(made.live));
-                    prop_assert_eq!(jlens_buffer_len(made.handle), 0);
-                    made.live = false;
+                    free(&mut buffers_made, index, jlens_buffer_free)?;
+                    if let Some(made) = pick(&buffers_made, index) {
+                        prop_assert_eq!(jlens_buffer_len(made.handle), 0);
+                    }
                 }
-                Call::FreeExpression(index) => {
-                    let len = expressions.len().max(1);
-                    let Some(made) = expressions.get_mut(index % len) else { continue };
-                    prop_assert_eq!(jlens_expression_free(made.handle), u32::from(made.live));
-                    made.live = false;
-                }
+                Call::FreeExpression(index) => free(&mut expressions, index, jlens_expression_free)?,
+                Call::FreeOptions(index) => free(&mut options, index, jlens_options_free)?,
+                Call::FreeDocument(index) => free(&mut documents, index, jlens_document_free)?,
                 Call::Stranger(generation, index, which) => {
                     let handle = stranger(generation, index);
                     let some = pick(&buffers_made, index as usize).map_or(0, |m| m.handle);
-                    match which % 7 {
+                    let expression = pick(&expressions, index as usize).map(|m| m.handle);
+                    let document = pick(&documents, index as usize).map(|m| m.handle);
+                    match which % 16 {
                         0 => prop_assert_eq!(jlens_buffer_free(handle), 0),
                         1 => prop_assert_eq!(jlens_buffer_address(handle), 0),
                         2 => prop_assert_eq!(jlens_buffer_len(handle), 0),
                         3 => prop_assert_eq!(jlens_expression_free(handle), 0),
-                        4 => prop_assert_eq!(reply(jlens_compile(handle))?, Some("U2002".to_owned())),
-                        5 => prop_assert_eq!(reply(jlens_evaluate(handle, some))?, Some("U2002".to_owned())),
+                        4 => prop_assert_eq!(jlens_options_free(handle), 0),
+                        5 => prop_assert_eq!(jlens_document_free(handle), 0),
+                        6 => prop_assert_eq!(reply(jlens_compile(handle))?, unknown()),
+                        7 => prop_assert_eq!(reply(jlens_evaluate(handle, some, 0))?, unknown()),
+                        8 => prop_assert_eq!(reply(jlens_options_new(handle))?, unknown()),
+                        9 => prop_assert_eq!(reply(jlens_document_new(handle, 0))?, unknown()),
+                        10 => prop_assert_eq!(reply(jlens_document_new(some, handle))?, unknown()),
+                        11 => prop_assert_eq!(reply(jlens_reads(handle))?, unknown()),
+                        12 => prop_assert_eq!(reply(jlens_union_reads(handle))?, unknown()),
+                        13 => {
+                            let Some(document) = document else { continue };
+                            let replied = reply(jlens_evaluate_document(handle, document, 0))?;
+                            prop_assert_eq!(replied, unknown());
+                        }
+                        14 => {
+                            let Some(expression) = expression else { continue };
+                            prop_assert_eq!(reply(jlens_evaluate(expression, handle, 0))?, unknown());
+                            let replied = reply(jlens_evaluate_document(expression, handle, 0))?;
+                            prop_assert_eq!(replied, unknown());
+                        }
                         _ => {
-                            let Some(expression) = pick(&expressions, index as usize) else { continue };
-                            let code = reply(jlens_evaluate(expression.handle, handle))?;
-                            prop_assert_eq!(code.as_deref(), Some("U2002"));
+                            let Some(expression) = expression else { continue };
+                            prop_assert_eq!(reply(jlens_evaluate(expression, 0, handle))?, unknown());
                         }
                     }
                 }
@@ -185,23 +321,39 @@ proptest! {
         for made in expressions.iter().filter(|m| m.live) {
             prop_assert_eq!(jlens_expression_free(made.handle), 1);
         }
+        for made in options.iter().filter(|m| m.live) {
+            prop_assert_eq!(jlens_options_free(made.handle), 1);
+        }
+        for made in documents.iter().filter(|m| m.live) {
+            prop_assert_eq!(jlens_document_free(made.handle), 1);
+        }
+        prop_assert_eq!(jlens_capi::documents::cached(), 0, "every conversion dropped");
     }
 
     #[test]
-    fn handles_of_one_kind_passed_as_the_other_fail_cleanly(source in bytes(), input in bytes()) {
-        // A buffer's handle may name a live expression of another test, and the other way
-        // round: the tables are separate. Whatever it names, the call does not panic.
+    fn handles_of_one_kind_passed_as_another_fail_cleanly(source in bytes(), input in bytes()) {
+        // A handle of one kind may name a live object of another kind, made by another test:
+        // the tables are separate. Whatever it names, the call does not panic.
         let source = buffers::insert(source);
         let input = buffers::insert(input);
-        reply(jlens_evaluate(source, input))?;
-        reply(jlens_evaluate(input, 0))?;
-        let compiled = jlens_compile(source);
-        let bytes = buffers::with(compiled, |b| b.clone()).unwrap();
-        reply(compiled)?;
-        if bytes[0] == REPLY_HANDLE {
-            let expression = u64::from_le_bytes(bytes[1..].try_into().unwrap());
+        reply(jlens_evaluate(source, input, input))?;
+        reply(jlens_evaluate(input, 0, source))?;
+        reply(jlens_evaluate_document(source, input, 0))?;
+        reply(jlens_reads(source))?;
+        if let Replied::Handle(options) = reply(jlens_options_new(input))? {
+            reply(jlens_evaluate(source, input, options))?;
+            reply(jlens_document_new(options, options))?;
+            prop_assert_eq!(jlens_options_free(options), 1);
+        }
+        if let Replied::Handle(document) = reply(jlens_document_new(input, 0))? {
+            reply(jlens_evaluate(document, document, document))?;
+            reply(jlens_union_reads(document))?;
+            prop_assert_eq!(jlens_document_free(document), 1);
+        }
+        if let Replied::Handle(expression) = reply(jlens_compile(source))? {
             reply(jlens_compile(expression))?;
-            reply(jlens_evaluate(expression, expression))?;
+            reply(jlens_evaluate(expression, expression, expression))?;
+            reply(jlens_evaluate_document(expression, expression, expression))?;
             prop_assert_eq!(jlens_expression_free(expression), 1);
         }
         prop_assert_eq!(jlens_buffer_free(source), 1);

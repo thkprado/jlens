@@ -30,8 +30,19 @@
 //! `value`. Its offsets count UTF-16 code units, as `position` does in jsonata-js. The C API's
 //! own failures use `U` codes: `U2001` for input that is not valid JSON (or not UTF-8),
 //! `U2002` for an unknown or freed handle, `U2003` for an expression that is not UTF-8,
-//! `U2004` for a panic, and `U1001` when a table of handles is full. A reply handle of 0 means
-//! that no buffer could be made for the reply.
+//! `U2004` for a panic, `U2005` for options or reads that are not in their form (its `token`
+//! says which: `options`, `read` or `reads`), and `U1001` when a table of handles is full. An
+//! unknown handle is reported before anything wrong with what the other handles hold. A reply
+//! handle of 0 means that no buffer could be made for the reply.
+//!
+//! # Objects
+//!
+//! Besides buffers, the host holds handles of expressions, options and documents, each freed
+//! by its own export. Options are made once from JSON text, with the names of the WebAssembly
+//! package's ([`api::options_new`]), and an evaluation takes their handle, or 0 for the
+//! defaults. A document is JSON text parsed once, kept behind an `Arc` and converted once per
+//! thread that evaluates against it ([`documents`]); it can be pruned to the fields that
+//! [`api::reads`] or [`api::union_reads`] give.
 //!
 //! # Panics
 //!
@@ -42,12 +53,20 @@
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+// Evaluation allocates for most of its work, and Windows' system allocator made the spike's
+// large cases up to 2.7 times slower than on Linux (ADR 0021). `local_dynamic_tls`, since the
+// library is loaded at run time, as the Python package's is (ADR 0014, amendment).
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 pub mod api;
 pub mod buffers;
+pub mod documents;
 // The crate's one exception to `unsafe_code = "deny"`, for `#[unsafe(no_mangle)]` (ADR 0021).
 #[allow(unsafe_code)]
 pub mod exports;
 pub mod handles;
+mod options;
 
 /// The first byte of a reply whose result is undefined.
 pub const REPLY_UNDEFINED: u8 = 0;
