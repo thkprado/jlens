@@ -12,7 +12,8 @@
 //! A path step looks its one field up in a `dict` not read whole yet (`read_field`), with the
 //! key's `str` taken from [`Keys`] when the expression names it, so that a lookup neither builds
 //! a `str` nor hashes it. That lookup can call the `__eq__` of a key that is not a `str`, whose
-//! hash collides with the key's; such a `dict` fails when it is read whole.
+//! hash collides with the key's; such a `dict` fails when it is read whole. An index into a
+//! `list` or a `tuple` not read whole yet reads the items it picks (`length`, `read_item`).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -203,6 +204,36 @@ where
             if let Some(item) = item.map_err(|e| e.to_string())? {
                 let this = self.this.upgrade();
                 Writer::new(self.keys, Some(member), this.as_ref()).put(sink, &item)?;
+            }
+            Ok(true)
+        })
+    }
+
+    fn length(&self, index: u32) -> Option<usize> {
+        self.with(index, |member| {
+            if let Ok(list) = member.cast::<PyList>() {
+                Some(list.len())
+            } else {
+                member.cast::<PyTuple>().ok().map(|tuple| tuple.len())
+            }
+        })
+    }
+
+    fn read_item(&self, index: u32, item: usize, sink: &mut Sink<'_, 'a>) -> Result<bool, String> {
+        self.with(index, |member| {
+            let this = self.this.upgrade();
+            let mut writer = Writer::new(self.keys, Some(member), this.as_ref());
+            if let Ok(list) = member.cast::<PyList>() {
+                // Code that ran since the length was read may have made the list shorter: an
+                // item past its end is undefined.
+                with_critical_section(member, || match list.get_item(item) {
+                    Ok(item) => writer.put(sink, &item),
+                    Err(_) => Ok(()),
+                })?;
+            } else if let Ok(tuple) = member.cast::<PyTuple>() {
+                writer.put(sink, &tuple.get_item(item).map_err(|e| e.to_string())?)?;
+            } else {
+                return Ok(false);
             }
             Ok(true)
         })

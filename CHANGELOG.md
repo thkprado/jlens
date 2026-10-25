@@ -20,6 +20,10 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Python: `evaluate` reads the items an index into a `list` or a `tuple` picks, alone, instead
+  of the whole list. With Python values in, `items[0].code` over 10,000 items takes 1.3 µs
+  instead of 413 µs, and `($i := 0; items[$i].code)` 1.7 µs instead of 414 µs; the other cases
+  of the comparison with the Python packages are within 2.3%.
 - jlens-wasm: `evaluate` reads the items an index into an array picks, alone, instead of the
   whole array, and the arrays and objects of a level cost one allocation each instead of two.
   `items[0].code` over 10,000 items takes 6.7 µs instead of 6.19 ms, and

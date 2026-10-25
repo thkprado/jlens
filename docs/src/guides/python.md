@@ -97,9 +97,10 @@ form. Two consequences follow from reading the input as the expression goes:
 
 - **Errors appear when their part is read.** A value that cannot be read stops the evaluation
   with `U1004`, with the message `json.dumps` would give, when the expression reads it. A path
-  step reads one field of a dictionary; other operations (`*`, `$keys`, returning the
-  dictionary) read the whole dictionary or list, and a key that is not a `str` fails then. An
-  expression that never reaches the value succeeds (below).
+  step reads one field of a dictionary, and an index (`items[0]`, `items[$i]`) the items of a
+  list it picks; other operations (`*`, `$keys`, returning the dictionary) read the whole
+  dictionary or list, and a key that is not a `str` fails then. An expression that never
+  reaches the value succeeds (below).
 - **The input must not change during the evaluation.** A [host function](#host-functions), or
   another thread, that modifies the input can change what the rest of the evaluation reads. In
   free-threaded Python, that gives a result mixing both states, or `U1004`, never a crash. Copy

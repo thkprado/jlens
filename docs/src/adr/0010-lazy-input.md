@@ -356,3 +356,13 @@ of two. With `evaluate`, `items[0].code` over 10,000 items takes 6.7 µs instead
 and `($i := 0; items[$i].code)` 7.3 µs instead of 6.19 ms; the twelve other cases of the
 comparison with jsonata-js are between 3.6% faster and 0.4% slower (the median of four runs
 each).
+
+### Follow-up: the Python package (0.24 #10)
+
+The Python package's source implements both methods for a `list` and a `tuple`: `length` reads
+their size, and `read_item` writes one item, under the `list`'s lock as a level is read, and
+checks cycles against the same ancestors. A host function, or another thread, can make a `list`
+shorter after its length was read; an item past its new end is undefined. With Python values
+in, `items[0].code` over 10,000 items takes 1.3 µs instead of 413 µs, and
+`($i := 0; items[$i].code)` 1.7 µs instead of 414 µs; the other cases of `python.py speed` are
+within 2.3% (the median of three alternated runs, both builds aligned).

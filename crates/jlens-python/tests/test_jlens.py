@@ -132,6 +132,30 @@ def test_fields_read_alone_then_whole():
     assert Expression("[o.q, o, o.missing, o.q]").evaluate(order) == [2, order["o"], 2]
 
 
+def test_items_read_alone_then_whole():
+    # An index reads the items it picks: the item that cannot be read is not reached.
+    for items in ([{"code": 1}, {1, 2}, 3], ({"code": 1}, {1, 2}, 3)):
+        order = {"items": items}
+        assert Expression("items[0].code").evaluate(order) == 1
+        assert Expression("($i := -1; items[$i])").evaluate(order) == 3
+        assert Expression("[items[5], items[-5], $count(items)]").evaluate(order) == [3]
+        raises("U1004", Expression("items[1]").evaluate, order)
+        raises("U1004", Expression("$sum(items.code)").evaluate, order)
+    # An item read alone is the value the array holds when it is read whole.
+    order = {"items": [{"code": 1}, [2], 3]}
+    same = Expression("($a := items[0]; $b := items[1]; {'a': $a = items[0], 'all': items, 'b': $b})")
+    assert same.evaluate(order) == {"a": True, "all": order["items"], "b": [2]}
+    # A cycle through an item read alone.
+    looped = []
+    looped.append(looped)
+    raises("U1004", Expression("$[0]").evaluate, looped)
+    # A list made shorter after its length was read: the item past its end is undefined.
+    items = [1, 2]
+    shorten = Expression("($n := $count(items); $pop(); [$n, items[1]])")
+    shorten.register_function("pop", lambda: items.pop())
+    assert shorten.evaluate({"items": items}) == [2]
+
+
 def test_fields_found_whatever_str_their_keys_are():
     class Key(str):
         pass

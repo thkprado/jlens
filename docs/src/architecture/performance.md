@@ -874,5 +874,13 @@ path changed but the order in which variables and functions are bound.
   against the revision before. The other cases are within 2% in every mode; against a `Document`,
   `path` and `object constructor`, 2.6% and 5.3% slower over 10 rounds, were within 0.1% over
   20.
+
+  The Python package's source reads an item of a `list` or a `tuple` alone since 0.24 #10. With
+  Python values in (`python.py speed`, WSL, the median of three alternated runs, both builds
+  aligned), `items[0].code` over 10,000 items takes 1.3 µs instead of 413 µs, and
+  `($i := 0; items[$i].code)` 1.7 µs instead of 414 µs, near the 0.9 and 1.2 µs they take
+  against a `Document`; the other cases are within 2.3%. Built without the alignment flags,
+  `names over items`, which reads no item alone, measured 4.6% slower in every run; aligned, it
+  takes 21.9 µs in both builds.
 - **Deep copies.** A transform (`|...|`) copies its input with `$clone` before changing it, as
   jsonata-js does. That makes transforms of large documents comparatively expensive.
