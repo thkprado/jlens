@@ -75,7 +75,8 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
 
 1. Update the version in `[workspace.package]` and in the `jlens-core`, `jlens-schema`,
    `jlens-lsp` and `regress` (`jlens-regress`) entries of `[workspace.dependencies]`
-   (`Cargo.toml`).
+   (`Cargo.toml`), and the project's `<version>` in `crates/jlens-java/java/pom.xml`
+   (`cargo xtask java` fails while they differ).
 2. Move the `Unreleased` entries of `CHANGELOG.md` under the new version, and open the section
    with a sentence that sums up the release. The section becomes the GitHub release notes;
    preview them with `cargo xtask release-notes X.Y.Z`, which points relative links

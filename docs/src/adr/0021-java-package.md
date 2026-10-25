@@ -645,7 +645,8 @@ a level read through the `Sink` ([performance](../architecture/performance.md#wh
   unnoticed.
 - **Documents** are JSON text behind an `Arc`, converted once per OS thread, as decided. A
   thread drops its conversion of a freed document the next time it makes, frees or evaluates
-  against a document; a carrier thread that never does keeps it until it exits.
+  against a document; a carrier thread that never does keeps it until it exits. (0.25 #3: at
+  its next call of any export; see below.)
 - **The reads** come back as the JSON of `Expression::reads`, and their union is made from a
   JSON array of them, as `union_reads` does in Python. A document is pruned to the `input` of
   either.
@@ -671,3 +672,19 @@ each the best of five runs of 0.3 s after a second of warm-up.
 On a `Document`, where nothing is parsed, the same cases take 7 to 53% less: `$sum(items.price)`
 over 100,000 items 5,646 µs against 12,021, and `$` 128,301 against 252,318. mimalloc is the
 library's global allocator, with `local_dynamic_tls`, as in the Python package.
+
+### Freed documents (0.25 #3)
+
+A thread now drops its conversions of freed documents at its next call of any export, a buffer's
+included, not only of the documents' exports. A count of the documents dropped, bumped when a
+document's text is dropped (its last `Arc`, so after an evaluation that still held it returns),
+tells each export whether the thread has conversions to sweep: one atomic load per call when
+nothing was freed. A conversion is then kept only by a thread that never calls jlens again, at
+most one per idle carrier thread. Releasing it at once on every thread was set aside: a
+`jlens_core::Document` is not `Send`, an `Arc` inside it would slow down every evaluation, and
+an export that releases the calling thread's conversions would not reach the carriers of
+virtual threads.
+
+`items[0].name` on a `Document` of 1,000 items, through the exports from Rust: 616 to 623 ns
+before, 603 to 609 ns after. The lookup of a conversion no longer sweeps the cache on every
+evaluation, which pays for the load.

@@ -14,6 +14,7 @@ mod differential;
 mod docs;
 mod fuzz;
 mod homebrew;
+mod java;
 mod npm;
 mod regex_corpus;
 mod regex_differential;
@@ -62,6 +63,8 @@ commands:
                                     build the package and test it in Node.js and a headless browser;
                                     --example also loads the web editor, from the repository and
                                     as the site assembles it
+  java [<maven argument>...]        build the C API and test the Java package with the Maven
+                                    Wrapper (`verify`, or the arguments given); needs a JDK 25+
   serve [--site]                    serve the repository over HTTP (for examples/web-editor),
                                     or with --site the site built by `site`
   site                              build the book and the web editor into target/site
@@ -135,6 +138,7 @@ fn main() -> Result<()> {
             args.iter().any(|a| a == "--require-browser"),
             args.iter().any(|a| a == "--example"),
         ),
+        Some("java") => java::test(&args[1..]),
         Some("ab") => ab::run(&args[1..]),
         Some("serve") => wasm::serve_forever(args.iter().any(|a| a == "--site")),
         Some("site") => site::build(),

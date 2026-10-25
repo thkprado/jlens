@@ -539,3 +539,31 @@ fn a_thread_drops_the_conversions_of_freed_documents() {
     freed.send(()).unwrap();
     assert_eq!(worker.join().unwrap(), 0);
 }
+
+#[test]
+fn a_thread_drops_a_freed_documents_conversion_at_its_next_call_of_any_export() {
+    let document = document(r#"{"a": 1}"#, None);
+    let expression = compile("a");
+    let (made, made_rx) = std::sync::mpsc::channel();
+    let (freed, freed_rx) = std::sync::mpsc::channel::<()>();
+    let worker = std::thread::spawn(move || {
+        assert_eq!(
+            on_document(expression, document, 0),
+            Reply::Json("1".into())
+        );
+        made.send(jlens_capi::documents::cached()).unwrap();
+        freed_rx.recv().unwrap();
+        let kept = jlens_capi::documents::cached();
+        // A buffer has nothing to do with documents; the call sweeps all the same.
+        jlens_buffer_free(jlens_buffer_new(1));
+        (kept, jlens_capi::documents::cached())
+    });
+    assert_eq!(made_rx.recv().unwrap(), 1);
+    assert_eq!(jlens_document_free(document), 1);
+    freed.send(()).unwrap();
+    assert_eq!(
+        worker.join().unwrap(),
+        (1, 0),
+        "kept until the call, dropped by it"
+    );
+}

@@ -181,6 +181,27 @@ jobs:
       - name: pytest
         run: python -m pytest -p no:cacheprovider tests
 
+  java:
+    name: Java ${{ matrix.java }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # The package's floor, and the newest release (ADR 0021).
+        java: ["25", latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      - name: Build the C API and run the JUnit suite
+        run: cargo xtask java
+
   wasm:
     name: Wasm (browser ESM)
     runs-on: ubuntu-latest

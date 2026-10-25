@@ -4,3 +4,5 @@
 node_modules/
 *.swp
 __pycache__/
+/crates/jlens-java/java/target
+/crates/jlens-java/java/native

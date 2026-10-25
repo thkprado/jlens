@@ -131,7 +131,7 @@ fn document_text(text: u64, read: u64) -> Result<Vec<u8>, Vec<u8>> {
     // Parsed now, to fail on text that is not JSON.
     documents::converted(&text).map_err(|e| not_json(e.to_string()))?;
     let Some(handle) = DOCUMENTS.insert_arc(text) else {
-        documents::sweep();
+        documents::sweep_if_freed();
         return Err(full());
     };
     handle_reply(Some(handle))
@@ -143,7 +143,7 @@ pub fn document_free(document: u64) -> u32 {
     let freed = DOCUMENTS.remove(document);
     let live = freed.is_some();
     drop(freed);
-    documents::sweep();
+    documents::sweep_if_freed();
     u32::from(live)
 }
 

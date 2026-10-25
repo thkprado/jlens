@@ -78,12 +78,17 @@ pub const REPLY_ERROR: u8 = 2;
 pub const REPLY_HANDLE: u8 = 3;
 
 /// Runs `f`, and `fallback` with the panic's payload if `f` panics, so that no panic unwinds
-/// into the caller of an export.
+/// into the caller of an export. First, this thread drops its conversions of the documents
+/// freed since its last call ([`documents`]).
 pub fn guarded<R>(fallback: impl FnOnce(Box<dyn Any + Send>) -> R, f: impl FnOnce() -> R) -> R {
     // Unwind safety: what a panic can leave half-done is the evaluation's own state, which is
     // dropped; the tables take their locks back from a poisoned mutex, and are never left in
     // the middle of an update.
-    catch_unwind(AssertUnwindSafe(f)).unwrap_or_else(fallback)
+    catch_unwind(AssertUnwindSafe(|| {
+        documents::sweep_if_freed();
+        f()
+    }))
+    .unwrap_or_else(fallback)
 }
 
 /// The fallback of the exports that do not reply: 0.
