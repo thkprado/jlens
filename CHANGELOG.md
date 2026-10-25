@@ -6,6 +6,16 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.24.0]
+
+An index into a long array reads the items it picks instead of the whole array, whether it is a
+number or held in a variable. Over 10,000 items, `items[0].code` and
+`($i := 0; items[$i].code)` take 0.7 to 2.3 µs on the engine's benchmark, against 40 µs to
+2.4 ms in 0.23.0, 1.3 to 1.7 µs in the Python package instead of 0.4 ms, and 6.7 to 7.3 µs in
+the WebAssembly package instead of 6.19 ms. Reading values through a `Source` allocates less, and a
+group-by on a call in tail position of a lambda is now applied. No other case of the engine's
+benchmark is more than 2 % slower than in 0.23.0.
+
 ### Added
 
 - `Source::length` and `Source::read_item`, and the same in `Sources`, let an index into an
@@ -930,7 +940,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/thkprado/jlens/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/thkprado/jlens/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/thkprado/jlens/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/thkprado/jlens/compare/v0.21.1...v0.21.2
