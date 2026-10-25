@@ -262,7 +262,7 @@ that cost from 350 to 106 ns for `1`, but a path still takes about seven times a
 
 JSONata in Python has a pure-Python port, a wrapper of jsonata-js, a young Rust port of
 jsonata-java and the Python package of jsonata-core (`jsonatapy`). jlens would bring its conformance, audits, schemas and speed to Python, where data
-pipelines and rules live, and more people using it would tell 0.24 which parts of the API to
+pipelines and rules live, and more people using it would tell 0.26 which parts of the API to
 keep. The package follows the WebAssembly package: the same objects, the same errors, beta until
 1.0.
 
@@ -378,7 +378,7 @@ hundred steps would remove most of that cost.
 
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
-| 1 | ADR 0018, the step limit. What a step is. Proposed: each node the general evaluation path evaluates (an `enter` event of a tracer), each call a host function makes through `Callable`, and one step per 1,024 steps of the regular expression backtracker (ADR 0009), so that catastrophic backtracking cannot run unbounded under a step limit alone. The paths that skip evaluating a node (a field looked up in each item, a literal key of a group, a comparison with a string literal, a constant predicate evaluated once) charge the steps they skip, so that the count depends neither on the optimizations nor on a tracer; `$eval` and host callbacks share the evaluation's budget. Also decided: the error code (proposed `U1006`, with the limit as `value`: `U1005` is taken, and an application must be able to tell an exhausted budget from a size limit without reading the message, as `D1011` and `D1012` already allow; the rule "limits use `U1001`" in `AGENTS.md` changes accordingly); what the limit does not bound, which is the work inside one step, already bounded by the size limits (a range, `$sort` without a function, `$string`, deep equality); whether the count may change between versions (proposed: only on purpose, with a changelog note, the table of exact counts of #2 making any change show in review); whether an evaluation reports the steps it took; how often the timeout reads the clock (#3) | The ADR accepted | **done**: [ADR 0018](../adr/0018-step-limit.md). A step is each node the general path evaluates and each function called back; the fast paths charge what they skip (a constant predicate its count once per further item); one step per 1,024 backtracker steps; `U1006` with the limit as `value`; counts change only with a changelog note; the audit header reports `steps`, and the count of every evaluation is left to 0.24; the clock read every 256 steps (proposed), settled in #3 |
+| 1 | ADR 0018, the step limit. What a step is. Proposed: each node the general evaluation path evaluates (an `enter` event of a tracer), each call a host function makes through `Callable`, and one step per 1,024 steps of the regular expression backtracker (ADR 0009), so that catastrophic backtracking cannot run unbounded under a step limit alone. The paths that skip evaluating a node (a field looked up in each item, a literal key of a group, a comparison with a string literal, a constant predicate evaluated once) charge the steps they skip, so that the count depends neither on the optimizations nor on a tracer; `$eval` and host callbacks share the evaluation's budget. Also decided: the error code (proposed `U1006`, with the limit as `value`: `U1005` is taken, and an application must be able to tell an exhausted budget from a size limit without reading the message, as `D1011` and `D1012` already allow; the rule "limits use `U1001`" in `AGENTS.md` changes accordingly); what the limit does not bound, which is the work inside one step, already bounded by the size limits (a range, `$sort` without a function, `$string`, deep equality); whether the count may change between versions (proposed: only on purpose, with a changelog note, the table of exact counts of #2 making any change show in review); whether an evaluation reports the steps it took; how often the timeout reads the clock (#3) | The ADR accepted | **done**: [ADR 0018](../adr/0018-step-limit.md). A step is each node the general path evaluates and each function called back; the fast paths charge what they skip (a constant predicate its count once per further item); one step per 1,024 backtracker steps; `U1006` with the limit as `value`; counts change only with a changelog note; the audit header reports `steps`, and the count of every evaluation is left to 0.26; the clock read every 256 steps (proposed), settled in #3 |
 | 2 | The limit in `jlens-core`: `Options::max_steps`, the counter in `Evaluator`, the paths that charge skipped steps, the regular expression backtracker on its interruptible path when a step limit is set, `U1006` in `error.rs`. `cargo xtask ab` gains `--b-max-steps`, like `--b-allocator`, to measure a limit set against none | A table test of exact counts: each expression succeeds with its count and fails with `U1006` with one step less. Every case of the suite takes the same number of steps with and without a tracer. Property tests (`robustness.rs`): no panic, any limit gives the result or `U1006`, the count the same with a tracer. Conformance unchanged; `gen-docs`; the crate guide. `ab` against `HEAD`, and with `--b-max-steps`: no case more than 2% slower | **done**: `Options::max_steps` and `U1006`; the fast paths charge what they skip (a field path its steps, a literal key or compared string its node, a constant predicate its count once per further item); the backtracker polls under a step limit or a tracer; the audit header reports `steps` (`Tracer::steps`); `$eval` lets `U1006` through instead of wrapping it in `D3121`. The table in `tests/steps.rs`; every case of the suite takes the same steps with and without a tracer (`steps:<id>` in the conformance test); property test run 200,000 cases. `ab HEAD .`: every case between 4.7% faster and 0.3% slower; with `--b-max-steps`: within 2% except `path` at +5.1%, +1.0% over 30 rounds |
 | 3 | The timeout read every few hundred steps instead of at every step, using the counter of #2; the cancellation token, an atomic load, still read at every step. `ab` gains `--timeout`, for both programs | The `$map` above and the `ab` workload measured with a timeout, before and after, natively and in WebAssembly; the timeout's existing tests green (a loop still stops with `D1012`); the outcome on the performance page | **done**: the counter counts down to the next checkpoint, the end of the budget or the next read of the clock every 256 steps, so a step costs one comparison as before; `ab --timeout MS` for both programs. The `$map` with a timeout: +47% → +0.8% natively, +149% → +1.3% in WebAssembly; the workload with a timeout 3 to 37% faster. Without a timeout, `filter + aggregate` and `shipping rule` +3.5%, which an unused field alone gives (layout), left to #7's profile; the [performance page](performance.md#what-the-limits-cost). Also fixed the crate guide's step budget, which CI found failing since #2 |
 | 4 | `maxSteps` in the WebAssembly package | The JS suite runs the table of exact counts of #2 in Node and the browser and finds the counts Rust finds; `types.d.ts`; the Wasm guide | **done**: `maxSteps` in the options of every evaluation; the table of #2 moved to `crates/jlens-core/tests/steps.json`, which `tests/steps.rs` and the JS suite read (and pytest will, in #5). In Node.js and in the browser each expression takes the steps Rust counts, fails with `U1006` with one step less and reports its count in the audit header, and so does a host function calling back |
@@ -457,12 +457,84 @@ text.
 | 2 | The performance of the release: `cargo xtask ab` against 0.22.0, as in 0.22 #6 | The measurements on the performance page; every case within 2%, or its cause found and recorded | **done**: every case of `evaluate` within 2% over 20 rounds; with `--mode document`, `sort + map`, `recursion` and `filter + aggregate` 2.2 to 2.9% slower, which run no regular expression: built aligned, all three within 1.8% |
 | 3 | Release 0.23.0 | The release checklist | **done**; the native, WebAssembly and Python tables of [the performance page](performance.md) measured again for 0.23.0 |
 
-## 0.24: an API to keep, toward 1.0
+## 0.24: reading the application's values faster
+
+The spike of [ADR 0021](../adr/0021-java-package.md) measured how jlens reads values that it
+does not parse itself, and two of the costs it found belong to `jlens-core`, so they reach
+every package.
+
+- An index into an array, such as `items[0]`, copied the whole array first: 2.6 ms on 100,000
+  items.
+- Reading an input one level at a time through a `Source`, as the Python package reads `dict`s
+  and `list`s, the WebAssembly package JavaScript objects and a Rust application its own
+  state, cost about 1 µs per object beyond the host's own work, by subtraction. That remainder
+  is the work of the `Sink` and of the values it builds.
+
+`cargo xtask ab` saw neither cost: its workload has 200 items and reads them from
+`serde_json`. 0.24 removes the first cost, gives `ab` the shapes that show both, then measures
+and reduces the second.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | A predicate reads its array in place: `filter` no longer copies the items before testing or indexing them | Before and after on a `Document` of 1,000 and 100,000 items; `cargo xtask ab` within 2.5%; `CHANGELOG.md` | **done**: `items[0].name` takes 1.3 µs on 100,000 items instead of 2.6 ms, and 1.3 µs instead of 4.8 µs on 1,000; `ab` puts every case between −2.4% and +1.1% |
+| 2 | What `ab` misses. `--mode source`: the workload read through a `Source` written in the probe over the input, with `Sources` for each level as the Python package does, so that #3 to #5 are measured by `ab`. A case of an index into a long array, the cost of #1, which 200 items hid. Proposed: an input of 10,000 items in `benches/`, taken by the WebAssembly and Python comparisons too unless they cannot run it | Two runs of `ab . . --mode source` agree within the run's noise; the new case fails `ab v0.23.0 .` by the gain of #1; "Comparing two revisions" on the [performance page](performance.md) documents the mode | |
+| 3 | Exploration, then the fix: where the time of a level read through a `Sink` goes. Profile `evaluate_source` in `host_state`, `ab --mode source`, and Python's `evaluate` on a list of `dict`s. What is known: keys are interned, at the cost of a hash and a lookup per field; each string is an `Rc<str>`; `Sink::array` and `Sink::object` allocate the source besides the value, which `Sources` avoids; each object is an `Rc` with its map. Candidates, to choose from the profile: a key that a source interns once and passes again without hashing it, cheaper objects for a level, fewer allocations per string | Before and after on `host_state`'s `evaluate_source`, `ab --mode source` and the Python table's evaluations on Python values; `ab` within 2% in the other modes; the performance page and `CHANGELOG.md`; an amendment to ADR 0021, whose results say keys are allocated once each where they are interned | |
+| 4 | The WebAssembly package's source writes the arrays and objects of a level as members of one `Sources`, one allocation each instead of two, as the Python package's has since 0.19; and it takes what #3 adds | The WebAssembly table's `evaluate` column before and after (`compare.mjs`, the median of four runs per cell); `cargo xtask wasm-test` | |
+| 5 | The Python package's source takes what #3 adds. Skipped if #3 adds no API | `benches/compare/python.py speed` before and after, in WSL; the Python tests | |
+| 6 | The performance of the release: `cargo xtask ab` against 0.23.0, in every mode, as in 0.23 #2 | The measurements on the performance page; every case within 2%, or its cause found and recorded | |
+| 7 | Release 0.24.0 | The release checklist; the native, WebAssembly and Python tables of the performance page measured again | |
+
+## 0.25: a Java package
+
+JSONata on the JVM has jsonata-java and JSONata4Java. [ADR 0021](../adr/0021-java-package.md)
+puts jlens there through a C API that Java 25 calls with Panama, after a spike that measured it
+against jsonata-java. On a `Document`, jlens was 2.6 to 70 times faster. On JSON text it was
+1.2 to 2.7 times faster, and 1.8 to 2.5 times on 16 threads or 1,000 virtual threads. The
+package follows the Python and WebAssembly ones: the same objects, the same errors, beta until
+1.0. It ships before the API work, as they did ([ADR 0021, amended](../adr/0021-java-package.md#amendment-before-the-api-work-2026-10-25)).
+The spike's code is the starting point, not the package: the decisions are in the ADR.
+
+| # | Deliverable | Definition of done | Status |
+|---|---|---|---|
+| 1 | `crates/jlens-capi`, the C API, not published to crates.io: buffers owned by Rust and known by handle; tables of handles locked only to find an entry, one lock per buffer; compiled expressions; evaluations on JSON text, parsed for the fields the expression reads; `Document`s as ADR 0014 keeps them, the parsed JSON behind an `Arc` and a copy per thread; the options and limits; errors as an envelope with `code`, `position`, `start`, `end`, `token` and `value`; mimalloc. The crate's lints with its one exception, for `no_mangle` in the exports module | Rust tests of the exports, threads included; the source test of the lint exception over every Rust file of the crate; clippy | |
+| 2 | The Java API over Panama, in `crates/jlens-java/java/`, built with the Maven Wrapper: `Expression`, `Document`, the options as a record with a builder, `JlensException`, JSON text in and out; the native library found in the JAR and loaded at first use | A JUnit suite on Windows and Linux, run by CI; the warning without `--enable-native-access` checked once | |
+| 3 | Results as Java objects (`Map`, `List`, `String`, numbers, booleans, `null`). Exploration first: the result builder (ADR 0017) through upcalls, against Java decoding the JSON text; `$` on a large document is the case to watch, the one jsonata-java won in the spike | Both measured on the spike's documents; the faster one kept, with its reason in the ADR's results; JUnit cases for each kind of value | |
+| 4 | Java objects as input, read one level at a time through a `Source` with an upcall per level, with what 0.24 made cheaper on the Rust side | The spike's `Source` column measured again, before and after; deep and cyclic values fail with `U1001` and `U1004`, never a crash | |
+| 5 | Host functions written in Java, with their signatures, calling the functions they receive (ADR 0011); a Java exception carried through the evaluation; audits and explanations as records and sealed interfaces | JUnit cases matching the host-function and audit cases of the Wasm and Python suites | |
+| 6 | The native libraries of the seven release targets, built in CI as the wheels are, in one JAR; the JUnit suite run on each target against that JAR | CI builds and tests the JAR on every target | |
+| 7 | Publishing to Maven Central through the Central Portal: the namespace `io.github.thkprado` verified, GPG signatures, sources and Javadoc JARs; a step in `release.yml` that publishes nothing unless every target built; `CONTRIBUTING.md` says how it is set up. A version published there cannot be removed | The release checklist installs the package from Maven Central and checks its signatures | |
+| 8 | Documentation: a Java chapter in the book, its snippets run by the JUnit suite, `--enable-native-access` in its installation section; the performance page compares the package with jsonata-java, single-threaded and on virtual threads; the README and the installation page | `doc-check` green; the snippets run in CI; the tables measured | |
+| 9 | Release 0.25.0, with the Java package in beta | The release checklist, with the package installed from Maven Central; the native, WebAssembly and Python tables of the performance page measured again | |
+
+## In exploration: a regular expression engine of jlens's own
+
+`jlens-regress` is a backtracker. A catastrophic pattern runs within the evaluation's limits
+([ADR 0009](../adr/0009-bounded-regex.md)), but it still runs to them. Its positions are code
+points, which jlens converts to UTF-16. On the engine's benchmark, V8 is 2 to 11 times faster.
+
+An engine of jlens's own could find a match in linear time wherever the pattern allows it: an
+automaton finds the match, and the backtracker is left only to extract its groups, or to run
+the patterns that need it (backreferences, lookarounds). It would also have the interrupt and
+UTF-16 positions built in, with no `unsafe`.
+
+This is research, not a release. The work lives apart from `jlens-core`, and the corpus, the
+differential test and the benchmark of 0.22 measure it. It ends in a decision: an ADR that adopts
+the engine in place of `jlens-regress`, or drops it. Adopted, the swap becomes a release of its
+own.
+
+| # | Stage | Done when | Status |
+|---|---|---|---|
+| 1 | The linear-time path on the patterns it can take, with the interrupt and UTF-16 positions | Its share of the corpus's patterns and their answers, against V8's | |
+| 2 | Every pattern: the backtracker for the rest | The corpus (19,108 cases) and `cargo xtask regex-differential` with 20,000 cases clean, or each difference recorded with its reason | |
+| 3 | Speed and limits, against `jlens-regress` and V8 | The engine's benchmark and `interrupt_cost`; catastrophic patterns timed | |
+| 4 | The decision | An ADR: the engine replaces `jlens-regress`, or is dropped, with the measurements | |
+
+## 0.26: an API to keep, toward 1.0
 
 After twenty releases, nothing says which parts of jlens are meant to last. `cargo
 semver-checks` runs in CI, but before 1.0 it only asks for a new minor version, and
 `jlens-core` exposes workspace plumbing (`stack`, `debug`, the AST's internals) next to its API.
-0.24 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
+0.26 decides what 1.0 will promise, breaks the API once to get there, and writes the promise
 down. Applications built on jlens are separate projects: they use `jlens-core` as any
 application does, and what they lack comes back here as general features.
 
@@ -474,9 +546,9 @@ from what they needed, missed or worked around, not guessed beforehand.
 | 1 | ADR 0015, what 1.0 promises. Exploration: list the public items of `jlens-core`, `jlens-schema` and `jlens-lsp` (rustdoc JSON or `cargo public-api`) and the contracts outside Rust: the Wasm API (`types.d.ts`), the Python package, the CLI (ADR 0008), the JSON of audits and explanations, `jlens.json`, the error codes. For each item: stable, hidden (`#[doc(hidden)]`, `pub(crate)`) or `#[non_exhaustive]` where it may grow. What semver covers and what it does not (messages, `Display`, `Debug`, performance, jsonata-js quirks), the MSRV policy, deprecations | The ADR accepted, with the list of changes that #2 to #4 make | |
 | 2 | `jlens-core` changes as ADR 0015 says, in one breaking batch | `cargo semver-checks` reports only the intended breaks; the changelog has a migration section; the crate guide's snippets updated | |
 | 3 | `jlens-schema` and `jlens-lsp` changes as ADR 0015 says | As #2 | |
-| 4 | The contracts outside Rust, as ADR 0015 says: the Wasm API, the Python package, the JSON of audits and `jlens.json`; a test pins each, so that a change shows in review | Tests that fail on an unintended change of each contract | |
+| 4 | The contracts outside Rust, as ADR 0015 says: the Wasm API, the Python package, the Java package, the JSON of audits and `jlens.json`; a test pins each, so that a change shows in review | Tests that fail on an unintended change of each contract | |
 | 5 | A stability page in the book, from ADR 0015, and the rules for changing a stable item in `CONTRIBUTING.md` | `doc-check` green; the page linked from the introduction | |
-| 6 | Release 0.24.0, the release that breaks once. 1.0.0 follows when ADR 0015's criterion is met | The release checklist, with the migration notes in the release notes | |
+| 6 | Release 0.26.0, the release that breaks once. 1.0.0 follows when ADR 0015's criterion is met | The release checklist, with the migration notes in the release notes | |
 
 ## Not planned
 
