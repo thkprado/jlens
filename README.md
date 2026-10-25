@@ -58,6 +58,7 @@ jlens check --schema schema.json -f fixtures/shipping-rule.jsonata
 | `crates/jlens-cli` | `jlens` binary |
 | `crates/jlens-wasm` | Browser bindings (`cargo xtask wasm`) |
 | `crates/jlens-python` | Python package (maturin) |
+| `crates/jlens-capi` | C API under the Java package (in progress) |
 | `tests/jsonata-suite` | Vendored official test suite (jsonata-js 2.2.2, MIT) |
 | `tests/conformance` | Baseline, overrides and conformance report |
 | `fixtures` | Sample documents and expressions used in tests and guides |

@@ -1,0 +1,73 @@
+//! The C API of jlens (ADR 0021): the exports the Java package calls through Panama, kept free
+//! of Java specifics so that other languages that call C could use them too.
+//!
+//! No Rust code dereferences a pointer it is given. Memory crosses the boundary in buffers
+//! owned by Rust and known by handle ([`buffers`]): the host asks for a buffer of `n` bytes,
+//! writes into it through the address Rust exposes, and passes the handle.
+//!
+//! # Handles
+//!
+//! A handle is a `u64`, never 0, that names a live buffer or expression. It carries the
+//! generation of its slot, so a handle that was freed stays unknown after its slot is reused:
+//! using it, or freeing it twice, fails with `U2002` instead of reaching another object.
+//! The tables of handles are global, since a virtual thread can move to another carrier thread
+//! between two calls, and they are locked only to find an entry ([`handles`]).
+//!
+//! # Replies
+//!
+//! The exports that can fail return the handle of a new buffer, the reply, which the caller
+//! reads and frees. Its first byte tells what follows:
+//!
+//! | Byte | Constant | What follows |
+//! |---|---|---|
+//! | 0 | [`REPLY_UNDEFINED`] | nothing: the result is undefined |
+//! | 1 | [`REPLY_JSON`] | the result, as UTF-8 JSON text |
+//! | 2 | [`REPLY_ERROR`] | the error envelope, as UTF-8 JSON text |
+//! | 3 | [`REPLY_HANDLE`] | a handle, as 8 bytes little-endian |
+//!
+//! The envelope is an object with the error's `code` and `message`, and, when the error has
+//! them, `position`, `start`, `end` (the range of the expression's source), `token` and
+//! `value`. Its offsets count UTF-16 code units, as `position` does in jsonata-js. The C API's
+//! own failures use `U` codes: `U2001` for input that is not valid JSON (or not UTF-8),
+//! `U2002` for an unknown or freed handle, `U2003` for an expression that is not UTF-8,
+//! `U2004` for a panic, and `U1001` when a table of handles is full. A reply handle of 0 means
+//! that no buffer could be made for the reply.
+//!
+//! # Panics
+//!
+//! A panic that unwinds out of an `extern "C"` function aborts the process, the JVM included.
+//! Every export catches it ([`guarded`]): the exports that reply return a `U2004` error, the
+//! others return 0. A panic is a bug in jlens.
+
+use std::any::Any;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
+pub mod api;
+pub mod buffers;
+// The crate's one exception to `unsafe_code = "deny"`, for `#[unsafe(no_mangle)]` (ADR 0021).
+#[allow(unsafe_code)]
+pub mod exports;
+pub mod handles;
+
+/// The first byte of a reply whose result is undefined.
+pub const REPLY_UNDEFINED: u8 = 0;
+/// The first byte of a reply holding the result as JSON text.
+pub const REPLY_JSON: u8 = 1;
+/// The first byte of a reply holding an error envelope.
+pub const REPLY_ERROR: u8 = 2;
+/// The first byte of a reply holding a handle.
+pub const REPLY_HANDLE: u8 = 3;
+
+/// Runs `f`, and `fallback` with the panic's payload if `f` panics, so that no panic unwinds
+/// into the caller of an export.
+pub fn guarded<R>(fallback: impl FnOnce(Box<dyn Any + Send>) -> R, f: impl FnOnce() -> R) -> R {
+    // Unwind safety: what a panic can leave half-done is the evaluation's own state, which is
+    // dropped; the tables take their locks back from a poisoned mutex, and are never left in
+    // the middle of an update.
+    catch_unwind(AssertUnwindSafe(f)).unwrap_or_else(fallback)
+}
+
+/// The fallback of the exports that do not reply: 0.
+pub fn zero<R: Default>(_payload: Box<dyn Any + Send>) -> R {
+    R::default()
+}

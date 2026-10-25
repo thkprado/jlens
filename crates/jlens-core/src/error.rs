@@ -271,8 +271,9 @@ pub enum Category {
     Type,
     /// `D` — dynamic errors, raised while evaluating.
     Dynamic,
-    /// `U` — errors raised by user-defined guardrails (limits, cancellation), and by the
-    /// `jlens` command-line interface for input that is not valid JSON (`U2001`).
+    /// `U` — errors raised by user-defined guardrails (limits, cancellation), by the `jlens`
+    /// command-line interface for input that is not valid JSON (`U2001`), and by the C API of
+    /// the Java package (`U2001` to `U2004`).
     Guardrail,
     /// `W` — jlens warnings; they never stop evaluation.
     Warning,
@@ -425,6 +426,9 @@ catalog! {
     "U1005" => "A function passed to ${{{token}}} was called after ${{{token}}} returned",
     "U1006" => "The evaluation exceeded its budget of {{value}} steps",
     "U2001" => "The input is not valid JSON: {{{message}}}",
+    "U2002" => "The {{{token}}} handle {{value}} is unknown: it was never created, or it was freed",
+    "U2003" => "The expression is not valid UTF-8: {{{message}}}",
+    "U2004" => "Internal error in jlens, please report it: {{{message}}}",
     "W0101" => "This annotation is not attached to an expression and will be ignored",
     "W0102" => "Unknown annotation tag @{{{tag}}}; expected @label, @message or @id",
     "W0103" => "The value of annotation tag @{{{tag}}} should be a JSON string literal",
