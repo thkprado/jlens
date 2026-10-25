@@ -217,7 +217,8 @@ row, a host language's objects) can be read the same way, one level at a time, w
 converted first. Implement
 [`input::Source`](https://docs.rs/jlens-core/latest/jlens_core/input/trait.Source.html) for
 it, and evaluate with `Expression::evaluate_source`; implement its `read_field` too when the
-representation looks up one field for less than it reads a whole object. The documentation of the
+representation looks up one field for less than it reads a whole object, and its `length` and
+`read_item` when it reads one item of an array for less than the whole array. The documentation of the
 [`input`](https://docs.rs/jlens-core/latest/jlens_core/input/index.html) module has an
 example. A level that the source fails to read stops the evaluation with `U1004`. The
 WebAssembly package reads JavaScript objects this way.

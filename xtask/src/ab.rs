@@ -77,6 +77,10 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 /// The line of the probe that `--b-max-steps` and `--timeout` replace.
 const OPTIONS: &str = "let options = Options::default();";
 
+/// The lines of the probe that read an item of an array alone, with `Sources::length` and
+/// `Sources::read_item` (0.24); left out for a revision whose `jlens-core` has no `read_item`.
+const ITEMS_ALONE: (&str, &str) = ("    // ab: items alone {\n", "    // ab: }\n");
+
 /// How B's program differs from A's.
 #[derive(Clone, Copy, Default)]
 struct Variant {
@@ -378,6 +382,14 @@ impl Work {
                 OPTIONS,
                 &format!("let options = Options::default(){options};"),
             );
+        }
+        let value = fs::read_to_string(checkout.join("crates/jlens-core/src/value.rs"))?;
+        if !value.contains("fn read_item(") {
+            let (begin, end) = ITEMS_ALONE;
+            let (Some(start), Some(stop)) = (source.find(begin), source.find(end)) else {
+                bail!("the probe has no lines {begin:?} and {end:?} around its items read alone");
+            };
+            source.replace_range(start..stop + end.len(), "");
         }
         if with.mimalloc {
             source.push_str(MIMALLOC);

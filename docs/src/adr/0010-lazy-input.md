@@ -4,6 +4,8 @@
 borrowed view of the input. Amended in 0.17: a path step reads one field of an object that has
 not been read ([below](#amendment-one-field-at-a-time-017)). Amended in 0.19: the arrays and
 objects of a level can share one source ([below](#amendment-one-allocation-per-member-019)).
+Amended in 0.24: an index reads the items of an array that it picks
+([below](#amendment-one-item-at-a-time-024)).
 
 ## Context
 
@@ -278,3 +280,59 @@ with `unsafe`, which jlens forbids.
   those over `serde_json` too: names over items took 17% longer with `cargo xtask ab --mode
   evaluate`. With decision 3, no case is slower but group-by, by 2%.
 - The WebAssembly source still boxes each source: it has not been measured with members.
+
+## Amendment: one item at a time (0.24)
+
+### Context
+
+Roadmap 0.24, item 4. An index into an array of the input read the array's whole level:
+`items[0].code` over 10,000 items took 0.6 to 0.7 ms through a source or with `evaluate`,
+writing a lazy value for each item, against 0.67 µs against a `Document`, and 6.25 ms in the
+WebAssembly package's `evaluate`, against 2.2 µs in jsonata-js. The 0.17 amendment let a path
+step read one field of an object; an index had no such way.
+
+### Decision
+
+1. **`Source` gains two optional methods, `length()` and `read_item(index, sink)`.** `length`
+   tells how many items the array the source stands for has, without reading them; `read_item`
+   writes the item at an index below that length as the only value of the sink, and returns
+   `true`. Their defaults, `None` and `false`, keep the source reading its array whole.
+   `Sources` gains the same, given the member's index. An item read alone needs the length: a
+   negative index counts from the end, and an index out of range picks nothing.
+2. **An index reads the items it picks.** A predicate that is a number (`items[0]`,
+   `items[-1]`), and one built from literals alone, which gives the same value for each item
+   (0.19 #2: `items[[0..2]]`), ask the array for its length and for each item they pick, which
+   it reads alone when it has not been read whole. Over JSON, the item is taken from the
+   `serde_json` array. `$count` reads the length too. A predicate that tests each item, an
+   index held in a variable (`items[$i]`) among them, and every other access read the whole
+   level as before.
+3. **An array or object is read once, as a field is.** The array keeps the arrays and objects
+   among the items read alone, with their indexes; reading the whole level later puts them back
+   in their places, so an item read twice is the same value. Past 16 of them, finding one would
+   cost a comparison with each, and the array is read whole instead; a predicate that picks
+   more than 16 items reads the level at once. Scalars are not kept. The length is asked of a
+   source once.
+4. **An array that keeps an item is no longer *unread*,** for the reason of the 0.17
+   amendment's decision 4: it is converted to JSON, and walked by the transform's check for
+   cycles, through its whole level.
+5. **What does not change.** A level read whole is read once; cycles and deep input fail with
+   `U1004` and `U1001`; a source that fails to read an item stops the evaluation as decision 6
+   says. Errors come from the part that is read, now at the grain of an item.
+
+### Consequences
+
+- An index into a long array costs the items it picks, not the array's length, when the input
+  can read one item: lazy JSON can, and so can a source that implements both methods. With
+  `cargo xtask ab`, built aligned against the revision before, `items[0].code` over 10,000
+  items takes 1.31 µs instead of 618 µs with `evaluate`, and 1.95 µs instead of 609 µs through
+  the program's source; against a `Document` it is unchanged, 0.67 µs. Every other case is
+  within 2% in every mode, checked over 20 rounds where a run of 10 left it above.
+- Two first versions were slower elsewhere. Reading the 16 first items of `items[[0..19]]`
+  alone, then the level, took 7% longer through a source than reading the level: hence the
+  rule above. And `filter`, grown by the reads alone, was inlined into `eval`, which made the
+  path `customer.name` 3% slower; it is kept out of it.
+- The part of a lazy array that holds its pending items is 48 bytes larger, for the length and
+  the items kept. Only lazy arrays allocate it; an array that an evaluation builds, or one of a
+  `Document`, is unchanged.
+- The WebAssembly and Python packages' sources do not implement the methods yet: roadmap 0.24
+  #5 and #6.

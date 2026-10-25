@@ -182,8 +182,9 @@ fn functions() -> Bindings {
         )
 }
 
-/// JSON read through the [`Source`] trait, one level at a time, and one field at a time when
-/// `fields` is set. An object with a field named `fails` cannot be read, whole or one field.
+/// JSON read through the [`Source`] trait, one level at a time, and one field or item at a time
+/// when `fields` is set. An object with a field named `fails` cannot be read, whole or one field,
+/// nor an array holding the string `"fails"`, whole or that item.
 /// With `members` set, the arrays and objects of a level are written as members of one
 /// [`Members`].
 #[derive(Clone, Copy)]
@@ -209,10 +210,19 @@ impl<'j> Sources<'j> for Members<'j> {
         let member = self.0.borrow()[index as usize];
         member.read_field(key, sink)
     }
+
+    fn length(&self, index: u32) -> Option<usize> {
+        self.0.borrow()[index as usize].length()
+    }
+
+    fn read_item(&self, index: u32, item: usize, sink: &mut Sink<'_, 'j>) -> Result<bool, String> {
+        let member = self.0.borrow()[index as usize];
+        member.read_item(item, sink)
+    }
 }
 
 thread_local! {
-    /// The levels read whole, and the fields read alone, by the sources of this thread.
+    /// The levels read whole, and the fields and items read alone, by the sources of this thread.
     static READS: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
 }
 
@@ -274,9 +284,14 @@ impl<'j> Source<'j> for JsonSource<'j> {
             return Ok(());
         }
         match self.json {
-            serde_json::Value::Array(items) => items
-                .iter()
-                .for_each(|item| self.write(sink, item, &members)),
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    if item == "fails" {
+                        return Err("bad item".into());
+                    }
+                    self.write(sink, item, &members);
+                }
+            }
             serde_json::Value::Object(fields) => {
                 if fields.contains_key("fails") {
                     // Half a level, then a failure: the level is left empty.
@@ -308,6 +323,28 @@ impl<'j> Source<'j> for JsonSource<'j> {
         if let Some(value) = fields.get(key) {
             self.write(sink, value, &Rc::default());
         }
+        Ok(true)
+    }
+
+    fn length(&self) -> Option<usize> {
+        match self.json {
+            serde_json::Value::Array(items) if self.fields && !self.root => Some(items.len()),
+            _ => None,
+        }
+    }
+
+    fn read_item(&self, index: usize, sink: &mut Sink<'_, 'j>) -> Result<bool, String> {
+        let serde_json::Value::Array(items) = self.json else {
+            return Ok(false);
+        };
+        if !self.fields || self.root {
+            return Ok(false);
+        }
+        READS.with(|reads| reads.set((reads.get().0, reads.get().1 + 1)));
+        if items[index] == "fails" {
+            return Err("bad item".into());
+        }
+        self.write(sink, &items[index], &Rc::default());
         Ok(true)
     }
 }
@@ -891,6 +928,100 @@ fn a_path_step_reads_one_field() {
         reads("o.b.c and o.a ? o : null", true),
         (Some(input["o"].clone()), 4, 4)
     );
+}
+
+/// An index into an array not read yet reads the items it picks, when the source tells the
+/// array's length and reads one item; the array keeps the arrays and objects among them, and
+/// reads its level once when it is needed whole (ADR 0010, amendment).
+#[test]
+fn an_index_reads_one_item() {
+    let input = json!({
+        "a": [{"b": 1}, [2, 3], 4, {"c": {"d": 5}}],
+        "bad": [1, "fails", {"e": 6}],
+        "long": (1..=20).collect::<Vec<_>>()
+    });
+    let reads = |source: &str, fields: bool, members: bool| {
+        READS.with(|reads| reads.set((0, 0)));
+        let expr = Expression::compile(source).unwrap();
+        let input = JsonSource {
+            members,
+            ..JsonSource::root(&input, fields)
+        };
+        let result = expr.evaluate_source(&input, &Bindings::new(), &Options::default());
+        let (levels, alone) = READS.with(|reads| reads.get());
+        (result.map_err(|e| e.code().to_string()), levels, alone)
+    };
+    for members in [false, true] {
+        let reads = |source: &str| reads(source, true, members);
+        // The input is one read; `a`, its item and `b` are each read alone.
+        assert_eq!(reads("a[0].b"), (Ok(Some(json!(1))), 1, 3));
+        assert_eq!(reads("a[-1].c.d"), (Ok(Some(json!(5))), 1, 4));
+        assert_eq!(reads("a[2.5]"), (Ok(Some(json!(4))), 1, 2));
+        // An item that is an array is returned whole: its level is read for the result.
+        assert_eq!(reads("a[1]"), (Ok(Some(json!([2, 3]))), 2, 2));
+        // An index out of range reads only the length.
+        assert_eq!(reads("a[4]"), (Ok(None), 1, 1));
+        assert_eq!(reads("a[-5]"), (Ok(None), 1, 1));
+        assert_eq!(reads("$count(a)"), (Ok(Some(json!(4))), 1, 1));
+        // A predicate that gives the same indexes for each item reads them alone too.
+        assert_eq!(
+            reads("a[[3, 0, 3]].*"),
+            (Ok(Some(json!([1, {"d": 5}, {"d": 5}]))), 4, 3)
+        );
+        // An index held in a variable is tested against each item: the level is read whole.
+        assert_eq!(reads("($i := -1; a[$i].c.d)"), (Ok(Some(json!(5))), 2, 3));
+        // Up to 16 items are read alone, more with their level; the predicate is evaluated
+        // against the first item, read alone too.
+        let picked = |n: i32| Ok(Some(json!((1..=n).collect::<Vec<_>>())));
+        assert_eq!(reads("long[[0..15]]"), (picked(16), 1, 18));
+        assert_eq!(reads("long[[0..16]]"), (picked(17), 2, 2));
+        // An item read alone is kept, and so is it when the array is read whole later: `a[0]`,
+        // `a[3]` and `c` are read alone once, `b` three times, and the array whole once.
+        assert_eq!(
+            reads("[a[0].b, a[0].b, $count(a), a[0].b, a[3].c.d, a]"),
+            (
+                Ok(Some(
+                    json!([1, 1, 4, 1, 5, {"b": 1}, [2, 3], 4, {"c": {"d": 5}}])
+                )),
+                6,
+                8
+            )
+        );
+        // An item that cannot be read fails with U1004 when it is read, alone or whole.
+        assert_eq!(reads("bad[0]"), (Ok(Some(json!(1))), 1, 2));
+        assert_eq!(reads("bad[2].e"), (Ok(Some(json!(6))), 1, 3));
+        assert_eq!(reads("bad[1]").0, Err("U1004".into()));
+        assert_eq!(reads("bad[-2] = 1").0, Err("U1004".into()));
+        assert_eq!(reads("bad[$ = 1]").0, Err("U1004".into()));
+        assert_eq!(
+            reads("bad[0] = 1 and $count(bad.e) = 1").0,
+            Err("U1004".into())
+        );
+    }
+    // A source that reads its levels whole only reads them whole.
+    assert_eq!(reads("a[0].b", false, false), (Ok(Some(json!(1))), 4, 0));
+    assert_eq!(reads("bad[0]", false, false).0, Err("U1004".into()));
+    // Lazy JSON reads its items alone too, with an audit or without, and agrees with a document.
+    let input = json!({"a": [{"b": 1}, [2, 3], 4, {"c": {"d": 5}}]});
+    let options = Options::default();
+    let audit = jlens_core::audit::AuditOptions::full();
+    for source in [
+        "a[0].b",
+        "a[-1].c.d",
+        "a[1]",
+        "a[4]",
+        "a[[3, 0, 3]].*",
+        "[a[0].b, a[0].b, $count(a), a[3].c.d, a]",
+        "a[0] ~> |b|{'x': 1}|",
+        "$map([0..3], function($i) { a[$i] })",
+    ] {
+        let expr = Expression::compile(source).unwrap();
+        let document = expr.evaluate_document(&Document::new(&input), &Bindings::new(), &options);
+        let lazy = expr.evaluate_with(Some(&input), &Bindings::new(), &options);
+        let (audited, _) = expr.evaluate_audited(Some(&input), &Bindings::new(), &options, &audit);
+        assert_eq!(lazy.unwrap(), *document.as_ref().unwrap(), "{source}");
+        assert_eq!(audited.unwrap(), document.unwrap(), "{source}");
+    }
 }
 
 /// Patterns that backtrack exponentially on a run of a's that ends in a character they cannot

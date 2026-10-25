@@ -45,8 +45,9 @@ cargo xtask ab main . --mode source           # evaluate_source instead of evalu
   `serde_json::Value`, converting the levels the expression reaches. `document` reads a
   `Document` converted once, before the measurement. `source` reads the `serde_json::Value`
   through a `Source` written in the program, one level at a time, as the Python package reads
-  its `dict`s and `list`s: the arrays and objects of a level are members of one `Sources`, and a
-  path step reads one field of an object alone. It measures what a level read through a `Sink`
+  its `dict`s and `list`s: the arrays and objects of a level are members of one `Sources`, a
+  path step reads one field of an object alone, and an index one item of an array (for a
+  revision that has `Source::read_item`, 0.24). It measures what a level read through a `Sink`
   costs, which the packages for other languages pay on every evaluation.
 
 - It builds one program per revision, against that revision's `jlens-core`, with the release
@@ -849,8 +850,14 @@ path changed but the order in which variables and functions are bound.
   in the array itself. That made `host_state`'s `evaluate_source` 2 to 4% faster, but every
   array 16 bytes larger, those an evaluation builds too, and `names over items` against a
   `Document` 2 to 3% slower in every run. What remains is one allocation for each array or
-  object a level holds. An index into a long array still reads the array's whole level:
-  `items[0].code` takes 0.6 to 0.7 ms through a source or with `evaluate`, against 0.67 µs
-  against a `Document` (roadmap 0.24 #4).
+  object a level holds.
+- **An index into a long array.** Since 0.24, an index reads the items it picks
+  ([ADR 0010](../adr/0010-lazy-input.md#amendment-one-item-at-a-time-024)): from lazy JSON, and
+  through a source that tells its length and reads one item. Built aligned against the
+  revision before, `items[0].code` over 10,000 items takes 1.31 µs instead of 618 µs with
+  `evaluate`, and 1.95 µs instead of 609 µs with `--mode source`, near the 0.67 µs it takes
+  against a `Document`; the other cases are within 2%. A predicate that picks more than 16 items
+  reads the array whole at once, and an index held in a variable (`items[$i]`) is tested against
+  every item, so it reads the whole array.
 - **Deep copies.** A transform (`|...|`) copies its input with `$clone` before changing it, as
   jsonata-js does. That makes transforms of large documents comparatively expensive.

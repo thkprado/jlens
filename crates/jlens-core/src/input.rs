@@ -7,7 +7,9 @@
 //! same way, without being converted to `serde_json` first. The WebAssembly package reads
 //! JavaScript objects this way. A source that looks up one field for less than it reads its
 //! object whole also implements [`Source::read_field`], which a path step uses; the Python
-//! package reads its dictionaries this way. A source can also write the arrays and objects of a
+//! package reads its dictionaries this way. One that reads an item of an array for less than
+//! the whole array implements [`Source::length`] and [`Source::read_item`], which an index such
+//! as `items[0]` uses. A source can also write the arrays and objects of a
 //! level as members of one [`Sources`], so that each costs one allocation instead of two; the
 //! Python package does.
 //!

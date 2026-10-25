@@ -125,6 +125,19 @@ impl<'a, S: Source<'a>> Sources<'a> for Only<S> {
     ) -> std::result::Result<bool, String> {
         self.0.read_field(key, sink)
     }
+
+    fn length(&self, _: u32) -> Option<usize> {
+        self.0.length()
+    }
+
+    fn read_item(
+        &self,
+        _: u32,
+        item: usize,
+        sink: &mut Sink<'_, 'a>,
+    ) -> std::result::Result<bool, String> {
+        self.0.read_item(item, sink)
+    }
 }
 
 impl<'a> Pending<'a> {
@@ -150,27 +163,25 @@ impl<'a> Pending<'a> {
             match sink.level {
                 Level::Items(items) => items.clear(),
                 Level::Fields(map) => map.clear(),
-                Level::Field(_) => {}
+                Level::Alone(_) => {}
             }
         }
     }
 
-    /// Reads the field `key` from a source: `None` when the source reads its object whole only,
-    /// undefined when the object has no such field or the source failed (its error is then
-    /// recorded, as for a level).
-    fn read_source_field(
+    /// Reads one value from a source with `read`, a field or an item: `None` when the source
+    /// reads its level whole only, undefined when there is no such value or the source failed
+    /// (its error is then recorded, as for a level).
+    fn read_source_alone(
         &self,
-        sources: &dyn Sources<'a>,
-        member: u32,
-        key: &str,
+        read: impl FnOnce(&mut Sink<'_, 'a>) -> std::result::Result<bool, String>,
     ) -> Option<Value<'a>> {
         let mut value = Value::Undefined;
         let mut sink = Sink {
-            level: Level::Field(&mut value),
+            level: Level::Alone(&mut value),
             shared: &self.shared,
             key: None,
         };
-        match sources.read_field(member, key, &mut sink) {
+        match read(&mut sink) {
             Ok(true) => Some(value),
             Ok(false) => None,
             Err(message) => {
@@ -217,25 +228,109 @@ struct LazyItems<'a> {
     /// The array's index among sources held together.
     member: u32,
     items: OnceCell<Vec<Value<'a>>>,
+    /// The number of items a source tells, asked once.
+    length: OnceCell<Option<usize>>,
+    /// The arrays and objects among the items read alone, with their indexes, until the array is
+    /// read whole (ADR 0010, amendment).
+    alone: RefCell<Vec<(usize, Value<'a>)>>,
 }
 
+/// Past this many items kept alone, an array is read whole: finding an item among them costs a
+/// comparison with each.
+pub(crate) const ITEMS_ALONE: usize = 16;
+
 impl<'a> LazyItems<'a> {
-    /// The items, read from the input on the first call.
+    /// The items, read from the input on the first call. The items read alone before keep their
+    /// values, so that a value read twice is the same value.
     #[inline(never)]
     fn read(&self) -> &Vec<Value<'a>> {
         let pending = &self.pending;
-        self.items.get_or_init(|| match &pending.origin {
-            Origin::Json(JsonValue::Array(items)) => items
-                .iter()
-                .map(|v| Value::lazy(v, &pending.shared))
-                .collect(),
-            Origin::Json(_) => Vec::new(),
-            Origin::Source(sources) => {
-                let mut items = Vec::new();
-                pending.read_source(&**sources, self.member, Level::Items(&mut items));
-                items
+        self.items.get_or_init(|| {
+            let mut items = match &pending.origin {
+                Origin::Json(JsonValue::Array(items)) => items
+                    .iter()
+                    .map(|v| Value::lazy(v, &pending.shared))
+                    .collect(),
+                Origin::Json(_) => Vec::new(),
+                Origin::Source(sources) => {
+                    let mut items = Vec::new();
+                    pending.read_source(&**sources, self.member, Level::Items(&mut items));
+                    items
+                }
+            };
+            for (index, value) in self.alone.take() {
+                if let Some(slot) = items.get_mut(index) {
+                    *slot = value;
+                }
             }
+            items
         })
+    }
+
+    /// The number of items, read without the items when the input can tell it.
+    fn len(&self) -> usize {
+        if let Some(items) = self.items.get() {
+            return items.len();
+        }
+        match &self.pending.origin {
+            Origin::Json(JsonValue::Array(items)) => items.len(),
+            Origin::Json(_) => 0,
+            Origin::Source(sources) => {
+                match *self.length.get_or_init(|| sources.length(self.member)) {
+                    Some(length) => length,
+                    None => self.read().len(),
+                }
+            }
+        }
+    }
+
+    /// The item at `index`, below [`LazyItems::len`], of an array not read whole: read alone
+    /// when the input can, and kept when it is an array or an object.
+    #[cold]
+    #[inline(never)]
+    fn read_item(&self, index: usize) -> Value<'a> {
+        let pending = &self.pending;
+        {
+            let alone = self.alone.borrow();
+            if let Some((_, value)) = alone.iter().find(|(i, _)| *i == index) {
+                return value.clone();
+            }
+            if alone.len() >= ITEMS_ALONE {
+                drop(alone);
+                return self.read().get(index).cloned().unwrap_or_default();
+            }
+        }
+        let value = match &pending.origin {
+            Origin::Json(JsonValue::Array(items)) => match items.get(index) {
+                Some(json) => Value::lazy(json, &pending.shared),
+                None => return Value::Undefined,
+            },
+            Origin::Json(_) => return Value::Undefined,
+            Origin::Source(sources) => {
+                let read = |sink: &mut Sink<'_, 'a>| sources.read_item(self.member, index, sink);
+                match pending.read_source_alone(read) {
+                    Some(value) => value,
+                    None => return self.read().get(index).cloned().unwrap_or_default(),
+                }
+            }
+        };
+        // As for the fields of an object, only arrays and objects are kept.
+        if let Value::Array(_) | Value::Object(_) = value {
+            self.alone.borrow_mut().push((index, value.clone()));
+        }
+        value
+    }
+
+    /// Whether nothing of the array has been read.
+    fn is_unread(&self) -> bool {
+        self.items.get().is_none() && self.alone.borrow().is_empty()
+    }
+
+    /// The values the array holds, read whole or alone, taken out of it.
+    fn take(&mut self) -> Vec<Value<'a>> {
+        let mut items = self.items.take().unwrap_or_default();
+        items.extend(self.alone.get_mut().drain(..).map(|(_, value)| value));
+        items
     }
 }
 
@@ -249,20 +344,31 @@ impl<'a> Array<'a> {
         }
     }
 
-    /// The input JSON this array stands for, when it has not been read.
+    /// The item at `index`, which is below [`Array::len`]. An array of the input not read whole
+    /// reads that item alone when its input can, and keeps it when it is an array or an object.
+    #[inline]
+    pub fn item(&self, index: usize) -> Value<'a> {
+        match &self.lazy {
+            None => self.items[index].clone(),
+            Some(lazy) => match lazy.items.get() {
+                Some(items) => items[index].clone(),
+                None => lazy.read_item(index),
+            },
+        }
+    }
+
+    /// The input JSON this array stands for, when nothing of it has been read.
     fn unread(&self) -> Option<&'a JsonValue> {
         match &self.lazy {
-            Some(lazy) if lazy.items.get().is_none() => lazy.pending.json(),
+            Some(lazy) if lazy.is_unread() => lazy.pending.json(),
             _ => None,
         }
     }
 
-    /// Whether the array has not been read from the input yet. Such an array holds only values
-    /// of the input.
+    /// Whether nothing of the array has been read from the input yet. Such an array holds only
+    /// values of the input.
     pub fn is_unread(&self) -> bool {
-        self.lazy
-            .as_ref()
-            .is_some_and(|lazy| lazy.items.get().is_none())
+        self.lazy.as_ref().is_some_and(|lazy| lazy.is_unread())
     }
 
     pub fn has(&self, flag: u8) -> bool {
@@ -281,10 +387,11 @@ impl<'a> Array<'a> {
         self.has(TUPLE_STREAM)
     }
 
+    /// The number of items, read without the items when the input can tell it.
     pub fn len(&self) -> usize {
-        match self.unread() {
-            Some(JsonValue::Array(items)) => items.len(),
-            _ => self.items().len(),
+        match &self.lazy {
+            None => self.items.len(),
+            Some(lazy) => lazy.len(),
         }
     }
 }
@@ -397,7 +504,8 @@ impl<'a> Object<'a> {
             }
             Origin::Json(_) => return Value::Undefined,
             Origin::Source(sources) => {
-                match pending.read_source_field(&**sources, self.member, key) {
+                let read = |sink: &mut Sink<'_, 'a>| sources.read_field(self.member, key, sink);
+                match pending.read_source_alone(read) {
                     Some(Value::Undefined) => return Value::Undefined,
                     Some(value) => value,
                     None => return self.borrow().get(key).cloned().unwrap_or_default(),
@@ -449,15 +557,17 @@ impl<'a> Object<'a> {
 // most of them, drop as usual.
 impl Drop for Array<'_> {
     fn drop(&mut self) {
-        let lazy = self.lazy.as_mut().and_then(|lazy| lazy.items.take());
-        let read = lazy.as_deref().unwrap_or_default();
-        if !self.items.iter().chain(read).any(owned) {
+        let lazy = match self.lazy.as_deref_mut() {
+            Some(lazy) => lazy.take(),
+            None => Vec::new(),
+        };
+        if !self.items.iter().chain(&lazy).any(owned) {
             return;
         }
         let items = std::mem::take(&mut self.items);
         nested_drop(|deep| {
             if deep {
-                release(items.into_iter().chain(lazy.into_iter().flatten()));
+                release(items.into_iter().chain(lazy));
             } else {
                 drop((items, lazy));
             }
@@ -540,8 +650,8 @@ fn release<'a>(values: impl IntoIterator<Item = Value<'a>>) {
             Value::Array(a) => {
                 if let Some(mut a) = Rc::into_inner(a) {
                     pending.extend(std::mem::take(&mut a.items).into_iter().filter(owned));
-                    if let Some(items) = a.lazy.as_mut().and_then(|lazy| lazy.items.take()) {
-                        pending.extend(items.into_iter().filter(owned));
+                    if let Some(lazy) = a.lazy.as_deref_mut() {
+                        pending.extend(lazy.take().into_iter().filter(owned));
                     }
                 }
             }
@@ -864,6 +974,8 @@ impl<'a> Value<'a> {
                 pending,
                 member,
                 items: OnceCell::new(),
+                length: OnceCell::new(),
+                alone: RefCell::default(),
             })),
         }))
     }
@@ -1074,6 +1186,34 @@ pub trait Source<'a> {
         let _ = (key, sink);
         Ok(false)
     }
+
+    /// The number of items of the array this source stands for, when the source can tell it
+    /// without reading them: the number of values [`Source::read`] writes. `None`, the default,
+    /// when it cannot.
+    ///
+    /// With [`Source::read_item`], it lets an index into the array (`items[0]`, `items[-1]`,
+    /// `items[[0..2]]`) read the items it picks, not the whole level; `$count` reads it too.
+    fn length(&self) -> Option<usize> {
+        None
+    }
+
+    /// Writes the item at `index` of the array this source stands for, below its
+    /// [`Source::length`], as the only value, and returns `true`. A source that reads its array
+    /// whole only returns `false`, writing nothing; that is the default.
+    ///
+    /// The array keeps an array or an object written this way, as an object keeps its fields
+    /// read with [`Source::read_field`]; past 16 of them, or when it is needed whole, its level
+    /// is read with [`Source::read`], and the items read before keep their values. Implement
+    /// it, with [`Source::length`], when one item costs less than the whole level. An error
+    /// stops the evaluation as it does in [`Source::read`].
+    fn read_item(
+        &self,
+        index: usize,
+        sink: &mut Sink<'_, 'a>,
+    ) -> std::result::Result<bool, String> {
+        let _ = (index, sink);
+        Ok(false)
+    }
 }
 
 /// The sources of several arrays and objects, held together: each is a member, known by its
@@ -1097,6 +1237,24 @@ pub trait Sources<'a> {
         let _ = (index, key, sink);
         Ok(false)
     }
+
+    /// The number of items of the member at `index`, as [`Source::length`] tells it.
+    fn length(&self, index: u32) -> Option<usize> {
+        let _ = index;
+        None
+    }
+
+    /// Writes the item `item` of the member at `index`, as [`Source::read_item`] does. A member
+    /// read whole only returns `false`, writing nothing; that is the default.
+    fn read_item(
+        &self,
+        index: u32,
+        item: usize,
+        sink: &mut Sink<'_, 'a>,
+    ) -> std::result::Result<bool, String> {
+        let _ = (index, item, sink);
+        Ok(false)
+    }
 }
 
 /// Where a [`Source`] writes the values of a level.
@@ -1109,8 +1267,8 @@ pub struct Sink<'s, 'a> {
 enum Level<'s, 'a> {
     Items(&'s mut Vec<Value<'a>>),
     Fields(&'s mut Map<'a>),
-    /// The value of one field, read alone: the first value written.
-    Field(&'s mut Value<'a>),
+    /// The value of one field or item, read alone: the first value written.
+    Alone(&'s mut Value<'a>),
 }
 
 impl<'a> Sink<'_, 'a> {
@@ -1125,7 +1283,7 @@ impl<'a> Sink<'_, 'a> {
                 map.reserve(additional);
                 self.shared.keys.borrow_mut().reserve(additional);
             }
-            Level::Field(_) => {}
+            Level::Alone(_) => {}
         }
     }
 
@@ -1182,7 +1340,7 @@ impl<'a> Sink<'_, 'a> {
             },
             (_, Level::Items(_)) => return Err("expected a JSON array".into()),
             (_, Level::Fields(_)) => return Err("expected a JSON object".into()),
-            (_, Level::Field(_)) => return Err("a field is written as one value".into()),
+            (_, Level::Alone(_)) => return Err("a field or an item is written as one value".into()),
         }
         Ok(())
     }
@@ -1228,9 +1386,9 @@ impl<'a> Sink<'_, 'a> {
                     map.insert(key, value);
                 }
             }
-            Level::Field(field) => {
-                if field.is_undefined() {
-                    **field = value;
+            Level::Alone(alone) => {
+                if alone.is_undefined() {
+                    **alone = value;
                 }
             }
         }
@@ -1718,6 +1876,37 @@ mod tests {
         );
         assert!(matches!(&map["a"], Value::Object(whole) if Rc::ptr_eq(whole, &a)));
         assert!(matches!(&map["c"], Value::Array(whole) if Rc::ptr_eq(whole, &c)));
+    }
+
+    #[test]
+    fn an_item_read_alone_is_kept_when_its_array_is_read_whole() {
+        let json = serde_json::json!([{"b": 1}, [2], "x", {"c": 3}]);
+        let shared = Shared::new();
+        let Value::Array(a) = Value::lazy(&json, &shared) else {
+            panic!("an array");
+        };
+        assert_eq!(a.len(), 4);
+        assert!(a.is_unread());
+        assert_eq!(a.item(2).as_str(), Some("x"));
+        assert!(a.is_unread());
+        let (Value::Object(first), Value::Array(second)) = (a.item(0), a.item(1)) else {
+            panic!("items");
+        };
+        assert!(!a.is_unread());
+        let Value::Object(again) = a.item(0) else {
+            panic!("an item");
+        };
+        assert!(Rc::ptr_eq(&first, &again));
+        let items = a.items();
+        assert_eq!(items.len(), 4);
+        assert!(matches!(&items[0], Value::Object(whole) if Rc::ptr_eq(whole, &first)));
+        assert!(matches!(&items[1], Value::Array(whole) if Rc::ptr_eq(whole, &second)));
+        assert!(
+            matches!(a.item(3), Value::Object(o) if Rc::ptr_eq(&o, match &items[3] {
+                Value::Object(o) => o,
+                _ => panic!("an object"),
+            }))
+        );
     }
 
     #[test]

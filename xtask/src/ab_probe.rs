@@ -92,7 +92,7 @@ pub fn main() {
 
 /// The input, read one level at a time as the Python package reads its values: the arrays and
 /// objects of a level are members of one [`Level`], made when the first of them is written, and
-/// a path step reads one field of an object alone.
+/// a path step reads one field of an object alone, and an index one item of an array.
 struct Input<'j>(&'j Value);
 
 /// The arrays and objects of a level.
@@ -161,6 +161,20 @@ impl<'j> Sources<'j> for Level<'j> {
         }
         Ok(true)
     }
+
+    // ab: items alone {
+    fn length(&self, index: u32) -> Option<usize> {
+        self.0.borrow()[index as usize].as_array().map(Vec::len)
+    }
+
+    fn read_item(&self, index: u32, item: usize, sink: &mut Sink<'_, 'j>) -> Result<bool, String> {
+        let Value::Array(items) = self.0.borrow()[index as usize] else {
+            return Ok(false);
+        };
+        put(sink, &items[item], &mut None);
+        Ok(true)
+    }
+    // ab: }
 }
 
 /// The fastest time of one call of `run`, in nanoseconds, over `SAMPLES` batches that each take

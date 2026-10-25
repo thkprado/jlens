@@ -188,6 +188,17 @@ fn js_truthy<'a>(v: &Value<'a>) -> bool {
     }
 }
 
+/// The item of an array of `len` items that the index `value` picks, as jsonata-js picks it:
+/// rounded down, counted from the end when negative.
+fn item_index(value: f64, len: usize) -> Option<usize> {
+    let len = len as f64;
+    let mut index = value.floor();
+    if index < 0.0 {
+        index += len;
+    }
+    (index >= 0.0 && index < len).then_some(index as usize)
+}
+
 fn tuple_get<'a>(tuple: &Value<'a>, key: &str) -> Value<'a> {
     match tuple {
         Value::Object(o) => o.borrow().get(key).cloned().unwrap_or_default(),
@@ -1138,7 +1149,9 @@ impl<'a> Evaluator<'_, 'a> {
         self.stages(&step.attrs.stages, result, env)
     }
 
-    /// Applies a predicate to a sequence (jsonata-js `evaluateFilter`).
+    /// Applies a predicate to a sequence (jsonata-js `evaluateFilter`). It is kept out of
+    /// `eval`, which it made 3% slower on `customer.name` when inlined there.
+    #[inline(never)]
     fn filter(
         &mut self,
         predicate: &Node,
@@ -1148,24 +1161,21 @@ impl<'a> Evaluator<'_, 'a> {
     ) -> Result<Value<'a>> {
         let is_tuple = input.has_flag(TUPLE_STREAM);
         let flags = SEQUENCE | if is_tuple { TUPLE_STREAM } else { 0 };
-        // The items are read where they are: copying them would cost more than an index takes
-        // (`items[0]` of 100,000 items, ADR 0021).
-        let items: &[Value<'a>] = match &input {
-            Value::Array(a) => a.items(),
-            other => std::slice::from_ref(other),
-        };
-        let len = items.len() as f64;
         let mut results = Vec::new();
 
+        // An index, and a predicate that gives the same value for each item, read the items
+        // they pick: an array of the input not read yet reads them alone (ADR 0010, amendment).
         if let NodeKind::Number { value } = predicate.kind {
-            let mut index = value.floor();
-            if index < 0.0 {
-                index += len;
-            }
-            let item = if index >= 0.0 && index < len {
-                items[index as usize].clone()
-            } else {
-                Value::Undefined
+            let len = match &input {
+                Value::Array(a) => a.len(),
+                _ => 1,
+            };
+            let item = match item_index(value, len) {
+                Some(i) => match &input {
+                    Value::Array(a) => a.item(i),
+                    other => other.clone(),
+                },
+                None => Value::Undefined,
             };
             match item {
                 Value::Undefined => {}
@@ -1177,10 +1187,16 @@ impl<'a> Evaluator<'_, 'a> {
 
         // A tracer is given each item's test, so it sees the predicate evaluated per item.
         if constant && self.tracer.is_none() {
-            self.filter_constant(predicate, items, env, &mut results)?;
+            self.filter_constant(predicate, &input, env, &mut results)?;
             return Ok(Value::array(results, flags));
         }
 
+        // The items are read where they are: copying them would cost more than an index takes
+        // (`items[0]` of 100,000 items, ADR 0021).
+        let items: &[Value<'a>] = match &input {
+            Value::Array(a) => a.items(),
+            other => std::slice::from_ref(other),
+        };
         if let Some(t) = self.tracer.as_deref_mut() {
             t.filter_begin(predicate);
         }
@@ -1239,39 +1255,49 @@ impl<'a> Evaluator<'_, 'a> {
     fn filter_constant(
         &mut self,
         predicate: &Node,
-        items: &[Value<'a>],
+        input: &Value<'a>,
         env: &Env<'a>,
         results: &mut Vec<Value<'a>>,
     ) -> Result<()> {
-        let Some(first) = items.first() else {
-            return Ok(());
+        let (len, array) = match input {
+            Value::Array(a) => (a.len(), Some(a)),
+            _ => (1, None),
         };
+        let item = |i: usize| match array {
+            Some(a) => a.item(i),
+            None => input.clone(),
+        };
+        if len == 0 {
+            return Ok(());
+        }
         let before = self.steps.get();
-        let mut res = self.eval(predicate, first, env)?;
+        let mut res = self.eval(predicate, &item(0), env)?;
         // Each further item would take the steps of the first: the predicate reads nothing
         // from it.
         let each = before - self.steps.get();
-        self.charge(each.saturating_mul(items.len() as u64 - 1))?;
+        self.charge(each.saturating_mul(len as u64 - 1))?;
         if res.is_numeric()? {
             res = Value::array(vec![res], 0);
         }
         if res.is_array_of_numbers()? {
-            let len = items.len() as f64;
             let mut indexes: Vec<usize> = res
                 .items_or_self()
                 .iter()
-                .filter_map(|n| {
-                    let mut ii = n.as_number().unwrap_or(f64::NAN).floor();
-                    if ii < 0.0 {
-                        ii += len;
-                    }
-                    (ii >= 0.0 && ii < len).then_some(ii as usize)
-                })
+                .filter_map(|n| item_index(n.as_number().unwrap_or(f64::NAN), len))
                 .collect();
             indexes.sort_unstable();
-            results.extend(indexes.into_iter().map(|i| items[i].clone()));
+            // More items than an array keeps alone are read with its level, at once.
+            if indexes.len() > value::ITEMS_ALONE
+                && let Some(a) = array
+            {
+                a.items();
+            }
+            results.extend(indexes.into_iter().map(item));
         } else if boolean(&res)? == Some(true) {
-            results.extend(items.iter().cloned());
+            match array {
+                Some(a) => results.extend(a.items().iter().cloned()),
+                None => results.push(input.clone()),
+            }
         }
         Ok(())
     }
