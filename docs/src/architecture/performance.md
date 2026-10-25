@@ -525,6 +525,15 @@ changed in 0.22. Built with functions and blocks aligned, as above, `filter + ag
 0.6% slower and `path` 13.5% faster (238 ns against 275 ns): the difference is where the code
 lies, not what it does.
 
+The lookarounds of 0.23 leave the rest as fast as in 0.22: the change is in `jlens-regress`
+alone, and the `regex` case has no lookaround. `cargo xtask ab v0.22.0 HEAD`, ten rounds, puts
+every case of `evaluate` between 2.8% faster (`shipping rule`) and 1.6% slower, except
+`sort + map` at 2.5%, 1.3% over 20 rounds. With `--mode document`, `sort + map`, `recursion` and
+`filter + aggregate` stay 2.9%, 2.3% and 2.2% slower over 20 rounds, and none of them runs a
+regular expression. Built aligned, the three are between 1.8% faster and 1.6% slower in both
+modes, and `number formatting`, unaligned 0.2% faster, becomes 3.4% slower: code placement
+again.
+
 ### What the limits cost
 
 From 0.20 on, every evaluation counts its steps for the step limit
