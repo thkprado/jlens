@@ -1,7 +1,7 @@
-# 0021 — A Java package: a C API called through Panama, or run on Chicory
+# 0021 — The Java package: a C API called through Panama
 
-**Status:** Proposed. A spike decides between the options below; the measurements it needs
-are listed at the end.
+**Status:** Accepted (2026-10-25), after the spike at the end. The context below is as it was
+proposed; the spike's results led to the decision.
 
 ## Context
 
@@ -159,47 +159,92 @@ both ways) and in execution: its documentation lists being "the fastest runtime"
 non-goals. Neither cost is known for jlens, so the spike measures both against jsonata-java on
 the workload of `benches/compare`.
 
-## Decision (proposed)
-
-Pending the spike:
+## Decision
 
 - **The package requires Java 25**, and CI tests it on 25 and on each later release.
-- **One C API crate** (`crates/jlens-capi`, not published to crates.io) holds the exports, with
-  buffers and handles owned by Rust, and the crate-level exception for `no_mangle` recorded
-  above.
-- **The Java package calls it through Panama**, if the measurements show the boundary costs
-  less than jsonata-java's evaluation on the common cases. Native speed, one `Expression` for
-  every thread, and no glue code beyond the C API are the reasons. Those are what users of a
-  rules engine on a server would choose jlens for. The install section documents
-  `--enable-native-access`, with the warning users see without it.
-- **A Chicory backend is cheap to add later**, since it compiles the same crate to
-  `wasm32-wasip1` behind the same Java API. It waits until users ask for a platform without a
-  binary or for a JAR with no native code. It then costs a second artifact, its test matrix and
-  the stack-depth tuning above.
-- **Chicory becomes the only backend** if the native-access flag or the native libraries are a
-  blocker for the intended users, *and* Chicory's compiled module is still faster than
-  jsonata-java.
-- **JNI is the fallback** only if Panama's downcalls or upcalls cost too much in the spike.
+- **Panama is the only backend.** Through Panama, a `Document` beats jsonata-java on its own
+  objects by 2.6 to 70 times, and JSON text beats jsonata-java parsing the same text by 1.2 to
+  2.7 times (item 2). Concurrent evaluations scale to 150,000 to 205,000 a second on 16
+  hardware threads, or on 1,000 virtual threads, 1.8 to 2.5 times jsonata-java (item 7). A
+  downcall costs 9 ns and an upcall 24 to 28 ns (item 6), so JNI has nothing to win.
+- **One C API crate, `crates/jlens-capi`**, not published to crates.io, holds the exports.
+  - **The lint.** It declares the workspace's lints itself, with `unsafe_code = "deny"`. Only
+    its exports module allows `unsafe_code`, for `#[unsafe(no_mangle)]`, and a `macro_rules!`
+    writes each export as one call to a safe function. A test fails if `unsafe` appears
+    anywhere else in the crate's Rust files, all of them, not only `src/` (item 1).
+  - **Buffers.** They are owned by Rust and known by handle; Java writes and reads them
+    through the address Rust exposes. No Rust code dereferences a pointer it is given.
+  - **The tables of handles** (buffers, expressions) are global, since a virtual thread can
+    change carriers between two calls. Their locks are held only to find an entry, and each
+    buffer has a lock of its own. A table locked across the work stopped all scaling in
+    item 7.
+  - **Documents** follow ADR 0014: the parsed JSON behind an `Arc`, converted once per OS
+    thread into a thread-local cache.
+  - **mimalloc** is the library's allocator, as in the Python wheels. The large cases ran up
+    to 2.7 times slower on Windows than on Linux, which points at Windows' system allocator
+    (item 2).
+- **Inputs.**
+  - JSON text (a `String`, or UTF-8 `byte[]`) is the default, parsed only for the fields the
+    expression reads (ADR 0016).
+  - A `Document` is for an input evaluated many times.
+  - Java objects (`Map`, `List`, strings, numbers, booleans, `null`) are accepted too,
+    through a `Source` read with one upcall per level. It is documented as the slower way
+    when an expression reads most of its input (item 2). Its Rust side takes the Python
+    package's levers, interned keys and one `Sources` per level, since the upcall is 2% of a
+    level and Rust's allocations most of the rest (item 6).
+- **Results.** They come back as JSON text, or as Java objects. Whether those objects are
+  built by the result builder (ADR 0017) through upcalls, or decoded from the JSON text in
+  Java, is measured when the package is built. `$` on a large document is the case to watch:
+  it is the one case where jsonata-java won in item 2, because it returns its input.
+- **Distribution.** One JAR carries the native libraries of the seven release targets, about
+  1 MB each compressed, about 7 MB in all (item 3). It extracts the right one at first use.
+  Per-platform JARs with a Maven classifier can follow if the size matters to users. The
+  install section documents `--enable-native-access` and the warning users see without it.
+- **Limits.** The native default depth of 50,000 holds on every kind of thread (item 4). A
+  robustness test runs evaluations on a thread with a small `-Xss`.
+- **Chicory is not shipped.**
+  - It fails the condition for a sole backend: even with `-XX:-DontCompileHugeMethods`, it
+    stays 3.6 to 4.8 times below jsonata-java (item 7).
+  - It needs that JVM flag, so it no longer spares users a launch flag.
+  - Each instance holds about 5 MiB (item 6), and its default depth would be about 200
+    (item 4).
+  - It can be weighed again if users ask for a JAR with no native code or for a platform
+    without a binary, or if Chicory's speed changes. The same C API crate compiles to
+    `wasm32-wasip1` unchanged (item 1). Items 3 to 6 say what such a backend needs: a module
+    built with `opt-level = "s"`, a depth limit near 200 on default stacks, and dropping an
+    instance after an overflow.
+- **JNI is not used.**
 - **The Java API is frozen with the other contracts outside Rust** (ADR 0015), so the package
   starts after the API stability work of roadmap 0.24, not before.
 
 ## Consequences
 
-- Java 21 users are not served. If demand appears, the C API cannot reach them through Panama;
-  they would need the Chicory backend (Java 11 and later) or JNI.
-- With Panama: a JAR of a few megabytes with native code for seven targets, a Java test suite
-  that CI runs on each target, and a launch flag for every user.
-- With Chicory: one portable JAR, slower evaluations by an amount the spike measures, a
-  `wasm32-wasip1` build of `jlens-core` that CI tests, and a pool of instances.
-- The C API could later serve other languages that call C (.NET, Go, Ruby). That is not a goal
-  of this ADR, but the crate is kept free of Java specifics with that in mind.
-- Either way, the book gains a Java chapter beside the WebAssembly and Python ones, and the
-  release checklist gains a Maven Central step, which, like `cargo publish`, cannot be undone.
+- Java 21 users are not served. If demand appears, Panama cannot reach them. A Chicory backend
+  (Java 11 and later) or JNI would.
+- **What users get.**
+  - A JAR of about 7 MB, with native code for seven targets.
+  - A launch flag, `--enable-native-access`: a later Java release will refuse native access
+    without it.
+  - No binary for Linux on s390x or ppc64le.
+- **What the project takes on.**
+  - CI builds the library for each target and runs a Java test suite on each.
+  - The release checklist gains a Maven Central step, which, like `cargo publish`, cannot be
+    undone.
+  - The book gains a Java chapter beside the WebAssembly and Python ones.
+- **Beyond Java.** The C API could later serve other languages that call C (.NET, Go, Ruby).
+  That is not a goal of this ADR, but the crate is kept free of Java specifics with that in
+  mind.
+- **Two costs in `jlens-core` showed up.** They are for the core, outside this ADR, and they
+  apply to the Python package too.
+  - On a `Document` of 100,000 items, the path `items[0]` builds the whole sequence of items
+    before taking the first: 0.9 to 2.4 ms.
+  - The `Sink` allocates once for each key, each string and each nested source.
+- The spike's code is kept outside the repository. Its results are below.
 
 ## The spike
 
-To be run before this ADR is accepted, on Windows x86-64 and Linux x86-64, with Java 25 and
-the release build:
+Run on 2026-10-25, before this ADR was accepted, on Windows x86-64 and Linux x86-64 (WSL 2),
+with Java 25 and the release build:
 
 1. A C API crate with one export, a crate-level exception for `no_mangle`, and a check that an
    `unsafe` block in the crate is still refused. Buffers by handle, read from Java through
@@ -483,3 +528,46 @@ slower and each new instance 2.7 times slower.)
   - The upcall is 2% of a level. The Python package's levers apply: keys interned for the
     expression, the arrays and objects of a level written as members of one `Sources`, and
     mimalloc. They are not measured here.
+
+**Item 7** (2026-10-25, the same versions; 16 hardware threads, a Ryzen 7 3700X).
+
+- **Method.** One compiled `$sum(items.price)` is evaluated on 9.5 KB of JSON text (100
+  items of item 2's document), over and over.
+  - The workers are 1 to 16 platform threads, or 1,000 virtual threads.
+  - The rate is counted over 3 s, after 2 s of warm-up.
+  - Chicory serves the workers from a pool of 16 instances, one per hardware thread. A
+    virtual thread waiting for an instance unmounts from its carrier.
+  - jsonata-java parses the text and evaluates, with one `Jsonata` object per thread.
+- **A first run did not scale at all.** Panama gave 20,383 evaluations per second on one
+  thread and 18,758 on 16. The spike's buffer table held its global lock while
+  `evaluate_json` parsed the input. With one lock per buffer, and the table's lock held only
+  to find a buffer, it scales as below. The package's C API must not serialize work behind
+  its handle tables.
+
+Evaluations per second (and the speed-up over one thread):
+
+| Engine | 1 thread | 4 threads | 16 threads | 1,000 virtual threads |
+|---|---:|---:|---:|---:|
+| Windows | | | | |
+| Panama | 19,795 | 71,596 (3.6×) | 150,036 (7.6×) | 149,892 (7.6×) |
+| Chicory | 481 | 1,681 (3.5×) | 3,236 (6.7×) | 3,126 (6.5×) |
+| Chicory, `-XX:-DontCompileHugeMethods` | 2,476 | 10,494 (4.2×) | 22,996 (9.3×) | 22,663 (9.2×) |
+| jsonata-java | 11,922 | 45,023 (3.8×) | 85,472 (7.2×) | 86,319 (7.2×) |
+| Linux (WSL 2) | | | | |
+| Panama | 22,505 | 82,500 (3.7×) | 204,750 (9.1×) | 204,165 (9.1×) |
+| Chicory | 454 | 1,536 (3.4×) | 3,125 (6.9×) | 2,974 (6.6×) |
+| Chicory, `-XX:-DontCompileHugeMethods` | 2,544 | 9,600 (3.8×) | 22,831 (9.0×) | 20,880 (8.2×) |
+| jsonata-java | 11,541 | 41,580 (3.6×) | 82,595 (7.2×) | 83,387 (7.2×) |
+
+- **Pinning costs nothing here.** 1,000 virtual threads calling Panama give the rate of 16
+  platform threads: the work is CPU-bound and each call is short (about 50 µs), so the 16
+  carriers stay busy. A host function that blocks while its virtual thread is pinned would
+  hold a carrier for that time; that is not measured.
+- **Panama beats jsonata-java at every thread count.** It is 1.7 to 2.0 times faster on one
+  thread, 1.8 times on 16 threads on Windows, and 2.5 times on Linux, where it scales further
+  (9.1×).
+- **A pool of 16 Chicory instances serves 1,000 virtual threads** at the rate of 16 platform
+  threads. Chicory stays 3.6 to 4.8 times below jsonata-java even with the flag, and 25 to 26
+  times below without it.
+- **The warning** Java 25 prints without `--enable-native-access` is item 1's: four lines on
+  standard error, once per module.

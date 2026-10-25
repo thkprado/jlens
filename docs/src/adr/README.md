@@ -25,4 +25,4 @@ earlier one instead.
 | [0018](0018-step-limit.md) | A deterministic step limit: each evaluated node and callback is a step, fast paths charge what they skip, `U1006` | Accepted |
 | [0019](0019-documents-from-rust-values.md) | Documents serialized straight from Rust values, as `serde_json::to_value` and `Document::new` would build them | Accepted |
 | [0020](0020-own-regress-fork.md) | `jlens-regress` is jlens's own fork of `regress`: upstream fixes ported, not rebased | Accepted |
-| [0021](0021-java-package.md) | A Java package: a C API called through Panama, or run on Chicory | Proposed |
+| [0021](0021-java-package.md) | The Java package: a C API called through Panama, for Java 25 | Accepted |
