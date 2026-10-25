@@ -1148,7 +1148,12 @@ impl<'a> Evaluator<'_, 'a> {
     ) -> Result<Value<'a>> {
         let is_tuple = input.has_flag(TUPLE_STREAM);
         let flags = SEQUENCE | if is_tuple { TUPLE_STREAM } else { 0 };
-        let items = input.items_or_self();
+        // The items are read where they are: copying them would cost more than an index takes
+        // (`items[0]` of 100,000 items, ADR 0021).
+        let items: &[Value<'a>] = match &input {
+            Value::Array(a) => a.items(),
+            other => std::slice::from_ref(other),
+        };
         let len = items.len() as f64;
         let mut results = Vec::new();
 
@@ -1172,14 +1177,14 @@ impl<'a> Evaluator<'_, 'a> {
 
         // A tracer is given each item's test, so it sees the predicate evaluated per item.
         if constant && self.tracer.is_none() {
-            self.filter_constant(predicate, &items, env, &mut results)?;
+            self.filter_constant(predicate, items, env, &mut results)?;
             return Ok(Value::array(results, flags));
         }
 
         if let Some(t) = self.tracer.as_deref_mut() {
             t.filter_begin(predicate);
         }
-        let tested = self.filter_items(predicate, &items, is_tuple, env, &mut results);
+        let tested = self.filter_items(predicate, items, is_tuple, env, &mut results);
         if let Some(t) = self.tracer.as_deref_mut() {
             t.filter_end(predicate);
         }

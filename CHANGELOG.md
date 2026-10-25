@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A predicate reads its array where it is instead of copying it first, so an index such as
+  `items[0]` no longer costs time in proportion to the array. `items[0].name` on a `Document` of
+  100,000 items takes 1.3 µs instead of 2.6 ms, and 1.3 µs instead of 4.8 µs on 1,000 items;
+  filters that test every item save the copy too. The Python and WebAssembly packages gain the
+  same. On the engine's benchmark, no case moves by more than 2.5 %: `items[[0..19]]` takes
+  2.4 % less time.
+
 ## [0.23.0]
 
 Regular expressions with a lookahead or a lookbehind take less than half the time they did on
