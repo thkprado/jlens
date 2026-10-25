@@ -53,9 +53,12 @@ All notable changes are recorded here. The format follows
   `$merge` fails with `T0412` on an item that is not an object: `($y := $merge($x); a)` no
   longer leaves `$x` out of its reads (ADR 0016, amended).
 - `Expression::reads` needs the value of a step that binds `@`, which makes a tuple for each of
-  its items: `$x@$v#$j` no longer leaves `$x` out. And it analyses a call in tail position of a
-  lambda as the evaluator runs it, without the group-by written on it, which neither engine
-  applies: `function($y) { $zip(items){1: 1} }` now reads `items` whole (ADR 0016, amended).
+  its items: `$x@$v#$j` no longer leaves `$x` out (ADR 0016, amended).
+- A group-by on a call in tail position of a lambda is applied, as it is outside a lambda:
+  `($f := function() { $zip(items){'k': $} }; $f())` gives `{"k": [...]}` instead of the result
+  of `$zip`. The call ran as a tail call, which made the call alone, as jsonata-js does; a call
+  with a group-by is no longer one, as a call with a predicate was not. jsonata-js still drops
+  the group-by (see "Compatibility").
 
 ## [0.23.0]
 

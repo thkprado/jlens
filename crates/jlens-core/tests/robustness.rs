@@ -1700,8 +1700,8 @@ fn found_reads_keep_what_an_evaluation_needs() {
     // when only the context goes on.
     let expr = Expression::compile("$x@$v#$j").unwrap();
     agrees_when_cut(&expr, &expr.reads()).unwrap();
-    // A call in tail position runs without the group-by written on it, in both engines, so
-    // its value is the result.
+    // A call in tail position with a group-by: jsonata-js drops the group-by, which made the
+    // analysis leave it out (0.24 #7); since #8 jlens applies it, and the call is not a tail call.
     let expr =
         Expression::compile("($f := function($y){ $zip(items){1: 1} }; $f(items@$o.'s'))").unwrap();
     agrees_when_cut(&expr, &expr.reads()).unwrap();

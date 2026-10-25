@@ -96,6 +96,45 @@ fn bindings_and_closures() {
 }
 
 #[test]
+fn a_group_by_on_a_tail_call_is_applied() {
+    // jsonata-js runs a call in tail position without its group-by; jlens applies it, as
+    // outside a lambda (`compatibility.md`).
+    let input = json!({"items": [{"a": 1, "k": "x"}, {"a": 2, "k": "y"}, {"a": 3, "k": "x"}]});
+    let grouped = json!({"x": 4, "y": 2});
+    for body in [
+        "$append(items, []){k: $sum(a)}",
+        "true ? $append(items, []){k: $sum(a)}",
+        "false ? 0 : $append(items, []){k: $sum(a)}",
+        "($x := 1; $append(items, []){k: $sum(a)})",
+        "nothing ?? $append(items, []){k: $sum(a)}",
+        "$append(items, []){k: $sum(a)} ?: 0",
+    ] {
+        let source = format!("($f := function() {{ {body} }}; $f())");
+        assert_eq!(
+            eval(&source, input.clone()),
+            Some(grouped.clone()),
+            "{body}"
+        );
+    }
+    assert_eq!(
+        eval(
+            "($f := function() { $zip(items){'k': $} }; $f())",
+            input.clone()
+        ),
+        Some(json!({"k": input["items"]}))
+    );
+    // The calls without a group-by are still tail calls: the recursion runs in constant stack
+    // depth.
+    assert_eq!(
+        eval(
+            "($f := function($n){ $n = 0 ? items{k: $sum(a)} : $f($n - 1) }; $f(100000))",
+            input
+        ),
+        Some(grouped)
+    );
+}
+
+#[test]
 fn errors_carry_code_position_and_token() {
     let err = Expression::compile("1 + 'a'")
         .unwrap()

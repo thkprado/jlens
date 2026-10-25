@@ -103,7 +103,8 @@ property.
   objects across nodes.
 - **Tail calls.** A function call in tail position of a lambda (either branch of a conditional,
   or the last expression of a block) is wrapped in a *thunk*. The evaluator's trampoline runs
-  thunks in a loop, so tail-recursive functions don't grow the stack.
+  thunks in a loop, so tail-recursive functions don't grow the stack. A call with a predicate or a
+  group-by is not wrapped: the trampoline makes the call alone, which would drop them.
 
 Finally, nodes receive sequential `NodeId`s in pre-order. Audit trees will refer to nodes by
 these ids.

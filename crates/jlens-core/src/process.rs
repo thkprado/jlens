@@ -769,6 +769,10 @@ fn variable_name(raw: &Raw) -> String {
 
 /// Wraps function calls in tail position in a thunk, so the trampoline in the evaluator can
 /// run tail-recursive functions without growing the stack.
+///
+/// The trampoline makes the call alone, so a call with a predicate or a group-by is left as
+/// it is. jsonata-js leaves out a call with a predicate only, and drops a group-by on a tail
+/// call: jlens applies it (`compatibility.md`).
 fn tail_call_optimize(expr: Node) -> Node {
     // A chain of conditions in a lambda's body recurses hundreds of times, with nodes by value.
     crate::stack::grow(|| tail_call_optimize_inner(expr))
@@ -776,7 +780,9 @@ fn tail_call_optimize(expr: Node) -> Node {
 
 fn tail_call_optimize_inner(mut expr: Node) -> Node {
     match &mut expr.kind {
-        NodeKind::Function { .. } if expr.attrs.predicate.is_empty() => {
+        NodeKind::Function { .. }
+            if expr.attrs.predicate.is_empty() && expr.attrs.group.is_none() =>
+        {
             let (span, pos) = (expr.span, expr.pos);
             Node::new(
                 NodeKind::Lambda(Arc::new(LambdaDef {

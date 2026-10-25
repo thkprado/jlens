@@ -315,3 +315,11 @@ input, cut by their `Reads`, gave another result (roadmap 0.24 #7). Two rules ch
   in jlens: in `function($y) { $zip(items){1: 1} }` the value is the result of `$zip`. The
   analysis applied the group-by, so the value had no places, and `items` was only needed where
   the result held it whole. It now analyses the call alone, as the evaluator runs it.
+
+### Follow-up: a group-by on a tail call (0.24 #8)
+
+jlens now applies a group-by written on a call in tail position, as it does outside a lambda
+([compatibility](../language/compatibility.md#evaluation)): `tail_call_optimize` leaves such a
+call out, as it leaves out a call with a predicate. A tail call is then the call alone, so the
+analysis evaluates the thunk's body again, as it did before #7, and applies the group-by where
+the evaluator does: `function($y) { $zip(items){1: 1} }` gives one object, and needs `items`.

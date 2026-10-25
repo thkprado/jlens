@@ -362,7 +362,8 @@ fn wildcard_first(expr: &str) -> bool {
 /// places separators with no digit on their left; and `$substringBefore` or `$substringAfter`
 /// whose `chars` is not a string literal, which jsonata-js searches as "undefined" when missing;
 /// and an order-by after a step that binds `@`, `#` or an ancestor, filtered or ending a path
-/// with a group-by, where jsonata-js gives the filter or group-by its internal tuples.
+/// with a group-by, where jsonata-js gives the filter or group-by its internal tuples. And a
+/// call with a group-by in tail position of a lambda, whose group-by jsonata-js drops.
 fn dropped_quirk(expr: &str) -> bool {
     let Ok(compiled) = Expression::compile(expr) else {
         return false;
@@ -397,10 +398,26 @@ fn dropped_quirk(expr: &str) -> bool {
                 }
                 _ => false,
             },
+            NodeKind::Lambda(def) => tail_group(&def.body),
             _ => false,
         };
     });
     found
+}
+
+/// Whether a call in tail position of `body`, a lambda's, has a group-by. jsonata-js runs such a
+/// call in its trampoline without the group-by; jlens applies it. The left side of `??` and `?:`
+/// is in tail position in jsonata-js, which copies it into the `then` of a condition.
+fn tail_group(body: &Node) -> bool {
+    match &body.kind {
+        NodeKind::Function { .. } => body.attrs.group.is_some() && body.attrs.predicate.is_empty(),
+        NodeKind::Condition {
+            then, otherwise, ..
+        } => tail_group(then) || otherwise.as_deref().is_some_and(tail_group),
+        NodeKind::Fallback { lhs, rhs, .. } => tail_group(lhs) || tail_group(rhs),
+        NodeKind::Block { exprs, .. } => exprs.last().is_some_and(tail_group),
+        _ => false,
+    }
 }
 
 /// Whether jlens wrote the digits of a large number where jsonata-js did not. `$formatNumber`
