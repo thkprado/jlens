@@ -4,6 +4,8 @@ import java.lang.ref.Cleaner;
 import java.lang.ref.Reference;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.function.LongFunction;
+import java.util.function.LongSupplier;
 
 /**
  * A compiled JSONata expression. Compile it once and evaluate it as often as needed, from any
@@ -38,6 +40,10 @@ import java.util.Map;
  * <p>A result that is undefined (JSONata's "no match") is {@code null} too. The {@code
  * evaluateJson} methods tell them apart: they return the result as JSON text, {@code null} when
  * it is undefined and the text {@code "null"} for {@code null}.
+ *
+ * <p>Each method takes {@link Bindings} too, the variables and {@link HostFunction}s the
+ * expression refers to as {@code $name}. An exception a host function throws ends the
+ * evaluation, which throws it again, unchanged.
  */
 public final class Expression implements AutoCloseable {
     private final String source;
@@ -91,7 +97,7 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the evaluation fails
      */
     public Object evaluate() {
-        return Native.values(onText(null, Options.DEFAULTS, Native.VALUES));
+        return evaluateFromJson((byte[]) null, Bindings.NONE, Options.DEFAULTS);
     }
 
     /**
@@ -114,7 +120,7 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the evaluation fails
      */
     public Object evaluate(Document input, Options options) {
-        return Native.values(onDocument(input, options, Native.VALUES));
+        return onDocument(input, Bindings.NONE, options, Native.VALUES, Native::values);
     }
 
     /**
@@ -145,7 +151,7 @@ public final class Expression implements AutoCloseable {
      *     fails
      */
     public Object evaluate(Object input) {
-        return evaluate(input, Options.DEFAULTS);
+        return evaluate(input, Bindings.NONE, Options.DEFAULTS);
     }
 
     /**
@@ -159,15 +165,49 @@ public final class Expression implements AutoCloseable {
      *     fails
      */
     public Object evaluate(Object input, Options options) {
-        if (input instanceof Document document) return evaluate(document, options);
+        return evaluate(input, Bindings.NONE, options);
+    }
+
+    /**
+     * Evaluates the expression against Java objects, with bindings, as {@link #evaluate(Object)}
+     * does.
+     *
+     * @param input the input
+     * @param bindings the variables and host functions of the evaluation
+     * @return the result as Java objects, {@code null} when it is undefined or {@code null}
+     * @throws JlensException when the input cannot be read ({@code U1004}) or the evaluation
+     *     fails
+     */
+    public Object evaluate(Object input, Bindings bindings) {
+        return evaluate(input, bindings, Options.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against Java objects, with bindings and options, as {@link
+     * #evaluate(Object)} does.
+     *
+     * @param input the input
+     * @param bindings the variables and host functions of the evaluation
+     * @param options the options of the evaluation
+     * @return the result as Java objects, {@code null} when it is undefined or {@code null}
+     * @throws JlensException when the input cannot be read ({@code U1004}) or the evaluation
+     *     fails
+     */
+    public Object evaluate(Object input, Bindings bindings, Options options) {
+        if (input instanceof Document document) {
+            return onDocument(document, bindings, options, Native.VALUES, Native::values);
+        }
         long expression = live();
+        long bound = bindings.live();
         try (Reader reader = new Reader()) {
             long level = reader.input(input);
-            long reply = ScopedValue.where(Reader.CURRENT, reader).call(() -> options.evaluate(
-                    o -> Native.evaluateSource(expression, level, o, Native.VALUES)));
-            return Native.values(reply, reader.nodes());
+            return run(bindings,
+                    () -> ScopedValue.where(Reader.CURRENT, reader).call(() -> options.evaluate(
+                            o -> Native.evaluateSource(expression, level, bound, o, Native.VALUES))),
+                    reply -> Native.values(reply, reader.nodes()));
         } finally {
             Reference.reachabilityFence(this);
+            Reference.reachabilityFence(bindings);
         }
     }
 
@@ -180,7 +220,7 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
      */
     public Object evaluateFromJson(String input) {
-        return evaluateFromJson(input, Options.DEFAULTS);
+        return evaluateFromJson(utf8(input), Bindings.NONE, Options.DEFAULTS);
     }
 
     /**
@@ -192,7 +232,32 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
      */
     public Object evaluateFromJson(String input, Options options) {
-        return Native.values(onText(utf8(input), options, Native.VALUES));
+        return evaluateFromJson(utf8(input), Bindings.NONE, options);
+    }
+
+    /**
+     * Evaluates the expression against JSON text, with bindings.
+     *
+     * @param input the input as JSON text, {@code null} for no input
+     * @param bindings the variables and host functions of the evaluation
+     * @return the result as Java objects, {@code null} when it is undefined or {@code null}
+     * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
+     */
+    public Object evaluateFromJson(String input, Bindings bindings) {
+        return evaluateFromJson(utf8(input), bindings, Options.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against JSON text, with bindings and options.
+     *
+     * @param input the input as JSON text, {@code null} for no input
+     * @param bindings the variables and host functions of the evaluation
+     * @param options the options of the evaluation
+     * @return the result as Java objects, {@code null} when it is undefined or {@code null}
+     * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
+     */
+    public Object evaluateFromJson(String input, Bindings bindings, Options options) {
+        return evaluateFromJson(utf8(input), bindings, options);
     }
 
     /**
@@ -203,7 +268,7 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
      */
     public Object evaluateFromJson(byte[] input) {
-        return evaluateFromJson(input, Options.DEFAULTS);
+        return evaluateFromJson(input, Bindings.NONE, Options.DEFAULTS);
     }
 
     /**
@@ -215,7 +280,32 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
      */
     public Object evaluateFromJson(byte[] input, Options options) {
-        return Native.values(onText(input, options, Native.VALUES));
+        return evaluateFromJson(input, Bindings.NONE, options);
+    }
+
+    /**
+     * Evaluates the expression against JSON text in UTF-8, with bindings.
+     *
+     * @param input the input as UTF-8 JSON text, {@code null} for no input
+     * @param bindings the variables and host functions of the evaluation
+     * @return the result as Java objects, {@code null} when it is undefined or {@code null}
+     * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
+     */
+    public Object evaluateFromJson(byte[] input, Bindings bindings) {
+        return evaluateFromJson(input, bindings, Options.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against JSON text in UTF-8, with bindings and options.
+     *
+     * @param input the input as UTF-8 JSON text, {@code null} for no input
+     * @param bindings the variables and host functions of the evaluation
+     * @param options the options of the evaluation
+     * @return the result as Java objects, {@code null} when it is undefined or {@code null}
+     * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
+     */
+    public Object evaluateFromJson(byte[] input, Bindings bindings, Options options) {
+        return onText(input, bindings, options, Native.VALUES, Native::values);
     }
 
     /**
@@ -225,7 +315,7 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the evaluation fails
      */
     public String evaluateJson() {
-        return evaluateJson((String) null, Options.DEFAULTS);
+        return evaluateJson((byte[]) null, Bindings.NONE, Options.DEFAULTS);
     }
 
     /**
@@ -237,7 +327,7 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
      */
     public String evaluateJson(String input) {
-        return evaluateJson(input, Options.DEFAULTS);
+        return evaluateJson(utf8(input), Bindings.NONE, Options.DEFAULTS);
     }
 
     /**
@@ -249,7 +339,32 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
      */
     public String evaluateJson(String input, Options options) {
-        return evaluateJson(utf8(input), options);
+        return evaluateJson(utf8(input), Bindings.NONE, options);
+    }
+
+    /**
+     * Evaluates the expression against JSON text, with bindings.
+     *
+     * @param input the input as JSON text, {@code null} for no input
+     * @param bindings the variables and host functions of the evaluation
+     * @return the result as JSON text, {@code null} when it is undefined
+     * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
+     */
+    public String evaluateJson(String input, Bindings bindings) {
+        return evaluateJson(utf8(input), bindings, Options.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against JSON text, with bindings and options.
+     *
+     * @param input the input as JSON text, {@code null} for no input
+     * @param bindings the variables and host functions of the evaluation
+     * @param options the options of the evaluation
+     * @return the result as JSON text, {@code null} when it is undefined
+     * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
+     */
+    public String evaluateJson(String input, Bindings bindings, Options options) {
+        return evaluateJson(utf8(input), bindings, options);
     }
 
     /**
@@ -260,7 +375,7 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
      */
     public String evaluateJson(byte[] input) {
-        return evaluateJson(input, Options.DEFAULTS);
+        return evaluateJson(input, Bindings.NONE, Options.DEFAULTS);
     }
 
     /**
@@ -272,7 +387,32 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
      */
     public String evaluateJson(byte[] input, Options options) {
-        return Native.json(onText(input, options, Native.JSON));
+        return evaluateJson(input, Bindings.NONE, options);
+    }
+
+    /**
+     * Evaluates the expression against JSON text in UTF-8, with bindings.
+     *
+     * @param input the input as UTF-8 JSON text, {@code null} for no input
+     * @param bindings the variables and host functions of the evaluation
+     * @return the result as JSON text, {@code null} when it is undefined
+     * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
+     */
+    public String evaluateJson(byte[] input, Bindings bindings) {
+        return evaluateJson(input, bindings, Options.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against JSON text in UTF-8, with bindings and options.
+     *
+     * @param input the input as UTF-8 JSON text, {@code null} for no input
+     * @param bindings the variables and host functions of the evaluation
+     * @param options the options of the evaluation
+     * @return the result as JSON text, {@code null} when it is undefined
+     * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
+     */
+    public String evaluateJson(byte[] input, Bindings bindings, Options options) {
+        return onText(input, bindings, options, Native.JSON, Native::json);
     }
 
     /**
@@ -283,7 +423,7 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the evaluation fails
      */
     public String evaluateJson(Document input) {
-        return evaluateJson(input, Options.DEFAULTS);
+        return evaluateJson(input, Bindings.NONE, Options.DEFAULTS);
     }
 
     /**
@@ -295,30 +435,81 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the evaluation fails
      */
     public String evaluateJson(Document input, Options options) {
-        return Native.json(onDocument(input, options, Native.JSON));
+        return evaluateJson(input, Bindings.NONE, options);
     }
 
-    /** The reply of an evaluation against UTF-8 JSON text, or no input, in {@code format}. */
-    private long onText(byte[] input, Options options, int format) {
+    /**
+     * Evaluates the expression against a document, with bindings.
+     *
+     * @param input the document
+     * @param bindings the variables and host functions of the evaluation
+     * @return the result as JSON text, {@code null} when it is undefined
+     * @throws JlensException when the evaluation fails
+     */
+    public String evaluateJson(Document input, Bindings bindings) {
+        return evaluateJson(input, bindings, Options.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against a document, with bindings and options.
+     *
+     * @param input the document
+     * @param bindings the variables and host functions of the evaluation
+     * @param options the options of the evaluation
+     * @return the result as JSON text, {@code null} when it is undefined
+     * @throws JlensException when the evaluation fails
+     */
+    public String evaluateJson(Document input, Bindings bindings, Options options) {
+        return onDocument(input, bindings, options, Native.JSON, Native::json);
+    }
+
+    /** Evaluates against UTF-8 JSON text, or no input, in {@code format}, and decodes the reply. */
+    private <T> T onText(byte[] input, Bindings bindings, Options options, int format,
+            LongFunction<T> decode) {
         long expression = live();
+        long bound = bindings.live();
         long buffer = input == null ? 0 : Native.buffer(input);
         try {
-            return options.evaluate(o -> Native.evaluate(expression, buffer, o, format));
+            return run(bindings,
+                    () -> options.evaluate(o -> Native.evaluate(expression, buffer, bound, o, format)),
+                    decode);
         } finally {
             if (buffer != 0) Native.free(buffer);
             Reference.reachabilityFence(this);
+            Reference.reachabilityFence(bindings);
         }
     }
 
-    /** The reply of an evaluation against a document, in {@code format}. */
-    private long onDocument(Document input, Options options, int format) {
+    /** Evaluates against a document, in {@code format}, and decodes the reply. */
+    private <T> T onDocument(Document input, Bindings bindings, Options options, int format,
+            LongFunction<T> decode) {
         long expression = live();
         long document = input.live();
+        long bound = bindings.live();
         try {
-            return options.evaluate(o -> Native.evaluateDocument(expression, document, o, format));
+            return run(bindings,
+                    () -> options.evaluate(
+                            o -> Native.evaluateDocument(expression, document, bound, o, format)),
+                    decode);
         } finally {
             Reference.reachabilityFence(this);
             Reference.reachabilityFence(input);
+            Reference.reachabilityFence(bindings);
+        }
+    }
+
+    /**
+     * Runs {@code evaluation} and decodes its reply. With host functions, the evaluation runs
+     * with a {@link Host}, and an error that stands for an exception of theirs throws it again.
+     */
+    private static <T> T run(Bindings bindings, LongSupplier evaluation, LongFunction<T> decode) {
+        if (!bindings.functions) return decode.apply(evaluation.getAsLong());
+        Host host = new Host();
+        long reply = ScopedValue.where(Host.CURRENT, host).call(evaluation::getAsLong);
+        try {
+            return decode.apply(reply);
+        } catch (JlensException e) {
+            throw Host.sneaky(host.thrown(e));
         }
     }
 

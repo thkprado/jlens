@@ -239,7 +239,7 @@ proptest! {
                     let Some(expression) = pick(&expressions, expression) else { continue };
                     let (input, input_live) = optional(&buffers_made, input);
                     let (given, given_live) = optional(&options, given);
-                    let replied = reply(jlens_evaluate(expression.handle, input, given, 0))?;
+                    let replied = reply(jlens_evaluate(expression.handle, input, 0, given, 0))?;
                     if !expression.live || !input_live || !given_live {
                         prop_assert_eq!(replied, unknown());
                     }
@@ -249,7 +249,7 @@ proptest! {
                     let Some(document) = pick(&documents, document) else { continue };
                     let (given, given_live) = optional(&options, given);
                     let replied =
-                        reply(jlens_evaluate_document(expression.handle, document.handle, given, 0))?;
+                        reply(jlens_evaluate_document(expression.handle, document.handle, 0, given, 0))?;
                     if !expression.live || !document.live || !given_live {
                         prop_assert_eq!(replied, unknown());
                     } else {
@@ -296,7 +296,7 @@ proptest! {
                         4 => prop_assert_eq!(jlens_options_free(handle), 0),
                         5 => prop_assert_eq!(jlens_document_free(handle), 0),
                         6 => prop_assert_eq!(reply(jlens_compile(handle))?, unknown()),
-                        7 => prop_assert_eq!(reply(jlens_evaluate(handle, some, 0, 0))?, unknown()),
+                        7 => prop_assert_eq!(reply(jlens_evaluate(handle, some, 0, 0, 0))?, unknown()),
                         8 => prop_assert_eq!(reply(jlens_options_new(handle))?, unknown()),
                         9 => prop_assert_eq!(reply(jlens_document_new(handle, 0))?, unknown()),
                         10 => prop_assert_eq!(reply(jlens_document_new(some, handle))?, unknown()),
@@ -304,18 +304,18 @@ proptest! {
                         12 => prop_assert_eq!(reply(jlens_union_reads(handle))?, unknown()),
                         13 => {
                             let Some(document) = document else { continue };
-                            let replied = reply(jlens_evaluate_document(handle, document, 0, 0))?;
+                            let replied = reply(jlens_evaluate_document(handle, document, 0, 0, 0))?;
                             prop_assert_eq!(replied, unknown());
                         }
                         14 => {
                             let Some(expression) = expression else { continue };
-                            prop_assert_eq!(reply(jlens_evaluate(expression, handle, 0, 0))?, unknown());
-                            let replied = reply(jlens_evaluate_document(expression, handle, 0, 0))?;
+                            prop_assert_eq!(reply(jlens_evaluate(expression, handle, 0, 0, 0))?, unknown());
+                            let replied = reply(jlens_evaluate_document(expression, handle, 0, 0, 0))?;
                             prop_assert_eq!(replied, unknown());
                         }
                         _ => {
                             let Some(expression) = expression else { continue };
-                            prop_assert_eq!(reply(jlens_evaluate(expression, 0, handle, 0))?, unknown());
+                            prop_assert_eq!(reply(jlens_evaluate(expression, 0, 0, handle, 0))?, unknown());
                         }
                     }
                 }
@@ -342,27 +342,27 @@ proptest! {
         // the tables are separate. Whatever it names, the call does not panic.
         let source = buffers::insert(source);
         let input = buffers::insert(input);
-        reply(jlens_evaluate(source, input, input, 0))?;
-        reply(jlens_evaluate(source, input, 0, 1))?;
-        reply(jlens_evaluate(source, input, 0, u32::MAX))?;
-        reply(jlens_evaluate(input, 0, source, 0))?;
-        reply(jlens_evaluate_document(source, input, 0, 0))?;
+        reply(jlens_evaluate(source, input, 0, input, 0))?;
+        reply(jlens_evaluate(source, input, 0, 0, 1))?;
+        reply(jlens_evaluate(source, input, 0, 0, u32::MAX))?;
+        reply(jlens_evaluate(input, 0, 0, source, 0))?;
+        reply(jlens_evaluate_document(source, input, 0, 0, 0))?;
         reply(jlens_reads(source))?;
         if let Replied::Handle(options) = reply(jlens_options_new(input))? {
-            reply(jlens_evaluate(source, input, options, 0))?;
+            reply(jlens_evaluate(source, input, 0, options, 0))?;
             reply(jlens_document_new(options, options))?;
             prop_assert_eq!(jlens_options_free(options), 1);
         }
         if let Replied::Handle(document) = reply(jlens_document_new(input, 0))? {
-            reply(jlens_evaluate(document, document, document, 0))?;
+            reply(jlens_evaluate(document, document, 0, document, 0))?;
             reply(jlens_union_reads(document))?;
             prop_assert_eq!(jlens_document_free(document), 1);
         }
         if let Replied::Handle(expression) = reply(jlens_compile(source))? {
             reply(jlens_compile(expression))?;
-            reply(jlens_evaluate(expression, expression, expression, 0))?;
-            reply(jlens_evaluate(expression, 0, 0, 1))?;
-            reply(jlens_evaluate_document(expression, expression, expression, 0))?;
+            reply(jlens_evaluate(expression, expression, 0, expression, 0))?;
+            reply(jlens_evaluate(expression, 0, 0, 0, 1))?;
+            reply(jlens_evaluate_document(expression, expression, 0, expression, 0))?;
             prop_assert_eq!(jlens_expression_free(expression), 1);
         }
         prop_assert_eq!(jlens_buffer_free(source), 1);
@@ -383,8 +383,8 @@ proptest! {
             handle
         };
         let buffer = buffers::insert(text.into_bytes());
-        let as_json = buffers::take(jlens_evaluate(expression, buffer, 0, 0)).unwrap();
-        let as_values = buffers::take(jlens_evaluate(expression, buffer, 0, 1)).unwrap();
+        let as_json = buffers::take(jlens_evaluate(expression, buffer, 0, 0, 0)).unwrap();
+        let as_values = buffers::take(jlens_evaluate(expression, buffer, 0, 0, 1)).unwrap();
         match (as_json[0], as_values[0]) {
             (REPLY_JSON, REPLY_VALUES) => {
                 let json: Value = serde_json::from_slice(&as_json[1..]).unwrap();
@@ -432,7 +432,7 @@ fn json() -> impl Strategy<Value = Value> {
 /// the reply's bytes, and the host's nodes.
 fn on_host(expression: u64, input: &Value, context: u64, result: u32) -> (Vec<u8>, Vec<Value>) {
     let level = host::Host::start(input);
-    let reply = jlens_evaluate_source(expression, level, Some(host::READER), context, 0, result);
+    let reply = jlens_evaluate_source(expression, level, Some(host::READER), context, 0, 0, result);
     host::Host::finish();
     assert_eq!(jlens_buffer_free(level), 1);
     let nodes = host::HOST.with_borrow_mut(|host| std::mem::take(&mut host.nodes));
@@ -480,7 +480,7 @@ proptest! {
         host::Host::know(&["a", "b", "x", "v"]);
         let expression = compiled(expression);
         let text = buffers::insert(input.to_string().into_bytes());
-        let as_text = buffers::take(jlens_evaluate(expression, text, 0, 0)).unwrap();
+        let as_text = buffers::take(jlens_evaluate(expression, text, 0, 0, 0)).unwrap();
         prop_assert_eq!(jlens_buffer_free(text), 1);
         for context in [host::PLAIN, host::WHOLE] {
             let (as_json, _) = on_host(expression, &input, context, 0);
@@ -534,5 +534,85 @@ proptest! {
             status => prop_assert_eq!(status, REPLY_UNDEFINED),
         }
         prop_assert_eq!(jlens_expression_free(expression), 1);
+    }
+}
+
+thread_local! {
+    /// What the host function of the tests below replies with, and calls with: any bytes.
+    static GARBAGE: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The replies of its calls of the functions it was given, checked once it returned.
+    static CALLED: std::cell::RefCell<Vec<u64>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A host function: function 0 replies with [`GARBAGE`]; function 1 calls its argument 0, in its own frame and
+/// in one that is not, with [`GARBAGE`] as the arguments, then replies undefined. It cannot
+/// assert: a panic in an `extern "C"` function aborts.
+extern "C" fn replying(_context: u64, index: u32, frame: u64, _arguments: u64) -> u64 {
+    let bytes = GARBAGE.with_borrow(Clone::clone);
+    if index == 0 {
+        return buffers::insert(bytes);
+    }
+    let arguments = buffers::insert(bytes.clone());
+    for (frame, index) in [(frame, 0), (frame ^ 1, 0), (frame, bytes.len() as u32 % 3)] {
+        let called = jlens_call(frame, index, arguments);
+        CALLED.with_borrow_mut(|called_| called_.push(called));
+    }
+    jlens_buffer_free(arguments);
+    buffers::insert(vec![REPLY_UNDEFINED])
+}
+
+proptest! {
+    /// A host function that replies with any bytes, replies nearly in their form included, or
+    /// calls the functions it receives with any bytes, makes the evaluation fail with an error
+    /// or give a result, never panic.
+    #[test]
+    fn host_functions_replying_any_bytes_fail_cleanly(
+        garbage in prop_oneof![
+            bytes(),
+            (0u8..5, bytes()).prop_map(|(status, rest)| {
+                let mut reply = vec![status];
+                reply.extend(rest);
+                reply
+            }),
+            (any::<u8>(), any::<u32>(), bytes()).prop_map(|(tag, count, rest)| {
+                let mut values = vec![REPLY_VALUES, tag % 11];
+                values.extend_from_slice(&(count % 4).to_le_bytes());
+                values.extend(rest);
+                values
+            }),
+        ],
+        result in 0u32..2,
+    ) {
+        GARBAGE.with_borrow_mut(|bytes| *bytes = garbage);
+        let functions = buffers::insert(br#"[{"name": "f"}, {"name": "g", "arity": 1}]"#.to_vec());
+        let Replied::Handle(bindings) = reply(jlens_bindings_new(functions, 0, Some(replying), 0))?
+        else {
+            return Err(TestCaseError::fail("no bindings"));
+        };
+        prop_assert_eq!(jlens_buffer_free(functions), 1);
+        for source in ["$f()", "$f(1, 'a')", "[$f(), $f()]", "$g(function($x) { $x })", "$g($f)"] {
+            let expression = compiled(source);
+            reply(jlens_evaluate(expression, 0, bindings, 0, result))?;
+            for called in CALLED.with_borrow_mut(std::mem::take) {
+                reply(called)?;
+            }
+            prop_assert_eq!(jlens_expression_free(expression), 1);
+        }
+        prop_assert_eq!(jlens_bindings_free(bindings), 1);
+    }
+
+    /// Bindings of any bytes are made or fail with an error, never a panic.
+    #[test]
+    fn bindings_of_any_bytes_fail_cleanly(functions in bytes(), variables in bytes()) {
+        let (functions, variables) = (buffers::insert(functions), buffers::insert(variables));
+        for (f, v) in [(functions, 0), (0, variables), (functions, variables)] {
+            if let Replied::Handle(bindings) = reply(jlens_bindings_new(f, v, Some(replying), 0))? {
+                prop_assert_eq!(jlens_bindings_free(bindings), 1);
+            }
+        }
+        prop_assert_eq!(jlens_buffer_free(functions), 1);
+        prop_assert_eq!(jlens_buffer_free(variables), 1);
+        // And a call with no host function running.
+        reply(jlens_call(1, 0, 0))?;
     }
 }

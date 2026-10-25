@@ -9,10 +9,12 @@ Guidance for working in the Java package. The repository-wide rules are in the r
   `io.github.thkprado.jlens`, built with the Maven Wrapper (`mvnw`, `mvnw.cmd`; no JAR is
   committed, the scripts download Maven and check its SHA-256).
 - `java/src/main/java/io/github/thkprado/jlens/`: the public classes (`Expression`, `Document`,
-  `Options`, `Read`, `Reads`, `JlensException`), `Native` (the C API's downcalls and the one
-  upcall, the loading of the library), `Reader` (Java objects as input, a level at a time, for
-  the C API's upcall), `Values` (the decoder of results as Java objects) and `Json` (the JSON the
-  package reads and writes itself).
+  `Options`, `Read`, `Reads`, `Bindings`, `HostFunction`, `JsonataFunction`, `JlensException`),
+  `Native` (the C API's downcalls and the two upcalls, the loading of the library), `Reader`
+  (Java objects as input, a level at a time, for the C API's upcall), `Host` (host functions,
+  for the other upcall, and the exceptions of an evaluation), `Values` (the decoder of results
+  as Java objects), `Writer` (its encoder, for host functions' results and bindings) and `Json`
+  (the JSON the package reads and writes itself).
 - `java/src/test/java/`: the JUnit suite, in the module's package.
 - `java/native/<os>-<arch>/`: the native libraries the JAR carries (not committed), put there by
   `cargo xtask java` for the host; the names are Rust's `std::env::consts::{OS, ARCH}`.
@@ -49,6 +51,10 @@ The system property `jlens.library` points the package at a library outside the 
   the C API on the evaluating thread, which finds it in a `ScopedValue`. An upcall must never
   throw: every failure becomes a level the evaluation fails with (`U1004`). A map or list of the
   input that the result holds unchanged comes back as itself (`INPUT` in `Values`).
+- **Host functions** (0.25 #7) are run by `Host`, called back on the evaluating thread, which
+  finds the evaluation's `Host` in a `ScopedValue` and the function by its `Bindings`' context.
+  The upcall never throws: an exception becomes an error reply with its number, and `evaluate`
+  throws the same object again. A `JsonataFunction` works on its thread while its call runs.
 - **API changes** need the Javadoc, the JUnit suite and, from 0.25 #11, the Java chapter of the
   book.
 - **The version** in `pom.xml` is the workspace's; `cargo xtask java` fails otherwise.

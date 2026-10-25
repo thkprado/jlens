@@ -4,7 +4,9 @@
 #![allow(dead_code)]
 
 use jlens_capi::source::INPUT;
-use jlens_capi::values::{ARRAY, FALSE, FLOAT, INTEGER, NULL, OBJECT, STRING, TRUE};
+use jlens_capi::values::{
+    ARRAY, FALSE, FLOAT, FUNCTION, INTEGER, NULL, OBJECT, STRING, TRUE, UNDEFINED,
+};
 use serde_json::{Map, Value};
 
 /// The value encoded in `bytes`, after a reply's status byte. Panics on bytes not in the
@@ -112,6 +114,9 @@ impl Decoder<'_> {
                 let node = self.u32();
                 self.nodes[node].clone()
             }
+            // A host function's arguments: markers the tests compare.
+            FUNCTION => serde_json::json!({"function": self.u32()}),
+            UNDEFINED => serde_json::json!({"undefined": true}),
             tag => panic!("unknown tag {tag}"),
         }
     }

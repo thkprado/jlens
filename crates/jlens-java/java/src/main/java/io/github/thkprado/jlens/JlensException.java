@@ -12,9 +12,9 @@ import java.util.OptionalInt;
  * the token and the value. Offsets count UTF-16 code units, as Java strings and jsonata-js do.
  *
  * <p>Codes are the stable part: match on {@link #code()}, never on the message. The package's
- * own failures use {@code U} codes: {@code U1001} for a size limit, {@code U1006} for the step
- * limit, {@code U2001} for input that is not JSON, {@code U2005} for a read that is not in its
- * form.
+ * own failures use {@code U} codes: {@code U1001} for a size limit, {@code U1005} for a {@link
+ * JsonataFunction} called after its host function returned, {@code U1006} for the step limit,
+ * {@code U2001} for input that is not JSON, {@code U2005} for a read that is not in its form.
  */
 public final class JlensException extends RuntimeException {
     @Serial
@@ -26,9 +26,13 @@ public final class JlensException extends RuntimeException {
     private final Integer end;
     private final String token;
     private final String value;
+    /** The number the C API gave this error when a function a host function called failed. */
+    private final transient long failure;
+    /** The number of the host function's exception the error stands for, or -1. */
+    private final transient int hostException;
 
     private JlensException(String code, String message, Integer position, Integer start,
-            Integer end, String token, String value) {
+            Integer end, String token, String value, long failure, int hostException) {
         super(message);
         this.code = code;
         this.position = position;
@@ -36,6 +40,14 @@ public final class JlensException extends RuntimeException {
         this.end = end;
         this.token = token;
         this.value = value;
+        this.failure = failure;
+        this.hostException = hostException;
+    }
+
+    /** The {@code U1005} error of a function called after host function {@code name} returned. */
+    static JlensException expired(String name) {
+        return new JlensException("U1005", "A function passed to $" + name + " was called after $"
+                + name + " returned", null, null, null, name, null, 0, -1);
     }
 
     /** The exception of the C API's error envelope {@code envelope}. */
@@ -48,7 +60,19 @@ public final class JlensException extends RuntimeException {
                 integer(members.get("start")),
                 integer(members.get("end")),
                 members.containsKey("token") ? (String) Json.parse(members.get("token")) : null,
-                members.get("value"));
+                members.get("value"),
+                members.containsKey("failure")
+                        ? ((BigDecimal) Json.parse(members.get("failure"))).longValueExact()
+                        : 0,
+                members.containsKey("hostException") ? integer(members.get("hostException")) : -1);
+    }
+
+    long failure() {
+        return failure;
+    }
+
+    int hostException() {
+        return hostException;
     }
 
     private static Integer integer(String json) {

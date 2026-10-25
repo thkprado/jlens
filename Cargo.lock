@@ -747,6 +747,7 @@ dependencies = [
  "jlens-core",
  "mimalloc",
  "proptest",
+ "scoped-tls-hkt",
  "serde",
  "serde_json",
 ]

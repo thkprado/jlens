@@ -837,3 +837,44 @@ spike's "Source" column (above) is repeated for comparison:
   `$sum(items.price)` takes 327 µs on 1,000 items, 4.5 times less than in the spike but twice
   jsonata-java's 152 µs, and 48 ms on 100,000, ahead of its 56 ms. A `Document` stays the fast
   way for an input evaluated many times, or read whole.
+
+### Host functions (0.25 #7)
+
+Host functions written in Java follow ADR 0006 and ADR 0011, as the Python and WebAssembly
+packages do, through one more upcall (`host.rs` in `jlens-capi`):
+
+- **`Bindings`, made once.** Variables and host functions are bound by a `Bindings` object,
+  built by a builder and immutable, that holds a native object: its variables are written to
+  Rust when it is built, so an evaluation does not convert them again, and one `Bindings` serves
+  any number of evaluations, of any expression, on any thread. Every `evaluate` method takes
+  one. There is no `registerFunction`: it would make an `Expression` mutable, shared between
+  threads, and a `Bindings` built once plays its part. A name holds a value or a function, and a
+  name given with its `$` is taken without it, as `registerFunction` does in Python and
+  WebAssembly.
+- **`HostFunction`, a functional interface**, `Object call(List<Object> arguments)`, bound with
+  an arity or a signature: a Java lambda has no arity Java can read, where Python reads the
+  parameters of a function. It throws no checked exception, so that `evaluate` declares none. A
+  host function does not receive the context of its call (`HostFunction::without_input`), as in
+  Python: a signature with `-` passes it as an argument.
+- **Values both ways.** The arguments reach Java as values (0.25 #5), with two more tags: an
+  undefined argument, and a function with its arity, which Java turns into a `JsonataFunction`.
+  The names `Function` and `Callable` would clash with `java.util.function.Function` and
+  `java.util.concurrent.Callable`. Java writes its results, the arguments of the functions it
+  calls and the variables in the same encoding, which Rust decodes with no parser; a value
+  nested more than 1,000 levels deep fails with `U1001`, since Rust would drop it by
+  recursion. Java's writer walks with its own stack, as `Values` does.
+- **Calling a function received.** The core's `Callable` borrows the call (ADR 0011). Each host
+  call is a frame of a scoped thread-local in Rust, numbered, and Java's `JsonataFunction` calls
+  `jlens_call` with that number. A virtual thread is pinned during the downcall, so the upcall,
+  and the downcall it makes, run on the same carrier. A call after the host function returned,
+  or from another thread, fails with `U1005`: Java checks it first, Rust again.
+- **Exceptions thrown again, unchanged.** An exception a host function throws is kept by the
+  evaluation, in Java, under a number that the error carries back through Rust
+  (`hostException` in the envelope), and `evaluate` throws the same object again. An error of a
+  function a host function called gets a number from Rust, kept while a host call runs on the
+  thread; when the host function lets it through, Java replies with the number, and the error
+  keeps its code and position, as `failures` does in Python. A `CompletionStage` or a `Future`
+  as a result fails with `U1002`, as a promise or a coroutine does.
+
+Host functions run while their virtual thread is pinned: one that blocks holds its carrier for
+that time, which the Java chapter says (0.25 #11).

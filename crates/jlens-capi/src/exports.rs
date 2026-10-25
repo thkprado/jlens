@@ -45,17 +45,28 @@ export! {
     jlens_document_new(text: u64, read: u64) -> u64 = crate::api::document_new, crate::api::panicked;
     /// Frees a document: 1 when it was live, 0 for an unknown or freed handle.
     jlens_document_free(document: u64) -> u32 = crate::api::document_free, crate::zero;
+    /// Makes bindings of the host functions in buffer `functions` (JSON text, 0 for none), run
+    /// by `function` given `context`, and of the variables in buffer `variables` (values, 0 for
+    /// none), as the `host` module describes: a reply with their handle or the error.
+    jlens_bindings_new(functions: u64, variables: u64, function: Option<crate::host::Function>, context: u64) -> u64 = crate::host::bindings_new, crate::api::panicked;
+    /// Frees bindings: 1 when they were live, 0 for an unknown or freed handle.
+    jlens_bindings_free(bindings: u64) -> u32 = crate::host::bindings_free, crate::zero;
+    /// Calls argument `index`, a function, of the host function's call `frame`, with the
+    /// arguments in buffer `arguments` (values, 0 for none): a reply with the result as values,
+    /// or the error.
+    jlens_call(frame: u64, index: u32, arguments: u64) -> u64 = crate::host::call, crate::api::panicked;
     /// Evaluates an expression against the JSON text in buffer `input` (0 for no input), with
+    /// bindings `bindings` (0 for none) and options `options` (0 for the defaults): a reply with
+    /// the result, as JSON text (`result` 0) or values (`result` 1), or the error.
+    jlens_evaluate(expression: u64, input: u64, bindings: u64, options: u64, result: u32) -> u64 = crate::api::evaluate, crate::api::panicked;
+    /// Evaluates an expression against a document, with bindings `bindings` (0 for none) and
     /// options `options` (0 for the defaults): a reply with the result, as JSON text (`result`
     /// 0) or values (`result` 1), or the error.
-    jlens_evaluate(expression: u64, input: u64, options: u64, result: u32) -> u64 = crate::api::evaluate, crate::api::panicked;
-    /// Evaluates an expression against a document, with options `options` (0 for the
-    /// defaults): a reply with the result, as JSON text (`result` 0) or values (`result` 1),
-    /// or the error.
-    jlens_evaluate_document(expression: u64, document: u64, options: u64, result: u32) -> u64 = crate::api::evaluate_document, crate::api::panicked;
+    jlens_evaluate_document(expression: u64, document: u64, bindings: u64, options: u64, result: u32) -> u64 = crate::api::evaluate_document, crate::api::panicked;
     /// Evaluates an expression against the host's own values: buffer `input` holds the input
     /// as a level, and `reader`, given `context`, writes the levels of its arrays and objects
-    /// (the `source` module). With options `options` (0 for the defaults): a reply with the
-    /// result, as JSON text (`result` 0) or values (`result` 1), or the error.
-    jlens_evaluate_source(expression: u64, input: u64, reader: Option<crate::source::Reader>, context: u64, options: u64, result: u32) -> u64 = crate::api::evaluate_source, crate::api::panicked;
+    /// (the `source` module). With bindings `bindings` (0 for none) and options `options` (0
+    /// for the defaults): a reply with the result, as JSON text (`result` 0) or values
+    /// (`result` 1), or the error.
+    jlens_evaluate_source(expression: u64, input: u64, reader: Option<crate::source::Reader>, context: u64, bindings: u64, options: u64, result: u32) -> u64 = crate::api::evaluate_source, crate::api::panicked;
 }

@@ -53,7 +53,7 @@ fn evaluate(expression: u64, input: Option<&str>) -> Reply {
 
 fn evaluate_with(expression: u64, input: Option<&str>, options: u64) -> Reply {
     let input = input.map_or(0, buffer);
-    let result = reply(jlens_evaluate(expression, input, options, 0));
+    let result = reply(jlens_evaluate(expression, input, 0, options, 0));
     if input != 0 {
         assert_eq!(jlens_buffer_free(input), 1);
     }
@@ -89,7 +89,7 @@ fn document(text: &str, read: Option<&str>) -> u64 {
 }
 
 fn on_document(expression: u64, document: u64, options: u64) -> Reply {
-    reply(jlens_evaluate_document(expression, document, options, 0))
+    reply(jlens_evaluate_document(expression, document, 0, options, 0))
 }
 
 fn json(reply: Reply) -> Value {
@@ -198,7 +198,7 @@ fn input_that_is_not_json_or_not_utf8_fails_with_u2001() {
     assert_eq!(code(&evaluate(expression, Some("{\"a\": "))), "U2001");
     let bytes = buffers::insert(b"{\"a\": \"\xff\"}".to_vec());
     assert_eq!(
-        code(&reply(jlens_evaluate(expression, bytes, 0, 0))),
+        code(&reply(jlens_evaluate(expression, bytes, 0, 0, 0))),
         "U2001"
     );
     jlens_buffer_free(bytes);
@@ -227,11 +227,11 @@ fn unknown_and_freed_handles_fail_with_u2002() {
     let input = buffer("{}");
     jlens_buffer_free(input);
     assert_eq!(
-        code(&reply(jlens_evaluate(expression, input, 0, 0))),
+        code(&reply(jlens_evaluate(expression, input, 0, 0, 0))),
         "U2002"
     );
     assert_eq!(code(&reply(jlens_compile(input))), "U2002");
-    assert_eq!(code(&reply(jlens_evaluate(u64::MAX, 0, 0, 0))), "U2002");
+    assert_eq!(code(&reply(jlens_evaluate(u64::MAX, 0, 0, 0, 0))), "U2002");
     assert_eq!(code(&reply(jlens_compile(0))), "U2002");
 }
 
@@ -584,7 +584,7 @@ fn a_thread_drops_a_freed_documents_conversion_at_its_next_call_of_any_export() 
 /// Evaluates with the result as values: the decoded value, `None` when undefined.
 fn values_of(expression: u64, input: Option<&str>, options: u64) -> Option<Value> {
     let input = input.map_or(0, buffer);
-    let replied = reply(jlens_evaluate(expression, input, options, 1));
+    let replied = reply(jlens_evaluate(expression, input, 0, options, 1));
     if input != 0 {
         assert_eq!(jlens_buffer_free(input), 1);
     }
@@ -630,7 +630,7 @@ fn values_hold_each_kind_of_value() {
 fn values_write_each_key_once() {
     use jlens_capi::values::{ARRAY, INTEGER, OBJECT, STRING};
     let expression = compile(r#"[{"a": 1}, {"a": "b"}]"#);
-    let bytes = match reply(jlens_evaluate(expression, 0, 0, 1)) {
+    let bytes = match reply(jlens_evaluate(expression, 0, 0, 0, 1)) {
         Reply::Values(bytes) => bytes,
         other => panic!("not values: {other:?}"),
     };
@@ -655,23 +655,28 @@ fn values_come_from_text_documents_and_no_input_within_the_limits() {
     );
     assert_eq!(values_of(expression, Some("{}"), 0), None);
     let doc = document(text, None);
-    match reply(jlens_evaluate_document(expression, doc, 0, 1)) {
+    match reply(jlens_evaluate_document(expression, doc, 0, 0, 1)) {
         Reply::Values(bytes) => assert_eq!(values::decode(&bytes), json!(["x", "y"])),
         other => panic!("not values: {other:?}"),
     }
     let small = options(r#"{"maxResultSize": 4}"#);
     assert_eq!(
-        code(&reply(jlens_evaluate_document(expression, doc, small, 1))),
+        code(&reply(jlens_evaluate_document(
+            expression, doc, 0, small, 1
+        ))),
         "U1001"
     );
     // A format that is neither 0 nor 1.
     assert_eq!(
-        code(&reply(jlens_evaluate_document(expression, doc, 0, 2))),
+        code(&reply(jlens_evaluate_document(expression, doc, 0, 0, 2))),
         "U2005"
     );
-    assert_eq!(code(&reply(jlens_evaluate(expression, 0, 0, 7))), "U2005");
+    assert_eq!(
+        code(&reply(jlens_evaluate(expression, 0, 0, 0, 7))),
+        "U2005"
+    );
     let failing = compile("$x()");
-    assert_eq!(code(&reply(jlens_evaluate(failing, 0, 0, 1))), "T1006");
+    assert_eq!(code(&reply(jlens_evaluate(failing, 0, 0, 0, 1))), "T1006");
     assert_eq!(jlens_options_free(small), 1);
     assert_eq!(jlens_document_free(doc), 1);
     assert_eq!(jlens_expression_free(expression), 1);
@@ -692,6 +697,7 @@ fn on_host(
         level,
         Some(host::READER),
         context,
+        0,
         0,
         result,
     ));
@@ -866,13 +872,14 @@ fn the_reader_fails_cleanly() {
         .join()
         .unwrap();
     let level = host::Host::start(&input);
-    let no_reader = crate::reply(jlens_evaluate_source(expression, level, None, 0, 0, 0));
+    let no_reader = crate::reply(jlens_evaluate_source(expression, level, None, 0, 0, 0, 0));
     assert_eq!(code(&no_reader), "U2005");
     assert_eq!(jlens_buffer_free(level), 1);
     let unknown = crate::reply(jlens_evaluate_source(
         expression,
         level,
         Some(host::READER),
+        0,
         0,
         0,
         0,

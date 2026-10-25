@@ -21,6 +21,7 @@ foldhash.workspace = true
 mimalloc = { workspace = true, features = ["local_dynamic_tls"] }
 serde.workspace = true
 serde_json.workspace = true
+scoped-tls-hkt.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

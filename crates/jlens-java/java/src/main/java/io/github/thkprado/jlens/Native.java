@@ -58,14 +58,21 @@ final class Native {
     private static final MethodHandle OPTIONS_FREE = function("jlens_options_free", U32, U64);
     private static final MethodHandle DOCUMENT_NEW = function("jlens_document_new", U64, U64, U64);
     private static final MethodHandle DOCUMENT_FREE = function("jlens_document_free", U32, U64);
-    private static final MethodHandle EVALUATE = function("jlens_evaluate", U64, U64, U64, U64, U32);
+    private static final MethodHandle BINDINGS_NEW =
+            function("jlens_bindings_new", U64, U64, U64, ValueLayout.ADDRESS, U64);
+    private static final MethodHandle BINDINGS_FREE = function("jlens_bindings_free", U32, U64);
+    private static final MethodHandle CALL = function("jlens_call", U64, U64, U32, U64);
+    private static final MethodHandle EVALUATE =
+            function("jlens_evaluate", U64, U64, U64, U64, U64, U32);
     private static final MethodHandle EVALUATE_DOCUMENT =
-            function("jlens_evaluate_document", U64, U64, U64, U64, U32);
+            function("jlens_evaluate_document", U64, U64, U64, U64, U64, U32);
     private static final MethodHandle EVALUATE_SOURCE = function("jlens_evaluate_source",
-            U64, U64, U64, ValueLayout.ADDRESS, U64, U64, U32);
+            U64, U64, U64, ValueLayout.ADDRESS, U64, U64, U64, U32);
 
     /** The function the C API calls back to read Java objects: {@link Reader#read}. */
     static final MemorySegment READER;
+    /** The function the C API calls back to run host functions: {@link Host#call}. */
+    static final MemorySegment HOST;
 
     static {
         try {
@@ -74,6 +81,10 @@ final class Native {
                             long.class, long.class));
             READER = Linker.nativeLinker().upcallStub(read,
                     FunctionDescriptor.of(U64, U64, U32, U32, U64, USIZE, USIZE), Arena.global());
+            MethodHandle call = MethodHandles.lookup().findStatic(Host.class, "call",
+                    MethodType.methodType(long.class, long.class, int.class, long.class, long.class));
+            HOST = Linker.nativeLinker().upcallStub(call,
+                    FunctionDescriptor.of(U64, U64, U32, U64, U64), Arena.global());
         } catch (ReflectiveOperationException e) {
             throw new ExceptionInInitializerError(e);
         }
@@ -159,17 +170,45 @@ final class Native {
         }
     }
 
-    static long evaluate(long expression, long input, long options, int format) {
+    /** Makes bindings: a reply with their handle. Their host functions run through {@link #HOST}. */
+    static long bindingsNew(long functions, long variables, long context) {
         try {
-            return (long) EVALUATE.invokeExact(expression, input, options, format);
+            return (long) BINDINGS_NEW.invokeExact(functions, variables, HOST, context);
         } catch (Throwable e) {
             throw failed(e);
         }
     }
 
-    static long evaluateDocument(long expression, long document, long options, int format) {
+    static void bindingsFree(long bindings) {
         try {
-            return (long) EVALUATE_DOCUMENT.invokeExact(expression, document, options, format);
+            int _ = (int) BINDINGS_FREE.invokeExact(bindings);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /** Calls argument {@code index}, a function, of host function call {@code frame}: a reply. */
+    static long call(long frame, int index, long arguments) {
+        try {
+            return (long) CALL.invokeExact(frame, index, arguments);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    static long evaluate(long expression, long input, long bindings, long options, int format) {
+        try {
+            return (long) EVALUATE.invokeExact(expression, input, bindings, options, format);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    static long evaluateDocument(long expression, long document, long bindings, long options,
+            int format) {
+        try {
+            return (long) EVALUATE_DOCUMENT.invokeExact(expression, document, bindings, options,
+                    format);
         } catch (Throwable e) {
             throw failed(e);
         }
@@ -179,9 +218,11 @@ final class Native {
      * Evaluates against Java objects: {@code input} is the buffer of the input's level, and the C
      * API reads the rest through {@link #READER}.
      */
-    static long evaluateSource(long expression, long input, long options, int format) {
+    static long evaluateSource(long expression, long input, long bindings, long options,
+            int format) {
         try {
-            return (long) EVALUATE_SOURCE.invokeExact(expression, input, READER, 0L, options, format);
+            return (long) EVALUATE_SOURCE.invokeExact(expression, input, READER, 0L, bindings,
+                    options, format);
         } catch (Throwable e) {
             throw failed(e);
         }
@@ -203,6 +244,17 @@ final class Native {
         try {
             long address = (long) BUFFER_ADDRESS.invokeExact(buffer);
             return MemorySegment.ofAddress(address).reinterpret(size);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /** A copy of the bytes of buffer {@code buffer}, which stays live. */
+    static byte[] bytes(long buffer) {
+        try {
+            long address = (long) BUFFER_ADDRESS.invokeExact(buffer);
+            long len = (long) BUFFER_LEN.invokeExact(buffer);
+            return MemorySegment.ofAddress(address).reinterpret(len).toArray(ValueLayout.JAVA_BYTE);
         } catch (Throwable e) {
             throw failed(e);
         }

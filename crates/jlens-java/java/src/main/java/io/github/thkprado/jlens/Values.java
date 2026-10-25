@@ -29,6 +29,11 @@ final class Values {
     static final byte ARRAY = 6;
     static final byte OBJECT = 7;
     static final byte INPUT = 8;
+    static final byte FUNCTION = 9;
+    static final byte UNDEFINED = 10;
+
+    /** A function among a host function's arguments, which {@link Host} makes callable. */
+    record Function(int arity) {}
 
     private static final VarHandle I32 =
             MethodHandles.byteArrayViewVarHandle(int[].class, ByteOrder.LITTLE_ENDIAN);
@@ -121,6 +126,9 @@ final class Values {
                 yield value;
             }
             case STRING -> text();
+            // Among a host function's arguments only.
+            case FUNCTION -> new Function(u32());
+            case UNDEFINED -> null;
             case INPUT -> {
                 if (input == null) throw new IllegalStateException("jlens: an input value with no input");
                 yield input[u32()];
