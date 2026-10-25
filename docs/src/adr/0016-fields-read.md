@@ -286,3 +286,16 @@ parses a matching document again, whole, to print it.*
 - Implementation, in order: the analysis, the cut and the Rust API, with the tests above
   (roadmap 0.18, item 2); the WebAssembly and Python packages and the CLI (item 3); the pruned
   parse (item 4).
+
+## Amendment: `$merge` needs its arguments (0.24)
+
+The row of decision 5 for `$append`, `$reverse`, `$shuffle`, `$zip` and `$merge` read nothing
+of their arguments: what reads them is whatever uses the value. But `$merge` fails with `T0412`
+on an item that is not an object, whether or not its value is used. `($y := $merge($x); a)`
+read nothing of `$x`, so the bindings cut by its `Reads` dropped `$x`, and the expression gave
+`a` where the whole bindings gave `T0412`. A run of the property tests with
+`PROPTEST_CASES=100000` found it (roadmap 0.24 #6).
+
+`$merge` now reads its arguments as `$count` does, needed: a cut keeps each item and its kind,
+which is all the check looks at. The places of its value are unchanged. The other four accept
+any value.

@@ -1006,6 +1006,10 @@ impl<'n> Analysis<'n> {
                 let mut value = Vec::new();
                 for arg in &args {
                     let places = self.arg(arg, context, scope);
+                    // `$merge` fails on an item that is not an object, used or not.
+                    if name == "merge" {
+                        self.need(&places);
+                    }
                     self.join(&mut value, places);
                 }
                 value

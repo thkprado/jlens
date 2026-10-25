@@ -43,6 +43,16 @@ All notable changes are recorded here. The format follows
   the `Sink` found that most of what a level costs is allocating and freeing a lazy value for
   each of its arrays and objects; the performance page has the details.
 
+### Fixed
+
+- Under a timeout, a predicate that gives the same value for each item, such as `[0 + 0]`, could
+  fail with `U1006` although no step limit was set, when the timeout's read of the clock fell
+  inside it; with a step limit, it could also count the wrong number of steps. A debug build
+  panicked. The bug came with the step limit, in 0.20.0.
+- `Expression::reads` reads the argument of `$merge` even when its value is not used, as
+  `$merge` fails with `T0412` on an item that is not an object: `($y := $merge($x); a)` no
+  longer leaves `$x` out of its reads (ADR 0016, amended).
+
 ## [0.23.0]
 
 Regular expressions with a lookahead or a lookbehind take less than half the time they did on

@@ -127,3 +127,32 @@ fn catastrophic_regexes_stop_on_steps() {
         started.elapsed()
     );
 }
+
+/// A predicate evaluated once for all the items spends the steps of each, also when a timeout's
+/// read of the clock falls inside it (found with `PROPTEST_CASES=100000`).
+#[test]
+fn a_constant_predicate_counts_its_steps_across_a_clock_read() {
+    // More steps than the clock is read every, so one read falls inside the predicate.
+    let source = format!("($i := 0; [1, 2, 3][{}])", vec!["$i"; 300].join(" + "));
+    let expr = Expression::compile(&source).unwrap();
+    let (_, audit) = expr.evaluate_audited(
+        Some(&input()),
+        &Bindings::new(),
+        &Options::new(),
+        &AuditOptions::decisions(),
+    );
+    let steps = audit.header.steps;
+    let options = Options::new().timeout(std::time::Duration::from_secs(60));
+    let within = expr.evaluate_with(
+        Some(&input()),
+        &Bindings::new(),
+        &options.clone().max_steps(steps),
+    );
+    assert_eq!(within.unwrap(), Some(json!(1)));
+    let fewer = expr.evaluate_with(
+        Some(&input()),
+        &Bindings::new(),
+        &options.max_steps(steps - 1),
+    );
+    assert_eq!(fewer.unwrap_err().code(), "U1006");
+}

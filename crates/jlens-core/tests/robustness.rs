@@ -1689,6 +1689,13 @@ fn found_reads_keep_what_an_evaluation_needs() {
         let expr = Expression::compile(source).unwrap();
         agrees_when_cut(&expr, &expr.reads()).unwrap();
     }
+    // Found with `PROPTEST_CASES=100000`: `$merge` fails on an item that is not an object, so
+    // its argument is read even when its result is not used.
+    let expr = Expression::compile("($y := $merge($x); a)").unwrap();
+    agrees_when_cut(&expr, &expr.reads()).unwrap();
+    // And a predicate evaluated once, whose steps overflowed across a read of the clock.
+    let expr = Expression::compile("items@$o.$x.($k := $; $x.$$.o.p[$k])").unwrap();
+    agrees_when_cut_with(&expr, &expr.reads_with(&without_input(bindings())), true).unwrap();
 }
 
 proptest! {

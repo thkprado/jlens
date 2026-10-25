@@ -1275,11 +1275,12 @@ impl<'a> Evaluator<'_, 'a> {
         if len == 0 {
             return Ok(());
         }
-        let before = self.steps.get();
+        let before = self.steps_taken();
         // The predicate reads nothing from the items, so none is read for it.
         let mut res = self.eval(predicate, &Value::Undefined, env)?;
-        // Each further item would take the steps of the first.
-        let each = before - self.steps.get();
+        // Each further item would take the steps of the first, counted on the whole budget: a
+        // read of the clock inside the predicate refills `steps`.
+        let each = self.steps_taken() - before;
         self.charge(each.saturating_mul(len as u64 - 1))?;
         if res.is_numeric()? {
             res = Value::array(vec![res], 0);
