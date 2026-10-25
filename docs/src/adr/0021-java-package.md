@@ -590,7 +590,7 @@ beta, and the API work covers them when it comes.
    ADR 0015 adds it to the contracts outside Rust that it freezes.
 2. **Results as Java objects are part of the package**, not left for later. How they are
    built, through the result builder (ADR 0017) with upcalls or by decoding the JSON text in
-   Java, is measured in 0.25 #3.
+   Java, is measured in 0.25 #5.
 
 ### Consequences
 
