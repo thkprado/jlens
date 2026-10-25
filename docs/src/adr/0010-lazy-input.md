@@ -335,4 +335,4 @@ step read one field of an object; an index had no such way.
   the items kept. Only lazy arrays allocate it; an array that an evaluation builds, or one of a
   `Document`, is unchanged.
 - The WebAssembly and Python packages' sources do not implement the methods yet: roadmap 0.24
-  #5 and #6.
+  #6 and #7.
