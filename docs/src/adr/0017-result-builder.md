@@ -131,6 +131,10 @@ jsonata-java returns at once.
 - A builder still does not see the evaluation's values: only a member's identity.
 - The walk asks once per array or object of a source, and the default inlines to nothing, so
   JSON input and the other builders pay nothing. Lazy JSON is written from its text, as before.
+  `cargo xtask ab` against the commit before, in the three modes, put every case within the
+  noise: `recursion` took 2.9 to 3.9% longer without alignment flags and 1.4% less with them,
+  `names over items` 2.6% less without and 3.7% more with, the layout of the release build
+  moving them, and the others within 2%.
 - The C API writes such a member as its number (`INPUT`), and the Java package returns its own
   map or list: `$` over Java objects returns the input itself, as jsonata-java does. The
   Python and WebAssembly packages could do the same; they do not yet.
