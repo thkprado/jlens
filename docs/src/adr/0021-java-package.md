@@ -342,3 +342,38 @@ What this says:
   first. That belongs to `jlens-core`, outside this ADR.
 
 The full tables, Linux included, are in the spike's `bench/results-*.md`.
+
+**Item 3** (2026-10-25, the same module and versions as item 2).
+
+- **No function is left to the interpreter.** The build passes with
+  `interpreterFallback=FAIL`. The module gives 2,963 methods and 1.47 MB of bytecode. The
+  largest method takes 25,776 bytes, 39% of the JVM's limit of 65,535.
+- **29 methods exceed HotSpot's 8,000-byte limit for JIT compilation**, and they are hot
+  paths. Without `-XX:-DontCompileHugeMethods` they run in the JVM's interpreter, which
+  explains item 2's slow Chicory columns. They include:
+  - `Evaluator::path`, `Evaluator::group` and `Evaluator::apply_inner`;
+  - the pruned parse's `CutSeed` and serde_json's `f64_from_parts`;
+  - the parser (`Parser::expression`, `led_step`) and the `Processor`;
+  - ten of `jlens-regress`'s backtracking functions, and its parser;
+  - `$replace`, `$formatNumber` and the date-time parser.
+- **Built with `opt-level = "s"`**, as the WebAssembly package is, the module gives 4,718
+  smaller methods: 16 exceed 8,000 bytes, and the largest takes 20,725. Without the flag,
+  JSON text then takes 2.9 to 6.3 ms on 1,000 items instead of 13 to 25 ms, about what
+  `opt-level = 3` takes with the flag (`$` stays near 20 ms either way). A `Document` still needs the flag:
+  `$sum(items.price)` takes 1,087 µs without it, 386 µs with it (one run of each, Windows).
+  The verdict of item 2 stands.
+- **Sizes**, as a JAR compresses them (deflate):
+
+  | Part | Raw | Compressed |
+  |---|---:|---:|
+  | Chicory: the generated classes and module metadata, `opt-level = 3` | 2.39 MB | 0.78 MB |
+  | Chicory: the same, `opt-level = "s"` | 2.22 MB | 0.69 MB |
+  | Chicory's runtime, `wasm`, `wasi` and `log` JARs | | 0.43 MB |
+  | Panama: the Windows DLL | 2.28 MB | 0.93 MB |
+  | Panama: the Linux `.so`, stripped | 2.40 MB | 0.97 MB |
+
+- **What a user downloads.**
+  - With Chicory: one JAR of about 1.2 MB, the same everywhere, with its runtime.
+  - With Panama: about 1 MB per platform, so about 7 MB for one JAR with the seven
+    targets, or about 1 MB per platform JAR with a Maven classifier.
+  - Both are about the size of a Python wheel (1.1 to 1.3 MB, ADR 0014).
