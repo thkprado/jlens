@@ -12,6 +12,7 @@
     { "name": "object constructor", "expr": "items.{'code': code, 'kind': 'item', 'total': unitPrice * quantity}" },
     { "name": "transform", "expr": "$ ~> |items|{'total': unitPrice * quantity}, ['tax']|" },
     { "name": "recursion", "expr": "($f := function($n){ $n <= 1 ? $n : $f($n - 1) + $f($n - 2) }; $f(15))" },
-    { "name": "shipping rule", "file": "../fixtures/shipping-rule.jsonata" }
+    { "name": "shipping rule", "file": "../fixtures/shipping-rule.jsonata" },
+    { "name": "index into 10,000 items", "input": "items-10000.json", "expr": "items[0].code" }
   ]
 }

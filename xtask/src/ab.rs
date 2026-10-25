@@ -10,6 +10,10 @@
 //! the median of the rounds, which a rare fast process does not move; the fastest round is
 //! printed beside it.
 //!
+//! `--mode` picks how the cases read their input: `evaluate` from the `serde_json::Value`,
+//! `document` from a `Document` converted once, `source` through a `Source` in the probe, one
+//! level at a time, as the Python package reads its values.
+//!
 //! A revision is anything `git rev-parse` accepts, or `.` for the working tree with its
 //! uncommitted changes. The program of a commit is built once, in a temporary git worktree,
 //! and kept in `target/ab/bin`.
@@ -137,8 +141,8 @@ pub fn run(args: &[String]) -> Result<()> {
     let [a, b] = positional.as_slice() else {
         bail!("ab needs two revisions\n\n{}", super::USAGE);
     };
-    if mode != "evaluate" && mode != "document" {
-        bail!("--mode is `evaluate` or `document`, not {mode:?}");
+    if !["evaluate", "document", "source"].contains(&mode.as_str()) {
+        bail!("--mode is `evaluate`, `document` or `source`, not {mode:?}");
     }
     if b_allocator != "system" && b_allocator != "mimalloc" {
         bail!("--b-allocator is `system` or `mimalloc`, not {b_allocator:?}");

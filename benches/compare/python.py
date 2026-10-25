@@ -182,13 +182,18 @@ def _normalize(value):
 
 
 def _cases():
+    """The cases, as (name, source, input file), and the inputs by file: a case reads the
+    workload's input, or its own."""
     spec = json.loads((HERE.parent / "cases.json").read_text(encoding="utf-8"))
-    input = json.loads((HERE.parent / spec["input"]).read_text(encoding="utf-8"))
+    inputs = {}
     cases = []
     for case in spec["cases"]:
         source = case.get("expr") or (HERE.parent / case["file"]).read_text(encoding="utf-8")
-        cases.append((case["name"], source))
-    return input, cases
+        file = case.get("input", spec["input"])
+        if file not in inputs:
+            inputs[file] = json.loads((HERE.parent / file).read_text(encoding="utf-8"))
+        cases.append((case["name"], source, file))
+    return inputs, cases
 
 
 def _measure(run, rounds=7, round_s=0.2):
@@ -213,20 +218,21 @@ def speed_child(name, max_steps=None):
     # Without a limit, no call passes `max_steps`: a call with `**limits`, even empty, builds a
     # tuple and a dict, which cost about 0.3 µs, as much as the smallest cases take.
     n = None if max_steps is None else int(max_steps)
-    input, cases = _cases()
+    inputs, cases = _cases()
     out = {"version": impl.version, "python": sys.version.split()[0], "cases": {}}
     out["document"] = hasattr(impl, "document")
-    document = impl.document(input) if hasattr(impl, "document") else None
-    for case, source in cases:
+    documents = {file: impl.document(input) for file, input in inputs.items()} if out["document"] else {}
+    for case, source, file in cases:
+        input, document = inputs[file], documents.get(file)
         entry = {}
         try:
             compiled = impl.compile(source)
             if n is None:
-                run = lambda c=compiled: impl.evaluate(c, input)
-                run_document = lambda c=compiled: impl.evaluate_document(c, document)
+                run = lambda c=compiled, i=input: impl.evaluate(c, i)
+                run_document = lambda c=compiled, d=document: impl.evaluate_document(c, d)
             else:
-                run = lambda c=compiled: impl.evaluate(c, input, max_steps=n)
-                run_document = lambda c=compiled: impl.evaluate_document(c, document, max_steps=n)
+                run = lambda c=compiled, i=input: impl.evaluate(c, i, max_steps=n)
+                run_document = lambda c=compiled, d=document: impl.evaluate_document(c, d, max_steps=n)
             entry["result"] = _normalize(run())
             entry["evaluate"] = _measure(run)
             if document is not None:
@@ -274,7 +280,7 @@ def speed(pythons, max_steps=None):
     print("| Case | " + " | ".join(header) + " |")
     print("|---|" + "---:|" * len(header))
     _, cases = _cases()
-    for case, _ in cases:
+    for case, *_ in cases:
         expected = reference["cases"][case].get("result") if reference else None
         cells = []
         for name, key in columns:

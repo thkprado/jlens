@@ -30,12 +30,21 @@ const limits = args["max-steps"] ? [null, { maxSteps: Number(args["max-steps"]) 
 const spec = JSON.parse(await readFile(here("../cases.json"), "utf8"));
 const inputText = await readFile(here(`../${spec.input}`), "utf8");
 const input = JSON.parse(inputText);
-const cases = await Promise.all(
-  spec.cases.map(async (c) => ({
+// A case reads the workload's input, or its own.
+const inputs = new Map([[spec.input, { text: inputText, value: input }]]);
+const cases = [];
+for (const c of spec.cases) {
+  const file = c.input ?? spec.input;
+  if (!inputs.has(file)) {
+    const text = await readFile(here(`../${file}`), "utf8");
+    inputs.set(file, { text, value: JSON.parse(text) });
+  }
+  cases.push({
     name: c.name,
     source: c.expr ?? (await readFile(here(`../${c.file}`), "utf8")),
-  })),
-);
+    input: inputs.get(file),
+  });
+}
 
 /** Median time per call in microseconds, over `rounds` rounds of about 200 ms each. */
 async function measure(run, rounds = 7) {
@@ -66,23 +75,23 @@ console.log(`| \`JSON.stringify\` of the input | ${fmt(await measure(() => JSON.
 console.log(`| \`Document.fromJson\` of that text, then \`free\` | ${fmt(await measure(() => Document.fromJson(compact).free()))} |`);
 console.log(`| \`new Document\` of the input, then \`free\` | ${fmt(await measure(() => new Document(input).free()))} |\n`);
 
-const doc = new Document(input);
+for (const input of inputs.values()) input.doc = new Document(input.value);
 console.log("| Case | jsonata-js | jlens-wasm `evaluate` | jlens-wasm `evaluateJson` | jlens-wasm `evaluateDocument` |");
 console.log("|---|---:|---:|---:|---:|");
-for (const { name, source } of cases) {
+for (const { name, source, input } of cases) {
   const js = jsonata(source);
   const wasm = new Expression(source);
   // The implementations must agree before their speed is compared.
-  const expected = JSON.stringify(await js.evaluate(input));
-  const actual = JSON.stringify(wasm.evaluate(input, ...limits));
+  const expected = JSON.stringify(await js.evaluate(input.value));
+  const actual = JSON.stringify(wasm.evaluate(input.value, ...limits));
   if (expected !== actual) {
     console.log(`| ${name} | results differ: ${expected?.slice(0, 60)} vs ${actual?.slice(0, 60)} | | | |`);
     continue;
   }
-  const a = await measure(() => js.evaluate(input));
-  const b = await measure(() => wasm.evaluate(input, ...limits));
-  const c = await measure(() => wasm.evaluateJson(inputText, ...limits));
-  const d = await measure(() => wasm.evaluateDocument(doc, ...limits));
+  const a = await measure(() => js.evaluate(input.value));
+  const b = await measure(() => wasm.evaluate(input.value, ...limits));
+  const c = await measure(() => wasm.evaluateJson(input.text, ...limits));
+  const d = await measure(() => wasm.evaluateDocument(input.doc, ...limits));
   console.log(`| ${name} | ${fmt(a)} | ${fmt(b)} | ${fmt(c)} | ${fmt(d)} |`);
   wasm.free();
 }

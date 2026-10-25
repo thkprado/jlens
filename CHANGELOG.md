@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `cargo xtask ab --mode source` measures the workload read through a `Source`, one level at a
+  time, as the Python package reads its values. The workload has a case that indexes an array
+  of 10,000 items, `items[0].code`, which the WebAssembly and Python comparisons run too.
+
 ### Changed
 
 - A predicate reads its array where it is instead of copying it first, so an index such as

@@ -66,8 +66,9 @@ commands:
                                     or with --site the site built by `site`
   site                              build the book and the web editor into target/site
   release-notes <version>           print the GitHub release notes of <version>, from CHANGELOG.md
-  ab <rev A> <rev B> [--rounds N] [--mode evaluate|document] [--case NAME]... [--sample-ms MS]
-     [--b-allocator system|mimalloc] [--b-max-steps N] [--timeout MS] [--target TRIPLE]
+  ab <rev A> <rev B> [--rounds N] [--mode evaluate|document|source] [--case NAME]...
+     [--sample-ms MS] [--b-allocator system|mimalloc] [--b-max-steps N] [--timeout MS]
+     [--target TRIPLE]
                                     compare the speed of two revisions (`.` is the working tree)
                                     on benches/cases.json, by running them in alternation; B can
                                     use mimalloc or a step limit, both can have a timeout, and

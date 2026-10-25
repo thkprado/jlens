@@ -5,7 +5,7 @@
 //!
 //! Groups:
 //! - `compile`: parsing and post-processing;
-//! - `evaluate`: evaluating each case against a 200-item document;
+//! - `evaluate`: evaluating each case against a 200-item document, or against its own input;
 //! - `document`: converting that document (with and without dropping it), parsing it cut by
 //!   what the cases read, and parsing a wide document whole and cut; and
 //!   `evaluate_document`: the cases against it converted once;
@@ -25,15 +25,17 @@ fn benches_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../benches")
 }
 
-/// The cases of `benches/cases.json`, as `(name, source)`, and the input document.
-fn workload() -> (Vec<(String, String)>, Value) {
+/// The cases of `benches/cases.json`, as `(name, source, input)`, where `input` is the case's
+/// own input, if it has one, and the workload's input document.
+type Case = (String, String, Option<Value>);
+
+fn workload() -> (Vec<Case>, Value) {
     let dir = benches_dir();
-    let spec: Value =
-        serde_json::from_str(&fs::read_to_string(dir.join("cases.json")).unwrap()).unwrap();
-    let input = serde_json::from_str(
-        &fs::read_to_string(dir.join(spec["input"].as_str().unwrap())).unwrap(),
-    )
-    .unwrap();
+    let read = |file: &str| -> Value {
+        serde_json::from_str(&fs::read_to_string(dir.join(file)).unwrap()).unwrap()
+    };
+    let spec = read("cases.json");
+    let input = read(spec["input"].as_str().unwrap());
     let cases = spec["cases"]
         .as_array()
         .unwrap()
@@ -44,7 +46,8 @@ fn workload() -> (Vec<(String, String)>, Value) {
                 (None, Some(file)) => fs::read_to_string(dir.join(file.as_str().unwrap())).unwrap(),
                 _ => panic!("a case needs `expr` or `file`"),
             };
-            (case["name"].as_str().unwrap().to_owned(), source)
+            let own = case.get("input").map(|file| read(file.as_str().unwrap()));
+            (case["name"].as_str().unwrap().to_owned(), source, own)
         })
         .collect();
     (cases, input)
@@ -53,9 +56,9 @@ fn workload() -> (Vec<(String, String)>, Value) {
 fn compile(c: &mut Criterion) {
     let (cases, _) = workload();
     let mut group = c.benchmark_group("compile");
-    for (name, source) in cases
+    for (name, source, _) in cases
         .iter()
-        .filter(|(n, _)| ["path", "group-by", "shipping rule"].contains(&n.as_str()))
+        .filter(|(n, ..)| ["path", "group-by", "shipping rule"].contains(&n.as_str()))
     {
         group.bench_function(name.as_str(), |b| {
             b.iter(|| Expression::compile(black_box(source)).unwrap())
@@ -68,12 +71,13 @@ fn evaluate(c: &mut Criterion) {
     let (cases, input) = workload();
     let bindings = Bindings::new();
     let mut group = c.benchmark_group("evaluate");
-    for (name, source) in &cases {
+    for (name, source, own) in &cases {
         let expr = Expression::compile(source).unwrap();
+        let input = own.as_ref().unwrap_or(&input);
         // Every case must succeed, or the benchmark measures an error path.
-        expr.evaluate(Some(&input), &bindings).unwrap();
+        expr.evaluate(Some(input), &bindings).unwrap();
         group.bench_function(name.as_str(), |b| {
-            b.iter(|| expr.evaluate(Some(black_box(&input)), &bindings).unwrap())
+            b.iter(|| expr.evaluate(Some(black_box(input)), &bindings).unwrap())
         });
     }
     group.finish();
@@ -99,7 +103,7 @@ fn document(c: &mut Criterion) {
     // Cut by what the cases read: one case, then the union of all of them.
     let exprs: Vec<_> = cases
         .iter()
-        .map(|(_, source)| Expression::compile(source).unwrap())
+        .map(|(_, source, _)| Expression::compile(source).unwrap())
         .collect();
     let read = exprs[1].reads().input().unwrap().clone();
     group.bench_function("Document::parse_cut names over items", |b| {
@@ -127,11 +131,13 @@ fn document(c: &mut Criterion) {
     let bindings = Bindings::new();
     let options = Options::default();
     let mut group = c.benchmark_group("evaluate_document");
-    for (name, source) in &cases {
+    for (name, source, own) in &cases {
         let expr = Expression::compile(source).unwrap();
+        let own = own.as_ref().map(Document::new);
+        let doc = own.as_ref().unwrap_or(&doc);
         group.bench_function(name.as_str(), |b| {
             b.iter(|| {
-                expr.evaluate_document(black_box(&doc), &bindings, &options)
+                expr.evaluate_document(black_box(doc), &bindings, &options)
                     .unwrap()
             })
         });
@@ -167,7 +173,7 @@ fn wide_document() -> String {
 
 fn audit(c: &mut Criterion) {
     let (cases, input) = workload();
-    let (_, source) = cases.iter().find(|(n, _)| n == "shipping rule").unwrap();
+    let (_, source, _) = cases.iter().find(|(n, ..)| n == "shipping rule").unwrap();
     let expr = Expression::compile(source).unwrap();
     let bindings = Bindings::new();
     let options = Options::default();

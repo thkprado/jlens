@@ -7,10 +7,15 @@ performance is measured, what the numbers are, and how to use the API to get the
 
 The workload is in `benches/` at the repository root. It is shared by the native benchmarks and
 by the comparisons with jsonata-js and with the other Python packages:
-- `benches/cases.json` lists twelve expressions: path navigation, a name mapped over the
+- `benches/cases.json` lists thirteen expressions: path navigation, a name mapped over the
   items, filters with aggregation, grouping, sorting, string and regex functions, number formatting, an object constructor, a
-  transform, a recursive function, and the shipping rule from the guides.
-- `benches/orders-200.json` is a 24 KB store order with 200 items.
+  transform, a recursive function, the shipping rule from the guides, and an index into a long
+  array.
+- `benches/orders-200.json` is a 24 KB store order with 200 items, the input of every case but
+  the last.
+- `benches/items-10000.json` is an array of 10,000 small items, the input of the last case,
+  `items[0].code`: it costs little only when an index does not touch the other items, which 200
+  items would hide.
 - `crates/jlens-core/benches/host_state.rs` builds a document from Rust values again and again,
   as an application that keeps its state in Rust types does
   ([below](#documents-built-from-rust-values)). It is native only.
@@ -33,7 +38,16 @@ differ by more than the change. `cargo xtask ab` is built for this:
 cargo xtask ab main .                         # main against the working tree
 cargo xtask ab v0.9.0 HEAD --case regex --case strings --rounds 20
 cargo xtask ab main . --mode document         # evaluate_document instead of evaluate
+cargo xtask ab main . --mode source           # evaluate_source instead of evaluate
 ```
+
+- `--mode` picks how the cases read their input. `evaluate` (the default) reads a
+  `serde_json::Value`, converting the levels the expression reaches. `document` reads a
+  `Document` converted once, before the measurement. `source` reads the `serde_json::Value`
+  through a `Source` written in the program, one level at a time, as the Python package reads
+  its `dict`s and `list`s: the arrays and objects of a level are members of one `Sources`, and a
+  path step reads one field of an object alone. It measures what a level read through a `Sink`
+  costs, which the packages for other languages pay on every evaluation.
 
 - It builds one program per revision, against that revision's `jlens-core`, with the release
   profile. A revision is anything git names (a commit, a tag, a branch), or `.` for the working
@@ -51,7 +65,8 @@ cargo xtask ab main . --mode document         # evaluate_document instead of eva
   than usual, by up to 10% on the machine below, and one such run sets the fastest time.
 
 Comparing a revision with itself shows the noise. On the machine below, with ten rounds, the
-medians of most cases agree within 1%, and a few cases (`group-by`) within 3%.
+medians of most cases agree within 1%, and a few cases (`group-by`) within 3%. In `source`
+mode, the index into 10,000 items, which writes an object for each item, agrees within 6%.
 
 The numbers below were measured on an AMD Ryzen 7 3700X under Windows 11, with Rust 1.99 and
 Node.js 24, for jlens 0.23.0. They are meant

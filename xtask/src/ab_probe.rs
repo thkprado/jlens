@@ -2,41 +2,58 @@
 //! `jlens-core`. It is also a module of xtask, so that it keeps compiling against the current
 //! API.
 //!
-//! Usage: `probe <benches dir> <evaluate|document> <sample ms> [case]...`. It runs the cases of
-//! `cases.json` (those named, or all of them) and prints, for each, its name, a tab and the
-//! fastest time of one evaluation in nanoseconds, over five samples of about `sample ms` each.
+//! Usage: `probe <benches dir> <evaluate|document|source> <sample ms> [case]...`. It runs the
+//! cases of `cases.json` (those named, or all of them) and prints, for each, its name, a tab and
+//! the fastest time of one evaluation in nanoseconds, over five samples of about `sample ms`
+//! each.
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::hint::black_box;
 use std::path::Path;
 use std::process::exit;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use jlens_core::input::{Sink, Source, Sources};
 use jlens_core::{Bindings, Document, Expression, Options};
 use serde_json::Value;
 
 const SAMPLES: usize = 5;
 const WARM_UP: Duration = Duration::from_millis(20);
 
+#[derive(Clone, Copy)]
+enum Mode {
+    /// `evaluate_with` on the `serde_json::Value`.
+    Evaluate,
+    /// `evaluate_document` on a `Document` converted once.
+    Document,
+    /// `evaluate_source` on the input read through [`Input`].
+    Source,
+}
+
 pub fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 3 {
-        eprintln!("usage: probe <benches dir> <evaluate|document> <sample ms> [case]...");
+        eprintln!("usage: probe <benches dir> <evaluate|document|source> <sample ms> [case]...");
         exit(2);
     }
     let dir = Path::new(&args[0]);
-    let document = match args[1].as_str() {
-        "evaluate" => false,
-        "document" => true,
+    let mode = match args[1].as_str() {
+        "evaluate" => Mode::Evaluate,
+        "document" => Mode::Document,
+        "source" => Mode::Source,
         mode => fail(&format!("unknown mode {mode:?}")),
     };
     let sample = Duration::from_millis(args[2].parse().unwrap_or_else(|_| fail("bad sample")));
     let wanted = &args[3..];
 
     let spec: Value = read_json(&dir.join("cases.json"));
-    let input = read_json(&dir.join(spec["input"].as_str().unwrap_or_default()));
-    let doc = Document::new(&input);
+    // A case reads the workload's input, or its own.
+    let default = spec["input"].as_str().unwrap_or_default();
+    let mut inputs: BTreeMap<String, (Value, Document)> = BTreeMap::new();
     let bindings = Bindings::new();
     // `cargo xtask ab --b-max-steps` and `--timeout` replace this line.
     let options = Options::default();
@@ -51,12 +68,18 @@ pub fn main() {
                 .unwrap_or_else(|e| fail(&format!("reading {file}: {e}"))),
             _ => fail(&format!("case {name:?} needs `expr` or `file`")),
         };
+        let file = case["input"].as_str().unwrap_or(default);
+        let (input, doc) = &*inputs.entry(file.to_owned()).or_insert_with(|| {
+            let input = read_json(&dir.join(file));
+            let doc = Document::new(&input);
+            (input, doc)
+        });
         let expr = Expression::compile(&source).unwrap_or_else(|e| fail(&format!("{name}: {e}")));
         let run = || {
-            let result = if document {
-                expr.evaluate_document(black_box(&doc), &bindings, &options)
-            } else {
-                expr.evaluate_with(Some(black_box(&input)), &bindings, &options)
+            let result = match mode {
+                Mode::Evaluate => expr.evaluate_with(Some(black_box(input)), &bindings, &options),
+                Mode::Document => expr.evaluate_document(black_box(doc), &bindings, &options),
+                Mode::Source => expr.evaluate_source(&Input(black_box(input)), &bindings, &options),
             };
             // Every case must succeed, or the probe measures an error path.
             if let Err(e) = result {
@@ -64,6 +87,79 @@ pub fn main() {
             }
         };
         println!("{name}\t{}", fastest(run, sample));
+    }
+}
+
+/// The input, read one level at a time as the Python package reads its values: the arrays and
+/// objects of a level are members of one [`Level`], made when the first of them is written, and
+/// a path step reads one field of an object alone.
+struct Input<'j>(&'j Value);
+
+/// The arrays and objects of a level.
+#[derive(Default)]
+struct Level<'j>(RefCell<Vec<&'j Value>>);
+
+/// Writes `value`; an array or an object becomes a member of `level`.
+fn put<'j>(sink: &mut Sink<'_, 'j>, value: &'j Value, level: &mut Option<Rc<Level<'j>>>) {
+    match value {
+        Value::Null => sink.null(),
+        Value::Bool(b) => sink.bool(*b),
+        Value::Number(n) => sink.number(n.as_f64().unwrap_or(f64::NAN)),
+        Value::String(s) => sink.string(s),
+        Value::Array(_) | Value::Object(_) => {
+            let level = level.get_or_insert_with(Rc::default);
+            let index = {
+                let mut members = level.0.borrow_mut();
+                members.push(value);
+                members.len() as u32 - 1
+            };
+            if value.is_array() {
+                sink.array_of(level, index);
+            } else {
+                sink.object_of(level, index);
+            }
+        }
+    }
+}
+
+impl<'j> Source<'j> for Input<'j> {
+    fn read(&self, sink: &mut Sink<'_, 'j>) -> Result<(), String> {
+        put(sink, self.0, &mut None);
+        Ok(())
+    }
+}
+
+impl<'j> Sources<'j> for Level<'j> {
+    fn read(&self, index: u32, sink: &mut Sink<'_, 'j>) -> Result<(), String> {
+        let member = self.0.borrow()[index as usize];
+        let mut level = None;
+        match member {
+            Value::Array(items) => {
+                sink.reserve(items.len());
+                for item in items {
+                    put(sink, item, &mut level);
+                }
+            }
+            Value::Object(fields) => {
+                sink.reserve(fields.len());
+                for (key, value) in fields {
+                    sink.key(key);
+                    put(sink, value, &mut level);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn read_field(&self, index: u32, key: &str, sink: &mut Sink<'_, 'j>) -> Result<bool, String> {
+        let Value::Object(fields) = self.0.borrow()[index as usize] else {
+            return Ok(false);
+        };
+        if let Some(value) = fields.get(key) {
+            put(sink, value, &mut None);
+        }
+        Ok(true)
     }
 }
 
