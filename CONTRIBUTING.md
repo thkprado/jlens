@@ -12,6 +12,7 @@ You need Rust 1.88 or later (stable). Some tasks need more:
 | Browser tests | Chrome, Chromium or Edge (`JLENS_BROWSER` to choose) |
 | The book | `mdbook` |
 | Comparisons with jsonata-js | Node.js and `npm install` in `benches/compare` |
+| Comparisons with the JVM implementations | a JDK 25 or later (`cargo xtask java-compare`, `benches/compare/README.md`) |
 
 ## Checks
 

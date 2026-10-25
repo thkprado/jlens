@@ -63,7 +63,7 @@ jlens check --schema schema.json -f fixtures/shipping-rule.jsonata
 | `tests/conformance` | Baseline, overrides and conformance report |
 | `fixtures` | Sample documents and expressions used in tests and guides |
 | `examples/web-editor` | Browser demo: JSONata editor with autocomplete, explanations and audit trees |
-| `benches` | Benchmark workload, and comparisons with jsonata-js (`benches/compare`) |
+| `benches` | Benchmark workload, and comparisons with other JSONata implementations (`benches/compare`) |
 | `docs` | The jlens book (mdBook) and decision records |
 | `xtask` | Repository automation (`cargo xtask`) |
 

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Compares the Java package with the other JSONata implementations for the JVM. Run it with
+     `cargo xtask java-compare` (see ../README.md). -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.thkprado</groupId>
+  <artifactId>jlens-compare</artifactId>
+  <version>0</version>
+
+  <properties>
+    <maven.compiler.release>25</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- The JAR that `cargo xtask java-compare` builds, with the version it passes. It is never
+         installed, so that a local build cannot hide the package published on Maven Central. -->
+    <jlens.jar>${project.basedir}/../../../crates/jlens-java/java/target/jlens-${jlens.version}.jar</jlens.jar>
+    <jsonata-java.version>0.9.10</jsonata-java.version>
+    <jsonata4java.version>3.0.0</jsonata4java.version>
+    <jsonata-jvm-compiler.version>1.0.7</jsonata-jvm-compiler.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- jsonata-jvm-compiler asks for jackson-databind 2.21 and gets jackson-core 2.18. -->
+      <dependency>
+        <groupId>com.fasterxml.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>2.21.2</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <dependency>
+      <groupId>io.github.thkprado</groupId>
+      <artifactId>jlens</artifactId>
+      <version>${jlens.version}</version>
+      <scope>system</scope>
+      <systemPath>${jlens.jar}</systemPath>
+    </dependency>
+    <!-- jsonata-java (Dashjoin), a port of jsonata-js 2.0 to Java objects. -->
+    <dependency>
+      <groupId>com.dashjoin</groupId>
+      <artifactId>jsonata</artifactId>
+      <version>${jsonata-java.version}</version>
+    </dependency>
+    <!-- JSONata4Java (IBM), over Jackson 3. -->
+    <dependency>
+      <groupId>com.ibm.jsonata4java</groupId>
+      <artifactId>JSONata4Java</artifactId>
+      <version>${jsonata4java.version}</version>
+    </dependency>
+    <!-- jsonata-jvm-compiler, which compiles an expression to a Java class, over Jackson 2. -->
+    <dependency>
+      <groupId>io.github.vlad-public-code</groupId>
+      <artifactId>jsonata-jvm-compiler</artifactId>
+      <version>${jsonata-jvm-compiler.version}</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <resources>
+      <!-- versions.properties: the versions above, for the tables' headers. -->
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>true</filtering>
+      </resource>
+    </resources>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.16.0</version>
+        <configuration>
+          <compilerArgs>
+            <arg>-Xlint:all</arg>
+            <arg>-Werror</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <version>3.5.0</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.11.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/deps</outputDirectory>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

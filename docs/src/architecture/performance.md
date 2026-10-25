@@ -25,6 +25,7 @@ cargo bench -p jlens-core                     # criterion, native
 cargo xtask ab main .                         # two revisions against each other, native
 cargo xtask wasm && cd benches/compare && npm install && node compare.mjs   # against jsonata-js
 python benches/compare/python.py speed jlens=<python> ...   # against the Python packages
+cargo xtask java-compare                      # against the JVM implementations (benches/compare/README.md)
 cargo bench -p jlens-regress --bench engine   # the regular expression engine alone (below)
 ```
 

@@ -65,6 +65,9 @@ commands:
                                     as the site assembles it
   java [<maven argument>...]        build the C API and test the Java package with the Maven
                                     Wrapper (`verify`, or the arguments given); needs a JDK 25+
+  java-compare [documents|cases|threads]... [--engines NAMES] [--sizes N,N]
+                                    compare the Java package with the other JSONata
+                                    implementations for the JVM (benches/compare/java)
   serve [--site]                    serve the repository over HTTP (for examples/web-editor),
                                     or with --site the site built by `site`
   site                              build the book and the web editor into target/site
@@ -139,6 +142,7 @@ fn main() -> Result<()> {
             args.iter().any(|a| a == "--example"),
         ),
         Some("java") => java::test(&args[1..]),
+        Some("java-compare") => java::compare(&args[1..]),
         Some("ab") => ab::run(&args[1..]),
         Some("serve") => wasm::serve_forever(args.iter().any(|a| a == "--site")),
         Some("site") => site::build(),

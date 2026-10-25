@@ -688,3 +688,47 @@ virtual threads.
 `items[0].name` on a `Document` of 1,000 items, through the exports from Rust: 616 to 623 ns
 before, 603 to 609 ns after. The lookup of a conversion no longer sweeps the cache on every
 evaluation, which pays for the load.
+
+### The comparison harness (0.25 #4)
+
+`cargo xtask java-compare` runs `benches/compare/java` (its README says how): the spike's
+documents, the workload of `benches/cases.json`, and the spike's throughput on platform and
+virtual threads, with each engine's result checked against jlens's first. Maven Central,
+searched again, has a JVM implementation the spike did not measure:
+`jsonata-jvm-compiler` 1.0.7, which translates an expression to Java and compiles it with
+`javac` at run time, over Jackson 2. The harness measures it with jsonata-java 0.9.10 and
+JSONata4Java 3.0.0; the README lists the packages left out and why. Every result agreed with
+jlens's, except two cases JSONata4Java rejects (`$formatNumber` on a path's value, the
+transform operator).
+
+Measured on Windows x86-64, Java 25.0.4, the machine of the spike:
+
+- **The harness reproduces the spike.** jsonata-java, unchanged since, takes within 4% of the
+  spike's times on its objects of 100,000 items and on parsing 1,000, 9% longer on parsing
+  100,000 for `items[0].name`, and 5 to 11% longer on its objects of 1,000 items (83 against
+  78 µs on `items[0].name`). On threads it gives 12,030 evaluations
+  per second on one and 85,981 on 16, against 11,922 and 85,472.
+- **jlens is faster than in the spike**, as #2 measured: on JSON text of 1,000 items it takes
+  232 to 529 µs where the spike took 277 to 633, and 2,041 µs on `$` (3,255); on threads,
+  25,350 evaluations per second on one, 224,252 on 16 and 217,297 on 1,000 virtual threads
+  (19,795, 150,036, 149,892). A `Document` now costs the same whatever its size:
+  `items[0].name` takes 0.88 µs on 1,000 items and 0.87 on 100,000, where the spike's took
+  4.8 µs and 2,362.
+- **jsonata-jvm-compiler is the one to beat on an input converted once.** On a Jackson tree it
+  takes 0.03 µs on `path` (jlens's `Document` 0.54), 8.7 against 27 µs on
+  `$sum(items.price)` over 1,000 items, and 1.8 (number formatting) to 26 times
+  (`recursion`) less than jlens on every case of `cases.json` but one: on
+  `($i := 0; items[$i].code)` it takes 43 µs against 1.2. Its expression is a Java class,
+  which the JIT compiles with the application.
+- **From JSON text, jlens is the fastest where the parsing is the cost.** It reads only the
+  fields an expression reads (ADR 0016), and the others parse the whole text with Jackson
+  or their own parser: on `path` it takes 32 µs against 99 to 158, and 366 against 686 to
+  786 µs on `items[0].name` over 1,000 items. Where the evaluation is the cost,
+  jsonata-jvm-compiler wins: 138 against 910 µs on `recursion`, 169 against 400 on
+  `sort + map`. On 100,000 items jlens takes 40 to 42 ms against 70 to 108 for the others,
+  but on `$`.
+- **On threads, jlens leads all three**: 224,252 evaluations per second on 16 threads, against
+  121,630 for jsonata-jvm-compiler, 85,981 for jsonata-java and 79,938 for JSONata4Java.
+- **`$` is still the case to watch.** jsonata-java and the two Jackson engines return their
+  input; jlens writes the whole document as JSON text (1,092 µs on 1,000 items, 128 ms on
+  100,000). That is #5's to measure.
