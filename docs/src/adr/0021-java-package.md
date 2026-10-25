@@ -878,3 +878,31 @@ packages do, through one more upcall (`host.rs` in `jlens-capi`):
 
 Host functions run while their virtual thread is pinned: one that blocks holds its carrier for
 that time, which the Java chapter says (0.25 #11).
+
+Measured on the maintainer's Windows machine, Java 25.0.4. The evaluations that take no bindings
+did not change: #4's harness on 1,000 items, 02a69e1 against this item, gave the same times
+within the noise, on a `Document` (`items[0].name` 0.89 µs before, 0.84 to 0.88 after) and on
+Java objects (2.63 before, 2.52 to 2.56 after). Microseconds per evaluation with no input, the
+best of five runs of 0.3 s:
+
+| Expression | Bindings | µs |
+|---|---|---:|
+| `1 + 2` | none | 0.48 |
+| `$a + $b` | two variables | 0.67 |
+| `$a + $b` | two variables, one function | 0.78 |
+| `$a + $b` | two variables, four functions | 1.10 |
+| `$a + $b` | two variables, sixteen functions | 2.17 |
+| `$add(1, 2)` | two variables, four functions | 1.99 |
+| `$add(1, 2)`, signature `<nn:n>` | the same | 2.15 |
+| `$apply(function($x) { $x + 1 }, 1)` | the same | 2.93 |
+| `$sum([1..100].$add($, 1))` | the same | 93.7 |
+| `$sum([1..100].($ + 1))` | the same | 12.7 |
+
+- **A host call costs about 0.8 µs**: an upcall, the arguments written and read as values both
+  ways, and the result. Calling back a function it received costs as much again.
+- **Bound functions cost about 0.09 µs each per evaluation, called or not**: the core binds
+  every host function in the evaluation's root frame before it starts (`eval.rs`), a cost the
+  Rust, Python and WebAssembly packages share. The Java side's own cost, the evaluation's
+  `Host` in a `ScopedValue`, is about 0.02 µs. Looking a host function up in the bindings when
+  a name is not found, instead of binding them all, would remove it; that is a change to the
+  core, left for its own item.
