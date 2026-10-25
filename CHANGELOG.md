@@ -20,6 +20,11 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- jlens-wasm: `evaluate` reads the items an index into an array picks, alone, instead of the
+  whole array, and the arrays and objects of a level cost one allocation each instead of two.
+  `items[0].code` over 10,000 items takes 6.7 µs instead of 6.19 ms, and
+  `($i := 0; items[$i].code)` 7.3 µs instead of 6.19 ms; the other cases of the comparison
+  with jsonata-js are between 3.6% faster and 0.4% slower.
 - An index held in a variable, as in `items[$i]` or `$map([0..9], function($i) { items[$i] })`,
   is evaluated once instead of once per item, and reads the items it picks as a number index
   does. `($i := 0; items[$i].code)` over 10,000 items takes 1.97 µs instead of 2.29 ms with

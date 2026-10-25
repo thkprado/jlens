@@ -208,7 +208,13 @@ array of up to 16 values through one call to a JavaScript helper, a larger one w
 objects. An expression that reads every item pays what converting the whole input does:
 `JSON.stringify` of the input takes 41 µs, and parsing that text 272 µs. Unlike the native
 and Python inputs, a JavaScript object is still read a whole level at a time: a path step does
-not read its one field alone, so `names over items` converts every item.
+not read its one field alone, so `names over items` converts every item. An index into an
+array reads the items it picks alone, since 0.24: with `evaluate`, `items[0].code` over
+10,000 items takes 6.7 µs instead of 6.19 ms, and `($i := 0; items[$i].code)` 7.3 µs instead
+of 6.19 ms, against 2.2 µs and 2.9 ms in jsonata-js, which tests every item for an index held
+in a variable. The source writes the arrays and objects of a level as members of one
+`Sources` too; the cases of the table moved by between −3.6% and +0.4% (the median of four
+runs each).
 
 `evaluate` is faster than jsonata-js on ten of the twelve cases, by up to 7.5× on recursion.
 It is slower on two:

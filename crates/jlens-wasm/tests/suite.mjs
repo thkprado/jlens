@@ -162,6 +162,42 @@ export const cases = [
     throws(() => value("x", { x: { toJSON() { throw boom; } } }), (e) => ok(e === boom, "the same exception"));
   }],
 
+  ["evaluate reads the items an index picks, alone", (j) => {
+    const value = (source, input) => new j.Expression(source).evaluate(input);
+    // The indexes of the items read, through a proxy over 100 items.
+    let read = [];
+    const items = Array.from({ length: 100 }, (_, i) => ({ code: i, tags: [i] }));
+    const input = {
+      items: new Proxy(items, {
+        get(target, key, receiver) {
+          if (typeof key === "string" && /^\d+$/.test(key)) read.push(Number(key));
+          return Reflect.get(target, key, receiver);
+        },
+      }),
+    };
+    const reads = (source) => {
+      read = [];
+      return [value(source, input), read];
+    };
+    equal(reads("items[0].code"), [0, [0]], "an index");
+    equal(reads("items[-1].tags[0]"), [99, [99]], "a negative index");
+    equal(reads("items[100]"), [undefined, []], "out of range");
+    equal(reads("($i := 2; items[$i].code)"), [2, [2]], "an index in a variable");
+    equal(reads("items[[1, 3]].code"), [[1, 3], [1, 3]], "two indexes");
+    const [both, after] = reads("[items[3].code, $sum(items.code)]");
+    equal([both, after.length], [[3, 4950], 101], "then the whole array");
+    // An item that fails, or holds a cycle, fails when it is read, not the items around it.
+    const boom = new Error("boom");
+    const failing = Array.from({ length: 20 }, (_, i) => i);
+    Object.defineProperty(failing, 5, { get() { throw boom; } });
+    equal(value("items[4]", { items: failing }), 4, "a failing item not read");
+    throws(() => value("items[5]", { items: failing }), (e) => ok(e === boom, "the item's exception"));
+    const cyclic = { items: Array.from({ length: 20 }, () => ({})) };
+    cyclic.items[1] = { up: cyclic };
+    equal(value("items[0]", cyclic), {}, "a cycle not read");
+    throws(() => value("items[1].up", cyclic), (e) => ok(e instanceof TypeError && /circular/.test(e.message), "cycle"));
+  }],
+
   ["syntax errors are JlensErrors with UTF-16 offsets", (j) => {
     throws(() => new j.Expression("'𝄞é' & items[0;]"), (e) => {
       ok(e instanceof Error, "an Error");

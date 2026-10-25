@@ -345,3 +345,14 @@ item, so `items[$i]` reads the items it picks, unless the predicate reads `$`, t
 input is a tuple stream, whose variables (`#$i`, `@$o`) change from item to item. Such a
 predicate is evaluated without an item, so none is read for it. `($i := 0; items[$i].code)`
 over 10,000 items takes 1.97 µs instead of 2.29 ms with `evaluate`.
+
+### Follow-up: the WebAssembly package (0.24 #9)
+
+The WebAssembly package's source implements both methods: `length` asks the JavaScript array
+its length, and `read_item` writes one item through the helper that reads a level, which
+checks cycles against the same ancestors. Its arrays and objects of a level are now the
+members of one `Sources`, the list of nodes the helper returns, one allocation each instead
+of two. With `evaluate`, `items[0].code` over 10,000 items takes 6.7 µs instead of 6.19 ms,
+and `($i := 0; items[$i].code)` 7.3 µs instead of 6.19 ms; the twelve other cases of the
+comparison with jsonata-js are between 3.6% faster and 0.4% slower (the median of four runs
+each).

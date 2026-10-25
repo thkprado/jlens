@@ -112,7 +112,8 @@ does not [read](#the-fields-an-expression-reads), checking them as JSON syntax o
 expression first reaches it ([ADR 0010](../adr/0010-lazy-input.md)). A path such as
 `customer.name` reads two small objects, however large the rest of the document is. An object or
 array of more than 16 values is read whole, with everything it holds, through `JSON.stringify`,
-which is faster than reading its values one by one.
+which is faster than reading its values one by one. An index into an array, such as
+`items[0]` or `items[$i]`, reads the items it picks alone, however long the array is.
 
 Two consequences follow:
 
