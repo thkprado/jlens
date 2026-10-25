@@ -444,3 +444,42 @@ The full tables, Linux included, are in the spike's `bench/results-*.md`.
 - **Reading the clock costs nothing measurable.** The clock is read every 256 steps (ADR
   0018). Against no timeout at all, a timeout of an hour changed the time by -0.6% to +0.1% on
   Chicory and by +0.6% to +1.8% through Panama, within the noise of a single run.
+
+**Item 6** (2026-10-25, the same versions; Windows, then Linux. On Linux the classes were
+copied off WSL's `/mnt` mount first: read from there, they made the first evaluation 28 times
+slower and each new instance 2.7 times slower.)
+
+- **A Chicory instance**, warm, takes 0.55 to 0.58 ms to create, and 0.64 to 0.67 ms with a
+  first `1 + 1`. That is 13 to 90 times one of item 2's small evaluations on a Chicory
+  `Document` (5.9 to 42 µs).
+  So a pool makes its instances ahead of time, and replacing one after an overflow (item 4)
+  costs under a millisecond.
+- **The first one in a JVM** costs more:
+  - loading the module (`JlensModule.load()`): 108 to 140 ms;
+  - creating the first instance: 49 to 64 ms;
+  - its first evaluation: 46 to 51 ms.
+  That is about 0.2 s of start-up, which a pool can pay when the application starts.
+- **Each idle instance holds 4.8 MiB of the Java heap**, its linear memory: 71 pages of
+  64 KiB, the 4 MiB stack of item 4 and the module's data. Parsing a `Document` of 1,000
+  items grows it to 86 pages, 5.4 MiB.
+  - A pool therefore costs about 5 MiB per instance, before its documents: 16 instances take
+    80 MiB.
+  - A smaller stack would save most of that. On the JVM's default stacks, only 0.4 to 0.7 MB
+    of it was in use when the JVM's own stack overflowed (item 4). The stack size is
+    therefore a choice between memory and the depth that 8 MiB threads allow.
+- **Panama's calls are cheap**:
+  - a downcall that does nothing: 9 ns;
+  - an upcall that does nothing, made from Rust: 24 to 28 ns.
+- **Reading one level through the reader** is mostly Rust's work, not the boundary's.
+  - The reader's Java work for one item of item 2's document takes 223 to 300 ns: 137 to
+    179 ns to encode its five fields (79 bytes), and 75 to 93 ns for the three downcalls
+    that copy it into a Rust buffer. That includes the upcall.
+  - Item 2's `$sum(items.price)` read 1,000 such items through the `Source`, at about
+    1.45 µs per item on Windows and 1.1 µs on Linux, the evaluation itself deducted (its
+    `Document` time).
+  - By subtraction, 0.9 to 1.2 µs of each item is spent in Rust: decoding the level and the
+    `Sink`'s allocations. Each key and string is an `Rc<str>`, and each nested array or
+    object is a boxed source of its own.
+  - The upcall is 2% of a level. The Python package's levers apply: keys interned for the
+    expression, the arrays and objects of a level written as members of one `Sources`, and
+    mimalloc. They are not measured here.
