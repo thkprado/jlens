@@ -71,12 +71,32 @@ struct State<Position: PositionType> {
     groups: Box<[GroupData<Position>]>,
 }
 
+/// jlens-regress: storage the lookarounds reuse instead of allocating it each time: the groups
+/// they save, on a stack, and backtrack stacks that hold only `Exhausted`.
+#[derive(Debug)]
+struct Lookarounds<Input: InputIndexer> {
+    saved_groups: Vec<GroupData<Input::Position>>,
+    spare_bts: Vec<Vec<BacktrackInsn<Input>>>,
+}
+
+impl<Input: InputIndexer> Default for Lookarounds<Input> {
+    fn default() -> Self {
+        Self {
+            saved_groups: Vec::new(),
+            spare_bts: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct MatchAttempter<'a, Input: InputIndexer, I: Interrupt = NoInterrupt> {
     re: &'a CompiledRegex,
     bts: Vec<BacktrackInsn<Input>>,
     s: State<Input::Position>,
     poll: Poll<I>,
+    // jlens-regress: behind a pointer: as fields of their own, they changed the code of the
+    // main loop, which searches without a lookaround run.
+    lookarounds: Option<Box<Lookarounds<Input>>>,
 }
 
 impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
@@ -99,6 +119,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                 groups: vec![GroupData::new(); re.groups as usize].into_boxed_slice(),
             },
             poll: Poll::new(interrupt),
+            lookarounds: None,
         }
     }
 
@@ -494,35 +515,51 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
         // Copy capture groups, because if the match fails (or if we are inverted)
         // we need to restore these.
         let range = (start_group as usize)..(end_group as usize);
-        // TODO: consider retaining storage here?
-        // Temporarily defeat backtracking.
-        let saved_groups = self.s.groups.iat(range.clone()).to_vec();
+        // jlens-regress: the groups go on `saved_groups` and the lookaround runs on a spare
+        // backtrack stack, both reused by the next lookaround; nested ones take theirs above.
+        let store = self.lookarounds.get_or_insert_with(Default::default);
+        let base = store.saved_groups.len();
+        store
+            .saved_groups
+            .extend_from_slice(self.s.groups.iat(range.clone()));
 
         // Start with an "empty" backtrack stack.
-        // TODO: consider using a stack-allocated array.
-        let mut saved_bts = vec![BacktrackInsn::Exhausted];
+        let mut saved_bts = store
+            .spare_bts
+            .pop()
+            .unwrap_or_else(|| vec![BacktrackInsn::Exhausted]);
         core::mem::swap(&mut self.bts, &mut saved_bts);
 
         // Enter into the lookaround's instruction stream.
         let matched = self.try_at_pos(*input, ip, pos, Dir::new()).is_some();
 
-        // Put back our bts.
+        // Put back our bts. The lookaround's holds only `Exhausted` again, as every attempt
+        // leaves it.
         core::mem::swap(&mut self.bts, &mut saved_bts);
+        let store = match self.lookarounds.as_deref_mut() {
+            Some(store) => store,
+            None => rs_unreachable!("The lookaround's storage was allocated above"),
+        };
+        store.spare_bts.push(saved_bts);
 
         // If we are a positive lookahead that successfully matched, retain the
         // capture groups (but we need to set up backtracking). Otherwise restore
         // them.
         if matched && !negate {
-            for (idx, cg) in saved_groups.iter().enumerate() {
+            for (idx, cg) in store.saved_groups[base..].iter().enumerate() {
                 debug_assert!(idx + (start_group as usize) < MAX_CAPTURE_GROUPS);
-                self.push_backtrack(BacktrackInsn::SetCaptureGroup {
+                self.bts.push(BacktrackInsn::SetCaptureGroup {
                     id: (idx as CaptureGroupID) + start_group,
                     data: *cg,
                 });
             }
         } else {
-            self.s.groups.mat(range).copy_from_slice(&saved_groups);
+            self.s
+                .groups
+                .mat(range)
+                .copy_from_slice(&store.saved_groups[base..]);
         }
+        store.saved_groups.truncate(base);
         matched != negate
     }
 

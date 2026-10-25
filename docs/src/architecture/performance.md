@@ -446,50 +446,67 @@ node crates/jlens-regress/benches/engine.mjs           # V8
 Each run saves its times and prints what the check costs against the last run of the other
 variant. These numbers are the baseline of the engine: a change to it is measured the same way,
 aligned, against the revision before. Without the alignment, a change that runs no differently
-moves cases by up to 8 % ([ADR 0009](../adr/0009-bounded-regex.md)). Measured for 0.22 (the
+moves cases by up to 8 % ([ADR 0009](../adr/0009-bounded-regex.md)). Measured for 0.23 (the
 median of 31 samples of at least 5 ms; V8 13.6, Node.js 24.19):
 
 | Case | Pattern | Matches | `jlens-regress` | With an interrupt | V8 |
 |---|---|---:|---:|---:|---:|
-| literal | `status=200` | 200 | 11.7 µs | 12.3 µs (+5.2%) | 16.5 µs |
-| literal, no match | `status=500` | 0 | 392 ns | 393 ns (+0.3%) | 5.5 µs |
-| case-insensitive literal | `lazy dog`, `i` | 200 | 13.7 µs | 15.0 µs (+9.5%) | 12.8 µs |
-| classes | `\d{4}-\d{2}-\d{2}T[\d:]+Z` | 200 | 48.6 µs | 47.9 µs (−1.5%) | 22.9 µs |
-| classes, no match | `\d{3}-\d{4}` | 0 | 5.9 µs | 5.9 µs (0.0%) | 1.5 µs |
-| alternation of words | `\b(?:fox\|dog\|cat)s?\b` | 400 | 190 µs | 190 µs (−0.3%) | 21.2 µs |
-| words | `\b\w+\b` | 2,400 | 366 µs | 380 µs (+3.8%) | 114 µs |
-| captures | `user=(\w+) id=(\d+)` | 200 | 60.6 µs | 57.8 µs (−4.6%) | 15.4 µs |
-| lazy | `path=(.*?) ` | 200 | 65.2 µs | 62.7 µs (−3.8%) | 11.8 µs |
-| lines | `^.*status=200$`, `m` | 200 | 49.6 µs | 51.4 µs (+3.6%) | 17.0 µs |
-| backreference, no match | `(\w+)\s+\1` | 0 | 568 µs | 620 µs (+9.1%) | 142 µs |
-| lookahead | `\w+(?=,)` | 200 | 1.42 ms | 1.42 ms (+0.3%) | 133 µs |
-| lookbehind | `(?<=the )\w+` | 200 | 511 µs | 517 µs (+1.2%) | 48.7 µs |
-| Unicode text | `\S+` | 2,000 | 300 µs | 296 µs (−1.4%) | 113 µs |
-| Unicode text, case-insensitive | `γράμματα`, `i` | 200 | 34.2 µs | 34.7 µs (+1.4%) | 11.0 µs |
-| Unicode property | `\p{L}+`, `u` | 2,000 | 389 µs | 390 µs (+0.2%) | 426 µs |
-| anchored, short text | `^1[0-9]$` on `17` | 1 | 98 ns | 105 ns (+6.9%) | 54 ns |
+| literal | `status=200` | 200 | 12.3 µs | 12.5 µs (+1.4%) | 16.4 µs |
+| literal, no match | `status=500` | 0 | 395 ns | 396 ns (+0.3%) | 5.4 µs |
+| case-insensitive literal | `lazy dog`, `i` | 200 | 12.9 µs | 12.9 µs (−0.1%) | 12.7 µs |
+| classes | `\d{4}-\d{2}-\d{2}T[\d:]+Z` | 200 | 48.3 µs | 46.7 µs (−3.3%) | 22.5 µs |
+| classes, no match | `\d{3}-\d{4}` | 0 | 5.9 µs | 5.8 µs (−1.0%) | 1.5 µs |
+| alternation of words | `\b(?:fox\|dog\|cat)s?\b` | 400 | 185 µs | 181 µs (−2.1%) | 22.4 µs |
+| words | `\b\w+\b` | 2,400 | 348 µs | 338 µs (−2.9%) | 121 µs |
+| captures | `user=(\w+) id=(\d+)` | 200 | 59.0 µs | 57.7 µs (−2.2%) | 15.8 µs |
+| lazy | `path=(.*?) ` | 200 | 68.0 µs | 62.5 µs (−8.1%) | 11.9 µs |
+| lines | `^.*status=200$`, `m` | 200 | 48.6 µs | 51.5 µs (+5.9%) | 17.1 µs |
+| backreference, no match | `(\w+)\s+\1` | 0 | 570 µs | 647 µs (+13.5%) | 147 µs |
+| lookahead | `\w+(?=,)` | 200 | 638 µs | 647 µs (+1.4%) | 131 µs |
+| lookbehind | `(?<=the )\w+` | 200 | 250 µs | 242 µs (−3.5%) | 48.7 µs |
+| Unicode text | `\S+` | 2,000 | 296 µs | 299 µs (+1.2%) | 103 µs |
+| Unicode text, case-insensitive | `γράμματα`, `i` | 200 | 31.8 µs | 31.9 µs (+0.1%) | 9.9 µs |
+| Unicode property | `\p{L}+`, `u` | 2,000 | 396 µs | 392 µs (−0.9%) | 463 µs |
+| anchored, short text | `^1[0-9]$` on `17` | 1 | 105 ns | 103 ns (−1.5%) | 51 ns |
 
 | Compilation | Pattern | `jlens-regress` | V8 `new RegExp` | V8, and a first `exec` |
 |---|---|---:|---:|---:|
-| date-time | `^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z\|[+-]\d{2}:\d{2})$` | 12.1 µs | 2.6 µs | 24.1 µs |
-| e-mail, case-insensitive | `^[a-z0-9._%+-]+@(?:[a-z0-9-]+\.)+[a-z]{2,}$`, `i` | 8.5 µs | 1.8 µs | 37.5 µs |
-| Unicode property | `\p{L}+`, `u` | 3.9 µs | 39.2 µs | 80.6 µs |
+| date-time | `^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z\|[+-]\d{2}:\d{2})$` | 11.9 µs | 2.6 µs | 24.0 µs |
+| e-mail, case-insensitive | `^[a-z0-9._%+-]+@(?:[a-z0-9-]+\.)+[a-z]{2,}$`, `i` | 8.4 µs | 1.8 µs | 37.5 µs |
+| Unicode property | `\p{L}+`, `u` | 3.9 µs | 34.5 µs | 81.7 µs |
 
-- V8 compiles a pattern to machine code, and is 2 to 11 times faster wherever the engine runs
+- V8 compiles a pattern to machine code, and is 2 to 8 times faster wherever the engine runs
   its instructions at many positions of the text: alternations, classes, lookarounds,
   backreferences. `jlens-regress` is a backtracker that interprets its instructions. It is
-  faster where it can search for a literal first (`memchr`): 1.4 times on `literal`, 14 times
-  on a literal that does not occur; and on `\p{L}+`. The lookarounds are the slowest against
-  V8, 10 times its time; each one allocates a backtracking stack of its own.
+  faster where it can search for a literal first (`memchr`): 1.3 times on `literal`, 14 times
+  on a literal that does not occur; and on `\p{L}+`.
+- **The lookarounds** took 10 times V8's time in 0.22, and take 5 times since 0.23. Each one
+  runs an attempt of its own, which needs an empty backtracking stack, and a copy of the groups
+  it holds, to restore them. Both were allocated every time the match reached the lookaround,
+  and the stack grew from one entry as the attempt pushed. `\w+(?=,)` runs about 25,000
+  lookaheads over this text: a profile (`perf`, on Linux) put a quarter of the time in `malloc`
+  and `free`. The matcher now keeps both and reuses them from one lookaround to the next,
+  nested ones included. Measured aligned, both variants, against 0.22.0: lookahead 1.40 ms to
+  638 µs (−55 %), lookbehind 510 to 250 µs (−52 %). Most of the cost was Windows's allocator:
+  on Linux (WSL), the two cases took 621 and 240 µs before and 5 and 8 % less after.
+- The storage is behind a pointer, allocated by the first lookaround of a search. As two fields
+  of the matcher, it changed the layout the backtracker's main loop works on, and made cases
+  without a lookaround up to 23 % slower on Linux (`lines`). Behind a pointer, that loop
+  compiles to the same instructions as before (compared in the Linux build): the other cases
+  move by −12 to +5 % from 0.22.0, both ways, and differently on Windows and Linux, which is
+  code placement. On Windows, `backreference, no match` is 5 % slower and `case-insensitive
+  literal` 12 % faster; on Linux, the same build makes `classes` 4 to 9 % slower.
 - V8's `new RegExp` only parses the pattern; the first `exec` compiles it, and V8 keeps both by
   the pattern's source, so the benchmark gives each compilation a pattern V8 has not seen (with
   an alternative `|<n>` added). jlens compiles a pattern once per expression, when the
   expression is compiled.
-- **The interrupt** costs 1.7 % over these 17 cases (the geometric mean), from 4.6 % faster to
-  9.5 % slower. Most of that spread is not the check: in a variant that has the interrupt's code
+- **The interrupt** costs between −0.2 and 0.8 % over these 17 cases (the geometric mean, three
+  runs of 0.23), from 8.1 % faster to 13.5 % slower per case. For the same code, 0.22.0 gave
+  1.7 % when it was released and 3.5 % on the day of the lookaround change: the check itself
+  did not change. Most of that spread is not the check: in a variant that has the interrupt's code
   but counts no step, `literal` is 12.8 % slower, and `words` 9 % faster. The backtracker is one
   large function, and any change to it, the check included, makes the compiler allocate its
-  registers anew. Counting itself costs about 7 % on `(\w+)\s+\1`, which backtracks one
+  registers anew. Counting itself costs 7 to 13 % on `(\w+)\s+\1`, which backtracks one
   character at a time, in steps of a few instructions, each with a decrement and a branch more.
   In 0.21 the counter was in memory, so every step waited for the store of the one before: the
   check cost about 2.5 % on average, 7 to 11 % on the lookahead, the backreference and

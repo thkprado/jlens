@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Regular expressions with a lookahead or a lookbehind are faster: a lookaround no longer
+  allocates a backtracking stack and a copy of its groups each time the match reaches it.
+  `\w+(?=,)` and `(?<=the )\w+` over prose take 55 % and 52 % less time on Windows, and 5 % and
+  8 % less on Linux, whose allocator is faster.
+
 ## [0.22.0]
 
 Regular expressions behave more like JavaScript's: `jlens-regress` becomes jlens's own fork of

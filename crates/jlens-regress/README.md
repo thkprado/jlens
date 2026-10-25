@@ -23,13 +23,13 @@ assert!(re.find_from_interruptible(&text, 0, || Instant::now() >= deadline).is_e
 ```
 
 The library keeps upstream's name, `regress`. Everything else is regress 0.12.0, under the same
-licences (MIT or Apache-2.0, see `LICENSE-MIT` and `LICENSE-APACHE`), apart from the fixes and
-the upstream commits ported below.
+licences (MIT or Apache-2.0, see `LICENSE-MIT` and `LICENSE-APACHE`), apart from the fixes,
+faster lookarounds, and the upstream commits ported below.
 
 The fork is jlens's own and is maintained with jlens
 ([ADR 0020](https://github.com/thkprado/jlens/blob/main/docs/src/adr/0020-own-regress-fork.md)):
 it is not rebased onto new regress versions. jlens ports upstream's fixes one commit at a time,
-and keeps its own changes to the interrupt and to bugs it finds. Report every problem with this
+and keeps its own changes to the interrupt, to bugs it finds and to the engine's speed. Report every problem with this
 crate at jlens, not at regress.
 
 ## Tested against V8
@@ -66,6 +66,11 @@ A benchmark, `cargo bench --bench engine`, times 17 searches and 3 compilations,
 without an interrupt, and `benches/engine.mjs` times the same in V8. How to run it so that its
 numbers can be compared, and the numbers, are on jlens's
 [performance page](https://github.com/thkprado/jlens/blob/main/docs/src/architecture/performance.md#the-regular-expression-engine).
+
+A lookaround no longer allocates: the matcher keeps the backtracking stacks the lookarounds run
+on, and the groups they save, and reuses them from one lookaround to the next. On the
+benchmark, `\w+(?=,)` and `(?<=the )\w+` take about half the time they took in 0.12.0 on
+Windows, and 5 to 8 % less on Linux, whose allocator is faster.
 
 ## Fixed in jlens-regress
 
