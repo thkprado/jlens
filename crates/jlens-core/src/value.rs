@@ -49,13 +49,22 @@ impl Keys {
         }
         key
     }
+
+    /// Makes room for at least the keys of an object of `fields` fields, read whole, so that
+    /// the table does not grow one rehash at a time while the first object is read.
+    pub(crate) fn reserve(&mut self, fields: usize) {
+        let fields = fields.min(Self::CAPACITY);
+        self.0.reserve(fields.saturating_sub(self.0.len()));
+    }
 }
 
-/// What the lazy values of one evaluation share (ADR 0010): the table of their keys, and the
-/// first error of a [`Source`] that failed to read a level.
+/// What the lazy values of one evaluation share (ADR 0010): the table of their keys, the hasher
+/// of their maps, made once rather than for each object, and the first error of a [`Source`]
+/// that failed to read a level.
 #[derive(Default)]
 pub(crate) struct Shared {
     keys: RefCell<Keys>,
+    hasher: foldhash::fast::RandomState,
     failed: Cell<bool>,
     failure: RefCell<Option<String>>,
 }
@@ -324,11 +333,13 @@ impl<'a> Object<'a> {
         let Ok(mut map) = self.map.try_borrow_mut() else {
             return;
         };
-        let mut alone = std::mem::take(&mut *map);
+        let hasher = map.hasher().clone();
+        let mut alone = std::mem::replace(&mut *map, Map::with_hasher(hasher.clone()));
         match &pending.origin {
             Origin::Json(JsonValue::Object(fields)) => {
-                *map = Map::with_capacity_and_hasher(fields.len(), Default::default());
+                *map = Map::with_capacity_and_hasher(fields.len(), hasher);
                 let mut keys = pending.shared.keys.borrow_mut();
+                keys.reserve(fields.len());
                 for (k, v) in fields {
                     let value = match alone.is_empty() {
                         true => None,
@@ -859,7 +870,7 @@ impl<'a> Value<'a> {
 
     fn lazy_object(pending: Pending<'a>, member: u32) -> Value<'a> {
         Value::Object(Rc::new(Object {
-            map: RefCell::new(Map::default()),
+            map: RefCell::new(Map::with_hasher(pending.shared.hasher.clone())),
             pending: Some(pending),
             read: Cell::new(Read::Nothing),
             member,
@@ -1110,7 +1121,10 @@ impl<'a> Sink<'_, 'a> {
         let additional = additional.min(1 << 16);
         match &mut self.level {
             Level::Items(items) => items.reserve(additional),
-            Level::Fields(map) => map.reserve(additional),
+            Level::Fields(map) => {
+                map.reserve(additional);
+                self.shared.keys.borrow_mut().reserve(additional);
+            }
             Level::Field(_) => {}
         }
     }

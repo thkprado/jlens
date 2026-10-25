@@ -239,7 +239,8 @@ the workload of `benches/compare`.
   apply to the Python package too.
   - On a `Document` of 100,000 items, the path `items[0]` builds the whole sequence of items
     before taking the first: 0.9 to 2.4 ms.
-  - The `Sink` allocates once for each key, each string and each nested source.
+  - The `Sink` allocates once for each key, each string and each nested source (keys are
+    interned: see the [amendment](#amendment-what-the-sink-allocates-024)).
 - The spike's code is kept outside the repository. Its results are below.
 
 ## The spike
@@ -598,3 +599,35 @@ beta, and the API work covers them when it comes.
 - The package becomes one more use of the contracts outside Rust that ADR 0015 decides from.
 - Every release from 0.25 on publishes to Maven Central too: one more step in the checklist,
   and one more channel to check.
+
+## Amendment: what the `Sink` allocates (0.24)
+
+### Context
+
+The Consequences and the results of spike item 6 say that the `Sink` allocates once for each
+key. It does not: keys are interned. An evaluation keeps a table of the keys its sources have
+written, and allocates an `Rc<str>` for each distinct key once (up to 1,024 of them); after
+that a key costs a hash and a lookup in the table, and no allocation. Roadmap 0.24 #3 profiled
+a level read through the `Sink` ([performance](../architecture/performance.md#where-the-time-goes)).
+
+### Decision
+
+1. **The spike's results stand corrected.** The `Sink` allocates once for each string, each
+   array or object written (the lazy value), and each source written with `Sink::array` or
+   `Sink::object`, which `Sink::array_of` and `Sink::object_of` avoid
+   ([ADR 0010, amended](0010-lazy-input.md#amendment-one-allocation-per-member-019)). A key is
+   allocated once per evaluation. The spike's reader wrote each nested value with its own
+   source, so part of the 0.9 to 1.2 µs per item it found in Rust was those boxes.
+2. **The levers decided above stand.** The Java package's reader writes the arrays and
+   objects of a level as members of one `Sources`, and it also gives the `Sink` the size of
+   each level (`Sink::reserve`), which since 0.24 makes room for the level's keys too.
+
+### Consequences
+
+- Most of what remains of a level is allocating and freeing a lazy value for each array or
+  object, about 99% of the time of 10,000 objects that the expression does not read. mimalloc,
+  already decided for the library, is the lever for it; the `Sink`'s own work is a few
+  percent.
+- An index into a long array reads the array's whole level, so `items[0]` costs as much as
+  writing every item. A reader that could write one item alone, as `Source::read_field`
+  writes one field, would avoid it: roadmap 0.24 #4 measures it.

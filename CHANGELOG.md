@@ -20,6 +20,14 @@ All notable changes are recorded here. The format follows
   filters that test every item save the copy too. The Python and WebAssembly packages gain the
   same. On the engine's benchmark, no case moves by more than 2.5 %: `items[[0..19]]` takes
   2.4 % less time.
+- Reading the input lazily, from a `serde_json::Value` or through a `Source`, no longer draws a
+  new hasher seed for each object, and the table of keys makes room for an object's fields at
+  once instead of growing to them. `$sum(items.quantity)` over 200 items takes 4.8 % less time
+  with `evaluate` and 4.0 % less through a `Source`; on the engine's benchmark, built with its
+  code aligned, every case of `evaluate` is between 4.8 % faster and 1.1 % slower. In Python,
+  `items[0].code` over a list of 10,000 `dict`s takes 9 % less time. Profiling
+  the `Sink` found that most of what a level costs is allocating and freeing a lazy value for
+  each of its arrays and objects; the performance page has the details.
 
 ## [0.23.0]
 

@@ -68,6 +68,13 @@ Comparing a revision with itself shows the noise. On the machine below, with ten
 medians of most cases agree within 1%, and a few cases (`group-by`) within 3%. In `source`
 mode, the index into 10,000 items, which writes an object for each item, agrees within 6%.
 
+Code placement moves cases too: a change can make a case that runs none of its code 5 to 8%
+slower or faster, because the release profile (LTO, one codegen unit) lays the whole program out
+again. To set that aside, build both programs with functions and blocks aligned, as the engine's
+benchmark below does, by setting `RUSTFLAGS` for the run. The programs that `ab` keeps in
+`target/ab/bin` are named by commit, not by flags: delete the commit's program before an aligned
+run, and again after it, so that neither kind of run reuses the other's.
+
 The numbers below were measured on an AMD Ryzen 7 3700X under Windows 11, with Rust 1.99 and
 Node.js 24, for jlens 0.23.0. They are meant
 for comparing alternatives on one machine. They are not guarantees, and your hardware will give
@@ -811,5 +818,39 @@ path changed but the order in which variables and functions are bound.
   filter + aggregate takes 80 µs with `evaluate` and 44 µs against a `Document`, against
   153 µs and 48 µs in 0.16. One that reads whole items, such as an object built from each, pays
   for converting them.
+- **Values read through a source.** A `Source` writes each level through a `Sink`, which
+  builds a value for each item. A key is looked up in the evaluation's table of keys: one
+  `Rc<str>` per distinct key, then a hash and a lookup for each field. A string is an
+  `Rc<str>`. An array or object is a lazy value of its own: 120 bytes for an object, and two
+  allocations for an array. Profiled in 0.24 with `perf` (Linux, in WSL):
+  - Reading the 10,000 items of `items[0].code` through a source spends 60% of its time
+    allocating and writing the 10,000 lazy objects and 39% freeing them. The `Sink`'s own work
+    is a few percent: reading the same `serde_json::Value` lazily, with no source, costs about
+    as much (385 µs, against 415 µs through the source).
+  - In `host_state`'s `evaluate_source`, looking keys up takes 2.3% and growing the table of
+    keys 0.9%; the evaluator takes most of the rest.
+
+  Two costs went in 0.24. Each lazy object drew a new hasher seed for its map, 1.2% of the
+  10,000 items; the evaluation now draws one and its objects copy it. The table of keys grew one
+  rehash at a time while the first object was read; it now makes room for that object's fields
+  at once. Measured with `cargo xtask ab` built aligned against the revision before:
+  - with `evaluate`, `names over items` takes 17.4 against 18.3 µs and filter + aggregate 61.6
+    against 63.3 µs, and every case is between 4.8% faster and 1.1% slower;
+  - with `--mode source`, `names over items` takes 26.6 against 27.7 µs, the other cases within
+    2%;
+  - `host_state`'s `evaluate_source` takes 0.8 to 1.8% less;
+  - nothing changes against a `Document`, which reads no lazy values; `recursion` measured 4.9%
+    slower there over 20 rounds, from code placement, and 0.5% with `evaluate`.
+
+  In Python (`python.py speed`, WSL, three runs of each), with Python values in, the index into
+  10,000 items takes 444 to 446 µs against 489 to 497 µs, and the other cases are within 1.5%.
+
+  Measured and not kept: a lazy array in one allocation instead of two, with its pending items
+  in the array itself. That made `host_state`'s `evaluate_source` 2 to 4% faster, but every
+  array 16 bytes larger, those an evaluation builds too, and `names over items` against a
+  `Document` 2 to 3% slower in every run. What remains is one allocation for each array or
+  object a level holds. An index into a long array still reads the array's whole level:
+  `items[0].code` takes 0.6 to 0.7 ms through a source or with `evaluate`, against 0.67 µs
+  against a `Document` (roadmap 0.24 #4).
 - **Deep copies.** A transform (`|...|`) copies its input with `$clone` before changing it, as
   jsonata-js does. That makes transforms of large documents comparatively expensive.
