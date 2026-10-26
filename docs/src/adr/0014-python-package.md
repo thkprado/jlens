@@ -205,3 +205,24 @@ is small and shared with every other module loaded so far.
   took 1.09 to 1.43 MB, not "under 1 MB" as the consequences above said.
 - Every target builds mimalloc's C sources with its own compiler, as the command's release
   binaries already do: the manylinux and musllinux containers on Linux, MSVC on Windows.
+
+### Follow-up: mimalloc 2 outside Windows (0.24.1)
+
+mimalloc 3.3.2, which `libmimalloc-sys` 0.1.49 bundles, crashes on glibc once the thread that
+imported the module has ended: a later thread's first allocation finds a heap whose thread data
+is null and faults in `_mi_subproc`, with the `local_dynamic_tls` model as with initial-exec.
+With 0.24.0, `import jlens` in a thread that ends, then an evaluation in another thread, ends
+the interpreter with a segmentation fault. Windows and musl do not crash; the suite never saw
+it, since its threads live as long as the run. `test_loaded_on_a_thread_that_ends` loads the
+package on a thread that ends, then evaluates on eight new threads, in a new interpreter; it
+fails with the 0.24.0 wheels.
+
+From 0.24.1 on, the package uses mimalloc 2 (2.3.2, the crate's `v2` feature) on every target
+but Windows, which keeps mimalloc 3. Measured in WSL, mimalloc 2, 3.3.2 and upstream's 3.6.0
+(which passes the test too, but which `libmimalloc-sys` has not published) are within 8% of
+each other on the engine's evaluations of JSON text and documents, jemalloc 8 to 39% slower and
+glibc's allocator 8 to 103%. On Windows, mimalloc 2 is up to 18% slower on JSON text, and
+mimalloc 3 has no such fault there. With Python values in (`python.py speed`, the median of
+three alternated runs), every case takes the same time as with 3.3.2 within 1%, or less:
+`recursion` 682 µs against 734. When `libmimalloc-sys` bundles a mimalloc 3 that passes the
+test, every target can move back to one version.

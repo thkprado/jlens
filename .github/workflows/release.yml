@@ -60,7 +60,8 @@ jobs:
   # such as the lints and the docs. The tag is usually pushed with main, so the job waits for the CI run
   # of the commit to finish, while the binaries and the wheels build. A tag on a commit never
   # pushed to main has no CI run and fails here. After a CI run that failed and passed when run
-  # again, "Re-run failed jobs" resumes the release.
+  # again, "Re-run failed jobs" resumes the release. On release-0.24, the branch of the 0.24.1
+  # patch cut from v0.24.0, the job waits for the CI run on that branch instead.
   ci:
     name: CI passed on the tagged commit
     needs: tag
@@ -76,11 +77,11 @@ jobs:
         run: |
           missing=0
           while true; do
-            run=$(gh run list --workflow ci.yml --branch main --event push --commit "$GITHUB_SHA" \
+            run=$(gh run list --workflow ci.yml --branch release-0.24 --event push --commit "$GITHUB_SHA" \
               --limit 1 --json status,conclusion,url --jq '.[0] // empty')
             if [[ -z "$run" ]]; then
               if (( ++missing > 20 )); then
-                echo "::error::No CI run on main for $GITHUB_SHA: tag a commit pushed to main"
+                echo "::error::No CI run on release-0.24 for $GITHUB_SHA: tag a commit pushed to release-0.24"
                 exit 1
               fi
             elif [[ $(jq -r .status <<< "$run") == completed ]]; then

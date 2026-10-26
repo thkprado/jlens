@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # release-0.24: the branch of the 0.24.1 patch, cut from v0.24.0; release.yml waits for its run.
+    branches: [main, release-0.24]
   pull_request:
 
 # Jobs read the repository; a job that needs more asks for it.

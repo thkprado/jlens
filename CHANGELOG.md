@@ -6,6 +6,20 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.24.1]
+
+The Python package no longer crashes on Linux when the thread that imported it has ended. The
+code is as in 0.24.0 but for the package's allocator.
+
+### Fixed
+
+- The Python package no longer crashes on Linux when the thread that imported it has ended:
+  with 0.24.0, a later thread's evaluation could end the interpreter with a segmentation fault.
+  mimalloc 3.3, its allocator, loses its thread data on glibc once the thread that loaded the
+  module ends. The package now uses mimalloc 2 on every target but Windows, as fast there;
+  Windows keeps mimalloc 3, which has no such fault and is up to 18% faster there on JSON text
+  ([ADR 0014, follow-up](docs/src/adr/0014-python-package.md#follow-up-mimalloc-2-outside-windows-0241)).
+
 ## [0.24.0]
 
 An index into a long array reads the items it picks instead of the whole array, whether it is a
@@ -940,7 +954,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/thkprado/jlens/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/thkprado/jlens/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/thkprado/jlens/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/thkprado/jlens/compare/v0.21.2...v0.22.0
