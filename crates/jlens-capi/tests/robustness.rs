@@ -347,6 +347,7 @@ proptest! {
         reply(jlens_evaluate(source, input, 0, 0, u32::MAX))?;
         reply(jlens_evaluate(input, 0, 0, source, 0))?;
         reply(jlens_evaluate_document(source, input, 0, 0, 0))?;
+        reply(jlens_evaluate_audited(source, input, 0, 0, input))?;
         reply(jlens_reads(source))?;
         if let Replied::Handle(options) = reply(jlens_options_new(input))? {
             reply(jlens_evaluate(source, input, 0, options, 0))?;
@@ -363,6 +364,9 @@ proptest! {
             reply(jlens_evaluate(expression, expression, 0, expression, 0))?;
             reply(jlens_evaluate(expression, 0, 0, 0, 1))?;
             reply(jlens_evaluate_document(expression, expression, 0, expression, 0))?;
+            reply(jlens_evaluate_audited(expression, input, 0, 0, source))?;
+            reply(jlens_evaluate_audited(expression, 0, 0, 0, input))?;
+            reply(jlens_evaluate_audited(expression, expression, expression, expression, expression))?;
             prop_assert_eq!(jlens_expression_free(expression), 1);
         }
         prop_assert_eq!(jlens_buffer_free(source), 1);
@@ -393,6 +397,48 @@ proptest! {
             (json, values) => prop_assert_eq!(json, values, "the same kind of reply"),
         }
         prop_assert_eq!(jlens_buffer_free(buffer), 1);
+        prop_assert_eq!(jlens_expression_free(expression), 1);
+    }
+
+    /// An audited evaluation, at any level and with any capture limits, gives the result an
+    /// evaluation gives, or its error.
+    #[test]
+    fn an_audit_gives_the_result_of_the_evaluation(
+        input in json(),
+        expression in prop::sample::select(EXPRESSIONS),
+        level in prop::sample::select(vec!["off", "decisions", "full"]),
+        max_items in 0..4usize,
+        max_nodes in 0..8usize,
+    ) {
+        let expression = compiled(expression);
+        let text = buffers::insert(input.to_string().into_bytes());
+        let values = {
+            let mut encoder = jlens_capi::values::Encoder::new(Vec::new());
+            encoder.json(&input);
+            buffers::insert(encoder.out)
+        };
+        let audit = format!(r#"{{"level":"{level}","limits":{{"maxItems":{max_items},"maxNodes":{max_nodes}}}}}"#);
+        let audit = buffers::insert(audit.into_bytes());
+        let evaluated = buffers::take(jlens_evaluate(expression, text, 0, 0, 0)).unwrap();
+        let audited = buffers::take(jlens_evaluate_audited(expression, values, 0, 0, audit)).unwrap();
+        prop_assert_eq!(audited[0], REPLY_VALUES);
+        let audited = values::decode(&audited[1..]);
+        prop_assert!(audited["audit"]["header"].is_object());
+        match evaluated[0] {
+            REPLY_JSON => {
+                let json: Value = serde_json::from_slice(&evaluated[1..]).unwrap();
+                prop_assert_eq!(values::as_f64(audited["result"].clone()), values::as_f64(json));
+            }
+            REPLY_UNDEFINED => prop_assert!(audited.get("result").is_none()),
+            _ => {
+                let error: Value = serde_json::from_slice(&evaluated[1..]).unwrap();
+                let envelope: Value = serde_json::from_str(audited["error"].as_str().unwrap()).unwrap();
+                prop_assert_eq!(&envelope["code"], &error["code"]);
+            }
+        }
+        for buffer in [text, values, audit] {
+            prop_assert_eq!(jlens_buffer_free(buffer), 1);
+        }
         prop_assert_eq!(jlens_expression_free(expression), 1);
     }
 }

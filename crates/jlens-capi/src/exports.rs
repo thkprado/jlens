@@ -69,4 +69,10 @@ export! {
     /// for the defaults): a reply with the result, as JSON text (`result` 0) or values
     /// (`result` 1), or the error.
     jlens_evaluate_source(expression: u64, input: u64, reader: Option<crate::source::Reader>, context: u64, bindings: u64, options: u64, result: u32) -> u64 = crate::api::evaluate_source, crate::api::panicked;
+    /// Evaluates an expression against the values in buffer `input` (0 for no input), with
+    /// bindings `bindings` (0 for none), options `options` (0 for the defaults) and the audit
+    /// options in buffer `audit`, JSON text (0 for the defaults), recording how the result was
+    /// reached: a reply with the result, its error, the audit tree and its explanation as values
+    /// (the `audit` module), or the error of an argument.
+    jlens_evaluate_audited(expression: u64, input: u64, bindings: u64, options: u64, audit: u64) -> u64 = crate::audit::evaluate_audited, crate::api::panicked;
 }

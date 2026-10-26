@@ -68,6 +68,8 @@ final class Native {
             function("jlens_evaluate_document", U64, U64, U64, U64, U64, U32);
     private static final MethodHandle EVALUATE_SOURCE = function("jlens_evaluate_source",
             U64, U64, U64, ValueLayout.ADDRESS, U64, U64, U64, U32);
+    private static final MethodHandle EVALUATE_AUDITED =
+            function("jlens_evaluate_audited", U64, U64, U64, U64, U64, U64);
 
     /** The function the C API calls back to read Java objects: {@link Reader#read}. */
     static final MemorySegment READER;
@@ -223,6 +225,19 @@ final class Native {
         try {
             return (long) EVALUATE_SOURCE.invokeExact(expression, input, READER, 0L, bindings,
                     options, format);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /**
+     * Evaluates against the values in buffer {@code input} (0 for none), recording an audit with
+     * the options in buffer {@code audit} (0 for the defaults).
+     */
+    static long evaluateAudited(long expression, long input, long bindings, long options,
+            long audit) {
+        try {
+            return (long) EVALUATE_AUDITED.invokeExact(expression, input, bindings, options, audit);
         } catch (Throwable e) {
             throw failed(e);
         }

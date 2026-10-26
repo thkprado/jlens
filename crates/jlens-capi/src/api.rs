@@ -20,15 +20,15 @@ use crate::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, REPLY_VALUES
 
 /// A compiled expression, with its source (for the offsets of its errors) and the fields it
 /// reads of its input (for the pruned parse of ADR 0016).
-struct Compiled {
-    expression: Expression,
-    source: String,
+pub(crate) struct Compiled {
+    pub(crate) expression: Expression,
+    pub(crate) source: String,
     reads: Reads,
     read: Read,
 }
 
 /// The live expressions. `Expression` is `Send` and `Sync`: one serves every thread.
-static EXPRESSIONS: Table<Compiled> = Table::new();
+pub(crate) static EXPRESSIONS: Table<Compiled> = Table::new();
 
 /// Compiles the expression in buffer `source`, which stays the caller's, and replies with the
 /// expression's handle or the compile error.
@@ -293,7 +293,7 @@ pub fn evaluate_source(
 }
 
 /// The bindings of handle `bindings`, or `None` for 0, none.
-fn find_bindings(bindings: u64) -> Result<Option<Arc<Bound>>, Vec<u8>> {
+pub(crate) fn find_bindings(bindings: u64) -> Result<Option<Arc<Bound>>, Vec<u8>> {
     match bindings {
         0 => Ok(None),
         bindings => BINDINGS
@@ -304,7 +304,7 @@ fn find_bindings(bindings: u64) -> Result<Option<Arc<Bound>>, Vec<u8>> {
 }
 
 /// The options of handle `options`, or `None` for 0, the defaults.
-fn find_options(options: u64) -> Result<Option<Arc<Options>>, Vec<u8>> {
+pub(crate) fn find_options(options: u64) -> Result<Option<Arc<Options>>, Vec<u8>> {
     match options {
         0 => Ok(None),
         options => OPTIONS
@@ -315,7 +315,7 @@ fn find_options(options: u64) -> Result<Option<Arc<Options>>, Vec<u8>> {
 }
 
 /// The default options, shared by the evaluations given none.
-static DEFAULTS: LazyLock<Options> = LazyLock::new(Options::default);
+pub(crate) static DEFAULTS: LazyLock<Options> = LazyLock::new(Options::default);
 
 /// The input of an evaluation.
 enum Input<'i> {
@@ -343,7 +343,7 @@ fn run(
 }
 
 /// The bindings of the evaluations given none.
-static NO_BINDINGS: LazyLock<Bindings> = LazyLock::new(Bindings::new);
+pub(crate) static NO_BINDINGS: LazyLock<Bindings> = LazyLock::new(Bindings::new);
 
 fn evaluate_with(
     compiled: &Compiled,

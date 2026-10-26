@@ -906,3 +906,49 @@ best of five runs of 0.3 s:
   `Host` in a `ScopedValue`, is about 0.02 µs. Looking a host function up in the bindings when
   a name is not found, instead of binding them all, would remove it; that is a change to the
   core, left for its own item.
+
+### Audits (0.25 #8)
+
+Audits follow the Python and WebAssembly packages' `evaluate_with_audit`, through one more
+export, `jlens_evaluate_audited` (`audit.rs` in `jlens-capi`):
+
+- **The input crosses whole.** The core audits an evaluation of JSON values, and the header
+  hashes the input's JSON text, so `evaluateWithAudit` writes its Java objects as values first
+  (the encoding of 0.25 #7's bindings), not through the reader of 0.25 #6. A `Document` is
+  refused: it may be pruned, and its hash would not be the input's.
+- **One reply of values.** Rust writes the result, the error, the audit tree and the
+  explanation as one object of values, which Java decodes with `Values` and turns into records.
+  The error is its envelope as JSON text, the one `JlensException` already reads. The tree's
+  spans are UTF-16 offsets, converted in Rust with a table of the source's offsets.
+- **Records, and a sealed interface for decisions.** `AuditResult`, `AuditTree` with its
+  `Header`, `AuditNode`, `Explanation` with its `Line`, `AuditOptions`, `CaptureLimits` and
+  `Span` are records; levels, outcomes and branches are enums. The ADR's Decision said that an
+  `AuditNode` would be a sealed hierarchy. It is one record instead, since every node has the
+  same fifteen components; what a node decided is the sealed hierarchy, `AuditNode.Decision`:
+  a `Comparison` with its two operands, a `ShortCircuit`, a `Conditional` with its branch, or a
+  `Binding` with its variable, `null` for a node that decided none of these. The core sets at
+  most one of the four fields, so a `switch` over them is exhaustive.
+- **Errors are reported, not thrown**, as in Python and WebAssembly: an error of the evaluation
+  is the result's `error`, a `JlensException`. A host function's exception does not throw
+  either; the error has its code, and the exception as its cause, the same object.
+- **Deep trees.** An audit nests as deep as the evaluation did. Java builds the nodes from a
+  queue, children first, never by recursion, and `AuditNode.toString` prints one node, not its
+  descendants. A full audit of a recursion 1,000,000 calls deep stops with `D1011`, and one
+  10,000 calls deep succeeds with a truncated tree, on threads of 128 KiB and 1 MiB.
+
+Measured on the maintainer's Windows machine, Java 25.0.4, the rule of the Python and
+WebAssembly suites on its order of three items, as Java objects, with one variable bound.
+Microseconds per evaluation, the best of five runs of 0.3 s, and the Python package's
+`evaluate` and `evaluate_with_audit` on the same machine:
+
+| Evaluation | Java µs | Python µs |
+|---|---:|---:|
+| `evaluate`, no audit | 5.8 | 3.6 |
+| audited, level `off` | 22.8 | 15.5 |
+| audited, level `decisions` | 49.3 | 40.6 |
+| audited, level `full` | 188.8 | 190.3 |
+
+An audit at level `off` costs 17 µs more than an evaluation: the input written whole and hashed,
+and the tree and the explanation written, read and made into records. Java's part is about
+7 µs more than Python's at `off` and `decisions`, and nothing at `full`, where capturing values
+in Rust dominates.

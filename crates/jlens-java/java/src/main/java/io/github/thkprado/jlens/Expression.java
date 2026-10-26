@@ -463,6 +463,121 @@ public final class Expression implements AutoCloseable {
         return onDocument(input, bindings, options, Native.JSON, Native::json);
     }
 
+    /**
+     * Evaluates the expression against Java objects and records how the result was reached, at
+     * {@link AuditLevel#DECISIONS}. The input is written whole first, as the audit hashes it; the
+     * objects read are those of {@link #evaluate(Object)}. An error of the evaluation does not
+     * throw: it is the result's {@link AuditResult#error()}.
+     *
+     * {@snippet :
+     * try (Expression rule = Expression.compile("age >= 18 and country = 'BR'")) {
+     *     AuditResult audited = rule.evaluateWithAudit(Map.of("age", 15, "country", "BR"));
+     *     // audited.result() is false; audited.explanation().text() says why:
+     *     // result: false
+     *     // ✘ age >= 18 → false (15 >= 18)
+     * }
+     * }
+     *
+     * @param input the input, {@code null} for no input
+     * @return the result, its audit and its explanation
+     * @throws IllegalArgumentException when the input holds an object {@link #evaluate(Object)}
+     *     does not read, a key that is not a string, or a map or list inside itself, or is a
+     *     {@link Document}
+     */
+    public AuditResult evaluateWithAudit(Object input) {
+        return evaluateWithAudit(input, Bindings.NONE, Options.DEFAULTS, AuditOptions.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against Java objects and records how the result was reached, as
+     * {@link #evaluateWithAudit(Object)} does, with audit options.
+     *
+     * @param input the input, {@code null} for no input
+     * @param audit what the audit records, and within which limits
+     * @return the result, its audit and its explanation
+     * @throws IllegalArgumentException when the input cannot be written, as for {@link
+     *     #evaluateWithAudit(Object)}
+     */
+    public AuditResult evaluateWithAudit(Object input, AuditOptions audit) {
+        return evaluateWithAudit(input, Bindings.NONE, Options.DEFAULTS, audit);
+    }
+
+    /**
+     * Evaluates the expression against Java objects and records how the result was reached, as
+     * {@link #evaluateWithAudit(Object)} does, with bindings.
+     *
+     * @param input the input, {@code null} for no input
+     * @param bindings the variables and host functions of the evaluation
+     * @return the result, its audit and its explanation
+     * @throws IllegalArgumentException when the input cannot be written, as for {@link
+     *     #evaluateWithAudit(Object)}
+     */
+    public AuditResult evaluateWithAudit(Object input, Bindings bindings) {
+        return evaluateWithAudit(input, bindings, Options.DEFAULTS, AuditOptions.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against Java objects and records how the result was reached, as
+     * {@link #evaluateWithAudit(Object)} does, with bindings and audit options.
+     *
+     * @param input the input, {@code null} for no input
+     * @param bindings the variables and host functions of the evaluation
+     * @param audit what the audit records, and within which limits
+     * @return the result, its audit and its explanation
+     * @throws IllegalArgumentException when the input cannot be written, as for {@link
+     *     #evaluateWithAudit(Object)}
+     */
+    public AuditResult evaluateWithAudit(Object input, Bindings bindings, AuditOptions audit) {
+        return evaluateWithAudit(input, bindings, Options.DEFAULTS, audit);
+    }
+
+    /**
+     * Evaluates the expression against Java objects and records how the result was reached, as
+     * {@link #evaluateWithAudit(Object)} does, with bindings, options and audit options. An
+     * exception a host function throws does not throw either: the result's error has its code
+     * and has it as its cause.
+     *
+     * @param input the input, {@code null} for no input
+     * @param bindings the variables and host functions of the evaluation
+     * @param options the options of the evaluation
+     * @param audit what the audit records, and within which limits
+     * @return the result, its audit and its explanation
+     * @throws IllegalArgumentException when the input cannot be written, as for {@link
+     *     #evaluateWithAudit(Object)}
+     */
+    public AuditResult evaluateWithAudit(Object input, Bindings bindings, Options options,
+            AuditOptions audit) {
+        if (input instanceof Document) {
+            throw new IllegalArgumentException(
+                    "jlens: an audit evaluates Java objects, not a Document");
+        }
+        byte[] values = input == null ? null : Writer.value(input, "the input");
+        long expression = live();
+        long bound = bindings.live();
+        long buffer = 0;
+        long auditBuffer = 0;
+        try {
+            if (values != null) buffer = Native.buffer(values);
+            if (!audit.equals(AuditOptions.DEFAULTS)) auditBuffer = Native.buffer(audit.toJson());
+            long in = buffer;
+            long recorded = auditBuffer;
+            LongSupplier evaluation = () -> options.evaluate(
+                    o -> Native.evaluateAudited(expression, in, bound, o, recorded));
+            Host host = bindings.functions ? new Host() : null;
+            long reply = host == null
+                    ? evaluation.getAsLong()
+                    : ScopedValue.where(Host.CURRENT, host).call(evaluation::getAsLong);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> decoded = (Map<String, Object>) Native.values(reply);
+            return Audits.result(decoded, host);
+        } finally {
+            if (buffer != 0) Native.free(buffer);
+            if (auditBuffer != 0) Native.free(auditBuffer);
+            Reference.reachabilityFence(this);
+            Reference.reachabilityFence(bindings);
+        }
+    }
+
     /** Evaluates against UTF-8 JSON text, or no input, in {@code format}, and decodes the reply. */
     private <T> T onText(byte[] input, Bindings bindings, Options options, int format,
             LongFunction<T> decode) {
