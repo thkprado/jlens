@@ -78,7 +78,7 @@ benchmark below does, by setting `RUSTFLAGS` for the run. The programs that `ab`
 run, and again after it, so that neither kind of run reuses the other's.
 
 The numbers below were measured on an AMD Ryzen 7 3700X under Windows 11, with Rust 1.99 and
-Node.js 24, for jlens 0.24.0. They are meant
+Node.js 24, for jlens 0.24.0 (0.24.1 changes only the Python package's allocator). They are meant
 for comparing alternatives on one machine. They are not guarantees, and your hardware will give
 different absolute values.
 
@@ -268,48 +268,50 @@ fourth package, `jsonata`, which runs jsonata-js in the Duktape JavaScript inter
 out: it has had no release since 2023, its module cannot load jsonata-js on Windows, and it
 compiles the expression at each call, taking up to 3.5 s on these cases.
 
-Measured for 0.24.0, on Python 3.14.8, under Linux: Ubuntu 26.04 under WSL 2, on the machine
+Measured for 0.24.1, on Python 3.14.8, under Linux: Ubuntu 26.04 under WSL 2, on the machine
 above. `jsonatapy` has wheels up to Python 3.13 and was built from its source distribution. The
 input is the document as Python values; for jlens and `jsonatapy`, also an input converted once
-(`Document`, `JsonataData`). Two more runs of jlens and `jsonatapy` alone gave the same times
-within 3% for jlens and 6% for `jsonatapy`:
+(`Document`, `JsonataData`). jlens and `jsonatapy` are the median of three runs, which agreed
+within 5% (`path` converted once 0.5 to 0.6 µs); `jsonata-python` and `jsonata-rs`, which 0.24.1
+does not change, as measured for 0.24.0:
 
 | Case | jsonata-python 0.7.1 | jsonata-rs 0.1.4 | jsonatapy 2.2.11 | jsonatapy, `JsonataData` | jlens `evaluate` | jlens `evaluate_document` |
 |---|---:|---:|---:|---:|---:|---:|
-| path | 1.56 ms | 218 µs | 0.7 µs | 0.4 µs | 0.9 µs | 0.6 µs |
-| names over items | 2.04 ms | 242 µs | 25 µs | 4.9 µs | 23 µs | 5.8 µs |
-| filter + aggregate | 4.69 ms | 399 µs | 121 µs | 88 µs | 65 µs | 38 µs |
-| group-by | 6.15 ms | 836 µs | 165 µs | 107 µs | 106 µs | 72 µs |
-| sort + map | 24.5 ms | 1.87 ms | 455 µs | 394 µs | 311 µs | 255 µs |
-| strings | 4.52 ms | 454 µs | 165 µs | 136 µs | 85 µs | 55 µs |
-| regex | 5.16 ms | 3.89 ms | 2.72 ms | 2.69 ms | 124 µs | 100 µs |
-| number formatting | 4.23 ms | 432 µs | 153 µs | 145 µs | 35 µs | 23 µs |
-| object constructor | 6.09 ms | 809 µs | 183 µs | 141 µs | 152 µs | 117 µs |
-| transform | 5.90 ms | 1.79 ms | 1.01 ms | 883 µs | 589 µs | 467 µs |
-| recursion | 41.2 ms | 2.34 ms | 726 µs | 822 µs | 727 µs | 720 µs |
-| shipping rule | 9.61 ms | 682 µs | 334 µs | 236 µs | 166 µs | 93 µs |
-| index into 10,000 items | 30.3 ms | 4.30 ms | 295 µs | 0.5 µs | 1.4 µs | 0.9 µs |
-| index in a variable | 50.8 ms | 5.47 ms | 603 µs | 498 µs | 1.8 µs | 1.2 µs |
+| path | 1.56 ms | 218 µs | 0.7 µs | 0.4 µs | 0.9 µs | 0.5 µs |
+| names over items | 2.04 ms | 242 µs | 25 µs | 4.9 µs | 23 µs | 5.6 µs |
+| filter + aggregate | 4.69 ms | 399 µs | 121 µs | 89 µs | 66 µs | 38 µs |
+| group-by | 6.15 ms | 836 µs | 165 µs | 107 µs | 107 µs | 71 µs |
+| sort + map | 24.5 ms | 1.87 ms | 455 µs | 395 µs | 306 µs | 253 µs |
+| strings | 4.52 ms | 454 µs | 164 µs | 136 µs | 85 µs | 54 µs |
+| regex | 5.16 ms | 3.89 ms | 2.69 ms | 2.64 ms | 127 µs | 100 µs |
+| number formatting | 4.23 ms | 432 µs | 152 µs | 145 µs | 34 µs | 23 µs |
+| object constructor | 6.09 ms | 809 µs | 186 µs | 142 µs | 152 µs | 116 µs |
+| transform | 5.90 ms | 1.79 ms | 1.01 ms | 876 µs | 569 µs | 452 µs |
+| recursion | 41.2 ms | 2.34 ms | 733 µs | 834 µs | 674 µs | 674 µs |
+| shipping rule | 9.61 ms | 682 µs | 332 µs | 236 µs | 170 µs | 93 µs |
+| index into 10,000 items | 30.3 ms | 4.30 ms | 295 µs | 0.5 µs | 1.3 µs | 0.8 µs |
+| index in a variable | 50.8 ms | 5.47 ms | 606 µs | 500 µs | 1.6 µs | 1.1 µs |
 
-- With Python values in, jlens is the fastest on twelve of the fourteen cases, by 22 times on
-  `regex`, 4.4 times on number formatting, twice on the shipping rule, and 200 and 330 times on
+- With Python values in, jlens is the fastest on thirteen of the fourteen cases, by 21 times on
+  `regex`, 4.5 times on number formatting, twice on the shipping rule, and 230 and 380 times on
   the two index cases, which read one item where `jsonatapy` reads the 10,000; `jsonatapy` on
-  `path` (0.7 against 0.9 µs). On `recursion` the two take the same time, within 0.7% in all
-  three runs, where `jsonatapy` was ahead by 3% or less for 0.23.0. At 0a1c6ad, before items 9 to 11 of roadmap 0.19,
+  `path` (0.7 against 0.9 µs). On `recursion` jlens takes 8% less time, 674 against 733 µs: with
+  mimalloc 2 (0.24.1) instead of 3, where the two took the same time for 0.24.0 (727 µs) and
+  `jsonatapy` was ahead by 3% or less for 0.23.0. At 0a1c6ad, before items 9 to 11 of roadmap 0.19,
   jlens took 1.1 µs on `path`, 35 µs on `names over items` and 203 µs on the object
   constructor, and was the fastest on nine cases; in 0.17 (c76a814) it took 357 µs on the
   object constructor, 167 µs on number formatting and 868 µs on the transform, and was the
   fastest on eight; before a path step read its one field of a `dict` (see below), it took
   138 µs on `names over items` and was the fastest on five.
 - With the input converted once, jlens is the fastest on eleven of the fourteen cases, by up to
-  6.4 times on number formatting and 27 times on `regex`, and on the object constructor by 117 against
-  141 µs; `jsonatapy` is faster on `path`, `names over items` and the index into 10,000 items
-  (0.5 against 0.9 µs).
+  6.4 times on number formatting and 26 times on `regex`, and on the object constructor by 116 against
+  142 µs; `jsonatapy` is faster on `path`, `names over items` and the index into 10,000 items
+  (0.5 against 0.8 µs).
 - On every case but `path` and the two index cases, jlens `evaluate` takes 3 (`transform`,
-  `recursion`) to 31 times (`regex`) less time than `jsonata-rs`, and 10 to 120 times less
+  `recursion`) to 31 times (`regex`) less time than `jsonata-rs`, and 10 to 125 times less
   than `jsonata-python`. Both read the whole input before evaluating: on `path` they take 0.2
   and 1.6 ms where jlens takes 0.9 µs, and on the index into 10,000 items 4.3 and 30 ms where
-  it takes 1.4 µs.
+  it takes 1.3 µs.
 
 From 0.19 on, the Python package builds a result as Python objects directly (ADR 0017), without a
 `serde_json` value in between, and creates each key of the result once, so that a key repeated
@@ -404,7 +406,7 @@ converted input, which looks no key up in a `dict`.
 Also from 0.19 on, the package uses mimalloc as its allocator, as the command does, with
 `local_dynamic_tls`, the thread-local model of a library loaded at run time ([ADR 0014,
 amended](../adr/0014-python-package.md#amendment-mimalloc-as-the-allocator-019)); mimalloc 2
-outside Windows from 0.24.1 on, as fast with Python values in ([ADR 0014, follow-up](../adr/0014-python-package.md#follow-up-mimalloc-2-outside-windows-025-11)). Measured the
+outside Windows from 0.24.1 on ([ADR 0014, follow-up](../adr/0014-python-package.md#follow-up-mimalloc-2-outside-windows-0241)). Measured the
 same way, with glibc's allocator before; the last rows come from `variants.py`, kept with the
 profiles of roadmap 0.19 #8:
 

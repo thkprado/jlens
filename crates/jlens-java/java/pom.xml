@@ -7,7 +7,7 @@
   <groupId>io.github.thkprado</groupId>
   <artifactId>jlens</artifactId>
   <!-- The workspace's version (Cargo.toml). -->
-  <version>0.24.0</version>
+  <version>0.24.1</version>
   <packaging>jar</packaging>
 
   <name>jlens</name>
