@@ -141,6 +141,7 @@ class SourceTest {
     @Test
     void deepInputStopsWithAnErrorOnSmallStacks() throws Exception {
         String[] expressions = {"$string($)", "$count(**)", "$", "$.$[0][0][0]"};
+        List<String> failures = new ArrayList<>();
         for (long stack : new long[] {128 << 10, 256 << 10, 1 << 20}) {
             for (int depth : new int[] {100, 2_000, 100_000}) {
                 Object deep = 1;
@@ -148,12 +149,14 @@ class SourceTest {
                 Object input = deep;
                 for (String expression : expressions) {
                     AtomicReference<String> outcome = new AtomicReference<>();
+                    AtomicReference<String> message = new AtomicReference<>("");
                     Thread thread = new Thread(null, () -> {
                         try {
                             Object result = evaluate(expression, input);
                             outcome.set(result == input ? "the input" : "a result");
                         } catch (JlensException e) {
                             outcome.set(e.code());
+                            message.set(": " + e.getMessage());
                         } catch (Throwable e) {
                             outcome.set(e.toString());
                         }
@@ -161,17 +164,23 @@ class SourceTest {
                     thread.start();
                     thread.join();
                     String got = outcome.get();
-                    String where = expression + ", stack " + stack + ", depth " + depth;
+                    boolean expected;
                     if (expression.equals("$")) {
-                        assertEquals("the input", got, where);
+                        expected = got.equals("the input");
                     } else if (depth > 1_000 && expression.equals("$string($)")) {
-                        assertEquals("U1001", got, where);
+                        expected = got.equals("U1001");
                     } else {
-                        assertTrue(got.equals("a result") || got.matches("[A-Z]\\d{4}"), where + ": " + got);
+                        expected = got.equals("a result") || got.matches("[A-Z]\\d{4}");
+                    }
+                    if (!expected) {
+                        failures.add(expression + ", stack " + stack + ", depth " + depth + ": "
+                                + got + message.get());
                     }
                 }
             }
         }
+        // Every case is run, so that one failure does not hide the others.
+        assertEquals(List.of(), failures);
     }
 
     @Test
