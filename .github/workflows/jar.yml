@@ -1,0 +1,194 @@
+name: JAR
+
+# Builds the Java package (ADR 0021) as it is released: the C API of each of the seven release
+# targets, as the wheels are built (glibc 2.28 in a manylinux_2_28 container, musl in Alpine),
+# then one JAR that carries the seven, then the JUnit suite on each target against that JAR, in
+# an Alpine container for musl. It builds the commit that triggered the caller (see binaries.yml).
+# Called by CI on each push to main; uploads the JAR as the artifact java-jar.
+
+on:
+  workflow_call:
+
+# Jobs read the repository; a job that needs more asks for it.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  native:
+    name: native (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x86_64, os: ubuntu-latest, image: quay.io/pypa/manylinux_2_28_x86_64 }
+          - { platform: linux-aarch64, os: ubuntu-24.04-arm, image: quay.io/pypa/manylinux_2_28_aarch64 }
+          - { platform: linux-x86_64-musl, os: ubuntu-latest, image: "rust:alpine" }
+          - { platform: linux-aarch64-musl, os: ubuntu-24.04-arm, image: "rust:alpine" }
+          - { platform: macos-x86_64, os: macos-15-intel }
+          - { platform: macos-aarch64, os: macos-latest }
+          - { platform: windows-x86_64, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - if: runner.os != 'Linux'
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build the C API
+        env:
+          IMAGE: ${{ matrix.image }}
+          # manylinux has no Rust. On musl, Rust links the C runtime statically by default, which
+          # a library loaded by a JVM linked against musl cannot do; linked dynamically, its
+          # unwinder is libgcc_s, which Alpine's JDKs lack (all but Temurin's). A linker script
+          # in libgcc_s's place links Rust's own libunwind.a, the one of a static build; the
+          # export tests, built the same way, check that a panic is still caught (U2004).
+          BUILD: |
+            set -eu
+            if ! command -v cargo >/dev/null; then
+              curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+              . "$HOME/.cargo/env"
+            fi
+            if [ -f /etc/alpine-release ]; then
+              host=$(rustc -vV | sed -n 's/^host: //p')
+              mkdir -p /tmp/unwind
+              printf 'INPUT(%s)\n' \
+                "$(rustc --print sysroot)/lib/rustlib/$host/lib/self-contained/libunwind.a" \
+                > /tmp/unwind/libgcc_s.so
+              export RUSTFLAGS="-C target-feature=-crt-static -L native=/tmp/unwind"
+              cargo test --release --locked -p jlens-capi --test exports
+            fi
+            cargo build --release --locked -p jlens-capi
+        run: |
+          if [ -n "$IMAGE" ]; then
+            docker run --rm -e CARGO_TERM_COLOR -v "$GITHUB_WORKSPACE:/w" -w /w "$IMAGE" sh -c "$BUILD"
+          else
+            sh -c "$BUILD"
+          fi
+      - name: Check the C library it links against
+        if: runner.os == 'Linux'
+        run: |
+          lib=target/release/libjlens_capi.so
+          objdump -p "$lib" | grep NEEDED
+          case "${{ matrix.platform }}" in
+            *-musl)
+              # musl alone.
+              test "$(objdump -p "$lib" | grep -c NEEDED)" -eq 1
+              objdump -p "$lib" | grep -q 'NEEDED *libc\.musl-' ;;
+            *)
+              newest=$(objdump -T "$lib" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n1)
+              echo "newest glibc symbol version: $newest"
+              test "$(printf '%s\n' "$newest" GLIBC_2.28 | sort -V | tail -n1)" = GLIBC_2.28 ;;
+          esac
+      - name: Put it where the JAR takes it from
+        run: |
+          native="crates/jlens-java/java/native/${{ matrix.platform }}"
+          mkdir -p "$native"
+          case "$RUNNER_OS" in
+            Windows) cp target/release/jlens_capi.dll "$native/" ;;
+            macOS) cp target/release/libjlens_capi.dylib "$native/" ;;
+            *) cp target/release/libjlens_capi.so "$native/" ;;
+          esac
+      - uses: actions/upload-artifact@v7
+        with:
+          name: java-native-${{ matrix.platform }}
+          path: crates/jlens-java/java/native/
+          if-no-files-found: error
+
+  jar:
+    name: JAR
+    needs: native
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/jlens-java/java
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: java-native-*
+          merge-multiple: true
+          path: crates/jlens-java/java/native
+      - name: Build the JAR
+        run: ./mvnw -B package -DskipTests
+      - name: It carries the seven libraries
+        run: |
+          jar=$(ls target/jlens-*.jar)
+          jar tf "$jar" | grep '^io/github/thkprado/jlens/native/.*[^/]$' | sort > libraries.txt
+          cat libraries.txt
+          printf 'io/github/thkprado/jlens/native/%s\n' \
+            linux-aarch64-musl/libjlens_capi.so linux-aarch64/libjlens_capi.so \
+            linux-x86_64-musl/libjlens_capi.so linux-x86_64/libjlens_capi.so \
+            macos-aarch64/libjlens_capi.dylib macos-x86_64/libjlens_capi.dylib \
+            windows-x86_64/jlens_capi.dll | sort | diff - libraries.txt
+          mkdir dist
+          cp "$jar" dist/jlens.jar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: java-jar
+          path: crates/jlens-java/java/dist/jlens.jar
+          if-no-files-found: error
+
+  test:
+    name: test (${{ matrix.platform }})
+    needs: jar
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x86_64, os: ubuntu-latest }
+          - { platform: linux-aarch64, os: ubuntu-24.04-arm }
+          - { platform: linux-x86_64-musl, os: ubuntu-latest, alpine: true }
+          - { platform: linux-aarch64-musl, os: ubuntu-24.04-arm, alpine: true }
+          - { platform: macos-x86_64, os: macos-15-intel }
+          - { platform: macos-aarch64, os: macos-latest }
+          - { platform: windows-x86_64, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: crates/jlens-java/java
+    steps:
+      - uses: actions/checkout@v7
+      - if: ${{ !matrix.alpine }}
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - uses: actions/download-artifact@v8
+        with:
+          name: java-jar
+          path: crates/jlens-java/java/dist
+      # The suite's classes are compiled, then the package's are replaced by the JAR's, its
+      # seven libraries included, and the suite runs: the loader picks the platform's library
+      # from the JAR, and LoaderTest checks it picked JLENS_TEST_PLATFORM.
+      - name: Run the JUnit suite against the JAR
+        env:
+          JLENS_TEST_PLATFORM: ${{ matrix.platform }}
+          TEST: |
+            set -eu
+            mvnw=./mvnw
+            [ "${RUNNER_OS-}" = Windows ] && mvnw=./mvnw.cmd
+            "$mvnw" -B test-compile
+            rm -rf target/classes
+            mkdir target/classes
+            (cd target/classes && jar xf ../../dist/jlens.jar)
+            "$mvnw" -B surefire:test
+        # On musl, Alpine's own JDK, which has no libgcc_s.
+        run: |
+          if [ "${{ matrix.alpine }}" = true ]; then
+            docker run --rm -e JLENS_TEST_PLATFORM -v "$GITHUB_WORKSPACE:/w" \
+              -w /w/crates/jlens-java/java alpine:3.24 sh -c \
+              "apk add -q openjdk25-jdk && PATH=/usr/lib/jvm/default-jvm/bin:\$PATH && $TEST"
+          else
+            sh -c "$TEST"
+          fi

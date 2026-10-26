@@ -248,6 +248,13 @@ jobs:
     if: github.event_name == 'push'
     uses: ./.github/workflows/wheels.yml
 
+  # The Java package's JAR, with the C API of every release target, its JUnit suite run on each
+  # (ADR 0021). Not on pull requests, for the same reason.
+  jar:
+    name: Java JAR
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/jar.yml
+
   # The npm packages of the CLI (ADR 0012), built from those archives as the Release workflow
   # builds them, then installed on each OS from the packed tarballs.
   npm-cli:

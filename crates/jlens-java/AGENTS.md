@@ -20,7 +20,9 @@ Guidance for working in the Java package. The repository-wide rules are in the r
   the package reads and writes itself).
 - `java/src/test/java/`: the JUnit suite, in the module's package.
 - `java/native/<os>-<arch>/`: the native libraries the JAR carries (not committed), put there by
-  `cargo xtask java` for the host; the names are Rust's `std::env::consts::{OS, ARCH}`.
+  `cargo xtask java` for the host, or by the JAR workflow for the seven release targets; the
+  names are Rust's `std::env::consts::{OS, ARCH}`, with `-musl` after them on musl
+  (`linux-x86_64-musl`), which the loader detects.
 
 ## Testing
 

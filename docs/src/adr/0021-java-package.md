@@ -1051,3 +1051,50 @@ smaller.
   version.
 - macOS takes mimalloc 2 too, unmeasured here: whether 3.3.2 has the fault there was not
   tested, and mimalloc 2 is the version known to pass.
+
+### The JAR (0.25 #12)
+
+`.github/workflows/jar.yml`, called by CI on each push to `main`, builds the C API of the seven
+release targets as the wheels are built, packs them in one JAR, then runs the JUnit suite on
+each target against that JAR: the suite's classes are compiled, the package's replaced by the
+JAR's, and `LoaderTest` checks that the loader picked the platform CI names in
+`JLENS_TEST_PLATFORM`. The JAR's directories are Rust's `{OS}-{ARCH}`, with `-musl` after them
+on musl (`linux-aarch64-musl`).
+
+- **glibc 2.28**, as the manylinux wheels: the glibc libraries are built in the
+  `manylinux_2_28` containers, with Rust installed there by rustup, and the job fails when a
+  symbol needs a newer glibc than 2.28.
+- **musl** is built in `rust:alpine`. A library loaded by a JVM linked against musl must link
+  musl dynamically (`-crt-static` off), and then Rust links its unwinder from `libgcc_s`, which
+  Alpine's JDK packages do not depend on: of the Alpine JDKs, only Temurin's brings it. A
+  linker script named `libgcc_s.so`, put first on the search path, links Rust's own
+  `libunwind.a`, the one a static build uses, so the library needs musl alone, which the job
+  checks. The export tests, built the same way in the same container, check that a panic is
+  still caught (`U2004`). The suite runs in `alpine:3.24` on its `openjdk25-jdk`, which has no
+  `libgcc`.
+- **The loader tells musl from glibc** by the dynamic loader mapped into the process
+  (`/ld-musl-` in `/proc/self/maps`). Files on disk do not tell: a glibc system can have musl
+  installed.
+- **Extraction.** The library is copied to `jlens-<user>-<SHA-256 of its bytes>` in
+  `java.io.tmpdir`. Each JVM writes its own temporary file there, then moves it in place
+  atomically; a failed move is accepted when the file in place has the library's size, as on
+  Windows, where a library another JVM moved in first and holds open cannot be replaced. The
+  temporary directory is shared on Linux and macOS, so another user could make the directory
+  first and put a library of their own in it: the loader makes it with permissions `rwx------`,
+  and refuses one that is a link, that another user owns (compared with the owner of a
+  temporary file it makes) or that the group or others may write to, with an
+  `UnsatisfiedLinkError` that names the ways out (remove it, or set `java.io.tmpdir` or
+  `jlens.library`). Windows has no POSIX permissions there; its temporary directory is the
+  user's own.
+- **`LoaderTest`**: the platform detected has its library in the JAR; eight JVMs started at
+  once leave one library and no partial file; a directory others may write to is refused, then
+  accepted again once restored.
+
+Run locally against one JAR carrying the Windows, glibc and musl x86-64 libraries, all 57 tests
+pass on Windows, in WSL (glibc, against the `manylinux_2_28` library, whose newest glibc symbol
+is 2.28) and on Alpine 3.24 (`openjdk25-jdk`, and earlier Amazon Corretto's Alpine build).
+Before #11, the glibc run crashed in mimalloc 3. ARM and macOS run only in CI.
+
+The JAR's size: each library is about 3 MB, about 1.1 to 1.25 MB compressed (Linux x86-64
+3.19 MB, 1.22 MB in the JAR; Windows 2.74 MB, 1.07 MB), so about 8.5 MB for the seven, more
+than the 7 MB the decision estimated. Per-platform JARs remain the way out if users ask.

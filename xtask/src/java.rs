@@ -15,7 +15,7 @@ fn project() -> PathBuf {
     root().join("crates/jlens-java/java")
 }
 
-/// Builds the C API for the host, puts it where the JAR takes it from (`native/<os>-<arch>/`),
+/// Builds the C API for the host, puts it where the JAR takes it from (`native/<platform>/`),
 /// and runs the Maven Wrapper with `args`, `verify` when none are given.
 pub fn test(args: &[String]) -> Result<()> {
     check_version()?;
@@ -68,7 +68,18 @@ pub fn compare(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Builds `jlens-capi` in release mode and copies it into `native/<os>-<arch>/`.
+/// The directory of `native/` that holds the host's library, as the package's loader names it:
+/// `<os>-<arch>`, and `<os>-<arch>-musl` on musl.
+fn platform() -> String {
+    let libc = if cfg!(target_env = "musl") {
+        "-musl"
+    } else {
+        ""
+    };
+    format!("{OS}-{ARCH}{libc}")
+}
+
+/// Builds `jlens-capi` in release mode and copies it into `native/<platform>/`.
 fn build_native() -> Result<()> {
     let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
         .current_dir(root())
@@ -82,7 +93,7 @@ fn build_native() -> Result<()> {
     let target =
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root().join("target"), PathBuf::from);
     let built = target.join("release").join(&name);
-    let native = project().join("native").join(format!("{OS}-{ARCH}"));
+    let native = project().join("native").join(platform());
     fs::create_dir_all(&native)?;
     fs::copy(&built, native.join(&name)).with_context(|| format!("copying {}", built.display()))?;
     Ok(())

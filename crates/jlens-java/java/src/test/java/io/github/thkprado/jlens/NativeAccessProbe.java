@@ -1,6 +1,9 @@
 package io.github.thkprado.jlens;
 
-/** Evaluates one expression, in the JVM that {@link ThreadsTest#nativeAccessWarning} starts. */
+/**
+ * Evaluates one expression, in the JVMs that {@link ThreadsTest#nativeAccessWarning} and
+ * {@link LoaderTest} start.
+ */
 final class NativeAccessProbe {
     private NativeAccessProbe() {}
 

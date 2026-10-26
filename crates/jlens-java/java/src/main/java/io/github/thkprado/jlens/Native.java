@@ -15,13 +15,23 @@ import java.lang.invoke.MethodType;
 import java.lang.ref.Cleaner;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * The C API of {@code jlens-capi} (ADR 0021), loaded at first use. Bytes cross in buffers owned
@@ -398,8 +408,10 @@ final class Native {
 
     /**
      * The path of the native library: the system property {@code jlens.library} when it is set,
-     * or the host platform's library in the JAR, copied to the temporary directory once per
-     * content (several JVMs can start at once: each writes its own file, then moves it in place).
+     * or the host platform's library in the JAR, copied to the temporary directory once per user
+     * and content. Several JVMs can start at once: each writes its own file, then moves it in
+     * place. The directory must be this user's alone, or another user could put a library of
+     * their own there for this one to load.
      */
     private static Path library() {
         String given = System.getProperty("jlens.library");
@@ -417,17 +429,27 @@ final class Native {
             throw new UncheckedIOException(e);
         }
         try {
-            Path directory = Path.of(System.getProperty("java.io.tmpdir"), "jlens-" + digest(bytes));
+            Path temporary = Path.of(System.getProperty("java.io.tmpdir"));
+            String user = System.getProperty("user.name", "").replaceAll("[^A-Za-z0-9._-]", "_");
+            Path directory = temporary.resolve("jlens-" + user + "-" + digest(bytes));
+            own(temporary, directory);
             Path library = directory.resolve(name);
-            if (Files.isRegularFile(library) && Files.size(library) == bytes.length) return library;
-            Files.createDirectories(directory);
+            if (Files.isRegularFile(library, LinkOption.NOFOLLOW_LINKS)
+                    && Files.size(library) == bytes.length) {
+                return library;
+            }
             Path part = Files.createTempFile(directory, name, ".part");
             Files.write(part, bytes);
             try {
                 Files.move(part, library, StandardCopyOption.ATOMIC_MOVE);
-            } catch (FileAlreadyExistsException | java.nio.file.AccessDeniedException e) {
-                // Another JVM moved the same bytes in first, and may have loaded them.
+            } catch (FileSystemException e) {
+                // On Windows, a file another JVM moved in first and holds open cannot be
+                // replaced; it has the same bytes.
                 Files.deleteIfExists(part);
+                if (!Files.isRegularFile(library, LinkOption.NOFOLLOW_LINKS)
+                        || Files.size(library) != bytes.length) {
+                    throw e;
+                }
             }
             return library;
         } catch (IOException e) {
@@ -435,7 +457,45 @@ final class Native {
         }
     }
 
-    /** The host platform, as the JAR's directories name it: {@code windows-x86_64} and so on. */
+    /**
+     * Makes {@code directory}, only its owner allowed in, or checks that it is so: a directory
+     * of this user's, not a link, that no one else may write to. Where files have no POSIX
+     * permissions (Windows), the temporary directory is the user's own.
+     */
+    private static void own(Path temporary, Path directory) throws IOException {
+        if (!FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+            Files.createDirectories(directory);
+            return;
+        }
+        try {
+            Files.createDirectory(directory,
+                    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+            return;
+        } catch (FileAlreadyExistsException e) {
+            // Made before, by this JVM's user or not: checked below.
+        }
+        Path probe = Files.createTempFile(temporary, "jlens-", ".owner");
+        UserPrincipal self;
+        try {
+            self = Files.getOwner(probe);
+        } finally {
+            Files.deleteIfExists(probe);
+        }
+        PosixFileAttributes attributes =
+                Files.readAttributes(directory, PosixFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        Set<PosixFilePermission> others = EnumSet.of(PosixFilePermission.GROUP_WRITE,
+                PosixFilePermission.OTHERS_WRITE);
+        others.retainAll(attributes.permissions());
+        if (!attributes.isDirectory() || !attributes.owner().equals(self) || !others.isEmpty()) {
+            throw new UnsatisfiedLinkError("jlens: " + directory + " is not a directory of this"
+                    + " user's alone; remove it, or set java.io.tmpdir or jlens.library");
+        }
+    }
+
+    /**
+     * The host platform, as the JAR's directories name it: {@code windows-x86_64},
+     * {@code linux-x86_64-musl} and so on.
+     */
     static String platform() {
         String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
         String arch = System.getProperty("os.arch").toLowerCase(Locale.ROOT);
@@ -448,7 +508,20 @@ final class Native {
             case "aarch64", "arm64" -> "aarch64";
             default -> arch;
         };
-        return system + "-" + machine;
+        return system + "-" + machine + (system.equals("linux") && musl() ? "-musl" : "");
+    }
+
+    /**
+     * Whether this JVM runs on musl, as on Alpine Linux: musl's dynamic loader is mapped into the
+     * process. Files on disk do not tell, as a glibc system can have musl installed too.
+     */
+    private static boolean musl() {
+        try (Stream<String> maps =
+                Files.lines(Path.of("/proc/self/maps"), StandardCharsets.ISO_8859_1)) {
+            return maps.anyMatch(line -> line.contains("/ld-musl-"));
+        } catch (IOException | UncheckedIOException e) {
+            return false;
+        }
     }
 
     private static String digest(byte[] bytes) {
