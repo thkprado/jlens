@@ -18,10 +18,16 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 jlens-core.workspace = true
 foldhash.workspace = true
-mimalloc = { workspace = true, features = ["local_dynamic_tls"] }
 serde.workspace = true
 serde_json.workspace = true
 scoped-tls-hkt.workspace = true
+
+# mimalloc 2 outside Windows: mimalloc 3.3 crashes on glibc once the thread that loaded the
+# library has ended (ADR 0021, the allocator of 0.25 #11).
+[target.'cfg(windows)'.dependencies]
+mimalloc = { workspace = true, features = ["local_dynamic_tls"] }
+[target.'cfg(not(windows))'.dependencies]
+mimalloc = { workspace = true, features = ["local_dynamic_tls", "v2"] }
 
 [dev-dependencies]
 proptest.workspace = true

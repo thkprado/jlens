@@ -9,6 +9,7 @@ import gc
 import json
 import pathlib
 import platform
+import subprocess
 import sys
 import threading
 import time
@@ -433,6 +434,34 @@ def test_threads():
         assert from_document == 499500
         assert from_json == "499500"
         assert from_values == sum(range(i))
+
+
+LOADED_ON_A_THREAD_THAT_ENDS = """
+import threading
+
+def load():
+    import jlens
+    assert jlens.Expression("1 + 1").evaluate(None) == 2
+
+thread = threading.Thread(target=load)
+thread.start()
+thread.join()
+import jlens
+expr = jlens.Expression("$sum(items)")
+results = []
+for i in range(8):
+    thread = threading.Thread(target=lambda: results.append(expr.evaluate({"items": [1, 2]})))
+    thread.start()
+    thread.join()
+assert results == [3] * 8, results
+"""
+
+
+def test_loaded_on_a_thread_that_ends():
+    # mimalloc 3 crashed here on glibc, at a later thread's first allocation (roadmap 0.25 #11).
+    # In a new interpreter, since this one has the package loaded already.
+    run = subprocess.run([sys.executable, "-c", LOADED_ON_A_THREAD_THAT_ENDS], capture_output=True)
+    assert run.returncode == 0, run.stderr.decode(errors="replace")
 
 
 def test_evaluation_lets_other_threads_run():

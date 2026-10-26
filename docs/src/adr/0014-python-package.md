@@ -205,3 +205,13 @@ is small and shared with every other module loaded so far.
   took 1.09 to 1.43 MB, not "under 1 MB" as the consequences above said.
 - Every target builds mimalloc's C sources with its own compiler, as the command's release
   binaries already do: the manylinux and musllinux containers on Linux, MSVC on Windows.
+
+### Follow-up: mimalloc 2 outside Windows (0.25 #11)
+
+mimalloc 3.3.2, which `libmimalloc-sys` 0.1.49 bundles, crashes on glibc once the thread that
+imported the module has ended: with 0.24.0, a later thread's evaluation can end the interpreter
+with a segmentation fault. From 0.24.1 on, the package uses mimalloc 2 on every target but
+Windows, which keeps mimalloc 3; with Python values in, every case of `python.py speed` takes
+the same time within 1%, or less. The candidates and their measurements are in
+[ADR 0021](0021-java-package.md#the-allocator-outside-windows-025-11), since the Java package's
+library has the same fault.

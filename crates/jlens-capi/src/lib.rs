@@ -69,7 +69,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 // Evaluation allocates for most of its work, and Windows' system allocator made the spike's
 // large cases up to 2.7 times slower than on Linux (ADR 0021). `local_dynamic_tls`, since the
-// library is loaded at run time, as the Python package's is (ADR 0014, amendment).
+// library is loaded at run time, as the Python package's is (ADR 0014, amendment). mimalloc 2
+// outside Windows (`Cargo.toml`).
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

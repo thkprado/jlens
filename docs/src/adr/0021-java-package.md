@@ -977,3 +977,77 @@ An audit at level `off` costs 17 µs more than an evaluation: the input written 
 and the tree and the explanation written, read and made into records. Java's part is about
 7 µs more than Python's at `off` and `decisions`, and nothing at `full`, where capturing values
 in Rust dominates.
+
+### The allocator outside Windows (0.25 #11)
+
+Found while testing the JAR (#12): mimalloc 3.3.2, the version `libmimalloc-sys` 0.1.49
+bundles, crashes on glibc in a library loaded at run time once the thread that loaded it has
+ended. A later thread's first allocation finds a heap whose thread data is null and faults in
+`_mi_subproc`, with the `local_dynamic_tls` model as with initial-exec. The JVM crashed at the
+third short-lived thread after the loading thread ended; the Python package 0.24.0 segfaults
+when `import jlens` runs in a thread that ends. Windows and musl do not crash, nor does the
+`jlens` command, an executable. The suites never saw it: their threads live as long as the run.
+
+`ThreadsTest.loadedOnAThreadThatEnds` and `test_loaded_on_a_thread_that_ends` load the library
+on a thread that ends, then evaluate on eight new threads, one after another, in a new process.
+Both fail with 3.3.2 on glibc (the JVM aborts with 134; the PyPI wheel of 0.24.0 and a wheel
+built with `maturin build` exit with 139) and pass with every candidate below.
+
+**Decision**: mimalloc 2 (2.3.2, the crate's `v2` feature) in `jlens-capi` and `jlens-python`
+on every target but Windows, where mimalloc 3 stays. One target-specific dependency in each
+`Cargo.toml`, no code. The `jlens` command keeps mimalloc 3: its release binaries are built
+alone (`-p jlens-cli`), while a build of the whole workspace on Linux unifies the feature and
+gives it mimalloc 2.
+
+The C API's evaluations through its exports, as in [the table of #2](#mimalloc-025-2): JSON
+text copied into a buffer per evaluation, then a `Document`. Microseconds, the best of two
+alternated runs, each the best of five runs of 0.3 s after a second of warm-up. 3.6.0 is
+upstream's release of 2026-10-23, put in place of 3.3.2's sources in a copy of
+`libmimalloc-sys`; it passes the regression tests.
+
+Linux (WSL, glibc):
+
+| Items | Expression | 3.3.2 | 3.6.0 | 2.3.2 | jemalloc | glibc |
+|---:|---|---:|---:|---:|---:|---:|
+| 1,000 | `items[0].name` | 307 | 292 | 297 | 355 | 381 |
+| 1,000 | `$count(items)` | 207 | 206 | 205 | 238 | 222 |
+| 1,000 | `$sum(items.price)` | 338 | 324 | 329 | 366 | 378 |
+| 1,000 | `items[price > 98].id` | 470 | 457 | 462 | 500 | 510 |
+| 1,000 | `$` | 1,834 | 1,792 | 1,759 | 2,047 | 2,223 |
+| 100,000 | `items[0].name` | 34,049 | 33,132 | 33,993 | 44,650 | 39,727 |
+| 100,000 | `$sum(items.price)` | 37,434 | 35,823 | 37,140 | 45,703 | 40,780 |
+| 100,000 | `$` | 216,536 | 210,379 | 209,392 | 264,134 | 255,974 |
+| 100,000 | `$sum(items.price)`, `Document` | 5,591 | 5,204 | 5,170 | 7,188 | 10,503 |
+| 100,000 | `$`, `Document` | 123,499 | 121,221 | 116,460 | 145,703 | 151,893 |
+
+Windows (the system allocator from a pair of runs alternated with 3.3.2 and 2.3.2 alone):
+
+| Items | Expression | 3.3.2 | 3.6.0 | 2.3.2 | System |
+|---:|---|---:|---:|---:|---:|
+| 1,000 | `items[0].name` | 318 | 296 | 344 | 441 |
+| 1,000 | `$sum(items.price)` | 339 | 333 | 366 | 448 |
+| 1,000 | `$` | 1,973 | 1,941 | 1,997 | 3,006 |
+| 100,000 | `items[0].name` | 34,488 | 33,544 | 38,594 | 54,764 |
+| 100,000 | `$sum(items.price)` | 36,477 | 36,366 | 41,964 | 57,964 |
+| 100,000 | `$` | 226,735 | 223,382 | 267,865 | 437,288 |
+| 100,000 | `$`, `Document` | 125,484 | 131,275 | 135,176 | 248,734 |
+
+The Python package with Python values in (`python.py speed`, WSL, Python 3.14, the median of
+three alternated runs): with mimalloc 2, every case takes the same time as with 3.3.2 within
+1%, or less: `recursion` 682 µs against 734, the index cases 0.1 µs less; the wheel is 7 KB
+smaller.
+
+- **On Linux the three mimalloc versions are within 8%** of each other, mimalloc 2 the fastest
+  on `$` and on a `Document`. jemalloc (`tikv-jemallocator` with `disable_initial_exec_tls`) is
+  8 to 39% slower than mimalloc 2, and glibc's allocator 8 to 103%.
+- **On Windows mimalloc 2 is up to 18% slower on JSON text**, and 8% on `$` over a `Document`;
+  3.6.0 is within 5% of 3.3.2. Since
+  3.3.2 does not crash there, Windows keeps it.
+- **3.6.0 was not taken**, though it passes: `libmimalloc-sys` has not published it, so it
+  would mean carrying a copy of the crate with upstream's C sources, through
+  `[patch.crates-io]`, for the whole workspace and the Python package's source distribution;
+  and it is two days old, its release notes silent on this fault. When `libmimalloc-sys`
+  bundles a v3 that passes the two regression tests, every target can move back to one
+  version.
+- macOS takes mimalloc 2 too, unmeasured here: whether 3.3.2 has the fault there was not
+  tested, and mimalloc 2 is the version known to pass.

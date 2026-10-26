@@ -28,6 +28,12 @@ All notable changes are recorded here. The format follows
   `node_count` of 5; such a node is now collapsed, its parent adopting its recorded descendants
   and filters, as a node not recorded at level `decisions` is. In every package and in
   `jlens eval --audit json`.
+- The Python package no longer crashes on Linux when the thread that imported it has ended:
+  with 0.24.0, a later thread's evaluation could end the interpreter with a segmentation fault.
+  mimalloc 3.3, its allocator, loses its thread data on glibc once the thread that loaded the
+  module ends. The package, and the Java package's library, now use mimalloc 2 outside
+  Windows, as fast there; Windows keeps mimalloc 3, which has no such fault and is up to 18%
+  faster there on JSON text (ADR 0021).
 
 ## [0.24.0]
 

@@ -69,18 +69,29 @@ class ThreadsTest {
      */
     @Test
     void nativeAccessWarning() throws Exception {
-        assertTrue(stderr().contains("WARNING: A restricted method"), "warned without the flag");
-        assertFalse(stderr("--enable-native-access=ALL-UNNAMED").contains("WARNING"), "quiet with it");
+        assertTrue(stderr(NativeAccessProbe.class).contains("WARNING: A restricted method"), "warned without the flag");
+        assertFalse(stderr(NativeAccessProbe.class, "--enable-native-access=ALL-UNNAMED").contains("WARNING"),
+                "quiet with it");
     }
 
-    private static String stderr(String... flags) throws IOException, InterruptedException {
+    /**
+     * The library loaded on a thread that ends, then used on new threads. mimalloc 3 crashed
+     * there on glibc, at the third thread (roadmap 0.25 #11). In a new JVM, since this one has
+     * the library loaded already.
+     */
+    @Test
+    void loadedOnAThreadThatEnds() throws Exception {
+        stderr(EndedThreadProbe.class, "--enable-native-access=ALL-UNNAMED");
+    }
+
+    private static String stderr(Class<?> probe, String... flags) throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
         command.add(ProcessHandle.current().info().command().orElseThrow());
         command.addAll(List.of(flags));
         command.add("-cp");
         command.add(System.getProperty("jlens.test.classes") + File.pathSeparator
                 + System.getProperty("jlens.test.testClasses"));
-        command.add(NativeAccessProbe.class.getName());
+        command.add(probe.getName());
         Process process = new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
         String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
         assertEquals(0, process.waitFor(), stderr);

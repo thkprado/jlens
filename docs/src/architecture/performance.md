@@ -403,7 +403,8 @@ converted input, which looks no key up in a `dict`.
 
 Also from 0.19 on, the package uses mimalloc as its allocator, as the command does, with
 `local_dynamic_tls`, the thread-local model of a library loaded at run time ([ADR 0014,
-amended](../adr/0014-python-package.md#amendment-mimalloc-as-the-allocator-019)). Measured the
+amended](../adr/0014-python-package.md#amendment-mimalloc-as-the-allocator-019)); mimalloc 2
+outside Windows from 0.24.1 on, as fast with Python values in ([ADR 0014, follow-up](../adr/0014-python-package.md#follow-up-mimalloc-2-outside-windows-025-11)). Measured the
 same way, with glibc's allocator before; the last rows come from `variants.py`, kept with the
 profiles of roadmap 0.19 #8:
 

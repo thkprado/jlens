@@ -42,6 +42,7 @@ use source::PySource;
 // Evaluation allocates for most of its work, and the system allocators are slower at it: with
 // glibc's, `malloc` and `free` took up to 38% of an evaluation (roadmap 0.19 #8). Only the
 // package's own allocations go through it; Python's objects keep the interpreter's allocator.
+// mimalloc 2 outside Windows (`Cargo.toml`).
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
