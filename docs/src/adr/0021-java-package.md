@@ -905,7 +905,32 @@ best of five runs of 0.3 s:
   Rust, Python and WebAssembly packages share. The Java side's own cost, the evaluation's
   `Host` in a `ScopedValue`, is about 0.02 µs. Looking a host function up in the bindings when
   a name is not found, instead of binding them all, would remove it; that is a change to the
-  core, left for its own item.
+  core, left for its own item. 0.25 #9 made it ([ADR 0006, amended](0006-host-functions.md#amendment-host-functions-looked-up-on-a-miss-025),
+  and [below](#host-functions-looked-up-on-a-miss-025-9)).
+
+### Host functions looked up on a miss (0.25 #9)
+
+The core looks a host function up in the bindings when no frame holds its name, and keeps it in
+the root frame, instead of binding every one before the evaluation ([ADR 0006, amended](0006-host-functions.md#amendment-host-functions-looked-up-on-a-miss-025)).
+Measured on the maintainer's Windows machine, Java 25.0.4, microseconds per evaluation with no
+input, the best of five runs of 0.3 s, the JAR of 4701ddc against this item's, both run from the
+class path by the same program (which is why the times are above those of #7's table):
+
+| Expression | Functions bound | Before µs | After µs |
+|---|---:|---:|---:|
+| `1 + 2` | none | 0.79 | 0.78 |
+| `$a + $b` | none | 0.96 | 0.96 |
+| `$a + $b` | one | 1.10 | 1.03 |
+| `$a + $b` | four | 1.37 | 1.03 |
+| `$a + $b` | sixteen | 2.50 | 1.04 |
+| `$add(1, 2)` | four | 2.21 | 2.05 |
+| `$add(1, 2)` | sixteen | 3.27 | 2.06 |
+
+- **A function not named costs nothing**, however many are bound. In Rust, `$a + $b` takes
+  0.40 µs with one, four or sixteen functions bound, against 0.39 µs with none (2.82 µs with
+  sixteen before).
+- **What stays is Java's own, about 0.07 µs** once the bindings hold a function, whatever their
+  number: the evaluation's `Host` in a `ScopedValue` and the frames' thread-local set in Rust.
 
 ### Audits (0.25 #8)
 

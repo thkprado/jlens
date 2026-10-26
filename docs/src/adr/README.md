@@ -11,7 +11,7 @@ earlier one instead.
 | [0003](0003-value-model.md) | An explicit value model with `Undefined` and sequence flags | Accepted |
 | [0004](0004-audit-tracer.md) | Audit evaluations through a tracer interface in the evaluator | Accepted |
 | [0005](0005-comment-annotations.md) | Carry audit labels in JSONata doc-comments | Accepted |
-| [0006](0006-host-functions.md) | Host functions with a JSON boundary | Accepted; extended by [0011](0011-host-callbacks.md) |
+| [0006](0006-host-functions.md) | Host functions with a JSON boundary | Accepted; extended by [0011](0011-host-callbacks.md); amended to look host functions up on a miss |
 | [0007](0007-language-server.md) | A language server on the language service, configured by `jlens.json` | Accepted |
 | [0008](0008-cli-machine-contract.md) | A machine contract for the CLI: `--json` envelopes, exit codes, stdout for data | Accepted |
 | [0009](0009-bounded-regex.md) | Regular expressions stop within the evaluation's limits, through a fork of `regress` | Accepted; the fork made permanent by [0020](0020-own-regress-fork.md) |

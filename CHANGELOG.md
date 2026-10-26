@@ -13,6 +13,14 @@ All notable changes are recorded here. The format follows
   of building a copy (ADR 0017, amended). The Java package returns its input's maps and lists
   this way.
 
+### Changed
+
+- Host functions are looked up when no frame holds a name, instead of being bound before each
+  evaluation, so an evaluation pays only for those it names (ADR 0006, amended). Each function
+  in `Bindings` cost about 0.15 µs per evaluation, called or not: `$a + $b` took 2.82 µs with
+  sixteen bound and now takes 0.40 µs, as with none. Variables still take the place of host
+  functions of the same name, and host functions the place of built-ins. In every package.
+
 ## [0.24.0]
 
 An index into a long array reads the items it picks instead of the whole array, whether it is a

@@ -1,7 +1,8 @@
 # 0006 — Host functions with a JSON boundary
 
 **Status:** Accepted; extended by [ADR 0011](0011-host-callbacks.md), which lets host functions
-call the functions they receive
+call the functions they receive. Amended in 0.25: host functions are looked up when no frame
+holds a name ([below](#amendment-host-functions-looked-up-on-a-miss-025)).
 
 ## Context
 
@@ -40,7 +41,8 @@ Options considered for the values that cross the boundary:
   function's `length` for higher-order functions and partial application.
 - **Bindings hold values and functions.** A name holds one or the other: binding one replaces the
   other. Each evaluation binds the host functions in its root frame next to the variables. So they
-  take precedence over built-in functions of the same name, as in jsonata-js.
+  take precedence over built-in functions of the same name, as in jsonata-js. (Since 0.25 they
+  are looked up when no frame holds a name, with the same precedence: see the amendment.)
 - **Function values** gain a `Host` variant. Partial application of built-in functions is
   generalized to host functions: `Partial` holds the target function.
 - **Errors** are `jlens_core::Error`s with a code chosen by the host. As for any error, the call
@@ -64,3 +66,30 @@ Options considered for the values that cross the boundary:
 - The evaluator's hot path only gains match arms. Tracing needs no new event: a host call is a
   function call node, with its `enter` and `exit` events.
 - Host functions run to completion. The evaluation's timeout is checked again once they return.
+
+## Amendment: host functions looked up on a miss (0.25)
+
+### Context
+
+Each evaluation bound every host function in its root frame before it started, a
+`HostFunction` cloned and its name allocated, called or not. The Java package measured it
+(ADR 0021, 0.25 #7): about 0.09 µs per function per evaluation, and in Rust `$a + $b` took
+2.82 µs with sixteen functions bound against 0.39 µs with none. A rule engine that binds dozens
+of functions paid microseconds for each rule, in every package.
+
+### Decision
+
+The root frame looks a name up among the bindings' host functions when no frame holds it,
+before the built-ins, and keeps the value it finds, as it keeps a built-in's. The precedence
+does not change: a variable, of the bindings or a document bound by `evaluate_document_with`,
+is in the root frame and found first; then the host functions; then the built-ins. A function
+bound by the expression or by a lambda's parameter is in a nearer frame. The value kept makes
+`$f = $f` hold, wherever in the expression each `$f` is.
+
+### Consequences
+
+- An evaluation pays only for the host functions it names, once each. On the maintainer's
+  Windows machine, `$a + $b` takes 0.40 µs with one, four or sixteen functions bound, against
+  0.39 µs with none; `$add(1, 2)` with sixteen bound 0.75 µs instead of 3.11.
+- A name that no frame holds costs a lookup in the bindings' functions before the built-ins,
+  once per evaluation and name, since the value is kept.

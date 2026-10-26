@@ -296,6 +296,49 @@ fn bindings_shadow_built_in_functions() {
 }
 
 #[test]
+fn host_functions_are_looked_up_when_no_frame_holds_the_name() {
+    let sum = HostFunction::new(1, |_, _| Ok(Some(json!("mine"))));
+    let b = Bindings::new().function("add", add()).function("sum", sum);
+    // A host function takes the place of a built-in in a lambda too, and keeps its value: the
+    // one a lambda finds is the one the expression finds.
+    assert_eq!(
+        eval("(function($x) { $sum($x) })([1])", None, &b),
+        Some(json!("mine"))
+    );
+    assert_eq!(eval("$sum = $sum", None, &b), Some(json!(true)));
+    assert_eq!(
+        eval("(function() { $add })() = $add", None, &b),
+        Some(json!(true))
+    );
+    // A function bound in a lambda, or by the expression, takes the place of a host function.
+    assert_eq!(
+        eval(
+            "(function($add) { $add(2, 3) })(function($a, $b) { $a * $b })",
+            None,
+            &b
+        ),
+        Some(json!(6))
+    );
+    assert_eq!(
+        eval("($add(1, 2); $add := 5; $add)", None, &b),
+        Some(json!(5))
+    );
+    // A document variable takes the place of a host function of the same name.
+    let doc = Document::new(&json!({}));
+    let seven = Document::new(&json!(7));
+    let result = Expression::compile("$add").unwrap().evaluate_document_with(
+        &doc,
+        &[("add", &seven)],
+        &b,
+        &Options::default(),
+    );
+    assert_eq!(result.unwrap(), Some(json!(7)));
+    // A host function named without `$` is a forgotten `$`, as a built-in is.
+    let err = eval_with("add(1, 2)", None, &b).unwrap_err();
+    assert_eq!(err.code(), "T1005");
+}
+
+#[test]
 fn a_name_holds_a_value_or_a_function() {
     let b = Bindings::new().var("f", 1).function("f", add());
     assert!(b.get("f").is_none());
