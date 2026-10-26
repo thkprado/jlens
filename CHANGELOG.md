@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.25.0]
+
+The Java package, in beta: `io.github.thkprado:jlens` on Maven Central, for Java 25 and later,
+one JAR with the native libraries of seven targets. Host functions are looked up when an
+expression names them, so an evaluation no longer pays for each one bound, and an audit cut
+short by `max_nodes` keeps the nodes it counts.
+
 ### Added
 
 - The Java package, `io.github.thkprado:jlens` on Maven Central, in beta, for Java 25 and later
@@ -986,7 +993,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.24.1...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/thkprado/jlens/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/thkprado/jlens/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/thkprado/jlens/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/thkprado/jlens/compare/v0.22.0...v0.23.0

@@ -29,6 +29,7 @@ pip install jlens                       # the Python package
 - crates.io: [jlens-core](https://crates.io/crates/jlens-core), [jlens-schema](https://crates.io/crates/jlens-schema), [jlens-lsp](https://crates.io/crates/jlens-lsp), [jlens-cli](https://crates.io/crates/jlens-cli)
 - npm: [jlens-wasm](https://www.npmjs.com/package/jlens-wasm), [jlens-cli](https://www.npmjs.com/package/jlens-cli)
 - PyPI: [jlens](https://pypi.org/project/jlens/)
+- Maven Central: [io.github.thkprado:jlens](https://central.sonatype.com/artifact/io.github.thkprado/jlens), the Java package (its Maven and Gradle lines in [installation](https://thkprado.github.io/jlens/getting-started/installation.html#java))
 - Container: [ghcr.io/thkprado/jlens](https://github.com/thkprado/jlens/pkgs/container/jlens)
 - VS Code: [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=thkprado.jlens), [Open VSX](https://open-vsx.org/extension/thkprado/jlens)
 - Every way to install: [installation](https://thkprado.github.io/jlens/getting-started/installation.html)
