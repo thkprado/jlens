@@ -116,3 +116,15 @@ pub fn guarded<R>(fallback: impl FnOnce(Box<dyn Any + Send>) -> R, f: impl FnOnc
 pub fn zero<R: Default>(_payload: Box<dyn Any + Send>) -> R {
     R::default()
 }
+
+/// Stack bytes left free when the host is called back. The JVM needs its guard zones and its
+/// shadow zone below the caller's frame, sized in 4 KiB units rounded up to the page size: about
+/// 96 KiB with 4 KiB pages, 128 KiB with the 16 KiB pages of macOS on ARM, more than the 128 KiB
+/// [`jlens_core::stack::grow`] keeps once the frames up to the call are counted. Then the host's
+/// own code runs there (ADR 0021, the JAR of 0.25 #12).
+const HOST_ROOM: usize = 256 * 1024;
+
+/// Calls the host back through `f`, on a new stack segment when less than [`HOST_ROOM`] is left.
+pub(crate) fn upcall<R>(f: impl FnOnce() -> R) -> R {
+    stacker::maybe_grow(HOST_ROOM, 4 * 1024 * 1024, f)
+}

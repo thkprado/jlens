@@ -202,7 +202,9 @@ fn run(
         return Err(Error::new("U1001").with("message", "Too many live objects in the C API"));
     }
     let id = NUMBERS.fetch_add(1, Ordering::Relaxed);
-    let reply = framed(id, call, || function(context, index, id, arguments));
+    let reply = framed(id, call, || {
+        crate::upcall(|| function(context, index, id, arguments))
+    });
     buffers::free(arguments);
     let result = read_reply(reply, name);
     if !FRAME.is_set() {

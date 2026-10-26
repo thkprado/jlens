@@ -1093,7 +1093,24 @@ on musl (`linux-aarch64-musl`).
 Run locally against one JAR carrying the Windows, glibc and musl x86-64 libraries, all 57 tests
 pass on Windows, in WSL (glibc, against the `manylinux_2_28` library, whose newest glibc symbol
 is 2.28) and on Alpine 3.24 (`openjdk25-jdk`, and earlier Amazon Corretto's Alpine build).
-Before #11, the glibc run crashed in mimalloc 3. ARM and macOS run only in CI.
+Before #11, the glibc run crashed in mimalloc 3. ARM and macOS run in CI, and macOS on ARM also
+on a MacBook Air M1.
+
+**macOS on ARM: room for the JVM below a call back.** The first CI run failed one test there,
+only there: `$string($)` over Java lists nested 2,000 deep, on threads of 128 and 256 KiB,
+failed with `U1004`, the reader's `StackOverflowError`; when the reader's handler overflowed
+too, the exception left the upcall and the JVM aborted (`upcallLinker.cpp`, "Unrecoverable
+uncaught exception"). HotSpot sizes its guard zones and its shadow zone in 4 KiB units rounded
+up to the page size, and macOS uses 16 KiB pages on ARM: Java needs about 128 KiB free below
+the caller's frame there (red, yellow and reserved zones 48 KiB, shadow zone 80 KiB), against
+96 KiB with 4 KiB pages. `jlens_core::stack::grow` moves to a new segment when less than 128 KiB
+is left, and the crash report showed exactly 128 KiB free at the call. Every call back into the
+host, the reader's and host functions', now goes through `upcall` in `jlens-capi`, which moves
+to a new segment of 4 MiB when less than 256 KiB is left. The core keeps its 128 KiB. Host
+functions never failed, at any depth from 0 to 3,000 on either stack, but take the same route.
+On Windows the calls cost the same within noise (`items[0].name` over Java objects 2.48 against
+2.49 µs, `$sum(items.price)` over 1,000 items 324 against 316 µs, a host call 1.73 against
+1.71 µs, the best of three alternated runs).
 
 The JAR's size: each library is about 3 MB, about 1.1 to 1.25 MB compressed (Linux x86-64
 3.19 MB, 1.22 MB in the JAR; Windows 2.74 MB, 1.07 MB), so about 8.5 MB for the seven, more

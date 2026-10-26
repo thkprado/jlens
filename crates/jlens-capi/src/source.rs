@@ -103,7 +103,8 @@ impl Host {
         sink: &mut Sink<'_, '_>,
     ) -> Result<bool, String> {
         let address = key.as_ptr().expose_provenance();
-        let level = (self.reader)(self.context, op, node, index, address, key.len());
+        let level =
+            crate::upcall(|| (self.reader)(self.context, op, node, index, address, key.len()));
         // A member is read through its `Rc`, so the host is alive.
         let this = self.this.upgrade().ok_or("the input is gone")?;
         write(level, &this, op != READ, sink)
@@ -216,7 +217,7 @@ impl Sources<'_> for Host {
     }
 
     fn length(&self, index: u32) -> Option<usize> {
-        let length = (self.reader)(self.context, LENGTH, index, 0, 0, 0);
+        let length = crate::upcall(|| (self.reader)(self.context, LENGTH, index, 0, 0, 0));
         usize::try_from(length).ok().filter(|_| length != u64::MAX)
     }
 

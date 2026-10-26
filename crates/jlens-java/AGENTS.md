@@ -29,7 +29,8 @@ Guidance for working in the Java package. The repository-wide rules are in the r
 `cargo xtask java` builds `jlens-capi` in release mode, copies the library into `java/native/`,
 and runs `mvnw -B verify`; arguments replace `verify` (`cargo xtask java test -Dtest=OptionsTest`).
 It needs a JDK 25 or later on `PATH` or in `JAVA_HOME`. CI runs it on Linux and Windows, on
-Java 25 and on the latest release.
+Java 25 and on the latest release; on each push to `main`, the JAR workflow (`jar.yml`) runs the
+suite against the release JAR on its seven targets, macOS and musl included.
 
 The system property `jlens.library` points the package at a library outside the JAR.
 
@@ -56,6 +57,9 @@ The system property `jlens.library` points the package at a library outside the 
   the C API on the evaluating thread, which finds it in a `ScopedValue`. An upcall must never
   throw: every failure becomes a level the evaluation fails with (`U1004`). A map or list of the
   input that the result holds unchanged comes back as itself (`INPUT` in `Values`).
+- **Every call back into Java goes through `upcall` in `jlens-capi`**, which keeps 256 KiB of
+  stack free for the JVM: with the 16 KiB pages of macOS on ARM, Java needs more below the caller
+  than the core keeps, and a `StackOverflowError` that leaves an upcall aborts the JVM.
 - **Host functions** (0.25 #7) are run by `Host`, called back on the evaluating thread, which
   finds the evaluation's `Host` in a `ScopedValue` and the function by its `Bindings`' context.
   The upcall never throws: an exception becomes an error reply with its number, and `evaluate`
