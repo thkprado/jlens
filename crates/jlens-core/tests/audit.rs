@@ -122,6 +122,56 @@ fn capture_limits_bound_the_audit() {
     assert_eq!(array[3], json!("… 47 more"));
 }
 
+/// The nodes reached from the root, and the items their filters tested.
+fn reached(tree: &AuditTree) -> (usize, usize) {
+    let mut stack: Vec<_> = tree.root.iter().collect();
+    let (mut nodes, mut tested) = (0, 0);
+    while let Some(node) = stack.pop() {
+        nodes += 1;
+        tested += node.filters.iter().map(|f| f.tested).sum::<usize>();
+        stack.extend(&node.children);
+    }
+    (nodes, tested)
+}
+
+#[test]
+fn a_tree_cut_by_max_nodes_holds_the_nodes_it_counts() {
+    let rule = fixture("shipping-rule.jsonata");
+    let cases = [
+        (rule.as_str(), order()),
+        (
+            "items[n > 1].(n * 2)",
+            json!({"items": [{"n": 1}, {"n": 2}, {"n": 3}]}),
+        ),
+    ];
+    for (src, input) in &cases {
+        for level in [AuditLevel::Decisions, AuditLevel::Full] {
+            let options = AuditOptions {
+                level,
+                ..AuditOptions::default()
+            };
+            let whole = audit(src, input, options);
+            assert!(!whole.truncated);
+            let (count, tested) = reached(&whole);
+            assert_eq!(count, whole.node_count);
+            for max_nodes in 0..whole.node_count + 3 {
+                let options = AuditOptions {
+                    level,
+                    limits: CaptureLimits {
+                        max_nodes,
+                        ..CaptureLimits::default()
+                    },
+                };
+                let cut = audit(src, input, options);
+                let at = format!("{level:?}, max_nodes {max_nodes}, {src}");
+                assert_eq!(reached(&cut), (cut.node_count, tested), "{at}");
+                assert_eq!(cut.node_count, max_nodes.clamp(1, whole.node_count), "{at}");
+                assert_eq!(cut.truncated, max_nodes.max(1) < whole.node_count, "{at}");
+            }
+        }
+    }
+}
+
 #[test]
 fn errors_are_audited() {
     let tree = audit("($x := 'a'; $x + 1)", &json!({}), AuditOptions::decisions());

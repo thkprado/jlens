@@ -18,7 +18,8 @@ class CaptureLimits(TypedDict, total=False):
     max_rejected: int
     """Rejected items kept as samples per filter. Default 5."""
     max_nodes: int
-    """Nodes recorded in the tree. Default 10000."""
+    """Nodes recorded in the tree, the root included; past it, a node is dropped, its
+    parent adopting its recorded descendants and filters. Default 10000."""
     max_source: int
     """Characters of source text kept per node. Default 200."""
 

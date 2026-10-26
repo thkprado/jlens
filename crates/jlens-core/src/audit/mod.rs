@@ -205,7 +205,8 @@ pub struct CaptureLimits {
     pub max_depth: usize,
     /// Rejected items kept as samples per filter.
     pub max_rejected: usize,
-    /// Nodes recorded in the tree; further nodes are dropped and `truncated` is set.
+    /// Nodes recorded in the tree, the root included; past it, a node is dropped, its parent
+    /// adopting its recorded descendants and filters, and `truncated` is set.
     pub max_nodes: usize,
     /// Characters of source text kept per node.
     pub max_source: usize,

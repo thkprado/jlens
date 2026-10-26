@@ -14,7 +14,8 @@ package io.github.thkprado.jlens;
  * @param maxString the characters kept of a string in captured values (200 by default)
  * @param maxDepth the nesting depth kept in captured values (4 by default)
  * @param maxRejected the rejected items kept as samples per filter (5 by default)
- * @param maxNodes the nodes recorded in the tree; past them, nodes are dropped and {@link
+ * @param maxNodes the nodes recorded in the tree, the root included; past them, a node is
+ *     dropped, its parent adopting its recorded descendants and filters, and {@link
  *     AuditTree#truncated()} is set (10,000 by default)
  * @param maxSource the characters of source text kept per node (200 by default)
  */

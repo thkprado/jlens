@@ -113,7 +113,7 @@ export interface CaptureLimits {
   maxDepth: number;
   /** Rejected items kept as samples per filter. Default 5. */
   maxRejected: number;
-  /** Nodes recorded in the tree. Default 10000. */
+  /** Nodes recorded in the tree, the root included; past it, a node is dropped, its parent adopting its recorded descendants and filters. Default 10000. */
   maxNodes: number;
   /** Characters of source text kept per node. Default 200. */
   maxSource: number;

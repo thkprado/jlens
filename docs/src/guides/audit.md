@@ -112,7 +112,7 @@ Audits of large documents stay bounded. `CaptureLimits` sets:
 | `max_string` | 200 | Characters kept per string; longer strings end with `…` |
 | `max_depth` | 4 | Nesting depth kept in captured values |
 | `max_rejected` | 5 | Rejected items kept per filter |
-| `max_nodes` | 10,000 | Recorded nodes; beyond it, nodes are dropped and `truncated` is set |
+| `max_nodes` | 10,000 | Recorded nodes, the root included; past it, a node is dropped, its recorded descendants and filters going to its parent, and `truncated` is set. A cut tree holds `node_count` nodes, all reached from the root |
 | `max_source` | 200 | Characters of source text kept per node |
 
 ## Event logs and custom tracers

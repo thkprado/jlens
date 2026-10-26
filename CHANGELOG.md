@@ -21,6 +21,14 @@ All notable changes are recorded here. The format follows
   sixteen bound and now takes 0.40 µs, as with none. Variables still take the place of host
   functions of the same name, and host functions the place of built-ins. In every package.
 
+### Fixed
+
+- An audit cut short by `max_nodes` keeps the nodes it counts. A node dropped for the limit
+  took with it the nodes already recorded under it, so a tree could hold its root alone with a
+  `node_count` of 5; such a node is now collapsed, its parent adopting its recorded descendants
+  and filters, as a node not recorded at level `decisions` is. In every package and in
+  `jlens eval --audit json`.
+
 ## [0.24.0]
 
 An index into a long array reads the items it picks instead of the whole array, whether it is a

@@ -106,6 +106,13 @@ fn an_audit_has_the_result_the_tree_and_the_explanation() {
     assert_eq!(full["result"], json!(true));
     assert_eq!(full["audit"]["nodeCount"], json!(5));
     assert_eq!(full["audit"]["truncated"], json!(true));
+    let mut stack = vec![&full["audit"]["root"]];
+    let mut nodes = 0;
+    while let Some(node) = stack.pop() {
+        nodes += 1;
+        stack.extend(node["children"].as_array().into_iter().flatten());
+    }
+    assert_eq!(nodes, 5, "the tree holds the nodes it counts");
     let off = r#"{"level": "off"}"#;
     let off = audited(
         RULE,

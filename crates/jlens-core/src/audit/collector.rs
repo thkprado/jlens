@@ -201,12 +201,13 @@ impl Tracer for AuditCollector {
                     || !frame.node.filters.is_empty()
             }
         };
-        // Keep one slot for the root, which is always recorded.
-        if record && !is_root && self.node_count + 1 >= limits.max_nodes {
+        // Keep one slot for the root, which is always recorded. A node dropped for the limit is
+        // collapsed like one not recorded, so its recorded descendants stay in the tree.
+        let dropped = record && !is_root && self.node_count + 1 >= limits.max_nodes;
+        if dropped {
             self.truncated = true;
-            return;
         }
-        if record {
+        if record && !dropped {
             self.node_count += 1;
             self.attach(frame.node);
         } else if let Some(parent) = self.stack.last_mut() {

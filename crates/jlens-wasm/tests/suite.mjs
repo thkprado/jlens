@@ -554,6 +554,8 @@ export const cases = [
     const full = expr.evaluateWithAudit(order, { minimum: 1 }, { level: "full", limits: { maxNodes: 5 } });
     equal(full.result, true, "full result");
     equal([full.audit.nodeCount, full.audit.truncated], [5, true], "limits");
+    const count = (n) => 1 + (n.children || []).reduce((sum, c) => sum + count(c), 0);
+    equal(count(full.audit.root), 5, "the tree holds the nodes it counts");
 
     const failing = new j.Expression("$x.y + 1").evaluateWithAudit(undefined, { x: { y: "a" } });
     equal(failing.error.code, "T2001", "reported error");

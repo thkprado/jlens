@@ -732,6 +732,11 @@ def test_evaluate_with_audit():
     )
     assert full["result"] is True
     assert (full["audit"]["nodeCount"], full["audit"]["truncated"]) == (5, True)
+    nodes, stack = 0, [full["audit"]["root"]]
+    while stack:
+        nodes += 1
+        stack.extend(stack.pop().get("children", []))
+    assert nodes == 5
     off = expr.evaluate_with_audit(SALES_ORDER, {"minimum": 1}, level="off")
     assert off["audit"].get("root") is None
 

@@ -88,7 +88,7 @@ class AuditTest {
             assertEquals(true, limited.result());
             assertEquals(5, limited.audit().nodeCount());
             assertTrue(limited.audit().truncated());
-            assertTrue(nodes(limited.audit().root()).size() <= 5);
+            assertEquals(5, nodes(limited.audit().root()).size());
             AuditResult off = expression.evaluateWithAudit(ORDER, low, AuditOptions.of(AuditLevel.OFF));
             assertNull(off.audit().root());
             assertEquals(true, off.result());
