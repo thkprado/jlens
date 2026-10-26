@@ -877,7 +877,7 @@ packages do, through one more upcall (`host.rs` in `jlens-capi`):
   as a result fails with `U1002`, as a promise or a coroutine does.
 
 Host functions run while their virtual thread is pinned: one that blocks holds its carrier for
-that time, which the Java chapter says (0.25 #11).
+that time, which the Java chapter says (0.25 #13).
 
 Measured on the maintainer's Windows machine, Java 25.0.4. The evaluations that take no bindings
 did not change: #4's harness on 1,000 items, 02a69e1 against this item, gave the same times
