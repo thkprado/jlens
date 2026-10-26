@@ -98,33 +98,38 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    ```
 
 5. Commit, push the commit to `main`, tag it `vX.Y.Z`, and push the tag. The `Release` workflow
-   first builds the `jlens` binaries for Linux, macOS and Windows and the Python wheels and
-   source distribution, each tested on its platform (CI builds both on each push to `main`
-   too), and waits for the CI run of the tagged commit on `main`: nothing is published unless
-   it passed, and a tag on a commit not pushed to `main` publishes nothing. When that CI run
-   failed for a reason outside the code and passes when run again, "Re-run failed jobs" on the
-   `Release` run resumes it. Then the workflow publishes `jlens-regress`, `jlens-core`,
-   `jlens-schema`, `jlens-lsp` and `jlens-cli` to crates.io, in that order, and to npm with provenance `jlens-wasm` and the packages of the
-   CLI (ADR 0012: the five `jlens-cli-<os>-<cpu>` packages built by `cargo xtask npm-cli` from
-   the archives, then `jlens-cli`; only when the repository variable `PUBLISH_NPM_CLI` is
-   `true`), and to PyPI the Python package `jlens` (ADR 0014: fourteen wheels and the source distribution, with attestations),
-   and to ghcr.io the
-   container image `ghcr.io/thkprado/jlens`
-   (`crates/jlens-cli/Dockerfile`, the two static Linux binaries; tags `X.Y.Z`, `X.Y` and
-   `latest`), and to the Visual Studio Marketplace and Open VSX the VS Code extension
-   `thkprado.jlens` (ADR 0013: the seven VSIX files of the targets and the one that uses the
-   `PATH`, built by `cargo xtask vscode` from the archives), then attests the binary archives
-   and the image (build provenance, through `actions/attest`) and drafts the GitHub release
-   with the notes of the version, the archives and their `SHA256SUMS`. It needs the repository
-   secret `CARGO_REGISTRY_TOKEN`. The npm packages are published from the environment `npm`,
-   the Python package from the environment `pypi`, and the extension from the environment
-   `vscode`, set up as [Publishing to npm](#publishing-to-npm),
-   [Publishing the Python package](#publishing-the-python-package) and
+   first builds the `jlens` binaries for Linux, macOS and Windows, the Python wheels and
+   source distribution, and the Java package's JAR with the libraries of its seven targets,
+   each tested on its platform (CI builds all three on each push to `main` too), and waits for
+   the CI run of the tagged commit on `main`: nothing is published unless it passed, and a tag
+   on a commit not pushed to `main` publishes nothing. When that CI run failed for a reason
+   outside the code and passes when run again, "Re-run failed jobs" on the `Release` run
+   resumes it. Then the workflow publishes `jlens-regress`, `jlens-core`, `jlens-schema`,
+   `jlens-lsp` and `jlens-cli` to crates.io, in that order, and to npm with provenance
+   `jlens-wasm` and the packages of the CLI (ADR 0012: the five `jlens-cli-<os>-<cpu>` packages
+   built by `cargo xtask npm-cli` from the archives, then `jlens-cli`; only when the repository
+   variable `PUBLISH_NPM_CLI` is `true`), and to PyPI the Python package `jlens` (ADR 0014:
+   fourteen wheels and the source distribution, with attestations), and to the Central Portal
+   the Java package `io.github.thkprado:jlens` (ADR 0021: the JAR, its sources and Javadoc and
+   the POM, signed with GPG), which waits there for step 6, and to ghcr.io the container image
+   `ghcr.io/thkprado/jlens` (`crates/jlens-cli/Dockerfile`, the two static Linux binaries; tags
+   `X.Y.Z`, `X.Y` and `latest`), and to the Visual Studio Marketplace and Open VSX the VS Code
+   extension `thkprado.jlens` (ADR 0013: the seven VSIX files of the targets and the one that
+   uses the `PATH`, built by `cargo xtask vscode` from the archives), then attests the binary
+   archives and the image (build provenance, through `actions/attest`) and drafts the GitHub
+   release with the notes of the version, the archives and their `SHA256SUMS`. It needs the
+   repository secret `CARGO_REGISTRY_TOKEN`. The npm packages are published from the
+   environment `npm`, the Python package from the environment `pypi`, the Java package from the
+   environment `maven-central`, and the extension from the environment `vscode`, set up as
+   [Publishing to npm](#publishing-to-npm),
+   [Publishing the Python package](#publishing-the-python-package),
+   [Publishing the Java package](#publishing-the-java-package) and
    [Publishing the VS Code extension](#publishing-the-vs-code-extension) say. The image is
    pushed with the run's `GITHUB_TOKEN`. The provenance and the attestations are signed with
    the run's OIDC token, so they need no secret. If the CLI's npm job, the PyPI job or the
    extension's job fails halfway, re-run it: it skips the files whose version is already
-   published.
+   published. The Maven Central job uploads a new deployment each time it runs: drop the
+   Portal's extra ones before publishing one.
 
    To publish by hand instead: `cargo publish -p jlens-regress`, then `-p jlens-core`, then
    `-p jlens-schema`, then `-p jlens-lsp`, then `-p jlens-cli`; then
@@ -156,6 +161,14 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    `thkprado/scoop-jlens`, with the secret `SCOOP_BUCKET_TOKEN`: a token like the one of the
    tap, whose only repository is `thkprado/scoop-jlens`. It is run again the same way:
    `gh workflow run scoop.yml --ref vX.Y.Z`.
+
+   Then publish the Java package: on <https://central.sonatype.com/publishing/deployments>, the
+   deployment `jlens X.Y.Z` that the `Maven Central` job uploaded is *Validated*. Check that it
+   holds the JAR, the sources, the Javadoc and the POM, each with its `.asc` and checksums, and
+   press **Publish**. A version published there can never be removed or replaced: when in doubt,
+   **Drop** the deployment instead, fix the cause and upload again (re-run the job, or publish
+   by hand as [Publishing the Java package](#publishing-the-java-package) says). It reaches
+   `repo1.maven.org` within about half an hour, and the search of central.sonatype.com later.
 7. Check that the packages prove where they were built:
 
    ```sh
@@ -167,6 +180,12 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    npx -y jlens-cli@X.Y.Z --version              # the binary of this platform, from npm
    uv run --no-project --with jlens==X.Y.Z python -c "import jlens; print(jlens.__version__)"   # the wheel of this platform, from PyPI
    curl -s https://pypi.org/integrity/jlens/X.Y.Z/jlens-X.Y.Z.tar.gz/provenance | jq '.attestation_bundles[].publisher'
+   (cd ../crates/jlens-java/java && ./mvnw -q dependency:get -Dartifact=io.github.thkprado:jlens:X.Y.Z)   # resolved from Maven Central
+   m=https://repo1.maven.org/maven2/io/github/thkprado/jlens/X.Y.Z
+   for f in jlens-X.Y.Z.jar jlens-X.Y.Z-sources.jar jlens-X.Y.Z-javadoc.jar jlens-X.Y.Z.pom; do curl -sfO "$m/$f" && curl -sfO "$m/$f.asc"; done
+   gpg --keyserver keyserver.ubuntu.com --recv-keys D007C3464271F80C1C1DF11BF1B365D7F599090B   # the release key
+   for f in jlens-X.Y.Z*.jar jlens-X.Y.Z.pom; do gpg --verify "$f.asc" "$f"; done   # Good signature, from that fingerprint
+   echo 'System.out.println(io.github.thkprado.jlens.Expression.compile("$sum([1, 2, 3])").evaluateJson("null"))' | jshell --class-path jlens-X.Y.Z.jar -R--enable-native-access=ALL-UNNAMED -q -   # 6, the library of this platform
    brew upgrade thkprado/jlens/jlens && jlens --version   # macOS and Linux, after the Homebrew run
    scoop update jlens; jlens --version                    # Windows, after the Scoop run
    docker run --rm ghcr.io/thkprado/jlens:X.Y.Z --version
@@ -228,6 +247,52 @@ To publish a release by hand (without attestations), download the wheels and the
 distribution of a `Release` run that built them,
 `gh run download <run> --pattern 'python-*' --dir dist`, which puts each artifact in a folder of
 its own, then run `uvx twine upload --skip-existing dist/*/*` with an API token of the project.
+
+### Publishing the Java package
+
+The `Maven Central` job of the `Release` workflow runs in the GitHub environment
+`maven-central`, whose deployment rules accept only `v*` tags. The Central Portal has no trusted
+publishing: the environment holds four secrets, `MAVEN_CENTRAL_USERNAME` and
+`MAVEN_CENTRAL_PASSWORD` (a user token of the Portal) and `MAVEN_GPG_KEY` and
+`MAVEN_GPG_PASSPHRASE` (the release key, which signs every file, as Maven Central requires). The
+job runs `mvnw -P release deploy` (the profile `release` of `pom.xml`): the sources and Javadoc
+JARs, the signatures, made by the GPG plugin in Java (no `gpg` program), and the upload of one
+deployment, which the Portal validates and then holds until the maintainer publishes it
+(`autoPublish` false). Before the upload, the job checks that the tag is the version of the
+workspace and of `pom.xml` (CI's Java job fails on each push while those two differ), and that
+the JAR it built is byte for byte the one the JAR workflow tested on the seven targets: the JAR's
+entries have a fixed time (`project.build.outputTimestamp`).
+
+To set it up, once:
+
+1. Sign in to <https://central.sonatype.com> with the GitHub account `thkprado`. The Portal then
+   verifies the namespace `io.github.thkprado` by itself; it is listed under **Namespaces**.
+2. Under **View Account**, **Generate User Token**. Set its two parts as the environment's
+   secrets `MAVEN_CENTRAL_USERNAME` and `MAVEN_CENTRAL_PASSWORD`. Generating a new token revokes
+   the old one: set the secrets again then.
+3. Make the release key, an Ed25519 signing key, with the GitHub noreply address, never a
+   personal one: `gpg --quick-gen-key "jlens releases <2347749+thkprado@users.noreply.github.com>"
+   ed25519 sign never`. Keep the revocation certificate that gpg writes, and the key, out of the
+   repository. Send the public key to a key server the Portal reads, one that keeps its user ID
+   without a confirmation mail, which a noreply address cannot receive:
+   `gpg --keyserver keyserver.ubuntu.com --send-keys <fingerprint>`. Set
+   `gpg --armor --export-secret-keys <fingerprint>` as the secret `MAVEN_GPG_KEY` and its
+   passphrase as `MAVEN_GPG_PASSPHRASE`.
+
+The release key's fingerprint is `D007C3464271F80C1C1DF11BF1B365D7F599090B` (`jlens releases`,
+Ed25519, made 2026-10-26).
+
+If the key is lost or leaks, revoke it with the certificate, send the revocation to the key
+server, and make a new one: the versions already published stay signed by the old key.
+
+To publish a release by hand, download the libraries of a `Release` (or CI) run,
+`gh run download <run> --pattern 'java-native-*' --dir dl`, which puts each artifact in a folder
+of its own, copy them with `cp -r dl/*/* crates/jlens-java/java/native/`, then, in
+`crates/jlens-java/java`, with the Portal's token in a server `central` of
+`~/.m2/settings.xml` and the key in the two environment variables, run
+`./mvnw -B -P release deploy -DskipTests`, and publish the deployment on the Portal.
+`-DskipUpload=true` builds the bundle without sending it
+(`target/central-publishing/central-bundle.zip`).
 
 ### Publishing the VS Code extension
 

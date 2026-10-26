@@ -69,6 +69,10 @@ The system property `jlens.library` points the package at a library outside the 
   cause), is the result's, never thrown. Spans are UTF-16, converted by the C API. Trees nest as
   deep as the evaluation: build and walk them with a stack or a queue, never by recursion, and
   keep `toString` of a node to the node.
-- **API changes** need the Javadoc, the JUnit suite and, from 0.25 #13, the Java chapter of the
+- **API changes** need the Javadoc, the JUnit suite and, from 0.25 #14, the Java chapter of the
   book.
 - **The version** in `pom.xml` is the workspace's; `cargo xtask java` fails otherwise.
+- **Releases go to Maven Central** from `release.yml`, with the profile `release` of `pom.xml`
+  (sources, Javadoc, signatures, the upload; `CONTRIBUTING.md`). The JAR must stay
+  reproducible, as the job compares it with the JAR the suite ran against: keep
+  `project.build.outputTimestamp`, and put nothing that changes between builds into it.

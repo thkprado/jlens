@@ -19,9 +19,16 @@
       <url>https://opensource.org/license/mit</url>
     </license>
   </licenses>
+  <developers>
+    <developer>
+      <name>Thiago Kato Prado</name>
+      <url>https://github.com/thkprado</url>
+    </developer>
+  </developers>
   <scm>
     <url>https://github.com/thkprado/jlens</url>
     <connection>scm:git:https://github.com/thkprado/jlens.git</connection>
+    <developerConnection>scm:git:https://github.com/thkprado/jlens.git</developerConnection>
   </scm>
 
   <properties>
@@ -29,6 +36,9 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <!-- The native libraries, one directory per platform, put there by `cargo xtask java`. -->
     <jlens.native>${project.basedir}/native</jlens.native>
+    <!-- One time for every entry of the JARs: built twice from the same files, a JAR is the same
+         bytes, so the release can check that it publishes the JAR the suite ran against. -->
+    <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
   </properties>
 
   <dependencies>
@@ -97,4 +107,78 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!-- Maven Central (CONTRIBUTING.md): `mvnw -P release deploy` adds the sources and Javadoc
+         JARs, signs every file with the key in MAVEN_GPG_KEY (its passphrase in
+         MAVEN_GPG_PASSPHRASE, no gpg program needed), and uploads the bundle to the Central
+         Portal with the user token of the server `central` in settings.xml. The Portal validates
+         it and waits: the maintainer publishes it there. -->
+    <profile>
+      <id>release</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-source-plugin</artifactId>
+            <version>3.4.0</version>
+            <configuration>
+              <!-- The Java sources alone, not the native libraries. -->
+              <excludeResources>true</excludeResources>
+            </configuration>
+            <executions>
+              <execution>
+                <id>sources</id>
+                <goals>
+                  <goal>jar-no-fork</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <version>3.12.0</version>
+            <executions>
+              <execution>
+                <id>javadoc</id>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>3.2.8</version>
+            <configuration>
+              <signer>bc</signer>
+              <bestPractices>true</bestPractices>
+            </configuration>
+            <executions>
+              <execution>
+                <id>sign</id>
+                <goals>
+                  <goal>sign</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.sonatype.central</groupId>
+            <artifactId>central-publishing-maven-plugin</artifactId>
+            <version>0.12.0</version>
+            <extensions>true</extensions>
+            <configuration>
+              <publishingServerId>central</publishingServerId>
+              <autoPublish>false</autoPublish>
+              <waitUntil>validated</waitUntil>
+              <deploymentName>jlens ${project.version}</deploymentName>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

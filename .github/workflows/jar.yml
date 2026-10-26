@@ -4,7 +4,8 @@ name: JAR
 # targets, as the wheels are built (glibc 2.28 in a manylinux_2_28 container, musl in Alpine),
 # then one JAR that carries the seven, then the JUnit suite on each target against that JAR, in
 # an Alpine container for musl. It builds the commit that triggered the caller (see binaries.yml).
-# Called by CI on each push to main; uploads the JAR as the artifact java-jar.
+# Called by CI on each push to main and by the Release workflow; uploads the JAR as the artifact
+# java-jar.
 
 on:
   workflow_call:

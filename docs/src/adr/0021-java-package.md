@@ -1115,3 +1115,32 @@ On Windows the calls cost the same within noise (`items[0].name` over Java objec
 The JAR's size: each library is about 3 MB, about 1.1 to 1.25 MB compressed (Linux x86-64
 3.19 MB, 1.22 MB in the JAR; Windows 2.74 MB, 1.07 MB), so about 8.5 MB for the seven, more
 than the 7 MB the decision estimated. Per-platform JARs remain the way out if users ask.
+
+### Maven Central (0.25 #13)
+
+The Release workflow publishes the package as `io.github.thkprado:jlens` through the Central
+Portal, in a job that needs every other build of the release, the JAR workflow's included: the
+seven libraries built and the suite passed on each target against the JAR. The Portal has no
+trusted publishing, unlike npm and PyPI, so the job's environment, `maven-central`, holds a user
+token of the Portal and the release key; its rules accept only `v*` tags.
+
+- **The profile `release`** of `pom.xml` adds the sources JAR (the Java sources alone: by
+  default the plugin also packs the resources, the 8.5 MB of libraries), the Javadoc JAR, a
+  signature of every file and the upload. The signatures are made by `maven-gpg-plugin`'s
+  BouncyCastle signer from the key in an environment variable, so the runner needs no `gpg` and
+  no keyring.
+- **The maintainer publishes.** The upload is a deployment that the Portal validates (the POM's
+  metadata, the signatures, the checksums) and then holds (`autoPublish` false). A version
+  published on Maven Central can never be removed or replaced, so the last step is a person's,
+  as the GitHub release is a draft.
+- **The JAR published is the JAR tested.** The job builds the JAR again from the libraries the
+  JAR workflow packed and compares it with that workflow's, byte for byte; `pom.xml` fixes the
+  time of the JAR's entries, which makes two builds from the same files the same bytes (checked
+  on Windows: two clean builds, with and without the profile, gave the same SHA-256).
+- **Versions.** CI's Java job fails while `pom.xml` and the workspace differ (`cargo xtask
+  java`), and the release job checks both against the tag.
+
+Run locally with a key made for the test and `-DskipUpload=true`, the profile built the bundle
+the Portal takes: the JAR, the sources (48 KB) and Javadoc (318 KB) JARs and the POM, each with
+its `.asc` and its MD5, SHA-1, SHA-256 and SHA-512 checksums; `gpg --verify` accepted the
+signatures. The first upload is 0.25.0's (#16).

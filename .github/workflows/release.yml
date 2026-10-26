@@ -1,16 +1,19 @@
 name: Release
 
-# When a version tag (v0.1.0, ...) is pushed, builds the jlens binaries (binaries.yml) and the
-# Python wheels (wheels.yml), then publishes the crates to crates.io, and to npm the WebAssembly
-# package and the packages of the CLI (ADR 0012), to PyPI the Python package (ADR 0014), to
-# ghcr.io the container image, and the VS Code extension to the Visual Studio Marketplace and
-# Open VSX (ADR 0013), then drafts the GitHub release from CHANGELOG.md with the binaries
-# attached. Nothing is published unless every binary and every wheel builds and the CI run of
-# the tagged commit on main passed. The npm packages are published with provenance, the Python
-# files with PEP 740 attestations, and the binary archives and the image get build
-# attestations, all signed through Sigstore with the run's OIDC token. Needs the repository secret
-# CARGO_REGISTRY_TOKEN, and the environments npm, pypi and vscode (CONTRIBUTING.md); the image
-# is pushed with the run's GITHUB_TOKEN.
+# When a version tag (v0.1.0, ...) is pushed, builds the jlens binaries (binaries.yml), the
+# Python wheels (wheels.yml) and the Java package's JAR (jar.yml), then publishes the crates to
+# crates.io, and to npm the WebAssembly package and the packages of the CLI (ADR 0012), to PyPI
+# the Python package (ADR 0014), to Maven Central the Java package (ADR 0021; the maintainer
+# publishes the deployment on the Central Portal), to ghcr.io the container image, and the VS
+# Code extension to the Visual Studio Marketplace and Open VSX (ADR 0013), then drafts the GitHub
+# release from CHANGELOG.md with the binaries attached. Nothing is published unless every binary,
+# every wheel and the JAR build and pass their tests and the CI run of the tagged commit on main
+# passed. The npm packages are published with provenance, the Python files with PEP 740
+# attestations, and the binary archives and the image get build attestations, all signed
+# through Sigstore with the run's OIDC token; the Java files are signed with the project's GPG
+# key, as Maven Central requires. Needs the repository secret CARGO_REGISTRY_TOKEN, and the
+# environments npm, pypi, maven-central and vscode (CONTRIBUTING.md); the image is pushed with
+# the run's GITHUB_TOKEN.
 # Run by hand (workflow_dispatch) on an existing tag (gh workflow run release.yml --ref vX.Y.Z),
 # it publishes nothing: it builds the binaries of that tag, attests them and drafts its release,
 # for a release whose draft failed after publishing. It takes no ref as input: every job builds
@@ -56,6 +59,13 @@ jobs:
     with:
       upload: true
 
+  # The Java package's JAR, with the native libraries of the seven targets, its suite run against
+  # it on each (artifacts java-native-* and java-jar).
+  jar:
+    needs: tag
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/jar.yml
+
   # Nothing is published from a commit whose CI failed: CI checks what the release does not,
   # such as the lints and the docs. The tag is usually pushed with main, so the job waits for the CI run
   # of the commit to finish, while the binaries and the wheels build. A tag on a commit never
@@ -97,7 +107,7 @@ jobs:
 
   crates:
     name: crates.io
-    needs: [binaries, wheels, ci]
+    needs: [binaries, wheels, jar, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
@@ -129,7 +139,7 @@ jobs:
   # environment npm; npm 11.5.1 or later, so Node.js 24), with provenance.
   npm:
     name: npm
-    needs: [binaries, wheels, ci]
+    needs: [binaries, wheels, jar, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:
@@ -165,7 +175,7 @@ jobs:
   # out of a release while npm refuses it.
   npm-cli:
     name: npm (CLI)
-    needs: [binaries, wheels, ci]
+    needs: [binaries, wheels, jar, ci]
     if: github.event_name == 'push' && vars.PUBLISH_NPM_CLI == 'true'
     runs-on: ubuntu-latest
     environment:
@@ -210,7 +220,7 @@ jobs:
   # replaces its tags.
   container:
     name: Container image
-    needs: [binaries, wheels, ci]
+    needs: [binaries, wheels, jar, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     # packages pushes the image; the others sign and store the attestation.
@@ -280,7 +290,7 @@ jobs:
   # halfway through.
   vscode:
     name: VS Code extension
-    needs: [binaries, wheels, ci]
+    needs: [binaries, wheels, jar, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: vscode
@@ -327,7 +337,7 @@ jobs:
   # skipped: re-running the job completes a release that failed halfway through.
   pypi:
     name: PyPI
-    needs: [binaries, wheels, ci]
+    needs: [binaries, wheels, jar, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:
@@ -361,11 +371,65 @@ jobs:
         with:
           skip-existing: true
 
+  # The Java package (ADR 0021) on Maven Central, through the Central Portal: the JAR, its sources
+  # and Javadoc and the POM, each signed with the project's GPG key, uploaded as a deployment that
+  # the Portal validates and then holds (autoPublish false): the maintainer publishes it on
+  # central.sonatype.com, and a version published there cannot be removed. The JAR is built again
+  # from the libraries the jar job packed, and must be the same bytes as the JAR the suite ran
+  # against (pom.xml fixes its entries' time). Needs the environment maven-central
+  # (CONTRIBUTING.md): the Portal's user token and the signing key.
+  maven:
+    name: Maven Central
+    needs: [binaries, wheels, jar, ci]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: maven-central
+      url: https://central.sonatype.com/publishing/deployments
+    defaults:
+      run:
+        working-directory: crates/jlens-java/java
+    steps:
+      - uses: actions/checkout@v7
+      # Writes the server central to settings.xml, its credentials read from the environment.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+      - name: The tag matches the workspace and pom.xml versions
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' ../../../Cargo.toml | head -1)
+          test "v$version" = "$TAG"
+          test "$(./mvnw -B -q help:evaluate -Dexpression=project.version -DforceStdout)" = "$version"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: java-native-*
+          merge-multiple: true
+          path: crates/jlens-java/java/native
+      - uses: actions/download-artifact@v8
+        with:
+          name: java-jar
+          path: crates/jlens-java/java/dist
+      # The suite ran in the jar job, against the JAR this one must equal.
+      - name: Build, sign and upload
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_GPG_KEY: ${{ secrets.MAVEN_GPG_KEY }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: |
+          ./mvnw -B package -DskipTests
+          cmp "target/jlens-${TAG#v}.jar" dist/jlens.jar
+          ./mvnw -B -P release deploy -DskipTests
+
   github:
     name: GitHub release (draft)
-    needs: [crates, npm, npm-cli, pypi, container, vscode, binaries]
-    # crates, the npm jobs, pypi, container and vscode are skipped when the workflow is run by
-    # hand.
+    needs: [crates, npm, npm-cli, pypi, maven, container, vscode, binaries]
+    # crates, the npm jobs, pypi, maven, container and vscode are skipped when the workflow is run
+    # by hand.
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     # contents creates the release; the others sign and store the attestations.
