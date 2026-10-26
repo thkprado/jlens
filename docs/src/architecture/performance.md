@@ -6,7 +6,8 @@ performance is measured, what the numbers are, and how to use the API to get the
 ## Benchmarks
 
 The workload is in `benches/` at the repository root. It is shared by the native benchmarks and
-by the comparisons with jsonata-js and with the other Python packages:
+by the comparisons with jsonata-js, with the other Python packages and with the JVM
+implementations:
 - `benches/cases.json` lists fourteen expressions: path navigation, a name mapped over the
   items, filters with aggregation, grouping, sorting, string and regex functions, number formatting, an object constructor, a
   transform, a recursive function, the shipping rule from the guides, and two indexes into a
@@ -467,6 +468,173 @@ the cyclic input is `{"n": 1, "child": {"parent": <the input>}}`:
   500: the endless tail call stops after 0.02 s, and so does a loop of 100,000 tail calls that
   jlens finishes.
 - Otherwise, no package stops an endless evaluation by default: set a timeout.
+
+### Java against the other implementations
+
+`cargo xtask java-compare` compares the Java package with two other JSONata implementations for
+the JVM on Maven Central: jsonata-java, a port of jsonata-js
+to Java objects, and jsonata-jvm-compiler, which translates an expression to Java and compiles it
+with `javac` at run time, over Jackson trees.
+[`benches/compare/README.md`](https://github.com/thkprado/jlens/blob/main/benches/compare/README.md)
+says how to run it, and which packages it leaves out and why. It first checks that each gives
+jlens's result for each case, and both do.
+
+Measured for 0.25 (f794f04, before its release), on OpenJDK 25.0.4 under Linux: Ubuntu 26.04
+under WSL 2, on the machine above (16 hardware threads), in one JVM with `-Xmx4g`. Each time is
+the best of five runs of 0.3 s after a second of warm-up. Each engine returns its result as its
+own objects, not serialized: jlens as maps, lists and boxed values. With the input converted
+once: Java maps for jsonata-java and for jlens's `evaluate(Object)`, a Jackson tree for
+jsonata-jvm-compiler, and a `Document` for `evaluate(Document)`:
+
+| Case | jsonata-java 0.9.10 | jsonata-jvm-compiler 1.0.7 | jlens `evaluate(Object)` | jlens `evaluate(Document)` |
+|---|---:|---:|---:|---:|
+| path | 7.1 µs | 0.05 µs | 1.4 µs | 0.44 µs |
+| names over items | 20 µs | 1.8 µs | 45 µs | 5.9 µs |
+| filter + aggregate | 112 µs | 4.7 µs | 111 µs | 40 µs |
+| group-by | 226 µs | 13 µs | 177 µs | 75 µs |
+| sort + map | 778 µs | 48 µs | 451 µs | 288 µs |
+| strings | 123 µs | 9.0 µs | 138 µs | 61 µs |
+| regex | 179 µs | 19 µs | 175 µs | 108 µs |
+| number formatting | 128 µs | 13 µs | 43 µs | 24 µs |
+| object constructor | 185 µs | 8.2 µs | 226 µs | 124 µs |
+| transform | 457 µs | 37 µs | 652 µs | 467 µs |
+| recursion | 1.56 ms | 36 µs | 754 µs | 771 µs |
+| shipping rule | 314 µs | 20 µs | 322 µs | 99 µs |
+| index into 10,000 items | 178 µs | 0.06 µs | 2.1 µs | 0.71 µs |
+| index in a variable | 1.07 ms | 51 µs | 2.4 µs | 1.0 µs |
+
+- jsonata-jvm-compiler is the fastest on every case but the index in a variable, by 1.8 (number
+  formatting) to 21 times (`recursion`) against a jlens `Document`: its expression is a Java
+  class, which the JIT compiles with the application. On `($i := 0; items[$i].code)` it takes
+  51 µs against 1.0.
+- Against jsonata-java, the other interpreter, jlens over a `Document` is faster on every case
+  but the transform, where the two are within 2% (457 against 467 µs). It takes half the time on
+  `recursion`, a third on `sort + map` and the shipping rule, and a fifth on number formatting.
+- Over Java maps, jlens reads each field it needs through a call back into Java, and takes 1.4
+  to 7.6 times as long as over a `Document` on the cases that read the order's items
+  (`names over items` 45 against 5.9 µs). jsonata-java, which reads maps in Java, is then faster
+  on five of the fourteen cases (`names over items`, strings, the object constructor, the
+  transform, the shipping rule); jlens on the nine others, by twice on `recursion` and three
+  times on number formatting.
+
+From JSON text, parsed at each evaluation, by its own parser for jsonata-java, by Jackson for
+jsonata-jvm-compiler, and by `evaluateFromJson` for jlens, which skips the fields the expression
+does not read:
+
+| Case | jsonata-java 0.9.10 | jsonata-jvm-compiler 1.0.7 | jlens `evaluateFromJson` |
+|---|---:|---:|---:|
+| path | 227 µs | 112 µs | 32 µs |
+| names over items | 216 µs | 118 µs | 74 µs |
+| filter + aggregate | 312 µs | 121 µs | 133 µs |
+| group-by | 447 µs | 134 µs | 169 µs |
+| sort + map | 1.02 ms | 169 µs | 377 µs |
+| strings | 321 µs | 127 µs | 166 µs |
+| regex | 382 µs | 138 µs | 179 µs |
+| number formatting | 323 µs | 128 µs | 107 µs |
+| object constructor | 390 µs | 124 µs | 223 µs |
+| transform | 644 µs | 153 µs | 603 µs |
+| recursion | 1.75 ms | 150 µs | 807 µs |
+| shipping rule | 546 µs | 138 µs | 220 µs |
+| index into 10,000 items | 3.26 ms | 2.24 ms | 2.01 ms |
+| index in a variable | 4.13 ms | 2.36 ms | 2.02 ms |
+
+- jlens is the fastest where the parsing is the cost: `path` takes 32 µs against 112 and 227,
+  `names over items` 74 against 118 and 216, and the two index cases, which read one item of
+  10,000, 2.0 ms against 2.2 to 4.1. Where the evaluation is the cost, jsonata-jvm-compiler is:
+  150 against 807 µs on `recursion`, 169 against 377 on `sort + map`.
+- jlens is faster than jsonata-java on every case.
+
+On the documents of ADR 0021's spike, 1,000 and 100,000 items of five fields each, with the input
+converted once:
+
+| Expression | jsonata-java 0.9.10 | jsonata-jvm-compiler 1.0.7 | jlens `evaluate(Object)` | jlens `evaluate(Document)` |
+|---|---:|---:|---:|---:|
+| **1,000 items (97 KB of JSON)** | | | | |
+| `items[0].name` | 83 µs | 0.05 µs | 2.0 µs | 0.75 µs |
+| `($i := 0; items[$i].name)` | 157 µs | 0.70 µs | 2.4 µs | 1.0 µs |
+| `$count(items)` | 84 µs | 0.05 µs | 1.7 µs | 0.71 µs |
+| `$sum(items.price)` | 153 µs | 8.6 µs | 213 µs | 28 µs |
+| `items[price > 98].id` | 338 µs | 13 µs | 291 µs | 107 µs |
+| `$` | 150 µs | 0.04 µs | 0.72 µs | 507 µs |
+| **100,000 items (10,099 KB of JSON)** | | | | |
+| `items[0].name` | 34.7 ms | 0.05 µs | 2.1 µs | 0.76 µs |
+| `($i := 0; items[$i].name)` | 42.8 ms | 388 µs | 2.4 µs | 1.1 µs |
+| `$sum(items.price)` | 55.9 ms | 5.23 ms | 33.3 ms | 7.36 ms |
+| `$` | 70.4 ms | 0.04 µs | 0.71 µs | 56.6 ms |
+
+From JSON text:
+
+| Expression | jsonata-java 0.9.10 | jsonata-jvm-compiler 1.0.7 | jlens `evaluateFromJson` |
+|---|---:|---:|---:|
+| **1,000 items (97 KB of JSON)** | | | |
+| `items[0].name` | 785 µs | 726 µs | 361 µs |
+| `($i := 0; items[$i].name)` | 858 µs | 730 µs | 355 µs |
+| `$count(items)` | 782 µs | 717 µs | 234 µs |
+| `$sum(items.price)` | 865 µs | 762 µs | 367 µs |
+| `items[price > 98].id` | 1.05 ms | 778 µs | 518 µs |
+| `$` | 831 µs | 717 µs | 1.39 ms |
+| **100,000 items (10,099 KB of JSON)** | | | |
+| `items[0].name` | 87.6 ms | 72.0 ms | 43.3 ms |
+| `($i := 0; items[$i].name)` | 86.2 ms | 72.9 ms | 39.3 ms |
+| `$sum(items.price)` | 97.6 ms | 83.0 ms | 43.6 ms |
+| `$` | 89.4 ms | 72.4 ms | 159 ms |
+
+- On an input converted once, an index or `$count` takes the same time on 100,000 items as on
+  1,000 in jlens, and in jsonata-jvm-compiler but for the index in a variable (0.70 µs, then
+  388 µs). jsonata-java takes time in proportion to the items: 83 µs on 1,000 and 35 ms on
+  100,000 for `items[0].name`.
+- `$` returns the input. jlens over Java maps and jsonata-jvm-compiler return it as it is, in
+  under a microsecond; jsonata-java takes 150 µs and 70 ms. jlens over a `Document` builds the
+  whole document as Java objects, 507 µs on 1,000 items and 57 ms on 100,000, and from JSON text
+  too, which only there takes longer than the others (159 against 72 and 89 ms).
+- From JSON text, jlens takes about half the time of the others on 100,000 items, 39 to 44 ms
+  against 72 to 98, but on `$`.
+
+Evaluations per second of `$sum(items.price)` on the JSON text of 100 items (9.5 KB), on 1 to 16
+platform threads and on 1,000 virtual threads, each engine parsing the text at each evaluation;
+jsonata-java, whose compiled expressions are not thread-safe, compiles one per thread:
+
+| Engine | 1 thread | 2 threads | 4 threads | 8 threads | 16 threads | 1,000 virtual threads |
+|---|---:|---:|---:|---:|---:|---:|
+| jlens, JSON text | 26,048 (1.0×) | 49,262 (1.9×) | 95,285 (3.7×) | 175,769 (6.7×) | 226,411 (8.7×) | 229,802 (8.8×) |
+| jlens, Java objects parsed by Jackson | 9,996 (1.0×) | 19,339 (1.9×) | 36,002 (3.6×) | 61,181 (6.1×) | 63,388 (6.3×) | 64,240 (6.4×) |
+| jsonata-java 0.9.10 | 9,219 (1.0×) | 18,019 (2.0×) | 33,873 (3.7×) | 59,885 (6.5×) | 76,948 (8.3×) | 76,234 (8.3×) |
+| jsonata-jvm-compiler 1.0.7 | 13,042 (1.0×) | 24,634 (1.9×) | 49,142 (3.8×) | 85,386 (6.5×) | 110,964 (8.5×) | 106,861 (8.2×) |
+
+- jlens leads at every count of threads: 226,411 evaluations per second on 16 threads, against
+  110,964 for jsonata-jvm-compiler and 76,948 for jsonata-java, and 229,802 on 1,000 virtual
+  threads.
+- Parsed by Jackson into Java maps first, jlens gives 63,388 on 16 threads: the parse, not the
+  evaluation, is then the cost.
+
+How each behaves at the limits, measured by `cargo xtask java-compare limits` on the same
+system, with the cases of `python.py limits`. Each case runs in a JVM of its own, on its main
+thread with the default stack, killed after 30 seconds. jlens reads Java objects
+(`evaluate(Object)`), jsonata-java maps, and jsonata-jvm-compiler a Jackson tree, built the same
+way, since text cannot hold a cycle. The messages are cut short:
+
+| Case | jsonata-java 0.9.10 | jsonata-jvm-compiler 1.0.7 | jlens |
+|---|---|---|---|
+| Input nested 900 levels, `$string($)` | result | result | result |
+| Input nested 2,000 levels | result | result | `U1001` |
+| Input nested 100,000 levels | `StackOverflowError` | `StackOverflowError` | `U1001` |
+| Cyclic input, `n` | `StackOverflowError` | `1` | `1` |
+| Cyclic input, `$string($)` | `StackOverflowError` | `StackOverflowError` | `U1004` |
+| Unbounded recursion, `1 + $f($n + 1)` | `StackOverflowError` | `U1001` | `D1011` |
+| The same, with a depth limit of 500 | `JException` (stack overflow, depth 501) | no such option | `D1011` |
+| Endless tail call, `$f($n + 1)` | runs on | `U1001` after 0.6 s | runs on |
+| The same, with a timeout of 1 s | `JException` (timeout) after 1.0 s | `U1001` after 0.6 s | `D1012` after 1.2 s |
+
+- jlens fails with a JSONata error code in each case but the endless loop with no timeout, and
+  refuses input nested more than 1,000 levels, as in Python. No JVM crashed: a
+  `StackOverflowError` is thrown to the caller, who must catch an `Error` rather than an
+  exception to survive it, and it can leave an application's own state half updated.
+- jsonata-java fails on the cycle even for `n`, which reads one field of the input.
+- jsonata-jvm-compiler turns a stack overflow into `U1001`, as `jsonatapy` does. It has no tail
+  calls, so the endless tail call stops there too, and so would a loop of 100,000 tail calls. It
+  has no depth limit.
+- jsonata-java takes a depth limit and a timeout (`Frame.setRuntimeBounds`), and reports them
+  with messages, not codes. The same cases on Windows gave the same outcomes.
 
 ### The regular expression engine
 

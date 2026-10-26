@@ -15,14 +15,17 @@ import java.util.concurrent.atomic.LongAdder;
  * Compares jlens's Java package with the other JSONata implementations for the JVM, in
  * microseconds per evaluation and in evaluations per second on many threads. Run by
  * {@code cargo xtask java-compare}, in this project's directory; the arguments are the parts to
- * run ({@code documents}, {@code cases}, {@code threads}; all when none is given), then
- * optionally {@code --engines jlens,jsonata-java,...} and {@code --sizes 1000,100000}.
+ * run ({@code documents}, {@code cases}, {@code threads}, all three when none is given, and
+ * {@code limits}), then optionally {@code --engines jlens,jsonata-java,...} and {@code --sizes
+ * 1000,100000}.
  *
  * <ul>
  *   <li>{@code documents}: the documents of ADR 0021's spike, items with five fields each.
  *   <li>{@code cases}: the workload of {@code benches/cases.json}.
  *   <li>{@code threads}: the spike's throughput, one expression on JSON text, on 1 to all
  *       hardware threads and on 1,000 virtual threads.
+ *   <li>{@code limits}: how each engine behaves at the limits ({@link Limits}), each case in a
+ *       JVM of its own.
  * </ul>
  *
  * <p>Each engine is timed on an input converted once and on JSON text parsed at each call,
@@ -33,6 +36,10 @@ public final class Compare {
     static final Path BENCHES = Path.of("..", "..");
 
     public static void main(String[] args) throws Exception {
+        if (args.length == 3 && args[0].equals("--limit")) {
+            Limits.child(args[1], args[2]);
+            return;
+        }
         List<String> parts = new ArrayList<>();
         List<Engine> engines = Engine.all();
         int[] sizes = {1000, 100000};
@@ -44,7 +51,7 @@ public final class Compare {
                 }
                 case "--sizes" ->
                     sizes = Arrays.stream(args[++i].split(",")).mapToInt(Integer::parseInt).toArray();
-                case "documents", "cases", "threads" -> parts.add(args[i]);
+                case "documents", "cases", "threads", "limits" -> parts.add(args[i]);
                 default -> throw new IllegalArgumentException("unknown argument " + args[i]);
             }
         }
@@ -57,6 +64,7 @@ public final class Compare {
             switch (part) {
                 case "documents" -> documents(engines, sizes);
                 case "cases" -> cases(engines);
+                case "limits" -> Limits.run(engines);
                 default -> threads(engines);
             }
         }

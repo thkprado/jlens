@@ -51,24 +51,29 @@ The engines (`--engines`, jlens first, as the reference):
 | `jlens` | `io.github.thkprado:jlens`, this repository | a `Document`, or JSON text |
 | `jlens-objects` | the same, over Java objects (`Expression.evaluate(Object)`), read one level at a time | maps, lists and boxed values, which Jackson 2 parses |
 | `jsonata-java` | `com.dashjoin:jsonata`, a port of jsonata-js to Java objects | maps, lists and boxed values |
-| `jsonata4java` | `com.ibm.jsonata4java:JSONata4Java`, IBM's | Jackson 3's `JsonNode` |
 | `jsonata-jvm-compiler` | `io.github.vlad-public-code:jsonata-jvm-compiler`, which compiles an expression to a Java class with `javac` at run time | Jackson 2's `JsonNode` |
 
 Their versions are properties of `java/pom.xml`. Searched on Maven Central on 2026-10-25, these
 were left out: `dev.vepo:jsonata.java` 0.1.0, whose results have no JSON form (`items.id` reads
 as `1, 2`) and which gives `{"k":[1,1]}` for `items{'k': $count($)}`; `io.hyperfoil.tools:jjq-jsonata`,
-which translates JSONata to jq at compile time; Apache Camel's `camel-jsonata`, which runs one of
-the engines above; and the WebJars of jsonata-js.
+which translates JSONata to jq at compile time; IBM's `com.ibm.jsonata4java:JSONata4Java`, no
+longer compared from roadmap 0.25 #14 on (its results until then are in ADR 0021); Apache
+Camel's `camel-jsonata`, which runs JSONata4Java; and the WebJars of jsonata-js.
 
-The parts (all of them when none is given):
+The parts (the first three when none is given):
 
 - `documents`: the documents of ADR 0021's spike, 1,000 and 100,000 items of five fields each
   (`--sizes` picks others), the spike's expressions and `($i := 0; items[$i].name)`.
 - `cases`: the workload of `../cases.json`.
 - `threads`: evaluations per second of `$sum(items.price)` on the JSON text of 100 items, on 1
   to all hardware threads and on 1,000 virtual threads, as in the spike. An engine whose
-  compiled expressions are not thread-safe (jsonata-java, JSONata4Java) compiles one per
-  thread.
+  compiled expressions are not thread-safe (jsonata-java) compiles one per thread.
+- `limits`, run only when named: how each engine behaves at the limits, the cases of
+  `python.py limits` (input nested deeply, cyclic input, unbounded recursion, an endless loop,
+  with and without a depth limit or a timeout). Each case runs in a JVM of its own, killed after
+  30 seconds, and the table says what came out: a result, an error code, an exception, the
+  JVM's exit code, or still running. jlens reads Java objects there, as cyclic input needs;
+  jsonata-jvm-compiler gets a Jackson tree built the same way.
 
 `documents` and `cases` print microseconds per evaluation, the best of five runs of 0.3 s after
 a second of warm-up, with two columns per engine: on the input converted once, and on JSON text
@@ -77,4 +82,5 @@ parsed at each evaluation. A result that differs from jlens's shows as `differs`
 objects, which are not serialized: jlens as maps, lists and boxed values (`Expression.evaluate`,
 `evaluateFromJson`).
 
-Keep the machine idle while it runs: every part takes about 20 minutes in all.
+Keep the machine idle while it runs: the three default parts take about 20 minutes in all, and
+`limits` about four more.

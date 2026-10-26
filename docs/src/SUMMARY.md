@@ -38,6 +38,7 @@
 - [Rust crate](guides/crate.md)
 - [WebAssembly (browser)](guides/wasm.md)
 - [Python](guides/python.md)
+- [Java](guides/java.md)
 - [Audit and explainability](guides/audit.md)
 - [Schema and autocomplete](guides/schema.md)
 - [Editors (language server)](guides/editors.md)

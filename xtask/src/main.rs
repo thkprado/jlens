@@ -15,6 +15,7 @@ mod docs;
 mod fuzz;
 mod homebrew;
 mod java;
+mod mdbook;
 mod npm;
 mod regex_corpus;
 mod regex_differential;
@@ -32,6 +33,8 @@ commands:
   update-suite <jsonata-js checkout> replace tests/jsonata-suite with <checkout>/test/test-suite
   gen-docs [--check]                regenerate the generated pages of the book (errors, functions)
   doc-check                         run the examples of the book and check its links
+  mdbook-dedent                     the book's mdBook preprocessor (docs/book.toml): removes the
+                                    indentation every line of a code block shares
   differential [--cases N] [--seed S]
                                     run N generated expressions (1000) in jlens and jsonata-js
                                     and report where they differ (needs benches/compare installed)
@@ -65,7 +68,7 @@ commands:
                                     as the site assembles it
   java [<maven argument>...]        build the C API and test the Java package with the Maven
                                     Wrapper (`verify`, or the arguments given); needs a JDK 25+
-  java-compare [documents|cases|threads]... [--engines NAMES] [--sizes N,N]
+  java-compare [documents|cases|threads|limits]... [--engines NAMES] [--sizes N,N]
                                     compare the Java package with the other JSONata
                                     implementations for the JVM (benches/compare/java)
   serve [--site]                    serve the repository over HTTP (for examples/web-editor),
@@ -87,6 +90,7 @@ fn main() -> Result<()> {
         Some("conformance") => conformance(args.iter().any(|a| a == "--update-baseline")),
         Some("gen-docs") => gen_docs(args.iter().any(|a| a == "--check")),
         Some("doc-check") => docs::check(),
+        Some("mdbook-dedent") => mdbook::run(&args[1..]),
         Some("differential") => differential::run(&args[1..]),
         Some("regex-corpus") => regex_corpus::run(&args[1..]),
         Some("regex-differential") => regex_differential::run(&args[1..]),

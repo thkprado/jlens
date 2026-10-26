@@ -77,7 +77,8 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
 1. Update the version in `[workspace.package]` and in the `jlens-core`, `jlens-schema`,
    `jlens-lsp` and `regress` (`jlens-regress`) entries of `[workspace.dependencies]`
    (`Cargo.toml`), and the project's `<version>` in `crates/jlens-java/java/pom.xml`
-   (`cargo xtask java` fails while they differ).
+   (`cargo xtask java` fails while they differ). Also the version of the Maven and Gradle snippets of `docs/src/getting-started/installation.md` and
+   `docs/src/guides/java.md`.
 2. Move the `Unreleased` entries of `CHANGELOG.md` under the new version, and open the section
    with a sentence that sums up the release. The section becomes the GitHub release notes;
    preview them with `cargo xtask release-notes X.Y.Z`, which points relative links
@@ -85,8 +86,9 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
 3. Measure the tables of the [performance page](docs/src/architecture/performance.md) again
    and set the new version in the sentence above them (`for jlens X.Y.Z`): the native table
    with `cargo bench -p jlens-core`, the WebAssembly one with `node compare.mjs` in
-   `benches/compare` after `cargo xtask wasm`, and the Python one with `python.py speed` (its
-   docstring says how), together with the text that quotes their numbers. Compare the new
+   `benches/compare` after `cargo xtask wasm`, the Python one with `python.py speed` (its
+   docstring says how), and the Java ones with `cargo xtask java-compare`
+   (`benches/compare/README.md`), together with the text that quotes their numbers. Compare the new
    numbers with the old table, not only one revision with another: a change in the benchmark
    scripts shows only there.
 4. Check that everything passes, including the packages:

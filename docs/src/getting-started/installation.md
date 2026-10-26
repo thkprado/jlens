@@ -153,6 +153,36 @@ commit and the workflow run that built it.
 The [Python guide](../guides/python.md) shows how to use it, and how to build it from a
 checkout.
 
+## Java
+
+The Java package is `io.github.thkprado:jlens` on
+[Maven Central](https://central.sonatype.com/artifact/io.github.thkprado/jlens), from 0.25.0 on,
+for Java 25 and later. With Maven:
+
+```xml
+<dependency>
+  <groupId>io.github.thkprado</groupId>
+  <artifactId>jlens</artifactId>
+  <version>0.25.0</version>
+</dependency>
+```
+
+With Gradle:
+
+```kotlin
+implementation("io.github.thkprado:jlens:0.25.0")
+```
+
+Its one JAR carries the native libraries of Linux (x86-64 and ARM64, glibc 2.28 or later and
+musl), macOS (Intel and Apple silicon) and Windows (x86-64), and loads the one of the platform it
+runs on. The package calls native code: start the JVM with
+`--enable-native-access=io.github.thkprado.jlens` on the module path, or
+`--enable-native-access=ALL-UNNAMED` on the class path, or Java prints a warning at first use.
+The files on Maven Central are signed with the release key
+`D007C3464271F80C1C1DF11BF1B365D7F599090B`, on `keyserver.ubuntu.com`.
+
+The [Java guide](../guides/java.md) shows how to use it, and how to build it from a checkout.
+
 ## This book
 
 The documentation is an [mdBook](https://rust-lang.github.io/mdBook/):

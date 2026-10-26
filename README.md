@@ -7,7 +7,9 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 - **`jlens`**: the command-line tool, which includes a language server for editors
   (`jlens lsp`);
 - **`jlens-wasm`**: an ES module for the browser (npm package `jlens-wasm`);
-- **`jlens` on PyPI**: the Python package (from 0.17.0).
+- **`jlens` on PyPI**: the Python package (from 0.17.0);
+- **`io.github.thkprado:jlens` on Maven Central**: the Java package, for Java 25 and later (from
+  0.25.0).
 
 The documentation is at <https://thkprado.github.io/jlens/>, with a
 [web editor](https://thkprado.github.io/jlens/editor/) that runs jlens in your browser.
@@ -58,7 +60,8 @@ jlens check --schema schema.json -f fixtures/shipping-rule.jsonata
 | `crates/jlens-cli` | `jlens` binary |
 | `crates/jlens-wasm` | Browser bindings (`cargo xtask wasm`) |
 | `crates/jlens-python` | Python package (maturin) |
-| `crates/jlens-capi` | C API under the Java package (in progress) |
+| `crates/jlens-capi` | C API under the Java package |
+| `crates/jlens-java` | Java package (Maven, over the C API) |
 | `tests/jsonata-suite` | Vendored official test suite (jsonata-js 2.2.2, MIT) |
 | `tests/conformance` | Baseline, overrides and conformance report |
 | `fixtures` | Sample documents and expressions used in tests and guides |

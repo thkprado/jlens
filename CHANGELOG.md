@@ -8,6 +8,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- The Java package, `io.github.thkprado:jlens` on Maven Central, in beta, for Java 25 and later
+  ([Java guide](docs/src/guides/java.md), [ADR 0021](docs/src/adr/0021-java-package.md)). It
+  calls a C API of the engine through Panama, and its one JAR carries the native libraries of
+  seven targets: Linux x86-64 and ARM64 (glibc 2.28 or later, and musl), macOS x86-64 and ARM64,
+  and Windows x86-64. Expressions evaluate Java objects, read a level at a time as the expression
+  reaches them, JSON text, parsed for the fields the expression reads, or a `Document` parsed
+  once; results come back as maps, lists and boxed values, or as JSON text. Host functions are
+  written in Java, and audits and explanations are records. Expressions, documents and bindings
+  are shared between threads, virtual ones included.
 - `output::Builder::input` and `output::Member`: a builder can return an array or object of
   its input, read through a `Sources` and unchanged by the evaluation, as its own object instead
   of building a copy (ADR 0017, amended). The Java package returns its input's maps and lists

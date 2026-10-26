@@ -4,7 +4,7 @@
 use it to filter, query and transform payloads, and to express business rules whose outcome must
 be explained.
 
-It ships in four forms that share a single engine:
+It ships in five forms that share a single engine:
 
 | Distribution | Package | Use it for |
 |---|---|---|
@@ -12,6 +12,7 @@ It ships in four forms that share a single engine:
 | Command line | `jlens` binary | Scripts, pipelines, NDJSON filtering, debugging expressions |
 | WebAssembly | `jlens-wasm` (npm package, ES module) | Browsers: evaluation, editors with autocomplete, audit viewers |
 | Python | `jlens` (PyPI package) | Data pipelines and rules in Python: evaluation, host functions, audits |
+| Java | `io.github.thkprado:jlens` (Maven Central) | Services and rules on the JVM, virtual threads included: evaluation, host functions, audits |
 
 To try it without installing anything, open the [web editor](https://thkprado.github.io/jlens/editor/):
 it runs jlens in your browser, with completion, diagnostics, and the explanation and audit tree

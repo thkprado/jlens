@@ -17,7 +17,6 @@
          installed, so that a local build cannot hide the package published on Maven Central. -->
     <jlens.jar>${project.basedir}/../../../crates/jlens-java/java/target/jlens-${jlens.version}.jar</jlens.jar>
     <jsonata-java.version>0.9.10</jsonata-java.version>
-    <jsonata4java.version>3.0.0</jsonata4java.version>
     <jsonata-jvm-compiler.version>1.0.7</jsonata-jvm-compiler.version>
   </properties>
 
@@ -47,12 +46,6 @@
       <groupId>com.dashjoin</groupId>
       <artifactId>jsonata</artifactId>
       <version>${jsonata-java.version}</version>
-    </dependency>
-    <!-- JSONata4Java (IBM), over Jackson 3. -->
-    <dependency>
-      <groupId>com.ibm.jsonata4java</groupId>
-      <artifactId>JSONata4Java</artifactId>
-      <version>${jsonata4java.version}</version>
     </dependency>
     <!-- jsonata-jvm-compiler, which compiles an expression to a Java class, over Jackson 2. -->
     <dependency>

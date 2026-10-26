@@ -3,9 +3,12 @@ package compare;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.thkprado.jlens.Document;
 import io.github.thkprado.jlens.Expression;
+import io.github.thkprado.jlens.JlensException;
+import io.github.thkprado.jlens.Options;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Properties;
 
@@ -36,8 +39,7 @@ abstract class Engine {
 
     /** The engines, by the names the command line uses. */
     static List<Engine> all() {
-        return List.of(new Jlens(), new JlensObjects(), new JsonataJava(), new Jsonata4Java(),
-            new JvmCompiler());
+        return List.of(new Jlens(), new JlensObjects(), new JsonataJava(), new JvmCompiler());
     }
 
     /** The name the command line uses. */
@@ -59,6 +61,26 @@ abstract class Engine {
     /** The JSON text of a result, {@code null} when it is undefined. */
     abstract String json(Object result) throws Exception;
 
+    /** How {@link Limits} builds this engine's input: maps and boxed values by default. */
+    Limits.Builder builder() { return Limits.MAPS; }
+
+    /**
+     * Compiles and evaluates once for {@link Limits}, with a timeout and a depth limit when they
+     * are not {@code null}; throws {@link Limits.Unsupported} for an option the engine lacks.
+     */
+    abstract Object limited(String expression, Object input, Integer timeoutMs, Integer maxDepth)
+        throws Exception;
+
+    /** The JSONata error code an exception of this engine carries, or {@code null}. */
+    String code(Throwable error) { return null; }
+
+    /** jlens over Java objects, as {@link Limits} runs it (cyclic input needs them). */
+    static Object jlensLimited(String expression, Object input, Integer timeoutMs, Integer maxDepth) {
+        Options.Builder options = Options.builder().maxDepth(maxDepth);
+        if (timeoutMs != null) options.timeout(Duration.ofMillis(timeoutMs));
+        return Expression.compile(expression).evaluate(input, options.build());
+    }
+
     /** jlens: results come out as Java objects (maps, lists, boxed values), as the others'. */
     static final class Jlens extends Engine {
         String key() { return "jlens"; }
@@ -78,6 +100,14 @@ abstract class Engine {
 
         String json(Object result) throws Exception {
             return result == null ? null : JACKSON.writeValueAsString(result);
+        }
+
+        Object limited(String expression, Object input, Integer timeoutMs, Integer maxDepth) {
+            return jlensLimited(expression, input, timeoutMs, maxDepth);
+        }
+
+        String code(Throwable error) {
+            return error instanceof JlensException j ? j.code() : null;
         }
     }
 
@@ -108,6 +138,14 @@ abstract class Engine {
         String json(Object result) throws Exception {
             return result == null ? null : JACKSON.writeValueAsString(result);
         }
+
+        Object limited(String expression, Object input, Integer timeoutMs, Integer maxDepth) {
+            return jlensLimited(expression, input, timeoutMs, maxDepth);
+        }
+
+        String code(Throwable error) {
+            return error instanceof JlensException j ? j.code() : null;
+        }
     }
 
     /** jsonata-java (Dashjoin), over maps, lists and boxed values. */
@@ -132,33 +170,19 @@ abstract class Engine {
         String json(Object result) throws Exception {
             return result == null ? null : JACKSON.writeValueAsString(result);
         }
-    }
 
-    /** JSONata4Java (IBM), over Jackson 3's trees. */
-    static final class Jsonata4Java extends Engine {
-        static final tools.jackson.databind.ObjectMapper MAPPER =
-            new tools.jackson.databind.ObjectMapper();
-
-        String key() { return "jsonata4java"; }
-
-        Object convert(String json) { return MAPPER.readTree(json); }
-
-        Compiled compile(String source) throws Exception {
-            var expression = com.api.jsonata4java.expressions.Expressions.parse(source);
-            return new Compiled() {
-                public Object evaluate(Object converted) throws Exception {
-                    return expression.evaluate((tools.jackson.databind.JsonNode) converted);
-                }
-
-                public Object evaluateText(String json) throws Exception {
-                    return expression.evaluate(MAPPER.readTree(json));
-                }
-            };
+        Object limited(String expression, Object input, Integer timeoutMs, Integer maxDepth) {
+            var compiled = com.dashjoin.jsonata.Jsonata.jsonata(expression);
+            var frame = compiled.createFrame();
+            if (timeoutMs != null || maxDepth != null)
+                frame.setRuntimeBounds(timeoutMs != null ? timeoutMs : 86_400_000L,
+                    maxDepth != null ? maxDepth : Integer.MAX_VALUE);
+            return compiled.evaluate(input, frame);
         }
 
-        boolean threadSafe() { return false; }
-
-        String json(Object result) { return result == null ? null : result.toString(); }
+        String code(Throwable error) {
+            return error instanceof com.dashjoin.jsonata.JException j ? j.getError() : null;
+        }
     }
 
     /** jsonata-jvm-compiler, which compiles an expression to a Java class, over Jackson 2. */
@@ -189,6 +213,35 @@ abstract class Engine {
             // A missing node is how it says undefined.
             return result == null || ((com.fasterxml.jackson.databind.JsonNode) result).isMissingNode()
                 ? null : result.toString();
+        }
+
+        Limits.Builder builder() {
+            var nodes = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance;
+            return new Limits.Builder() {
+                public Object object() { return nodes.objectNode(); }
+
+                public void put(Object object, String key, Object value) {
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) object)
+                        .set(key, (com.fasterxml.jackson.databind.JsonNode) value);
+                }
+
+                public Object number(int n) { return nodes.numberNode(n); }
+            };
+        }
+
+        Object limited(String expression, Object input, Integer timeoutMs, Integer maxDepth)
+                throws Exception {
+            if (maxDepth != null) throw new Limits.Unsupported();
+            var compiled = FACTORY.compile(expression);
+            if (timeoutMs != null) compiled.setTimeout(timeoutMs);
+            // It takes no null: a missing node is its undefined.
+            return compiled.evaluate(input == null
+                ? com.fasterxml.jackson.databind.node.MissingNode.getInstance()
+                : (com.fasterxml.jackson.databind.JsonNode) input);
+        }
+
+        String code(Throwable error) {
+            return error instanceof org.json_kula.jsonata_jvm.JsonataException j ? j.getErrorCode() : null;
         }
     }
 }

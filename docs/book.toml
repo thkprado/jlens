@@ -5,6 +5,13 @@ authors = ["jlens contributors"]
 language = "en"
 src = "src"
 
+# `{{#include file:anchor}}` keeps the indentation of the part it includes, so a snippet taken
+# from inside a test function would show it (mdBook issues 1430 and 1601). This preprocessor,
+# run after the includes, removes the indentation every line of a code block shares.
+[preprocessor.dedent]
+command = "cargo xtask mdbook-dedent"
+after = ["links"]
+
 [output.html]
 # The site is served under the project path (https://thkprado.github.io/jlens/); the 404 page
 # needs it to load its styles and links.
