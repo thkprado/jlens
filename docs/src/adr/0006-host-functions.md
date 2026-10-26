@@ -93,3 +93,10 @@ bound by the expression or by a lambda's parameter is in a nearer frame. The val
   0.39 µs with none; `$add(1, 2)` with sixteen bound 0.75 µs instead of 3.11.
 - A name that no frame holds costs a lookup in the bindings' functions before the built-ins,
   once per evaluation and name, since the value is kept.
+- Every lookup carries the bindings to the root frame, which a name found in a nearer frame
+  never reaches, yet costs: `cargo xtask ab` against 0.24.0, built aligned, put `recursion`
+  (`$f(15)`, about 2,000 calls of a lambda) 2.5 to 5.6% slower in every mode, the other cases
+  within 2% (0.25 #15). Inlining `Frame::lookup` and `variable` brings it to about 2% (between
+  1.2 and 2.6% over nine builds, by the fastest round); 0.24.0 rebuilt is within 1.1% of
+  itself. The rest stays: keeping the functions in the root frame instead would tie the
+  bindings to the lifetime of the values.

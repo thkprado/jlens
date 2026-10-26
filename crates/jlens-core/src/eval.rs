@@ -48,7 +48,10 @@ impl<'a> Frame<'a> {
     }
 
     /// Looks a variable up in this frame and its ancestors, then among the host functions of
-    /// `bindings` and the built-ins.
+    /// `bindings` and the built-ins. Inlined, as is `variable`: once they took the bindings,
+    /// a recursion through a lambda, which looks variables up at each call, ran 2.5 to 5.6%
+    /// slower (0.25 #15).
+    #[inline]
     pub fn lookup(&self, name: &str, bindings: &crate::Bindings) -> Value<'a> {
         let mut frame = self;
         loop {
@@ -2147,6 +2150,7 @@ fn is_plain_step(step: &Node) -> bool {
 }
 
 /// The value of a variable; `$` alone is the context value.
+#[inline]
 fn variable<'a>(
     name: &str,
     input: &Value<'a>,

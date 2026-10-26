@@ -1077,5 +1077,18 @@ path changed but the order in which variables and functions are bound.
   and 1.9% slower (`transform` with `evaluate`), except `strings` with `--mode source`, 5.1%
   slower over ten rounds and 1.3% faster over 20. `names over items` is 4.7% faster with
   `evaluate` and 2.3% with `--mode source`, from the hasher seed the lazy objects now share.
+- **Host functions.** Since 0.25, the root frame looks a host function up when no frame holds
+  its name, instead of binding every function before each evaluation
+  ([ADR 0006, amended](../adr/0006-host-functions.md#amendment-host-functions-looked-up-on-a-miss-025)):
+  `$a + $b` with sixteen functions bound takes 0.40 µs instead of 2.82 µs, 0.39 µs with none.
+  Every lookup now carries the bindings, though. Against 0.24.0 (`cargo xtask ab v0.24.0 .`,
+  the 0.25 code complete, ten rounds, built aligned), every case is within 2% in every mode
+  but `recursion` (`$f(15)`, about 2,000 calls of a lambda), which reads no input and looks
+  variables up at each call: 2.5 to 5.6% slower, from #9 alone. With `Frame::lookup` and
+  `variable` inlined, it is about 2% slower: between 1.2 and 2.6% over nine builds, by the
+  fastest round, while 0.24.0 built again three times is within 1.1% of itself. Its median
+  moves more from build to build, up to 4%. Built without the alignment flags, before the
+  inlining, more cases moved by code placement: up to 3.9% slower with `evaluate`
+  (`sort + map`), and `path` 4.9% faster against a `Document`; aligned, they are within 2%.
 - **Deep copies.** A transform (`|...|`) copies its input with `$clone` before changing it, as
   jsonata-js does. That makes transforms of large documents comparatively expensive.
