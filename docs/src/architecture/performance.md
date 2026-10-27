@@ -227,9 +227,13 @@ input. jlens-wasm `evaluate` reads the input object as the expression reaches it
 array of up to 16 values through one call to a JavaScript helper, a larger one whole, through
 `JSON.stringify` and a parse into jlens's representation. The path case reads two small
 objects. An expression that reads every item pays what converting the whole input does:
-`JSON.stringify` of the input takes 41 µs, and parsing that text 269 µs. Unlike the native
-and Python inputs, a JavaScript object is still read a whole level at a time: a path step does
-not read its one field alone, so `names over items` converts every item. An index into an
+`JSON.stringify` of the input takes 41 µs, and parsing that text 269 µs. A path step reads
+its one field alone, since 0.26, as with the native and Python inputs: `path` takes 4.9 µs
+instead of 7.3 µs, the other cases within 2.1% (the median of four alternated runs, on a day
+when both builds and jsonata-js measured about 7% above the table). It does not help
+`names over items`, which still converts every item: an array of more than 16 values is read
+whole, and reading its items alone instead was faster on five cases and slower on five
+([ADR 0010](../adr/0010-lazy-input.md#follow-up-the-webassembly-package-026-3)). An index into an
 array reads the items it picks alone, since 0.24: with `evaluate`, `items[0].code` over
 10,000 items takes 6.7 µs instead of 6.19 ms, and `($i := 0; items[$i].code)` 7.3 µs instead
 of 6.19 ms, against 2.2 µs and 2.9 ms in jsonata-js, which tests every item for an index held

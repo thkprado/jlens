@@ -192,7 +192,7 @@ every field of its object, strings included, to use one.
    its object whole only, as before, and the evaluation reads the whole level. The Python source
    implements it with one lookup in the `dict`. The WebAssembly source does not, for now: it
    reads a level with one call into JavaScript, and a call per field has not been measured
-   against it.
+   against it (it does since 0.26, [below](#follow-up-the-webassembly-package-026-3)).
 2. **The path step reads one field.** `functions::lookup`, the step's single site, asks the
    object for its field with `Object::get`, which reads it alone when the object has not been
    read whole. The `Json` source finds the key in its `serde_json` map, comparing the keys of an
@@ -237,6 +237,37 @@ every field of its object, strings included, to use one.
 - A Python key's `__eq__` can run during a lookup, when a `dict` has a key that is not a `str`
   and whose hash collides with the key looked up. Such a `dict` fails when it is read whole.
 - `Object` gains no field: its `read` flag becomes a state of three values.
+
+### Follow-up: the WebAssembly package (0.26 #3)
+
+The WebAssembly package's source implements `read_field`, with a JavaScript helper that looks
+the field up as `JSON.stringify` reads it: an own enumerable field, its `toJSON` called with
+its key, a boxed primitive unwrapped, nothing for a value that `JSON.stringify` leaves out. A
+scalar comes back as a JavaScript value, and an array or object as a node, its cycle checked
+against the same ancestors as a level's. A field whose getter throws, or that holds a cycle,
+fails when it is read, no longer when one of the fields around it is. With `evaluate`, `path`
+takes 4.9 µs instead of 7.3 µs, and the two indexes into 10,000 items 6.8 and 7.6 µs instead
+of 7.5 and 8.2 µs; the other eleven cases are within 2.1% (the median of four alternated runs
+of `compare.mjs`, each cell).
+
+It does not reach `names over items` (355 against 363 µs): an array of more than 16 values is
+still read whole through `JSON.stringify`, so the fields of its items are read from lazy JSON,
+after every item was converted. Three variants were measured, one run each, and not kept:
+- **A long array of objects as one node per item**, nothing of them read: `names over items`
+  154 µs, number formatting 104 µs instead of 395, `regex` 416 instead of 555; but the shipping
+  rule 1.10 ms instead of 498 µs, sort + map 1.09 ms instead of 840 µs, the transform 1.64
+  instead of 1.36 ms, the object constructor 673 instead of 585 µs and group-by 537 instead of
+  459 µs. A scalar read alone is read again at each lookup, one call into JavaScript each (the
+  sort reads its keys at every comparison), and an item read whole costs a call of its own,
+  where the array cost one `JSON.stringify` and one parse.
+- **The same, with an object read whole at its second field**: slower still, group-by 910 µs
+  and the object constructor 1.06 ms. Reading a level through the helper costs more than a
+  few fields read alone.
+- **The same, with an object of scalars read as JSON text**: no change (the transform 1.61 ms);
+  what an item costs is its own call and lazy object, not the format of its level.
+
+A long array stays read whole until there is a way to choose, array by array, between reading
+its items alone and reading it whole.
 
 ## Amendment: one allocation per member (0.19)
 

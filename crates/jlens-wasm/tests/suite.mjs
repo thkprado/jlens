@@ -198,6 +198,41 @@ export const cases = [
     throws(() => value("items[1].up", cyclic), (e) => ok(e instanceof TypeError && /circular/.test(e.message), "cycle"));
   }],
 
+  ["evaluate reads the field a path step looks up, alone", (j) => {
+    const value = (source, input) => new j.Expression(source).evaluate(input);
+    // The keys read, through a proxy over an object of 30 fields.
+    let read = [];
+    const fields = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`f${i}`, { n: i }]));
+    const wide = new Proxy(fields, {
+      get(target, key, receiver) {
+        if (typeof key === "string" && key.startsWith("f")) read.push(key);
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    equal(value("f3.n", wide), 3, "a field of a wide object");
+    equal(read, ["f3"], "only that field read");
+    read = [];
+    equal(value("f3.n + f4.n", wide), 7, "two fields");
+    equal(read, ["f3", "f4"], "each read alone");
+    read = [];
+    equal(value("$count($keys($))", wide), 30, "then the whole object");
+    // Only own enumerable fields, as JSON.stringify reads them.
+    const hidden = Object.create({ inherited: 1 });
+    Object.defineProperty(hidden, "hidden", { value: 1, enumerable: false });
+    equal(value("[inherited, hidden, __proto__, toString]", hidden), [], "fields JSON.stringify skips");
+    equal(value("[u, f, s, n]", { u: undefined, f() {}, s: Symbol("s"), n: NaN }), [null], "values it leaves out");
+    // A field that fails, or holds a cycle, fails when it is read, not the fields around it.
+    const boom = new Error("boom");
+    const failing = { ok: 1, get bad() { throw boom; } };
+    equal(value("ok", failing), 1, "a failing field not read");
+    throws(() => value("bad", failing), (e) => ok(e === boom, "the field's exception"));
+    throws(() => value("$keys($)", failing), (e) => ok(e === boom, "the whole object"));
+    const cyclic = { a: { b: 1 } };
+    cyclic.a.up = cyclic;
+    equal(value("a.b", cyclic), 1, "a cycle not read");
+    throws(() => value("a.up.a", cyclic), (e) => ok(e instanceof TypeError && /circular/.test(e.message), "cycle"));
+  }],
+
   ["syntax errors are JlensErrors with UTF-16 offsets", (j) => {
     throws(() => new j.Expression("'𝄞é' & items[0;]"), (e) => {
       ok(e instanceof Error, "an Error");

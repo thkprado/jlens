@@ -10,7 +10,8 @@
 //! a level of more than [`WHOLE`] values is read whole, everything it holds included, through
 //! `JSON.stringify`. A small level stays cheap to reach, and a large one costs what converting
 //! it did before levels were read lazily. An index into an array reads the items it picks
-//! alone, one call each, whatever the array's length.
+//! alone, one call each, whatever the array's length, and a path step reads the one field it
+//! looks up, one call per field, whatever the object's width.
 //!
 //! The arrays and objects of a level are the members of one [`Sources`], the list of their
 //! nodes that the helper returns, so that each costs one allocation.
@@ -25,6 +26,30 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(inline_js = r#"
 const CIRCULAR = "Converting circular structure to JSON";
 const BIGINT = "Do not know how to serialize a BigInt";
+
+// The value JSON.stringify writes for `v`, the value of `key`: what `toJSON` returns, and a
+// boxed primitive unwrapped.
+function unwrap(v, key) {
+  if ((typeof v === "object" && v !== null) || typeof v === "bigint") {
+    const toJSON = v.toJSON;
+    if (typeof toJSON === "function") v = toJSON.call(v, key);
+  }
+  if (typeof v === "object" && v !== null) {
+    if (v instanceof Number) v = Number(v);
+    else if (v instanceof String) v = String(v);
+    else if (v instanceof Boolean) v = v.valueOf();
+    else if (v instanceof BigInt) throw new TypeError(BIGINT);
+  }
+  return v;
+}
+
+// Throws as JSON.stringify does when `v` is the array or object of the node `up` or of one of
+// its ancestors.
+function checkCycle(v, up) {
+  for (let n = up; n !== null; n = n.up) {
+    if (n.v === v) throw new TypeError(CIRCULAR);
+  }
+}
 
 // Reads values: with `kind` 0 the input itself (`node` is the value); with 1 the array or
 // object of the node `node[index]`, the nodes of a level; with 2 the item `n` of that array.
@@ -41,16 +66,7 @@ export function jlensRead(node, kind, index, n) {
   const nested = [];
   const up = kind === 0 ? null : node[index];
   const put = (v, key) => {
-    if ((typeof v === "object" && v !== null) || typeof v === "bigint") {
-      const toJSON = v.toJSON;
-      if (typeof toJSON === "function") v = toJSON.call(v, key);
-    }
-    if (typeof v === "object" && v !== null) {
-      if (v instanceof Number) v = Number(v);
-      else if (v instanceof String) v = String(v);
-      else if (v instanceof Boolean) v = v.valueOf();
-      else if (v instanceof BigInt) throw new TypeError(BIGINT);
-    }
+    v = unwrap(v, key);
     switch (typeof v) {
       case "string":
         nums.push(5, v.length);
@@ -70,9 +86,7 @@ export function jlensRead(node, kind, index, n) {
           nums.push(1);
           return true;
         }
-        for (let n = up; n !== null; n = n.up) {
-          if (n.v === v) throw new TypeError(CIRCULAR);
-        }
+        checkCycle(v, up);
         nums.push(Array.isArray(v) ? 6 : 7);
         nested.push({ v, up });
         return true;
@@ -106,6 +120,32 @@ export function jlensRead(node, kind, index, n) {
   return [new Float64Array(nums), text, nested];
 }
 
+// Reads the field `key` of the object of the node `nodes[index]`, as JSON.stringify sees it:
+// undefined when the object has no own enumerable field `key`, or when JSON.stringify leaves
+// its value out; a string, a boolean or null as itself; a number, or null when it is not
+// finite; an array or object as [6 or 7, its node], so that the node is member 1.
+export function jlensField(nodes, index, key) {
+  const up = nodes[index];
+  const fields = up.v;
+  if (!Object.prototype.propertyIsEnumerable.call(fields, key)) return undefined;
+  const v = unwrap(fields[key], key);
+  switch (typeof v) {
+    case "string":
+    case "boolean":
+      return v;
+    case "number":
+      return isFinite(v) ? v : null;
+    case "bigint":
+      throw new TypeError(BIGINT);
+    case "object":
+      if (v === null) return null;
+      checkCycle(v, up);
+      return [Array.isArray(v) ? 6 : 7, { v, up }];
+    default:
+      return undefined;
+  }
+}
+
 // The length of the array of the node `nodes[index]`.
 export function jlensLength(nodes, index) {
   return nodes[index].v.length;
@@ -114,6 +154,8 @@ export function jlensLength(nodes, index) {
 extern "C" {
     #[wasm_bindgen(catch, js_name = jlensRead)]
     fn read_js(node: &JsValue, kind: u32, index: u32, n: u32) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(catch, js_name = jlensField)]
+    fn read_field_js(nodes: &JsValue, index: u32, key: &str) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(catch, js_name = jlensLength)]
     fn read_length(nodes: &JsValue, index: u32) -> Result<f64, JsValue>;
 }
@@ -166,6 +208,15 @@ struct Nested {
     exception: Exception,
 }
 
+impl Nested {
+    fn new(nodes: JsValue, exception: &Exception) -> Rc<Nested> {
+        Rc::new(Nested {
+            nodes,
+            exception: exception.clone(),
+        })
+    }
+}
+
 impl<'a> Sources<'a> for Nested {
     fn read(&self, index: u32, sink: &mut Sink<'_, 'a>) -> Result<(), String> {
         let mut parts = keep(&self.exception, read_js(&self.nodes, LEVEL, index, WHOLE))?;
@@ -182,6 +233,29 @@ impl<'a> Sources<'a> for Nested {
         }
         write(parts, sink, &self.exception);
         Ok(())
+    }
+
+    fn read_field(&self, index: u32, key: &str, sink: &mut Sink<'_, 'a>) -> Result<bool, String> {
+        let value = keep(&self.exception, read_field_js(&self.nodes, index, key))?;
+        if let Some(n) = value.as_f64() {
+            sink.number(n);
+        } else if let Some(s) = value.as_string() {
+            sink.string(&s);
+        } else if let Some(b) = value.as_bool() {
+            sink.bool(b);
+        } else if value.is_null() {
+            sink.null();
+        } else if value.is_object() {
+            // [6 or 7, the node]: the node is member 1 of a level of its own.
+            let tag = value.unchecked_ref::<js_sys::Array>().get(0).as_f64();
+            let level = Nested::new(value, &self.exception);
+            if tag == Some(6.0) {
+                sink.array_of(&level, 1);
+            } else {
+                sink.object_of(&level, 1);
+            }
+        }
+        Ok(true)
     }
 
     fn length(&self, index: u32) -> Option<usize> {
@@ -248,12 +322,7 @@ fn write(parts: JsValue, sink: &mut Sink<'_, '_>, exception: &Exception) {
             Entry::Number(n) => sink.number(n),
             Entry::String(s) => sink.string(s),
             Entry::Array | Entry::Object => {
-                let level = nested.get_or_insert_with(|| {
-                    Rc::new(Nested {
-                        nodes: parts.get(2),
-                        exception: exception.clone(),
-                    })
-                });
+                let level = nested.get_or_insert_with(|| Nested::new(parts.get(2), exception));
                 if let Entry::Array = value {
                     sink.array_of(level, next_nested);
                 } else {

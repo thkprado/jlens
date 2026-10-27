@@ -19,6 +19,11 @@ All notable changes are recorded here. The format follows
   reach them. A recursion through a lambda, which ran up to 4% slower in 0.25.0, is back
   within about 1% of 0.24.0; host functions cost what they did in 0.25.0. Cloning `Bindings`
   no longer copies its functions.
+- The WebAssembly package's `evaluate` reads the one field a path step looks up in a
+  JavaScript object, rather than the object's whole level: a path into the input takes about
+  a third less time (`customer.name`: 4.9 against 7.3 µs). A field whose getter throws, or
+  that holds a cycle, now fails only when it is read, not when another field of its object is.
+  An array of more than 16 values is still read whole.
 
 ## [0.25.0]
 
