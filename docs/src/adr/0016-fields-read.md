@@ -167,8 +167,8 @@ evaluated on it. So an application can mark a host function as not reading the c
 call. `HostCall::input` then gives nothing, so the mark is a guarantee rather than a promise,
 and the analysis, given the bindings (`Expression::reads_with`), reads only the arguments of a
 call to a marked function. Without the mark a host function reads its context, as before.
-Making that the default instead would change the API, a question for its stability (roadmap
-0.26).
+Making that the default instead would change the API, a question for the API work
+(ADR 0015).
 
 *Amended with the implementation (roadmap 0.18, item 2): the rows for a binding and for
 `$reduce` without `init` were found then.*

@@ -116,15 +116,15 @@ timeout, a limit an application does not set changes nothing.
 4. **Counts change only on purpose, and are reported by audits.**
    - The table test of exact counts (#2) makes any change visible in review. A version that
      changes counts says so in its changelog, under its own heading, with the cases that
-     changed. Before 1.0 that is not a breaking change; 0.26 decides what 1.0 promises.
-     An upgrade of `jlens-regress` can change the counts of regular
+     changed. Before 1.0 that is not a breaking change; the API work (ADR 0015) decides what
+     1.0 promises. An upgrade of `jlens-regress` can change the counts of regular
      expressions, and is reviewed the same way.
    - An evaluation does not return its count: the `evaluate*` methods keep their return types
-     until 0.26 settles the API. The audit header gets a `steps` field, the steps the audited
-     evaluation took, which equal the untraced count by point 1. An application measures an
+     until the API work settles the API. The audit header gets a `steps` field, the steps the
+     audited evaluation took, which equal the untraced count by point 1. An application measures an
      expression with an audit and sets its budget from that; the Wasm and Python audit types
      gain the field with their `maxSteps` / `max_steps` (#4, #5). Whether 1.0 returns the count
-     of every evaluation, for a quota that charges what was used, is a question for 0.26.
+     of every evaluation, for a quota that charges what was used, is a question for the API work.
 
 5. **The counter paces the timeout.** The cancellation token, an atomic load, is still read at
    every step. The clock is read only every *N* steps of the same counter. Proposed: a mask
@@ -154,7 +154,7 @@ timeout, a limit an application does not set changes nothing.
 - **Reusing `U1001`** with a message, or `D1012`. An application could not tell a budget from
   a size limit, or from a clock, without matching messages, which `AGENTS.md` forbids.
 - **Returning the count from every evaluation** now. It changes the signatures of every
-  `evaluate*` method in Rust, Wasm and Python before 0.26 decides the API.
+  `evaluate*` method in Rust, Wasm and Python before the API work decides the API.
 - **Fuel from the runtime,** as `wasmtime` meters WebAssembly instructions. It exists only for
   one runtime, not natively nor in browsers, and instruction counts change with the compiler.
 

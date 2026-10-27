@@ -215,7 +215,7 @@ the workload of `benches/compare`.
     instance after an overflow.
 - **JNI is not used.**
 - **The Java API is frozen with the other contracts outside Rust** (ADR 0015), so the package
-  starts after the API stability work of roadmap 0.26, not before. (Superseded by the
+  starts after the API stability work of the roadmap, not before. (Superseded by the
   amendment below: the package ships before that work, in beta.)
 
 ## Consequences
@@ -578,7 +578,7 @@ Evaluations per second (and the speed-up over one thread):
 
 ### Context
 
-The decision tied the package to the API stability work (ADR 0015), now roadmap 0.26. That
+The decision tied the package to the API stability work (ADR 0015) of the roadmap. That
 work is deferred until applications built on jlens have used jlens, with no date, so the
 package would wait with it. The Python and WebAssembly packages did not wait: they shipped in
 beta, and the API work covers them when it comes.
@@ -594,7 +594,7 @@ beta, and the API work covers them when it comes.
 
 ### Consequences
 
-- When 0.26 breaks the API, the Java package changes with the Python and WebAssembly ones.
+- When the API work breaks the API, the Java package changes with the Python and WebAssembly ones.
   `jlens-capi` is not published, so only the Java API's users see the change.
 - The package becomes one more use of the contracts outside Rust that ADR 0015 decides from.
 - Every release from 0.25 on publishes to Maven Central too: one more step in the checklist,
