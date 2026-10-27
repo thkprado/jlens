@@ -23,6 +23,7 @@ implementations:
 
 ```sh
 cargo bench -p jlens-core                     # criterion, native
+cargo xtask bench-table                       # the native table below: the median of three runs
 cargo xtask ab main .                         # two revisions against each other, native
 cargo xtask wasm && cd benches/compare && npm install && node compare.mjs   # against jsonata-js
 python benches/compare/python.py speed jlens=<python> ...   # against the Python packages
@@ -84,6 +85,20 @@ for comparing alternatives on one machine. They are not guarantees, and your har
 different absolute values.
 
 ### Native (criterion)
+
+The table is measured with `cargo xtask bench-table`. It runs `cargo bench -p jlens-core --bench
+evaluate` three times and prints, for each benchmark, the time criterion gives in each run and
+their median. One run alone can be far off: for 0.25.0, one run gave 1.19 ms on `regex` against
+a `Document`, where the next two gave 179 and 182 µs, and later one gave 1.99 ms on `recursion`
+where the next two gave 1.03 ms. The median sets such a run aside when the other two agree. A
+case where most runs are more than 2% from the median is marked, and run again with `--runs 5`.
+
+The programs are built with the release profile, without the alignment flags, as an
+application builds them. Aligned, the same code measured up to 7% faster (`path` against a
+`Document`), most cases by 0 to 3%. Unaligned, a case can move from one release to the next by
+code placement alone ([above](#comparing-two-revisions)). A case more than 2% away from the
+previous table is compared with `cargo xtask ab <previous tag> .`, built aligned, before the
+difference is put down to a change.
 
 Each `evaluate` call reads its `serde_json::Value` input as the expression reaches it, one
 object or array at a time ([ADR 0010](../adr/0010-lazy-input.md)). `evaluate_document`

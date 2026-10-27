@@ -10,6 +10,7 @@ mod ab;
 // Also built on its own by `ab`, against each revision it compares.
 #[allow(dead_code)]
 mod ab_probe;
+mod bench_table;
 mod differential;
 mod docs;
 mod fuzz;
@@ -82,6 +83,9 @@ commands:
                                     on benches/cases.json, by running them in alternation; B can
                                     use mimalloc or a step limit, both can have a timeout, and
                                     both can be built for another local target
+  bench-table [--runs N] [--reuse]  run the native benchmark (cargo bench -p jlens-core --bench
+                                    evaluate) N times (3) and print each case's median and spread,
+                                    for the performance page; --reuse reads the runs saved before
 ";
 
 fn main() -> Result<()> {
@@ -148,6 +152,7 @@ fn main() -> Result<()> {
         Some("java") => java::test(&args[1..]),
         Some("java-compare") => java::compare(&args[1..]),
         Some("ab") => ab::run(&args[1..]),
+        Some("bench-table") => bench_table::run(&args[1..]),
         Some("serve") => wasm::serve_forever(args.iter().any(|a| a == "--site")),
         Some("site") => site::build(),
         Some("release-notes") => match args.get(1) {

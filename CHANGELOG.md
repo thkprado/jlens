@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `cargo xtask bench-table` measures the native table of the performance page: it runs the
+  native benchmark three times (`--runs`) and prints each case's median and spread, marking a
+  case whose runs mostly disagree with the median by more than 2%.
+
 ## [0.25.0]
 
 The Java package, in beta: `io.github.thkprado:jlens` on Maven Central, for Java 25 and later,
