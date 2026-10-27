@@ -1096,14 +1096,14 @@ path changed but the order in which variables and functions are bound.
   its name, instead of binding every function before each evaluation
   ([ADR 0006, amended](../adr/0006-host-functions.md#amendment-host-functions-looked-up-on-a-miss-025)):
   `$a + $b` with sixteen functions bound takes 0.40 µs instead of 2.82 µs, 0.39 µs with none.
-  Every lookup now carries the bindings, though. Against 0.24.0 (`cargo xtask ab v0.24.0 .`,
-  the 0.25 code complete, ten rounds, built aligned), every case is within 2% in every mode
-  but `recursion` (`$f(15)`, about 2,000 calls of a lambda), which reads no input and looks
-  variables up at each call: 2.5 to 5.6% slower, from #9 alone. With `Frame::lookup` and
-  `variable` inlined, it is about 2% slower: between 1.2 and 2.6% over nine builds, by the
-  fastest round, while 0.24.0 built again three times is within 1.1% of itself. Its median
-  moves more from build to build, up to 4%. Built without the alignment flags, before the
-  inlining, more cases moved by code placement: up to 3.9% slower with `evaluate`
-  (`sort + map`), and `path` 4.9% faster against a `Document`; aligned, they are within 2%.
+  In 0.25 every lookup carried the bindings to reach them, which made `recursion` (`$f(15)`,
+  about 2,000 calls of a lambda, each looking variables up) slower than in 0.24.0: about 2%
+  built aligned, after inlining `Frame::lookup` and `variable`, and 4.0% with `evaluate` and
+  2.9% against a `Document` built as an application builds it. Since 0.26 the root frame holds
+  the functions itself, shared with the `Bindings` through an `Arc`
+  ([ADR 0006, follow-up](../adr/0006-host-functions.md#follow-up-the-functions-in-the-root-frame-026-2)),
+  and lookups are as in 0.24.0. Against 0.24.0 (`cargo xtask ab v0.24.0 .`, ten rounds),
+  `recursion` is within 1.1% in both modes, aligned or not, and every other case within 2.3%;
+  `$a + $b` takes the same 0.38 to 0.39 µs with none, one or sixteen functions bound.
 - **Deep copies.** A transform (`|...|`) copies its input with `$clone` before changing it, as
   jsonata-js does. That makes transforms of large documents comparatively expensive.

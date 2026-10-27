@@ -422,7 +422,8 @@ fn limits(options: &Options) -> eval::Limits {
 #[derive(Debug, Clone, Default)]
 pub struct Bindings {
     vars: IndexMap<String, JsonValue>,
-    functions: IndexMap<String, HostFunction>,
+    /// Shared with the root frame of each evaluation, which looks them up on a miss.
+    functions: Arc<IndexMap<String, HostFunction>>,
 }
 
 impl Bindings {
@@ -434,7 +435,9 @@ impl Bindings {
     /// Adds (or replaces) a variable binding. The name is given without the leading `$`.
     pub fn var(mut self, name: impl Into<String>, value: impl Into<JsonValue>) -> Self {
         let name = name.into();
-        self.functions.shift_remove(&name);
+        if self.functions.contains_key(&name) {
+            Arc::make_mut(&mut self.functions).shift_remove(&name);
+        }
         self.vars.insert(name, value.into());
         self
     }
@@ -444,7 +447,7 @@ impl Bindings {
     pub fn function(mut self, name: impl Into<String>, function: HostFunction) -> Self {
         let name = name.into();
         self.vars.shift_remove(&name);
-        self.functions.insert(name, function);
+        Arc::make_mut(&mut self.functions).insert(name, function);
         self
     }
 
@@ -463,6 +466,11 @@ impl Bindings {
         self.vars.iter().map(|(k, v)| (k.as_str(), v))
     }
 
+    /// The host functions, for the root frame of an evaluation; `None` when there are none.
+    pub(crate) fn shared_functions(&self) -> Option<Arc<IndexMap<String, HostFunction>>> {
+        (!self.functions.is_empty()).then(|| self.functions.clone())
+    }
+
     /// Iterates over the host functions in insertion order.
     pub fn functions(&self) -> impl Iterator<Item = (&str, &HostFunction)> {
         self.functions.iter().map(|(k, f)| (k.as_str(), f))
@@ -473,7 +481,7 @@ impl FromIterator<(String, JsonValue)> for Bindings {
     fn from_iter<T: IntoIterator<Item = (String, JsonValue)>>(iter: T) -> Self {
         Bindings {
             vars: iter.into_iter().collect(),
-            functions: IndexMap::new(),
+            functions: Arc::default(),
         }
     }
 }

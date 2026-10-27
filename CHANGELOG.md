@@ -12,6 +12,14 @@ All notable changes are recorded here. The format follows
   native benchmark three times (`--runs`) and prints each case's median and spread, marking a
   case whose runs mostly disagree with the median by more than 2%.
 
+### Changed
+
+- Variables are looked up as fast as in 0.24.0 again: the root frame of an evaluation holds the
+  host functions, shared with the `Bindings`, instead of every lookup carrying the bindings to
+  reach them. A recursion through a lambda, which ran up to 4% slower in 0.25.0, is back
+  within about 1% of 0.24.0; host functions cost what they did in 0.25.0. Cloning `Bindings`
+  no longer copies its functions.
+
 ## [0.25.0]
 
 The Java package, in beta: `io.github.thkprado:jlens` on Maven Central, for Java 25 and later,

@@ -33,6 +33,9 @@ pub(crate) struct Frame<'a> {
     /// In the root frame, the input of the evaluation (`$$`) when no binding of `$` hides it;
     /// keeping it out of `vars` spares every evaluation a binding.
     input: Value<'a>,
+    /// In the root frame, the host functions, looked up when no frame holds a name; `None`
+    /// when there are none.
+    functions: Option<Arc<IndexMap<String, crate::HostFunction>>>,
 }
 
 /// A shared reference to a [`Frame`].
@@ -44,15 +47,13 @@ impl<'a> Frame<'a> {
             vars: RefCell::new(HashMap::default()),
             parent: parent.cloned(),
             input: Value::Undefined,
+            functions: None,
         })
     }
 
-    /// Looks a variable up in this frame and its ancestors, then among the host functions of
-    /// `bindings` and the built-ins. Inlined, as is `variable`: once they took the bindings,
-    /// a recursion through a lambda, which looks variables up at each call, ran 2.5 to 5.6%
-    /// slower (0.25 #15).
-    #[inline]
-    pub fn lookup(&self, name: &str, bindings: &crate::Bindings) -> Value<'a> {
+    /// Looks a variable up in this frame and its ancestors, then among the host functions and
+    /// the built-ins.
+    pub fn lookup(&self, name: &str) -> Value<'a> {
         let mut frame = self;
         loop {
             if let Some(v) = frame.vars.borrow().get(name) {
@@ -61,7 +62,7 @@ impl<'a> Frame<'a> {
             match &frame.parent {
                 Some(p) => frame = p,
                 None if name == "$" => return frame.input.clone(),
-                None => return frame.builtin(name, bindings),
+                None => return frame.builtin(name),
             }
         }
     }
@@ -72,8 +73,8 @@ impl<'a> Frame<'a> {
     /// bound in the root frame, still take the place of the functions of the same name. Values
     /// never outlive their evaluation, so each evaluation has its own.
     #[inline(never)]
-    fn builtin(&self, name: &str, bindings: &crate::Bindings) -> Value<'a> {
-        let value = match bindings.get_function(name) {
+    fn builtin(&self, name: &str) -> Value<'a> {
+        let value = match self.functions.as_ref().and_then(|f| f.get(name)) {
             Some(function) => Value::function(Function::Host(function.clone())),
             None => functions::native_value(name).unwrap_or_default(),
         };
@@ -157,8 +158,6 @@ pub(crate) struct Evaluator<'t, 'a> {
     tracer: Option<&'t mut dyn Tracer>,
     /// The state of an input read from a `Source`, which can fail (ADR 0010, decision 6).
     source: Option<Rc<Shared>>,
-    /// The host functions, looked up when no frame holds a name (`Frame::lookup`).
-    bindings: &'t crate::Bindings,
 }
 
 impl Drop for Evaluator<'_, '_> {
@@ -308,13 +307,13 @@ impl crate::host::Caller for HostCaller<'_, '_, '_> {
 /// Evaluates a parsed expression, and gives its result to `finish` (ADR 0017), which converts
 /// it. This is the entry point used by `Expression::evaluate_with`.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn evaluate<'t, 'a, 'v, R>(
+pub(crate) fn evaluate<'a, 'v, R>(
     ast: &Ast,
     input: Value<'a>,
     variables: impl Iterator<Item = (&'v str, Value<'a>)>,
-    bindings: &'t crate::Bindings,
+    bindings: &crate::Bindings,
     limits: Limits,
-    tracer: Option<&'t mut dyn Tracer>,
+    tracer: Option<&mut dyn Tracer>,
     source: Option<Rc<Shared>>,
     finish: impl FnOnce(Output<'_, 'a>) -> Result<R>,
 ) -> Result<R> {
@@ -339,13 +338,13 @@ pub(crate) fn evaluate<'t, 'a, 'v, R>(
         clock: None,
         tracer,
         source,
-        bindings,
     };
     let mut input = input;
     let env = Rc::new(Frame {
         vars: RefCell::new(HashMap::default()),
         parent: None,
         input: input.clone(),
+        functions: bindings.shared_functions(),
     });
     // The host functions are looked up on a miss: a variable, bound to a document or in
     // `bindings`, takes the place of a function of the same name.
@@ -687,7 +686,7 @@ impl<'a> Evaluator<'_, 'a> {
             NodeKind::Null => Value::Null,
             NodeKind::Wildcard => wildcard(input, self.limits.max_array_length)?,
             NodeKind::Descendant => descendants(input, self.limits.max_array_length)?,
-            NodeKind::Parent { label, .. } => env.lookup(label, self.bindings),
+            NodeKind::Parent { label, .. } => env.lookup(label),
             NodeKind::Condition {
                 condition,
                 then,
@@ -770,7 +769,7 @@ impl<'a> Evaluator<'_, 'a> {
             NodeKind::Function { procedure, args } => {
                 self.call(expr, procedure, args, input, env, None)?
             }
-            NodeKind::Variable { name } => variable(name, input, env, self.bindings),
+            NodeKind::Variable { name } => variable(name, input, env),
             NodeKind::Lambda(def) => Value::function(Function::Lambda(Lambda {
                 def: def.clone(),
                 params: None,
@@ -868,7 +867,7 @@ impl<'a> Evaluator<'_, 'a> {
                         _ => false,
                     }
             })
-            && let Some((value, taken)) = plain_fields(steps, input, env, self.bindings)
+            && let Some((value, taken)) = plain_fields(steps, input, env)
         {
             self.charge(taken)?;
             return Ok(value);
@@ -1727,7 +1726,7 @@ impl<'a> Evaluator<'_, 'a> {
         let name = procedure_name(procedure);
         if proc.is_undefined()
             && let Some(step_name) = first_step_name(procedure)
-            && js_truthy(&env.lookup(step_name, self.bindings))
+            && js_truthy(&env.lookup(step_name))
         {
             // The user probably forgot the leading `$`.
             return Err(err_at("T1005", expr).with("token", step_name));
@@ -1950,7 +1949,7 @@ impl<'a> Evaluator<'_, 'a> {
         let proc = self.eval(procedure, input, env)?;
         if proc.is_undefined()
             && let Some(step_name) = first_step_name(procedure)
-            && js_truthy(&env.lookup(step_name, self.bindings))
+            && js_truthy(&env.lookup(step_name))
         {
             return Err(err_at("T1007", expr).with("token", step_name));
         }
@@ -2055,7 +2054,7 @@ impl<'a> Evaluator<'_, 'a> {
         if obj.is_undefined() {
             return Ok(Value::Undefined);
         }
-        let clone = env.lookup("clone", self.bindings);
+        let clone = env.lookup("clone");
         if !clone.is_function() {
             return Err(Error::new("T2013"));
         }
@@ -2150,13 +2149,7 @@ fn is_plain_step(step: &Node) -> bool {
 }
 
 /// The value of a variable; `$` alone is the context value.
-#[inline]
-fn variable<'a>(
-    name: &str,
-    input: &Value<'a>,
-    env: &Env<'a>,
-    bindings: &crate::Bindings,
-) -> Value<'a> {
+fn variable<'a>(name: &str, input: &Value<'a>, env: &Env<'a>) -> Value<'a> {
     if name.is_empty() {
         match input {
             Value::Array(a) if a.has(OUTER_WRAPPER) => {
@@ -2165,7 +2158,7 @@ fn variable<'a>(
             other => other.clone(),
         }
     } else {
-        env.lookup(name, bindings)
+        env.lookup(name)
     }
 }
 
@@ -2173,14 +2166,9 @@ fn variable<'a>(
 /// with one; `None` when the input, the variable or a field holds an array (which the general
 /// path iterates, flattens or keeps). An undefined field ends the path, as it does in the
 /// general path. With the value, the steps the general path would evaluate (ADR 0018).
-fn plain_fields<'a>(
-    steps: &[Node],
-    input: &Value<'a>,
-    env: &Env<'a>,
-    bindings: &crate::Bindings,
-) -> Option<(Value<'a>, u64)> {
+fn plain_fields<'a>(steps: &[Node], input: &Value<'a>, env: &Env<'a>) -> Option<(Value<'a>, u64)> {
     let (mut value, names, mut taken) = match &steps[0].kind {
-        NodeKind::Variable { name } => (variable(name, input, env, bindings), &steps[1..], 1),
+        NodeKind::Variable { name } => (variable(name, input, env), &steps[1..], 1),
         _ => (input.clone(), steps, 0),
     };
     if value.is_array() {

@@ -99,4 +99,23 @@ bound by the expression or by a lambda's parameter is in a nearer frame. The val
   within 2% (0.25 #15). Inlining `Frame::lookup` and `variable` brings it to about 2% (between
   1.2 and 2.6% over nine builds, by the fastest round); 0.24.0 rebuilt is within 1.1% of
   itself. The rest stays: keeping the functions in the root frame instead would tie the
-  bindings to the lifetime of the values.
+  bindings to the lifetime of the values. (Undone in 0.26, below.)
+
+### Follow-up: the functions in the root frame (0.26 #2)
+
+Built as an application builds it, without the alignment flags, the 0.25 code ran `recursion`
+4.0% slower than 0.24.0 with `evaluate` and 2.9% against a `Document`. The root frame now holds
+the host functions itself: `Bindings` keeps them behind an `Arc`, which the root frame clones,
+and holds `None` when there are none. The lifetime of the values is not involved, since the
+frame owns its share of them. `Frame::lookup` and `variable` take no bindings again and are no
+longer marked `#[inline]`, as in 0.24.0. The precedence and the value kept do not change.
+
+- `cargo xtask ab v0.24.0 .` puts `recursion` within 1.1% in both modes, built aligned or not
+  (`evaluate` +0.7% unaligned and +1.0% aligned, `document` +0.5% and +1.1%), and every other
+  case within 2.3%. One unaligned run against a `Document` gave `recursion` +8.8%; two more
+  runs of the same build gave +0.1% (the case alone) and +0.5%.
+- An evaluation with host functions pays one atomic increment and decrement of the `Arc`;
+  `$a + $b` still takes 0.38 to 0.39 µs with none, one or sixteen bound, and `$add(1, 2)` with
+  sixteen 0.72 µs, as before within 1%.
+- Cloning `Bindings` shares the functions' map instead of copying it; adding or removing a
+  function on a clone copies the map then, as cloning did before.
