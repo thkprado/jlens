@@ -1,0 +1,147 @@
+<!doctype html>
+<!--
+  The repository's social preview (Settings > General > Social preview), 1280x640.
+  The terminal panel is the README's `jlens eval --explain` example, with the lines shortened.
+  The fonts (Segoe UI, Cascadia Mono) are Windows 11's. Render it with headless Edge:
+
+    msedge --headless=new --hide-scrollbars --force-device-scale-factor=1 --window-size=1280,640
+      --screenshot=social-preview.png file:///D:/workspace/jlens/.github/social-preview/social-preview.html
+
+  then upload social-preview.png on the settings page (GitHub has no API for it).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>jlens social preview</title>
+<style>
+  :root {
+    --bg: #141416;
+    --panel: #1e1e21;
+    --text: #e8e8ea;
+    --muted: #9a9aa2;
+    --border: #34343a;
+    --accent: #7aa2ff;
+    --pass: #4cc38a;
+    --fail: #ff6b6b;
+    --string: #f0a07a;
+    --number: #5fd3cc;
+    --keyword: #c79bff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    background:
+      radial-gradient(900px 500px at 0% 0%, rgba(122,162,255,0.16), transparent 60%),
+      radial-gradient(700px 500px at 100% 100%, rgba(76,195,138,0.10), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 40px;
+    padding: 0 64px;
+  }
+  .left { width: 540px; flex: none; }
+  .brand { display: flex; align-items: center; gap: 22px; }
+  .brand svg { flex: none; }
+  .wordmark {
+    font-size: 104px;
+    font-weight: 700;
+    letter-spacing: -4px;
+    line-height: 1;
+  }
+  .tagline {
+    margin-top: 30px;
+    font-size: 34px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.5px;
+  }
+  .tagline em { font-style: normal; color: var(--accent); }
+  .sub {
+    margin-top: 16px;
+    font-size: 21px;
+    line-height: 1.4;
+    color: var(--muted);
+  }
+  .chips { margin-top: 30px; display: flex; flex-wrap: nowrap; gap: 8px; }
+  .chip {
+    font-size: 15px;
+    font-weight: 600;
+    padding: 6px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03);
+    color: var(--text);
+  }
+  .term {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+    overflow: hidden;
+  }
+  .bar {
+    display: flex; gap: 8px; align-items: center;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: #3a3a40; }
+  .code {
+    padding: 20px 22px 24px;
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+    font-size: 16px;
+    line-height: 1.75;
+    white-space: pre;
+    font-variant-ligatures: none;
+    color: var(--text);
+  }
+  .p { color: var(--muted); }
+  .c { color: #8b919a; }
+  .s { color: var(--string); }
+  .n { color: var(--number); }
+  .v { color: var(--accent); }
+  .k { color: var(--keyword); }
+  .ok { color: var(--pass); }
+  .no { color: var(--fail); }
+  .l { color: var(--text); font-weight: 600; }
+  .m { color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="left">
+    <div class="brand">
+      <svg width="92" height="92" viewBox="0 0 92 92" aria-hidden="true">
+        <circle cx="38" cy="38" r="31" fill="rgba(122,162,255,0.12)" stroke="#7aa2ff" stroke-width="7"/>
+        <line x1="61" y1="61" x2="85" y2="85" stroke="#7aa2ff" stroke-width="10" stroke-linecap="round"/>
+        <text x="38" y="49" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="30" font-weight="700" fill="#e8e8ea">{}</text>
+      </svg>
+      <div class="wordmark">jlens</div>
+    </div>
+    <div class="tagline">JSONata that <em>shows its work</em>.</div>
+    <div class="sub">Query and transform JSON, and see why each result came out the way it did. Passes the official JSONata test suite.</div>
+    <div class="chips">
+      <span class="chip">Rust</span>
+      <span class="chip">Python</span>
+      <span class="chip">Java</span>
+      <span class="chip">WebAssembly</span>
+      <span class="chip">CLI + LSP</span>
+      <span class="chip">VS Code</span>
+    </div>
+  </div>
+  <div class="term">
+    <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+<div class="code"><span class="p">$</span> jlens eval -f rule.jsonata -i order.json <span class="k">--explain</span>
+<span class="m">result:</span> {<span class="s">"action"</span>:<span class="s">"FREE_SHIPPING"</span>,<span class="s">"code"</span>:<span class="s">"OK_200"</span>}
+<span class="m">•</span> <span class="v">$total</span> := $sum(items.(unitPrice * quantity)) = <span class="n">57000</span>
+<span class="ok">✔</span> <span class="l">Authorized customer</span> <span class="m">→</span> true
+<span class="ok">✔</span> <span class="l">Customer not blocked</span> <span class="m">→</span> true
+<span class="ok">✔</span> <span class="l">Minimum order grand total</span> <span class="m">→</span> true <span class="m">(</span><span class="n">57000</span> &gt; <span class="n">50000</span><span class="m">)</span>
+<span class="ok">✔</span> <span class="l">Order category check</span> <span class="m">→</span> true
+  <span class="ok">✔</span> <span class="l">Electronics group</span> <span class="m">→</span> true
+    <span class="ok">✔</span> <span class="v">$electronics</span> &gt; <span class="v">$total</span> * <span class="n">0.30</span> + <span class="n">1000</span> <span class="m">→</span> true
+      <span class="m">(</span><span class="n">37000</span> &gt; <span class="n">18100</span><span class="m">)</span></div>
+  </div>
+</body>
+</html>
