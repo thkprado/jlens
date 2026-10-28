@@ -230,10 +230,14 @@ objects. An expression that reads every item pays what converting the whole inpu
 `JSON.stringify` of the input takes 41 µs, and parsing that text 269 µs. A path step reads
 its one field alone, since 0.26, as with the native and Python inputs: `path` takes 4.9 µs
 instead of 7.3 µs, the other cases within 2.1% (the median of four alternated runs, on a day
-when both builds and jsonata-js measured about 7% above the table). It does not help
-`names over items`, which still converts every item: an array of more than 16 values is read
-whole, and reading its items alone instead was faster on five cases and slower on five
-([ADR 0010](../adr/0010-lazy-input.md#follow-up-the-webassembly-package-026-3)). An index into an
+when both builds and jsonata-js measured about 7% above the table). A long array of objects
+is read in one call with the fields the expression reads of each item, since 0.26 too, rather
+than whole through `JSON.stringify` ([ADR 0010](../adr/0010-lazy-input.md#follow-up-long-arrays-of-objects-026-5)):
+with `evaluate`, `names over items` takes 52 µs instead of 337, number formatting 100 instead
+of 369, the shipping rule 302 instead of 467, and the six other cases that read the order's
+items 30% to 62% less; the transform and recursion within 1.3%. The cases that take a few
+microseconds pay about 0.3 µs more each: `path` 4.8 instead of 4.5 µs, the indexes into
+10,000 items 6.5 and 7.3 instead of 6.1 and 6.8 µs (the median of four alternated runs). An index into an
 array reads the items it picks alone, since 0.24: with `evaluate`, `items[0].code` over
 10,000 items takes 6.7 µs instead of 6.19 ms, and `($i := 0; items[$i].code)` 7.3 µs instead
 of 6.19 ms, against 2.2 µs and 2.9 ms in jsonata-js, which tests every item for an index held
@@ -247,7 +251,8 @@ item. It is slower on three:
 - `path` and the index into 10,000 items, which do almost no work, so the overhead of calling
   into WebAssembly dominates;
 - `names over items`, by 5.3×: it reads every item and does little with each, so converting
-  the input is nearly all of its time.
+  the input is nearly all of its time. Since 0.26 #5, which reads the items' one field without
+  converting them, it is faster (52 against 63 µs).
 
 In 0.18.0 it was also slower on `number formatting`, by 11%; it is now 34% faster (roadmap 0.19
 #2 and #4).

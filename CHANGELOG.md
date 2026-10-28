@@ -24,6 +24,12 @@ All notable changes are recorded here. The format follows
   a third less time (`customer.name`: 4.9 against 7.3 µs). A field whose getter throws, or
   that holds a cycle, now fails only when it is read, not when another field of its object is.
   An array of more than 16 values is still read whole.
+- The WebAssembly package's `evaluate` reads a long array of JavaScript objects with the fields
+  the expression reads of its items (`Expression.reads()`), in one call, rather than whole
+  through `JSON.stringify`: `$sum(items.quantity)` over 200 items takes 52 instead of 337 µs,
+  faster than jsonata-js, and the cases that read an order's items 30% to 85% less. An
+  evaluation that takes a few microseconds pays about 0.3 µs more. A field of an item that
+  holds a cycle, or whose getter throws, now fails only when it is read.
 - The Java package reads Java objects with fewer calls back into Java: a map or list met in a
   level is written with what the expression reads of it (`Expression.reads()`), the fields it
   reads, or the whole map or list when it is small and read whole. Over Java maps, `names over

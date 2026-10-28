@@ -269,6 +269,57 @@ after every item was converted. Three variants were measured, one run each, and 
 A long array stays read whole until there is a way to choose, array by array, between reading
 its items alone and reading it whole.
 
+### Follow-up: long arrays of objects (0.26 #5)
+
+The choice is made from what the expression reads (`reads()`,
+[ADR 0016](0016-fields-read.md)), as the Java package does since 0.26 #4. `evaluate` turns the
+expression's reads of its input into a plan once, at its first evaluation: of a value read in
+part, the fields read, sorted, each with its own plan, and their keys as a JavaScript array
+when there are at most 16. The source keeps the plan of each array and object it meets. A
+long array whose plan lists at most 16 fields is read by a second helper, `jlensItems`, when
+its first item is an object: in one call, each object as tag 8, its node, and the value of
+each field read, as `JSON.stringify` sees it, an array or object among them as a node. The
+source keeps those values, and a path step on the item finds its field there without calling
+JavaScript. Any other field is read alone, and the item whole as a level, so the result never
+depends on the analysis. An array of scalars, or one whose plan reads it whole, is read whole
+as before. A field of an item that holds a cycle, or whose getter throws, fails when it is
+read, as an object's field does since 0.26 #3, not when the array is.
+
+The plans of an input's members, the fields kept and their strings are in three vectors that
+its levels share, so that a level still costs one allocation, and that the next evaluation
+reuses (up to 4,096 members).
+
+With `evaluate`, the median of four alternated runs of `compare.mjs` per cell:
+
+| Case | Before | After | Change |
+|---|---:|---:|---:|
+| path | 4.5 µs | 4.8 µs | +7.8% |
+| names over items | 337 µs | 52.1 µs | −85% |
+| filter + aggregate | 369 µs | 141 µs | −62% |
+| group-by | 423 µs | 195 µs | −54% |
+| sort + map | 789 µs | 553 µs | −30% |
+| strings | 420 µs | 210 µs | −50% |
+| regex | 519 µs | 252 µs | −51% |
+| number formatting | 369 µs | 100 µs | −73% |
+| object constructor | 547 µs | 312 µs | −43% |
+| transform | 1.26 ms | 1.26 ms | −0.4% |
+| recursion | 1.01 ms | 997 µs | −1.3% |
+| shipping rule | 467 µs | 302 µs | −35% |
+| index into 10,000 items | 6.1 µs | 6.5 µs | +6.6% |
+| index in a variable | 6.8 µs | 7.3 µs | +6.6% |
+
+`names over items` is now faster than in jsonata-js (63 µs), and number formatting, which reads
+20 items of 200, no longer converts the 200: every item is written with its two fields read.
+The cases that take a few microseconds pay about 0.3 µs more, a fixed cost of each evaluation,
+which the definition of done (no case more than 2% slower) did not allow and which was
+accepted for the gains. A micro-benchmark of those cases alone, with `evaluateDocument` of the
+same cases as a control that did not move, put it at 2% to 4%, and half of it remained in a
+build that made no plan at all. Five variants, measured that way, did not remove it: the
+helper's keys passed only for arrays; the long arrays in a helper of their own, leaving
+`jlensRead` as it was; the members of each level in the shared vectors, not one vector per
+level; those vectors reused from one evaluation to the next; and the plan's code out of line.
+They took the two indexes from about +6% to +1.5% in the micro-benchmark, not `path`.
+
 ## Amendment: one allocation per member (0.19)
 
 ### Context

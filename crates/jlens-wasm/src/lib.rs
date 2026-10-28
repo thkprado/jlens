@@ -62,6 +62,8 @@ pub struct Expression {
     /// What the expression reads of its input, which cuts the input of `evaluateJson`; worked
     /// out on the first call.
     input_read: OnceCell<Read>,
+    /// The same, made ready for reading the input of `evaluate`.
+    input_plan: OnceCell<Option<Rc<source::Plan>>>,
 }
 
 #[wasm_bindgen]
@@ -77,6 +79,7 @@ impl Expression {
             offsets: Rc::new(offsets),
             registered: Vec::new(),
             input_read: OnceCell::new(),
+            input_plan: OnceCell::new(),
         })
     }
 
@@ -132,7 +135,10 @@ impl Expression {
         let write = |out: jlens_core::output::Output<'_, '_>| out.write(&mut builder);
         let written = match input.filter(|input| !input.is_undefined()) {
             Some(input) => {
-                let source = source::JsSource::input(input);
+                let plan = self
+                    .input_plan
+                    .get_or_init(|| source::Plan::new(self.input_read()));
+                let source = source::JsSource::input(input, plan.clone());
                 self.inner
                     .evaluate_source_to(&source, &bindings, &options, write)
                     .map_err(|e| {

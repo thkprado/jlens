@@ -233,6 +233,71 @@ export const cases = [
     throws(() => value("a.up.a", cyclic), (e) => ok(e instanceof TypeError && /circular/.test(e.message), "cycle"));
   }],
 
+  ["evaluate reads the fields an expression reads of a long array's objects", (j) => {
+    const value = (source, input, bindings) => new j.Expression(source).evaluate(input, bindings);
+    const json = (source, input, bindings) => {
+      const text = new j.Expression(source).evaluateJson(JSON.stringify(input), bindings);
+      return text === undefined ? undefined : JSON.parse(text);
+    };
+    // The result, or the code of the error.
+    const outcome = (f) => {
+      try {
+        return { result: f() };
+      } catch (e) {
+        return { code: e.code };
+      }
+    };
+    const items = Array.from({ length: 40 }, (_, i) => ({
+      a: i,
+      b: `é${i}𝄞`,
+      c: { d: i % 3, e: [i, { f: i * 2 }] },
+      u: undefined,
+      g() {},
+      n: i % 7 ? new Number(i) : NaN,
+      t: i % 5 ? true : null,
+    }));
+    items[3] = 3;
+    items[4] = null;
+    items[5] = [{ a: 50 }, { a: 51 }];
+    items[6] = { b: "no a" };
+    items[7] = new Date(0);
+    items[8] = { toJSON: () => ({ a: 80, b: "from toJSON" }) };
+    items[9] = { a: { toJSON: () => 90 }, b: new String("boxed") };
+    const input = { items, other: { many: Array.from({ length: 20 }, (_, i) => ({ a: -i })) } };
+    for (const source of [
+      "items.a", "items.b", "items.c.d", "items.c.e", "items.c.e.f", "items.c.e[1].f",
+      "items[a > 30].b", "items[$type(a) = 'number' and a > 30].b", "$count(items)", "$count(items.u)", "items.g", "items.n", "items.t",
+      "items[2]", "items[5]", "items[9]", "items.$keys($)", "$string(items[0])",
+      "items^(>a).b", "items.{'a': a, 'q': q}", "items.c.{'d': d}", "$map(items, function($i) { $i.a })",
+      "items[$type($) = 'object'].c", "other.many.a", "$sum(other.many.a) + $sum(items.a)",
+      "items.$sum(c.e[0])", "items[0].(a + c.d)", "$merge(items[[0..2]])", "items.$f(a)",
+    ]) {
+      const bindings = { f: (a) => a };
+      equal(outcome(() => value(source, input, bindings)), outcome(() => json(source, input, bindings)), source);
+    }
+    // Of each object, only the fields read; a field read that the plan does not list, alone.
+    const read = new Set();
+    const watched = Array.from({ length: 30 }, (_, i) => new Proxy({ a: i, b: i, c: i }, {
+      get(target, key, receiver) {
+        if (typeof key === "string" && key.length === 1) read.add(key);
+        return Reflect.get(target, key, receiver);
+      },
+    }));
+    equal(value("$sum(items.a)", { items: watched }), 435, "a sum");
+    equal([...read], ["a"], "only the field read");
+    read.clear();
+    // The analysis takes `$exists` for the built-in, which reads none of the item's fields:
+    // the host function gets each item whole.
+    const exists = (o) => o.b;
+    equal(value("$sum(items.$exists($))", { items: watched }, { exists }), 435, "a function the analysis misses");
+    equal([...read].sort(), ["a", "b", "c"], "the items read whole");
+    // A cycle through a field fails when that field is read, not the fields around it.
+    const cyclic = Array.from({ length: 20 }, (_, i) => ({ a: i, c: {} }));
+    cyclic[3].c = cyclic;
+    equal(value("$sum(items.a)", { items: cyclic }), 190, "a cycle not read");
+    throws(() => value("items.c", { items: cyclic }), (e) => ok(e instanceof TypeError && /circular/.test(e.message), "cycle"));
+  }],
+
   ["syntax errors are JlensErrors with UTF-16 offsets", (j) => {
     throws(() => new j.Expression("'𝄞é' & items[0;]"), (e) => {
       ok(e instanceof Error, "an Error");
