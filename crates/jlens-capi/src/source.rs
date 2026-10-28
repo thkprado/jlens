@@ -115,6 +115,10 @@ struct Held {
     /// By node number: the index of its level plus one (0 for a node not held), where its
     /// contents start in it, and the tag it was written with.
     nodes: Vec<(u32, u32, u8)>,
+    /// The bytes of the levels decoded so far. The host numbers its nodes as it writes them,
+    /// from 0, so none has a number this large; a node that has, from a host out of the
+    /// form, is not held, and `nodes` stays no longer than the levels.
+    read: usize,
 }
 
 impl Held {
@@ -139,6 +143,10 @@ impl Record<'_, '_> {
     /// Records that the contents of node `node`, written with `tag`, start at `rest`, a suffix
     /// of the level.
     fn node(&mut self, node: u32, tag: u8, rest: &[u8]) {
+        let slot = node as usize;
+        if slot >= self.held.read {
+            return;
+        }
         let index = match self.index {
             Some(index) => index,
             None => {
@@ -147,7 +155,6 @@ impl Record<'_, '_> {
             }
         };
         let nodes = &mut self.held.nodes;
-        let slot = node as usize;
         if slot >= nodes.len() {
             nodes.resize(slot + 1, (0, 0, 0));
         }
@@ -200,6 +207,7 @@ impl Host {
         let level = bytes.0.get(..len).ok_or("a level longer than its buffer")?;
         let mut bytes = Bytes(level);
         let mut held = self.held.borrow_mut();
+        held.read = held.read.saturating_add(level.len());
         let mut record = Record {
             held: &mut held,
             level,

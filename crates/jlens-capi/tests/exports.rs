@@ -978,6 +978,10 @@ fn the_reader_fails_cleanly() {
         vec![
             14, 0, 0, 0, VALUES, 1, 0, 0, 0, ARRAY_WITH, 5, 0, 0, 0, 3, 0, 0, 0,
         ],
+        // A node numbered past any the host wrote: not held, so no table of its size.
+        vec![
+            14, 0, 0, 0, VALUES, 1, 0, 0, 0, ARRAY_WITH, 255, 255, 255, 255, 3, 0, 0, 0,
+        ],
     ] {
         host::HOST.with_borrow_mut(|host| host.garbage = garbage.clone());
         let (reply, _, _) = on_host(expression, &input, host::GARBAGE, 0);
