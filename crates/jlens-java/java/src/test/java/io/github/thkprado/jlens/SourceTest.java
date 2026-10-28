@@ -120,6 +120,17 @@ class SourceTest {
     }
 
     @Test
+    void fieldsTheAnalysisDoesNotSeeAreReadToo() {
+        // The analysis takes $exists for the built-in, which reads none of the fields of its
+        // argument, so that `a` is written with none; bound to a host function, it gets them all.
+        Bindings bindings = Bindings.builder().function("exists", 1, args -> args.get(0)).build();
+        try (Expression expression = Expression.compile("$exists(a)")) {
+            Map<String, Object> a = Map.of("b", 1L, "c", List.of(2L));
+            assertEquals(a, expression.evaluate(Map.of("a", a), bindings));
+        }
+    }
+
+    @Test
     void theInputUnchangedIsReturnedAsItself() {
         Map<String, Object> input = items();
         assertSame(input, evaluate("$", input));
@@ -219,7 +230,8 @@ class SourceTest {
     private static final String[] EXPRESSIONS = {
         "$", "a", "a.b", "*", "**", "$.*[0]", "a[0]", "a[-1].b", "($i := 1; a[$i])", "$count(a)",
         "$string($)", "$keys($)", "[$]", "{'v': a}", "$ ~> | $ | {'x': 1} |", "a[b = 1]",
-        "$sort(a)", "a[b > 0].b", "$type(a)",
+        "$sort(a)", "a[b > 0].b", "$type(a)", "a.b + a.x", "a.(b & x)", "{'k': a.b, 'n': a.é}",
+        "$exists(a.`a b`)", "a.b.a", "a[0].x", "x ~> $string()",
     };
 
     @Test

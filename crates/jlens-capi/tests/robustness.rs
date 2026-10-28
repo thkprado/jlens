@@ -477,7 +477,7 @@ fn json() -> impl Strategy<Value = Value> {
 /// Evaluates `expression` against `input` as the host's own values, read in mode `context`:
 /// the reply's bytes, and the host's nodes.
 fn on_host(expression: u64, input: &Value, context: u64, result: u32) -> (Vec<u8>, Vec<Value>) {
-    let level = host::Host::start(input);
+    let level = host::Host::start_in(input, context);
     let reply = jlens_evaluate_source(expression, level, Some(host::READER), context, 0, 0, result);
     host::Host::finish();
     assert_eq!(jlens_buffer_free(level), 1);
@@ -528,7 +528,7 @@ proptest! {
         let text = buffers::insert(input.to_string().into_bytes());
         let as_text = buffers::take(jlens_evaluate(expression, text, 0, 0, 0)).unwrap();
         prop_assert_eq!(jlens_buffer_free(text), 1);
-        for context in [host::PLAIN, host::WHOLE] {
+        for context in [host::PLAIN, host::WHOLE, host::WITH, host::SOME] {
             let (as_json, _) = on_host(expression, &input, context, 0);
             prop_assert_eq!(&as_json, &as_text);
             let (as_values, nodes) = on_host(expression, &input, context, 1);

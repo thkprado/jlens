@@ -40,7 +40,8 @@ cargo xtask java-compare cases --engines jlens,jsonata-java
 ```
 
 The command builds the C API and the Java package's JAR (`crates/jlens-java/java/target`),
-then this Maven project, which fetches the other implementations, and runs `compare.Compare`
+then this Maven project, which fetches the other implementations into `target/deps` (emptied
+first, so that a JAR of an earlier version is not left on the classpath), and runs `compare.Compare`
 in one JVM with `-Xmx4g`. The JAR is never installed into the local Maven repository, so that a
 local build cannot hide the package published on Maven Central.
 

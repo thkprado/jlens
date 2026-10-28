@@ -2,8 +2,10 @@
 //! these tests fill them with `buffers::insert`, which needs no pointer.
 
 use jlens_capi::exports::*;
-use jlens_capi::source::{DECLINED, INPUT, ITEM, LENGTH, READ};
-use jlens_capi::values::ARRAY;
+use jlens_capi::source::{
+    ARRAY_WITH, DECLINED, FIELD, INPUT, ITEM, LENGTH, OBJECT_SOME, OBJECT_WITH, READ, VALUES,
+};
+use jlens_capi::values::{ARRAY, UNDEFINED};
 use jlens_capi::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, REPLY_VALUES, buffers};
 use serde_json::{Value, json};
 
@@ -691,7 +693,7 @@ fn on_host(
     context: u64,
     result: u32,
 ) -> (Reply, Vec<(u32, u32)>, Vec<Value>) {
-    let level = host::Host::start(input);
+    let level = host::Host::start_in(input, context);
     let replied = reply(jlens_evaluate_source(
         expression,
         level,
@@ -745,7 +747,7 @@ fn the_hosts_values_give_what_their_json_text_gives() {
     ] {
         let expression = compile(source);
         let expected = evaluate(expression, Some(&text));
-        for context in [host::PLAIN, host::WHOLE] {
+        for context in [host::PLAIN, host::WHOLE, host::WITH, host::SOME] {
             let (json, _, _) = on_host(expression, &input, context, 0);
             assert_eq!(json, expected, "{source} as JSON text");
             let (values, _, nodes) = on_host(expression, &input, context, 1);
@@ -782,6 +784,61 @@ fn one_field_or_item_is_read_alone() {
             calls.iter().any(|&(op, _)| op == READ),
             "{source}: {calls:?}"
         );
+        assert_eq!(jlens_expression_free(expression), 1);
+    }
+}
+
+/// A small array or object written with its contents is read without calling the reader
+/// again: its fields, its length, its items, and itself whole.
+#[test]
+fn a_node_written_with_its_contents_is_read_without_calls() {
+    let input = json!({"items": [{"name": "pen", "qty": 1}, {"name": "ink", "qty": 2}]});
+    for (source, expected) in [
+        ("$sum(items.qty)", json!(3)),
+        ("items[1].name", json!("ink")),
+        ("$count(items[0].*)", json!(2)),
+        ("$string(items[0])", json!(r#"{"name":"pen","qty":1}"#)),
+    ] {
+        let expression = compile(source);
+        let (reply, calls, nodes) = on_host(expression, &input, host::WITH, 1);
+        match reply {
+            Reply::Values(bytes) => assert_eq!(values::decode_with(&bytes, &nodes), expected),
+            other => panic!("{source}: {other:?}"),
+        }
+        // The input, an object of one field, is written with it; only `items` is read, and its
+        // items never.
+        assert!(
+            calls.contains(&(READ, 1))
+                && calls
+                    .iter()
+                    .all(|&call| call == (READ, 1) || call == (LENGTH, 1)),
+            "{source}: {calls:?}"
+        );
+        assert_eq!(jlens_expression_free(expression), 1);
+    }
+}
+
+/// An object written with some of its fields answers those, and a field it lacks, without
+/// calling the reader; any other field, and the object whole, are read from the reader.
+#[test]
+fn an_object_written_with_some_fields_reads_the_others_from_the_reader() {
+    // In mode SOME, the input is written with `a` and `ccc`, and `absent` as lacking. The keys'
+    // lengths differ, so that the host tells them apart.
+    let input = json!({"a": 1, "bb": 2, "ccc": 3});
+    for (source, expected, called) in [
+        ("a + ccc", json!(4), vec![]),
+        ("absent", Value::Null, vec![]),
+        ("bb", json!(2), vec![(FIELD, 0)]),
+        ("$keys($)", json!(["a", "bb", "ccc"]), vec![(READ, 0)]),
+    ] {
+        let expression = compile(source);
+        let (reply, calls, nodes) = on_host(expression, &input, host::SOME, 1);
+        match reply {
+            Reply::Values(bytes) => assert_eq!(values::decode_with(&bytes, &nodes), expected),
+            Reply::Undefined => assert_eq!(expected, Value::Null, "{source}"),
+            other => panic!("{source}: {other:?}"),
+        }
+        assert_eq!(calls, called, "{source}");
         assert_eq!(jlens_expression_free(expression), 1);
     }
 }
@@ -834,6 +891,93 @@ fn the_reader_fails_cleanly() {
         vec![9, 0, 0, 0, 0, 1, 0, 0, 0, 99, 0, 0, 0, 0],
         vec![1, 0, 0, 0, DECLINED],
         vec![200, 0, 0, 0, 0],
+        // An object written with its contents inside the contents of another.
+        vec![
+            28,
+            0,
+            0,
+            0,
+            VALUES,
+            1,
+            0,
+            0,
+            0,
+            OBJECT_WITH,
+            5,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            b'b',
+            OBJECT_WITH,
+            6,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ],
+        // A field lacking among all the fields of an object.
+        vec![
+            20,
+            0,
+            0,
+            0,
+            VALUES,
+            1,
+            0,
+            0,
+            0,
+            OBJECT_WITH,
+            5,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            b'b',
+            UNDEFINED,
+        ],
+        // Some fields of an object, cut short.
+        vec![
+            14,
+            0,
+            0,
+            0,
+            VALUES,
+            1,
+            0,
+            0,
+            0,
+            OBJECT_SOME,
+            5,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            0,
+        ],
+        // Contents cut short.
+        vec![
+            14, 0, 0, 0, VALUES, 1, 0, 0, 0, ARRAY_WITH, 5, 0, 0, 0, 3, 0, 0, 0,
+        ],
     ] {
         host::HOST.with_borrow_mut(|host| host.garbage = garbage.clone());
         let (reply, _, _) = on_host(expression, &input, host::GARBAGE, 0);

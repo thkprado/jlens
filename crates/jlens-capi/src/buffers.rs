@@ -1,7 +1,7 @@
 //! Buffers owned by Rust. The host gets a handle and the buffer's address, writes into it or
 //! reads from it, and Rust finds the buffer again by its handle.
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::handles::Table;
 
@@ -52,4 +52,20 @@ pub fn with<R>(handle: u64, f: impl FnOnce(&mut Vec<u8>) -> R) -> Option<R> {
     let buffer = BUFFERS.get(handle)?;
     let mut bytes = buffer.lock().unwrap_or_else(PoisonError::into_inner);
     Some(f(&mut bytes))
+}
+
+/// A buffer, for a caller that uses it many times: finding it again by its handle takes the
+/// table's lock. Once freed, it holds no bytes.
+pub fn get(handle: u64) -> Option<Buffer> {
+    BUFFERS.get(handle).map(Buffer)
+}
+
+/// A buffer found by [`get`].
+pub struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+impl Buffer {
+    /// Runs `f` on the buffer's bytes, holding its lock.
+    pub fn with<R>(&self, f: impl FnOnce(&mut Vec<u8>) -> R) -> R {
+        f(&mut self.0.lock().unwrap_or_else(PoisonError::into_inner))
+    }
 }

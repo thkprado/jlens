@@ -534,7 +534,12 @@ jsonata-jvm-compiler, and a `Document` for `evaluate(Document)`:
   (`names over items` 45 against 6.0 µs). jsonata-java, which reads maps in Java, is then faster
   on five of the fourteen cases (`names over items`, strings, the object constructor, the
   transform, the shipping rule); jlens on the nine others, by twice on `recursion` and three
-  times on number formatting.
+  times on number formatting. Since 0.26, a map met in a level is written with the fields the
+  expression reads, so that most fields cost no call
+  ([ADR 0021, amended](../adr/0021-java-package.md#amendment-maps-written-with-what-the-expression-reads-026-4)):
+  measured on Windows, `names over items` takes 30 instead of 67 µs, the shipping rule 235
+  instead of 484, the other cases that read the items 22 to 42% less, and number formatting
+  16% more. The table above is 0.25.0's.
 
 From JSON text, parsed at each evaluation, by its own parser for jsonata-java, by Jackson for
 jsonata-jvm-compiler, and by `evaluateFromJson` for jlens, which skips the fields the expression

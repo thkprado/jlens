@@ -33,6 +33,12 @@ pub fn compare(args: &[String]) -> Result<()> {
     build_native()?;
     maven(&["-q".into(), "package".into(), "-DskipTests".into()])?;
     let harness = root().join("benches/compare/java");
+    // The JARs copied by an earlier build stay, the package's of another version among them,
+    // and the classpath's `deps/*` would load whichever comes first.
+    let deps = harness.join("target/deps");
+    if deps.exists() {
+        std::fs::remove_dir_all(&deps).with_context(|| format!("removing {}", deps.display()))?;
+    }
     maven(&[
         "-q".into(),
         "-f".into(),

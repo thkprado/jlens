@@ -24,6 +24,14 @@ All notable changes are recorded here. The format follows
   a third less time (`customer.name`: 4.9 against 7.3 µs). A field whose getter throws, or
   that holds a cycle, now fails only when it is read, not when another field of its object is.
   An array of more than 16 values is still read whole.
+- The Java package reads Java objects with fewer calls back into Java: a map or list met in a
+  level is written with what the expression reads of it (`Expression.reads()`), the fields it
+  reads, or the whole map or list when it is small and read whole. Over Java maps, `names over
+  items` takes 30 instead of 67 µs, the shipping rule 235 instead of 484 µs, and the other
+  cases that read the order's items 22% to 42% less time; `$sum(items.price)` over 100,000
+  items 19.6 instead of 43.9 ms. Number formatting, which reads 20 items of 200, takes 16%
+  longer, and `$` 1.0 instead of 0.75 µs. A field the analysis misses is still read, through a
+  call back, so results do not change.
 
 ## [0.25.0]
 

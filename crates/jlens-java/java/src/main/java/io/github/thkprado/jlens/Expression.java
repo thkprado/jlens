@@ -4,6 +4,7 @@ import java.lang.ref.Cleaner;
 import java.lang.ref.Reference;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 
@@ -50,6 +51,8 @@ public final class Expression implements AutoCloseable {
     private final long handle;
     private final Cleaner.Cleanable cleanable;
     private volatile boolean closed;
+    /** What the expression reads of Java objects as input, found at their first evaluation. */
+    private volatile Optional<Reader.Shape> inputShape;
 
     private Expression(String source, long handle) {
         this.source = source;
@@ -199,7 +202,7 @@ public final class Expression implements AutoCloseable {
         }
         long expression = live();
         long bound = bindings.live();
-        try (Reader reader = new Reader()) {
+        try (Reader reader = new Reader(inputShape())) {
             long level = reader.input(input);
             return run(bindings,
                     () -> ScopedValue.where(Reader.CURRENT, reader).call(() -> options.evaluate(
@@ -656,6 +659,19 @@ public final class Expression implements AutoCloseable {
     private long live() {
         if (closed) throw new IllegalStateException("jlens: the expression was closed");
         return handle;
+    }
+
+    /**
+     * What the expression reads of its input, for the {@link Reader} of Java objects: two threads
+     * may find it at once, and find the same.
+     */
+    private Reader.Shape inputShape() {
+        Optional<Reader.Shape> shape = inputShape;
+        if (shape == null) {
+            shape = Optional.ofNullable(Reader.Shape.of(reads().input()));
+            inputShape = shape;
+        }
+        return shape.orElse(null);
     }
 
     @Override

@@ -11,8 +11,11 @@
 use std::cell::RefCell;
 
 use jlens_capi::buffers;
-use jlens_capi::source::{DECLINED, FAILED, FIELD, FIELDS, ITEM, LENGTH, READ, Reader, VALUES};
-use jlens_capi::values::{ARRAY, FALSE, FLOAT, INTEGER, NULL, OBJECT, STRING, TRUE};
+use jlens_capi::source::{
+    ARRAY_WITH, DECLINED, FAILED, FIELD, FIELDS, ITEM, LENGTH, OBJECT_SOME, OBJECT_WITH, READ,
+    Reader, VALUES,
+};
+use jlens_capi::values::{ARRAY, FALSE, FLOAT, INTEGER, NULL, OBJECT, STRING, TRUE, UNDEFINED};
 use serde_json::Value;
 
 /// How the reader answers, chosen by the evaluation's `context`.
@@ -21,6 +24,18 @@ pub const PLAIN: u64 = 0;
 pub const WHOLE: u64 = 1;
 /// Answers every call with the bytes of [`Host::garbage`].
 pub const GARBAGE: u64 = 2;
+/// Writes the arrays and objects of at most [`SMALL`] entries with their contents, when they
+/// are values of the level itself, as the Java package does.
+pub const WITH: u64 = 3;
+/// The most entries of an array or object written with its contents, in mode [`WITH`]: few,
+/// so that small inputs have both kinds.
+const SMALL: usize = 2;
+/// As [`WITH`], except that objects are written with some of their fields, whatever their
+/// size: every other one, and [`ABSENT`] as a field they lack. The C API must give the same
+/// answers whichever fields are written, as the Java package writes those the expression reads.
+pub const SOME: u64 = 4;
+/// The key of a field written as lacking in mode [`SOME`], unless the object has it.
+const ABSENT: &str = "absent";
 
 /// The state of this thread's host during an evaluation.
 #[derive(Default)]
@@ -37,6 +52,10 @@ pub struct Host {
     named: Vec<String>,
     /// The level returned last, freed at the next call.
     level: u64,
+    /// Whether levels write small arrays and objects with their contents ([`WITH`]).
+    with: bool,
+    /// Whether levels write objects with some of their fields ([`SOME`]).
+    some: bool,
 }
 
 thread_local! {
@@ -79,16 +98,24 @@ impl Host {
     /// Resets the host for an evaluation against `input`, and returns the buffer of the input's
     /// level, which the caller frees.
     pub fn start(input: &Value) -> u64 {
+        Host::start_in(input, PLAIN)
+    }
+
+    /// Resets the host for an evaluation against `input` in mode `context`, as [`Host::start`]
+    /// does.
+    pub fn start_in(input: &Value, context: u64) -> u64 {
         HOST.with_borrow_mut(|host| {
             *host = Host {
                 garbage: std::mem::take(&mut host.garbage),
                 known: host.named.clone(),
                 named: std::mem::take(&mut host.named),
+                with: context == WITH || context == SOME,
+                some: context == SOME,
                 ..Host::default()
             };
             keys(input, &mut host.known);
             let mut level = Level::new(VALUES, 1);
-            host.value(&mut level, input);
+            host.top(&mut level, input);
             buffers::insert(level.finish())
         })
     }
@@ -115,14 +142,14 @@ impl Host {
         match (op, &value) {
             (READ, Value::Array(items)) => {
                 let mut level = Level::new(VALUES, items.len());
-                items.iter().for_each(|item| self.value(&mut level, item));
+                items.iter().for_each(|item| self.top(&mut level, item));
                 level.finish()
             }
             (READ, Value::Object(fields)) => {
                 let mut level = Level::new(FIELDS, fields.len());
                 for (key, value) in fields {
                     level.text(key);
-                    self.value(&mut level, value);
+                    self.top(&mut level, value);
                 }
                 level.finish()
             }
@@ -141,7 +168,7 @@ impl Host {
                 match fields.get(key) {
                     Some(value) => {
                         let mut level = Level::new(VALUES, 1);
-                        self.value(&mut level, value);
+                        self.top(&mut level, value);
                         level.finish()
                     }
                     None => Level::new(VALUES, 0).finish(),
@@ -150,12 +177,54 @@ impl Host {
             (ITEM, Value::Array(items)) => match items.get(index as usize) {
                 Some(item) => {
                     let mut level = Level::new(VALUES, 1);
-                    self.value(&mut level, item);
+                    self.top(&mut level, item);
                     level.finish()
                 }
                 None => Level::new(VALUES, 0).finish(),
             },
             _ => failed(&format!("op {op} on {value}")),
+        }
+    }
+
+    /// A value of the level itself: a small array or object with its contents in mode [`WITH`],
+    /// an object with some of its fields in mode [`SOME`].
+    fn top(&mut self, level: &mut Level, value: &Value) {
+        let node = self.nodes.len();
+        match value {
+            Value::Object(fields) if self.some => {
+                let absent = !fields.contains_key(ABSENT);
+                let some = fields.iter().step_by(2);
+                level.0.push(OBJECT_SOME);
+                level.u32(node);
+                level.u32(some.len() + absent as usize);
+                self.nodes.push(value.clone());
+                for (key, value) in some {
+                    level.text(key);
+                    self.value(level, value);
+                }
+                if absent {
+                    level.text(ABSENT);
+                    level.0.push(UNDEFINED);
+                }
+            }
+            Value::Array(items) if self.with && items.len() <= SMALL => {
+                level.0.push(ARRAY_WITH);
+                level.u32(node);
+                level.u32(items.len());
+                self.nodes.push(value.clone());
+                items.iter().for_each(|item| self.value(level, item));
+            }
+            Value::Object(fields) if self.with && fields.len() <= SMALL => {
+                level.0.push(OBJECT_WITH);
+                level.u32(node);
+                level.u32(fields.len());
+                self.nodes.push(value.clone());
+                for (key, value) in fields {
+                    level.text(key);
+                    self.value(level, value);
+                }
+            }
+            _ => self.value(level, value),
         }
     }
 

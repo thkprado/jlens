@@ -1144,3 +1144,92 @@ Run locally with a key made for the test and `-DskipUpload=true`, the profile bu
 the Portal takes: the JAR, the sources (48 KB) and Javadoc (318 KB) JARs and the POM, each with
 its `.asc` and its MD5, SHA-1, SHA-256 and SHA-512 checksums; `gpg --verify` accepted the
 signatures. The first upload is 0.25.0's (#16).
+
+## Amendment: maps written with what the expression reads (0.26 #4)
+
+### Context
+
+Over Java maps, jlens took 1.4 to 7.5 times as long as over a `Document` on the cases that read
+the order's items, with one call back into Java for each field it read. Measured on Windows with
+Java 25, one call back costs about 300 ns: 28 ns for a bare Panama upcall, about 85 ns in the C
+API (finding the level's buffer by its handle takes the table's lock, then the buffer's) and
+about 95 ns in Java (115 with a string). The cases of `benches/cases.json`, over 200 items,
+made 202 calls (`names over items`) to 1,406 (the shipping rule) per evaluation.
+
+Writing a small map or list whole with the level that holds it, one level deep, cut the calls to
+one to three, and the shipping rule's time by a third to a half. It made the cases that read one
+field of each item 8 to 20% slower (`names over items`, regex), and number formatting, which
+reads 20 items of 200, two to three times slower: Java writes a map's entry in about 30 ns, so
+six entries cost about one call.
+
+### Decision
+
+1. **A map or list is written with what the expression reads of it** (ADR 0016), when it is a
+   value of the level written, not of the contents of another, so that the C API reads it
+   without calling back:
+   - a map of which the expression reads some fields, with those fields (`OBJECT_SOME`, at most
+     16, whatever the map's size), a field it reads that the map lacks as `UNDEFINED`;
+   - a map read whole, of at most 16 entries, whole (`OBJECT_WITH`), and a list of at most 16
+     items with its items (`ARRAY_WITH`);
+   - a map or list the expression does not read, as a reference, its number.
+2. **The expression's reads are found once**, at its first evaluation over Java objects
+   (`Expression.reads()`), and made ready for the reader: each field's key in UTF-8 and the
+   reads of its value.
+3. **The result never depends on the analysis.** The C API calls back for a field that was not
+   written and for the map whole. A host function named after a built-in, which the analysis
+   takes for the built-in, gets its argument whole. The tests prove it with a host that writes
+   every other field and a field that no object has (`SOME` in `tests/host/mod.rs`), against
+   the same evaluation on JSON text.
+4. **The C API keeps the last buffer it read a level from**, which saves the table's lock on
+   each call (17 ns).
+
+Tried and dropped: a pattern `switch` replaced with `instanceof` tests, and strings encoded by
+an ASCII loop (4 ns a character, slower than `getBytes`) or through a cache of 64 keys' UTF-8,
+which distinct values evicted.
+
+### Consequences
+
+Microseconds per evaluation with `cargo xtask java-compare cases` over Java maps parsed by
+Jackson, on the maintainer's Windows machine, Java 25.0.4: the median of three runs alternated
+with the code before the change. The `Document` column, which this does not touch, measured
+within 2.5% between the two, `recursion` aside:
+
+| Case | Before | After | Change |
+|---|---:|---:|---:|
+| path | 1.68 | 1.68 | 0% |
+| names over items | 66.8 | 30.4 | −54% |
+| filter + aggregate | 153 | 98.6 | −36% |
+| group-by | 243 | 142 | −42% |
+| sort + map | 547 | 376 | −31% |
+| strings | 179 | 139 | −22% |
+| regex | 206 | 159 | −23% |
+| number formatting | 48.5 | 56.0 | +16% |
+| object constructor | 294 | 190 | −35% |
+| transform | 716 | 696 | −3% |
+| recursion | 863 | 889 | +3% |
+| shipping rule | 484 | 235 | −51% |
+| index into 10,000 items | 2.53 | 2.44 | −4% |
+| index in a variable | 2.91 | 2.83 | −3% |
+
+- **On the spike's documents** (`java-compare documents`, two alternated runs), `$sum(items.price)`
+  takes 146 instead of 324 µs on 1,000 items and 19.6 instead of 43.9 ms on 100,000, now 2.7
+  times as long as over a `Document`, against six times; `items[price > 98].id` 273 instead of
+  407 µs; `items[0].name` 2.3 instead of 2.5 µs, the input's one field written with it.
+- **On threads** (`java-compare threads`, one run each), `$sum(items.price)` on Java objects
+  that Jackson parses from 100 items at each evaluation gives 98,085 evaluations per second on
+  16 threads instead of 73,479, and 10,931 on one instead of 9,131.
+- **Number formatting** takes 16% longer: `items[[0..19]]` reads the list of 200 items whole,
+  so each item is written with the two fields the expression reads, and 20 are used.
+- **`$`** takes 1.00 instead of 0.75 µs: the input, a map of one field read whole, is written
+  with that field, which the result, the input itself, does not need.
+- **`recursion`** reads no input, and takes 3 to 4% longer with a `Document` too: the C API
+  library's layout, not the reader.
+- **Benchmark harness.** `cargo xtask java-compare` put every JAR in the harness's
+  `target/deps` on the classpath, and a JAR of an earlier version stayed there: on Windows
+  the harness loaded `jlens-0.24.0.jar`, built on 2026-10-25 at 0.25 #6, from the version bump
+  of 0.24.1 on. The command now empties the directory first. In one run, that JAR measured
+  within 4.3% of the code before the change on the cases above, over Java maps and over a
+  `Document`, but for `names over items` over a `Document`, 9.6% faster: the Windows
+  measurements from 0.25 #12 on are close, though not of the code they name. The performance
+  page's Java tables were measured under Linux, whose order of `deps/*` is the directory's;
+  0.26.0 measures them again.
