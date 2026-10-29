@@ -380,9 +380,13 @@ fn extreme<'a>(items: &Value<'a>, pick: fn(f64, f64) -> f64) -> Result<Value<'a>
     }
 }
 
-/// `$clone`: a deep copy made the way jsonata-js does it, by serializing and parsing. The text
-/// is limited to `limit` bytes, like a string.
+/// `$clone`: a deep copy with the values jsonata-js gets by serializing and parsing, made
+/// without the text for an array or an object ([`value::deep_copy`]). The text is limited to
+/// `limit` bytes, like a string.
 pub(crate) fn clone<'a>(v: &Value<'a>, limit: usize) -> Result<Value<'a>> {
+    if let Value::Array(_) | Value::Object(_) = v {
+        return value::deep_copy(v, limit);
+    }
     let Some(text) = to_string(v, false, limit)? else {
         return Ok(Value::Undefined);
     };

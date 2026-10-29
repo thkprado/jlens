@@ -1120,4 +1120,26 @@ path changed but the order in which variables and functions are bound.
   `recursion` is within 1.1% in both modes, aligned or not, and every other case within 2.3%;
   `$a + $b` takes the same 0.38 to 0.39 µs with none, one or sixteen functions bound.
 - **Deep copies.** A transform (`|...|`) copies its input with `$clone` before changing it, as
-  jsonata-js does. That makes transforms of large documents comparatively expensive.
+  jsonata-js does. jsonata-js copies by writing the JSON text and parsing it
+  (`JSON.parse($string(value))`), and jlens did the same until 0.26. Timed in parts against a
+  `Document` (0.26 #6, the fastest of seven runs), the benchmark's transform,
+  `$ ~> |items|{'total': unitPrice * quantity}, ['tax']|` over 200 items, took 778 µs: the copy
+  about 430 µs (writing the text about 100, parsing it with `serde_json` and converting it the
+  rest), building the result about 180 µs, as `$` alone does, the update about 120 µs and the
+  deletion 30 µs. Since 0.26, `$clone` copies the value itself, with the values the text gave
+  (numbers rounded to 15 significant digits, functions as `""`, undefined left out of objects
+  and `null` in arrays), counting
+  the length the text would have so that it fails where `$string` would. The copy takes about
+  85 µs, and the case 447 µs. Against the code before (`cargo xtask ab`, ten rounds, built
+  without the alignment flags), the transform takes 543 µs instead of 921 against a `Document`
+  (−41%) and 568 µs instead of 1.14 ms with `evaluate` (−50%), where the copy reads the
+  input's JSON directly; the other cases are within +1.1%. In Java (`java-compare cases`, six runs of
+  each JAR alternated, the fastest), 487 → 272 µs on a `Document` and 626 → 414 µs from JSON
+  text, where jsonata-java takes 395 and 527 µs.
+
+  What remains is not the copy. A copy that shares what the update does not change, which the
+  roadmap considered, would save at most those 85 µs, and would have to keep apart the places
+  where a value is reached twice (`{'x': $o, 'y': $o} ~> |x|{'a': 2}|` changes `x` alone) and
+  round the numbers it shares. The update spends about 0.2 µs per item on the object it
+  builds and the fields it sets, and about as much again when the field is new and the copied
+  object grows. Building the result is the conversion every result pays.

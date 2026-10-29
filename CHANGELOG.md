@@ -38,6 +38,18 @@ All notable changes are recorded here. The format follows
   items 19.6 instead of 43.9 ms. Number formatting, which reads 20 items of 200, takes 16%
   longer, and `$` 1.0 instead of 0.75 µs. A field the analysis misses is still read, through a
   call back, so results do not change.
+- `$clone`, which a transform calls to copy its input, copies the value itself instead of
+  writing its JSON text and parsing it back. The copy has the values the text gave, as in
+  jsonata-js (numbers rounded to 15 significant digits, functions as `""`), and fails where
+  the text would have been longer than `max_string_length` or nested too deeply. The
+  benchmark's transform over 200 items takes 543 µs instead of 921 against a `Document`, and
+  568 µs instead of 1.14 ms with `evaluate`.
+
+### Fixed
+
+- `$clone`, and a transform, of a value nested more than 128 levels deep failed with `D3141`:
+  the JSON text was parsed with a limit of 128 levels. A value is copied up to the 1,000 levels
+  that `$string` writes, as jsonata-js copies it.
 
 ## [0.25.0]
 

@@ -107,6 +107,7 @@ fn valid() -> impl Strategy<Value = String> {
                 "$checked",
                 "$fail",
                 "$apply",
+                "$clone",
             ][..],
         );
         prop_oneof![
@@ -1713,6 +1714,7 @@ fn deep_values_fail_cleanly() {
         let built = [
             ("$build(100000, 1)", Err("U1001")),
             ("$string($build(5000, 1))", Err("U1001")),
+            ("$clone($build(5000, 1))", Err("U1001")),
             ("$build(5000, 1) = $build(5000, 1)", Err("U1001")),
             ("$count([$build(100000, 1)])", Ok(json!(1))),
             ("$count($build(5000, 1).**)", Err("U1001")),
@@ -1720,6 +1722,12 @@ fn deep_values_fail_cleanly() {
             ("$build(1000, 1) = $build(1000, 1)", Ok(json!(true))),
             ("$build(1001, 1) = $build(1001, 1)", Err("U1001")),
             ("$length($string($build(1000, 1)))", Ok(json!(1000 * 6 + 1))),
+            // Until 0.26, a copy deeper than 128 levels failed with D3141.
+            (
+                "$string($clone($build(1000, 1))) = $string($build(1000, 1))",
+                Ok(json!(true)),
+            ),
+            ("($build(1000, 1) ~> |$|{'b': 2}|).b", Ok(json!(2))),
         ];
         for (source, expected) in built {
             let source = format!("({build}; {source})");

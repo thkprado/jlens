@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use jlens_core::{Bindings, Expression, Options};
+use jlens_core::{Bindings, Document, Expression, Options};
 use serde_json::{Value, json};
 
 fn fixture(name: &str) -> String {
@@ -772,7 +772,6 @@ fn the_result_size_cap_limits_host_function_arguments() {
 
 #[test]
 fn documents_are_reusable_and_unchanged_by_evaluation() {
-    use jlens_core::Document;
     let text = r#"{"items": [{"code": "a", "n": 1}, {"code": "b", "n": 2}], "k": 1, "k": 2}"#;
     let parsed = Document::parse(text).unwrap();
     let converted = Document::new(&serde_json::from_str(text).unwrap());
@@ -1017,6 +1016,60 @@ fn transforms_cannot_create_circular_objects() {
             .unwrap(),
         Some(json!({"items": [{"a": 1, "copy": {"a": 1}}]}))
     );
+}
+
+/// A transform changes a copy: its input, a value it was given twice and the values bound to
+/// variables stay as they were, and the copy has the values of jsonata-js, which copies by
+/// serializing and parsing (results checked against jsonata-js 2.2.2).
+#[test]
+fn transforms_change_a_copy_alone() {
+    let input = json!({"items": [{"a": 1, "b": {"c": 2}}, {"a": 0.1, "b": {"c": 3}}], "n": 0.30000000000000004});
+    let document = Document::new(&input);
+    for (source, expected) in [
+        (
+            "($t := $ ~> |items|{'x': 1}|; [$t, $])",
+            json!([
+                {"items": [{"a": 1, "b": {"c": 2}, "x": 1}, {"a": 0.1, "b": {"c": 3}, "x": 1}], "n": 0.3},
+                input,
+            ]),
+        ),
+        (
+            "($o := {'a': 1}; $t := $o ~> |$|{'a': 2}|; [$o, $t])",
+            json!([{"a": 1}, {"a": 2}]),
+        ),
+        (
+            "($o := {'a': 1}; {'x': $o, 'y': $o} ~> |x|{'a': 2}|)",
+            json!({"x": {"a": 2}, "y": {"a": 1}}),
+        ),
+        (
+            "$ ~> |items|{'n': $ ~> |b|{'d': 4}|}|",
+            json!({"items": [
+                {"a": 1, "b": {"c": 2}, "n": {"a": 1, "b": {"c": 2, "d": 4}}},
+                {"a": 0.1, "b": {"c": 3}, "n": {"a": 0.1, "b": {"c": 3, "d": 4}}},
+            ], "n": 0.3}),
+        ),
+        (
+            "($t := |items.b|{'c': c + 10}|; $ ~> $t ~> $t)",
+            json!({"items": [{"a": 1, "b": {"c": 22}}, {"a": 0.1, "b": {"c": 23}}], "n": 0.3}),
+        ),
+        (
+            "$ ~> |items|{}, ['b']|",
+            json!({"items": [{"a": 1}, {"a": 0.1}], "n": 0.3}),
+        ),
+        (
+            "($f := function(){1}; {'f': $f, 'g': [$f, 1], 'n': 0.1 + 0.2, 'z': -0} ~> |$|{}|)",
+            json!({"f": "", "g": ["", 1], "n": 0.3, "z": 0}),
+        ),
+    ] {
+        let expr = Expression::compile(source).unwrap();
+        let result = expr.evaluate(Some(&input), &Bindings::new()).unwrap();
+        assert_eq!(result, Some(expected.clone()), "{source}");
+        let result = expr
+            .evaluate_document(&document, &Bindings::new(), &Options::default())
+            .unwrap();
+        assert_eq!(result, Some(expected), "{source} against a document");
+        assert_eq!(document.to_json(), input, "{source}: the document changed");
+    }
 }
 
 #[test]

@@ -169,9 +169,11 @@ out is limited too:
   below the length of the text that `format_json` prints.
 - **The arguments of a host function** are measured together in the same way, and so is its
   context value (`HostCall::input`).
-- **`$string`, `$clone`** (and the transform operator, which clones its input) and `&` write
-  JSON text, which is a string: the text is checked against `Options::max_string_length` as it
-  is written.
+- **`$string`** and `&` write JSON text, which is a string: the text is checked against
+  `Options::max_string_length` as it is written. **`$clone`** (and the transform operator, which
+  clones its input) gives the values jsonata-js gets by writing that text and parsing it, but
+  copies the value without the text; it counts the length the text would have, and fails where
+  `$string` would.
 - **The `value` of an error** (`T2001`, `T0410` and others) is left out when it is larger than
   the default size of a result.
 

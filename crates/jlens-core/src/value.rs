@@ -1818,6 +1818,179 @@ fn write_json<'a>(
     Ok(())
 }
 
+/// The value that parsing the text of [`stringify`] gives, made without the text: a deep copy
+/// in which numbers are rounded to 15 significant digits, functions are `""`, and undefined is
+/// `null` in an array and left out of an object. Strings and keys are shared with `value`. It
+/// fails as `stringify` does, the text it would write counted and checked against `limit` where
+/// `stringify` checks its text, so that a value too large or too deep fails with the same error.
+pub(crate) fn deep_copy<'a>(value: &Value<'a>, limit: usize) -> Result<Value<'a>> {
+    let value = match value {
+        Value::Array(a) if a.has(OUTER_WRAPPER) && !a.items().is_empty() => &a.items()[0],
+        v => v,
+    };
+    let mut copy = Copier {
+        len: 0,
+        limit,
+        keys: Keys::default(),
+    };
+    copy.value(value, 0)
+}
+
+/// The state of a [`deep_copy`]: the length of the text `stringify` would have written so far,
+/// and the keys of the input JSON copied, shared as in a document.
+struct Copier {
+    len: usize,
+    limit: usize,
+    keys: Keys,
+}
+
+impl Copier {
+    /// Adds `bytes` of text, which `stringify` checks only after a whole value.
+    #[inline]
+    fn add(&mut self, bytes: usize) {
+        self.len = self.len.saturating_add(bytes);
+    }
+
+    /// Fails when the text so far is longer than the limit, as `stringify` checks it.
+    #[inline]
+    fn check(&self) -> Result<()> {
+        if self.len > self.limit {
+            return Err(string_too_long(self.limit));
+        }
+        Ok(())
+    }
+
+    /// Copies a value nested in `depth` arrays and objects, as [`write_json`] writes it.
+    fn value<'a>(&mut self, value: &Value<'a>, depth: usize) -> Result<Value<'a>> {
+        if let Some(json) = value.unread() {
+            return self.json(json, depth);
+        }
+        let copy = match value {
+            Value::Undefined | Value::Null => {
+                self.add(4);
+                Value::Null
+            }
+            Value::Bool(b) => {
+                self.add(if *b { 4 } else { 5 });
+                Value::Bool(*b)
+            }
+            Value::Number(n) => self.number(*n)?,
+            Value::String(s) => {
+                self.add(json_string_len(s));
+                Value::String(s.clone())
+            }
+            Value::Function(_) => {
+                self.add(2);
+                Value::string("")
+            }
+            Value::Array(_) | Value::Object(_) if depth >= MAX_NESTING => return Err(too_deep()),
+            Value::Array(a) => {
+                let items = a.items();
+                if items.is_empty() {
+                    self.add(2);
+                    return Ok(Value::array(Vec::new(), 0));
+                }
+                let mut out = Vec::with_capacity(items.len());
+                for item in items.iter() {
+                    // The `[` before the first item, a `,` before each other.
+                    self.add(1);
+                    out.push(nest(depth + 1, || self.value(item, depth + 1))?);
+                }
+                self.add(1);
+                Value::array(out, 0)
+            }
+            Value::Object(o) => {
+                let o = o.borrow();
+                let mut out = Map::with_capacity_and_hasher(o.len(), Default::default());
+                for (k, v) in o.iter() {
+                    if v.is_undefined() {
+                        continue;
+                    }
+                    // `{` or `,`, the key, `:`.
+                    self.add(json_string_len(k) + 2);
+                    out.insert(k.clone(), nest(depth + 1, || self.value(v, depth + 1))?);
+                }
+                self.add(if out.is_empty() { 2 } else { 1 });
+                Value::object(out)
+            }
+        };
+        self.check()?;
+        Ok(copy)
+    }
+
+    /// A number as its text in `stringify` parses back: rounded, and `0` for `-0`.
+    fn number<'a>(&mut self, n: f64) -> Result<Value<'a>> {
+        if !Value::Number(n).is_numeric()? {
+            self.add(4);
+            return Ok(Value::Null);
+        }
+        let n = round15(n);
+        self.add(number_len(n));
+        Ok(Value::Number(if n == 0.0 { 0.0 } else { n }))
+    }
+
+    /// Copies input JSON not read yet, as [`Copier::value`] copies the values read from it.
+    fn json<'a>(&mut self, json: &JsonValue, depth: usize) -> Result<Value<'a>> {
+        let copy = match json {
+            JsonValue::Null => {
+                self.add(4);
+                Value::Null
+            }
+            JsonValue::Bool(b) => {
+                self.add(if *b { 4 } else { 5 });
+                Value::Bool(*b)
+            }
+            JsonValue::Number(n) => self.number(n.as_f64().unwrap_or(f64::NAN))?,
+            JsonValue::String(s) => {
+                self.add(json_string_len(s));
+                Value::string(s.as_str())
+            }
+            JsonValue::Array(_) | JsonValue::Object(_) if depth >= MAX_NESTING => {
+                return Err(too_deep());
+            }
+            JsonValue::Array(items) => {
+                if items.is_empty() {
+                    self.add(2);
+                    return Ok(Value::array(Vec::new(), 0));
+                }
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    self.add(1);
+                    out.push(nest(depth + 1, || self.json(item, depth + 1))?);
+                }
+                self.add(1);
+                Value::array(out, 0)
+            }
+            JsonValue::Object(fields) => {
+                let mut out = Map::with_capacity_and_hasher(fields.len(), Default::default());
+                self.keys.reserve(fields.len());
+                for (k, v) in fields {
+                    self.add(json_string_len(k) + 2);
+                    let v = nest(depth + 1, || self.json(v, depth + 1))?;
+                    out.insert(self.keys.get(k), v);
+                }
+                self.add(if out.is_empty() { 2 } else { 1 });
+                Value::object(out)
+            }
+        };
+        self.check()?;
+        Ok(copy)
+    }
+}
+
+/// The length of `s` written by [`write_json_string`], quotes included.
+fn json_string_len(s: &str) -> usize {
+    let escapes: usize = s
+        .bytes()
+        .map(|b| match b {
+            b'"' | b'\\' | 0x8 | 0xc | b'\n' | b'\r' | b'\t' => 1,
+            b if b < 0x20 => 5,
+            _ => 0,
+        })
+        .sum();
+    s.len() + escapes + 2
+}
+
 impl std::fmt::Debug for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1935,5 +2108,204 @@ mod tests {
         assert!(a.deep_eq(&b).unwrap());
         assert!(!a.strict_eq(&b));
         assert_eq!(js_string_cmp("a", "b"), Ordering::Less);
+    }
+
+    mod deep_copy {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// A value to build: what a value can hold that its text does not show as is.
+        #[derive(Debug, Clone)]
+        enum Shape {
+            Undefined,
+            Null,
+            Bool(bool),
+            Number(f64),
+            String(String),
+            Function,
+            Array(Vec<Shape>, u8),
+            Object(Vec<(String, Shape)>),
+            /// Input JSON, read one level at a time, unread or with its first field or item read.
+            Input(JsonValue, bool),
+        }
+
+        fn build<'a>(shape: &'a Shape) -> Value<'a> {
+            match shape {
+                Shape::Undefined => Value::Undefined,
+                Shape::Null => Value::Null,
+                Shape::Bool(b) => Value::Bool(*b),
+                Shape::Number(n) => Value::Number(*n),
+                Shape::String(s) => Value::string(s.as_str()),
+                Shape::Function => crate::functions::native_value("sum").unwrap(),
+                Shape::Array(items, flags) => {
+                    Value::array(items.iter().map(build).collect(), *flags)
+                }
+                Shape::Object(fields) => Value::object(
+                    fields
+                        .iter()
+                        .map(|(k, v)| (Rc::from(k.as_str()), build(v)))
+                        .collect(),
+                ),
+                Shape::Input(json, read) => {
+                    let value = Value::lazy(json, &Shared::new());
+                    if *read {
+                        match &value {
+                            Value::Array(a) if a.len() > 0 => drop(a.item(0)),
+                            Value::Object(o) => {
+                                if let Some(key) = json.as_object().and_then(|o| o.keys().next()) {
+                                    o.get(key);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    value
+                }
+            }
+        }
+
+        fn text() -> impl Strategy<Value = String> {
+            const CHARS: [char; 12] = [
+                'a', 'é', '😀', '"', '\\', '\n', '\r', '\t', '\u{8}', '\u{c}', '\u{1}', '\u{1f}',
+            ];
+            prop::collection::vec(prop::sample::select(&CHARS[..]), 0..4)
+                .prop_map(|c| c.into_iter().collect())
+        }
+
+        fn number() -> impl Strategy<Value = f64> {
+            prop_oneof![
+                any::<f64>(),
+                -1e6..1e6f64,
+                prop::sample::select(
+                    &[
+                        0.0,
+                        -0.0,
+                        f64::NAN,
+                        f64::INFINITY,
+                        0.1 + 0.2,
+                        1e21,
+                        -1e-7,
+                        123_456_789_012.5,
+                        9_007_199_254_740_993.0,
+                    ][..]
+                ),
+            ]
+        }
+
+        fn json() -> impl Strategy<Value = JsonValue> {
+            let leaf = prop_oneof![
+                Just(JsonValue::Null),
+                any::<bool>().prop_map(JsonValue::Bool),
+                number()
+                    .prop_map(|n| serde_json::Number::from_f64(n)
+                        .map_or(JsonValue::Null, JsonValue::Number)),
+                text().prop_map(JsonValue::String),
+            ];
+            leaf.prop_recursive(3, 24, 4, |inner| {
+                prop_oneof![
+                    prop::collection::vec(inner.clone(), 0..4).prop_map(JsonValue::Array),
+                    prop::collection::vec((text(), inner), 0..4)
+                        .prop_map(|f| JsonValue::Object(f.into_iter().collect())),
+                ]
+            })
+        }
+
+        fn shape() -> impl Strategy<Value = Shape> {
+            let flags =
+                prop::sample::select(&[0, SEQUENCE, KEEP_SINGLETON, OUTER_WRAPPER, CONS][..]);
+            let leaf = prop_oneof![
+                Just(Shape::Undefined),
+                Just(Shape::Null),
+                any::<bool>().prop_map(Shape::Bool),
+                number().prop_map(Shape::Number),
+                text().prop_map(Shape::String),
+                Just(Shape::Function),
+                (json(), any::<bool>()).prop_map(|(j, r)| Shape::Input(j, r)),
+            ];
+            leaf.prop_recursive(4, 32, 4, move |inner| {
+                prop_oneof![
+                    (prop::collection::vec(inner.clone(), 0..4), flags.clone())
+                        .prop_map(|(items, f)| Shape::Array(items, f)),
+                    prop::collection::vec((text(), inner), 0..4).prop_map(Shape::Object),
+                ]
+            })
+        }
+
+        /// The copy `$clone` made before: the text, parsed.
+        fn by_text<'a>(value: &Value<'a>, limit: usize) -> Result<Value<'a>> {
+            let text = stringify(value, false, limit)?;
+            Ok(Value::from_json(&serde_json::from_str(&text).unwrap()))
+        }
+
+        /// Whether two values are the same, numbers to the bit and arrays with their flags.
+        fn same(a: &Value, b: &Value) -> bool {
+            match (a, b) {
+                (Value::Undefined, Value::Undefined) | (Value::Null, Value::Null) => true,
+                (Value::Bool(a), Value::Bool(b)) => a == b,
+                (Value::Number(a), Value::Number(b)) => a.to_bits() == b.to_bits(),
+                (Value::String(a), Value::String(b)) => a == b,
+                (Value::Array(a), Value::Array(b)) => {
+                    a.flags.get() == b.flags.get()
+                        && a.items().len() == b.items().len()
+                        && a.items()
+                            .iter()
+                            .zip(b.items().iter())
+                            .all(|(a, b)| same(a, b))
+                }
+                (Value::Object(a), Value::Object(b)) => {
+                    let (a, b) = (a.borrow(), b.borrow());
+                    a.len() == b.len()
+                        && a.iter()
+                            .zip(b.iter())
+                            .all(|((ka, a), (kb, b))| ka == kb && same(a, b))
+                }
+                _ => false,
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn gives_the_values_and_errors_of_the_text(
+                shape in shape(),
+                limit in prop_oneof![0..64usize, Just(usize::MAX)],
+            ) {
+                let value = build(&shape);
+                let expected = by_text(&value, limit);
+                let copy = deep_copy(&value, limit);
+                match (&expected, &copy) {
+                    (Ok(e), Ok(c)) => prop_assert!(same(e, c), "{expected:?} != {copy:?}"),
+                    (Err(e), Err(c)) => {
+                        prop_assert_eq!(e.code(), c.code());
+                        prop_assert_eq!(e.to_string(), c.to_string());
+                    }
+                    _ => prop_assert!(false, "{expected:?} != {copy:?}"),
+                }
+            }
+        }
+
+        #[test]
+        fn copies_up_to_the_nesting_limit_as_the_text_does() {
+            let mut json = JsonValue::from(1);
+            for _ in 0..MAX_NESTING {
+                json = JsonValue::Array(vec![json]);
+            }
+            // As deep as allowed: the text was too deep for `serde_json` to parse back (128
+            // levels), the copy is whole.
+            let value = Value::from_json(&json);
+            let copy = deep_copy(&value, usize::MAX).unwrap();
+            let text = stringify(&value, false, usize::MAX).unwrap();
+            assert_eq!(stringify(&copy, false, usize::MAX).unwrap(), text);
+            // One level deeper, the same error as the text.
+            let json = JsonValue::Array(vec![json]);
+            for value in [Value::from_json(&json), Value::lazy(&json, &Shared::new())] {
+                let expected = by_text(&value, usize::MAX).unwrap_err();
+                let copy = deep_copy(&value, usize::MAX).unwrap_err();
+                assert_eq!(
+                    (copy.code(), copy.to_string()),
+                    (expected.code(), expected.to_string())
+                );
+            }
+        }
     }
 }
