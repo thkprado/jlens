@@ -559,6 +559,13 @@ proptest! {
                 if !timed_out(&json) && !timed_out(&built) {
                     prop_assert_eq!(format!("{built:?}"), format!("{json:?}"));
                 }
+                let shape = expr.evaluate_document_to(&document, &bindings, &options, |out| {
+                    Ok(out.is_array_or_object())
+                });
+                if let (Ok(json), Ok(structured)) = (&json, shape) {
+                    let expected = json.as_ref().is_some_and(|v| v.is_array() || v.is_object());
+                    prop_assert_eq!(structured, expected);
+                }
                 let source = JsonSource::root(&input, true);
                 let json = expr.evaluate_source(&source, &bindings, &options);
                 let built = expr.evaluate_source_to(&source, &bindings, &options, |out| {

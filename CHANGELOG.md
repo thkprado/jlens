@@ -11,6 +11,9 @@ All notable changes are recorded here. The format follows
 - `cargo xtask bench-table` measures the native table of the performance page: it runs the
   native benchmark three times (`--runs`) and prints each case's median and spread, marking a
   case whose runs mostly disagree with the median by more than 2%.
+- `Output::is_array_or_object` in `jlens-core`: whether a result is an array or an object,
+  before it is written, so that a host can build any other result after the evaluation has
+  returned.
 
 ### Changed
 
@@ -38,6 +41,13 @@ All notable changes are recorded here. The format follows
   items 19.6 instead of 43.9 ms. Number formatting, which reads 20 items of 200, takes 16%
   longer, and `$` 1.0 instead of 0.75 µs. A field the analysis misses is still read, through a
   call back, so results do not change.
+- The Python package's `evaluate_document` builds a result that is not an array or an object
+  once the evaluation has returned, attaching to the interpreter once instead of twice:
+  `customer.name` takes 0.49 instead of 0.55 µs, and an evaluation that returns a number, a
+  string, a boolean or `null` about 70 ns less.
+- The Java package reads a reply with critical downcalls (`Linker.Option.critical`), which skip
+  the thread's transition out of Java: `customer.name` against a `Document` takes 0.44 instead
+  of 0.48 µs.
 - `$clone`, which a transform calls to copy its input, copies the value itself instead of
   writing its JSON text and parsing it back. The copy has the values the text gave, as in
   jsonata-js (numbers rounded to 15 significant digits, functions as `""`), and fails where

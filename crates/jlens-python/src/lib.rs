@@ -36,7 +36,7 @@ use serde_json::Value as Json;
 
 use convert::{JlensError, Registered, to_py};
 use host::{Function, Host};
-use output::{NoInput, PyBuilder};
+use output::{NoInput, PyBuilder, Scalar, ScalarBuilder};
 use source::PySource;
 
 // Evaluation allocates for most of its work, and the system allocators are slower at it: with
@@ -68,6 +68,14 @@ pub struct Expression {
 enum Failure {
     Input(String),
     Evaluation(jlens_core::Error),
+}
+
+/// The result of `evaluate_document`, carried out of the code that runs detached.
+enum Written {
+    /// A result that is not an array or an object, built once attached again.
+    Scalar(Option<Scalar>),
+    /// An array or object, built attached.
+    Built(PyResult<Py<PyAny>>),
 }
 
 #[pymethods]
@@ -262,23 +270,34 @@ impl Expression {
             seed,
         })?;
         let source = &document.get().source;
-        // The result is written attached again, once the evaluation has succeeded.
+        // An array or object is written attached again, once the evaluation has succeeded; any
+        // other result once the evaluation has returned, which spares attaching twice.
         let result = py
             .detach(|| {
                 let document = converted(source)
                     .map_err(|e| Failure::Input(format!("the document is not valid JSON: {e}")))?;
                 self.inner
                     .evaluate_document_to(&document, &bindings, &options, |out| {
+                        if !out.is_array_or_object() {
+                            return Ok(Written::Scalar(out.write(&mut ScalarBuilder)?));
+                        }
                         Python::attach(|py| {
                             let mut builder = PyBuilder::new(py);
                             let written = out.write(&mut builder)?;
-                            Ok(builder.finish(written).map(Bound::unbind))
+                            Ok(Written::Built(builder.finish(written).map(Bound::unbind)))
                         })
                     })
                     .map_err(Failure::Evaluation)
             })
             .map_err(|e| self.failure(py, e, host.as_deref()))?;
-        Ok(result?.into_bound(py))
+        match result {
+            Written::Scalar(scalar) => {
+                let mut builder = PyBuilder::new(py);
+                let written = scalar.map(|scalar| scalar.build(&mut builder));
+                builder.finish(written)
+            }
+            Written::Built(built) => Ok(built?.into_bound(py)),
+        }
     }
 
     /// Evaluates the expression and records how the result was reached, at `level` (`"off"`,

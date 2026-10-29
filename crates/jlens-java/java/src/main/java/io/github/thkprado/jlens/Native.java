@@ -57,9 +57,9 @@ final class Native {
     private static final ValueLayout.OfInt U32 = ValueLayout.JAVA_INT;
 
     private static final MethodHandle BUFFER_NEW = function("jlens_buffer_new", U64, USIZE);
-    private static final MethodHandle BUFFER_ADDRESS = function("jlens_buffer_address", USIZE, U64);
-    private static final MethodHandle BUFFER_LEN = function("jlens_buffer_len", USIZE, U64);
-    private static final MethodHandle BUFFER_FREE = function("jlens_buffer_free", U32, U64);
+    private static final MethodHandle BUFFER_ADDRESS = critical("jlens_buffer_address", USIZE, U64);
+    private static final MethodHandle BUFFER_LEN = critical("jlens_buffer_len", USIZE, U64);
+    private static final MethodHandle BUFFER_FREE = critical("jlens_buffer_free", U32, U64);
     private static final MethodHandle COMPILE = function("jlens_compile", U64, U64);
     private static final MethodHandle EXPRESSION_FREE = function("jlens_expression_free", U32, U64);
     private static final MethodHandle READS = function("jlens_reads", U64, U64);
@@ -110,9 +110,23 @@ final class Native {
     private static final byte REPLY_VALUES = 4;
 
     private static MethodHandle function(String name, ValueLayout result, ValueLayout... arguments) {
-        MemorySegment symbol = LIBRARY.find(name)
+        return Linker.nativeLinker().downcallHandle(symbol(name), FunctionDescriptor.of(result, arguments));
+    }
+
+    /**
+     * A downcall that never calls back into Java and returns at once, made without the thread's
+     * transition out of Java: the three calls that read a reply cost about 20 ns less (roadmap
+     * 0.26 #7). Freeing a large reply, or sweeping the documents this thread converted after one
+     * was closed, as any export may, takes longer and holds the garbage collector off meanwhile.
+     */
+    private static MethodHandle critical(String name, ValueLayout result, ValueLayout... arguments) {
+        return Linker.nativeLinker().downcallHandle(symbol(name), FunctionDescriptor.of(result, arguments),
+                Linker.Option.critical(false));
+    }
+
+    private static MemorySegment symbol(String name) {
+        return LIBRARY.find(name)
                 .orElseThrow(() -> new UnsatisfiedLinkError("jlens: no symbol " + name));
-        return Linker.nativeLinker().downcallHandle(symbol, FunctionDescriptor.of(result, arguments));
     }
 
     // The exports catch every panic, so these calls throw only when a downcall itself fails,

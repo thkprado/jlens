@@ -170,6 +170,13 @@ pub struct Output<'r, 'a> {
 }
 
 impl Output<'_, '_> {
+    /// Whether the result is an array or an object. Any other result is written with one call
+    /// of `builder` at most, never with [`input`](Builder::input): a host that must hold a lock
+    /// to build its values can build such a result after the evaluation has returned.
+    pub fn is_array_or_object(&self) -> bool {
+        matches!(self.value, Value::Array(_) | Value::Object(_))
+    }
+
     /// Writes the result with `builder`: `None` when it is undefined. A result whose compact JSON
     /// text would be longer than the size limit of a result, or nested more than 1,000 levels
     /// deep, fails with `U1001`, and writing stops there. Writing reads what the evaluation left

@@ -409,6 +409,19 @@ def test_document():
     raises("T2001", Expression("customer.name + 1").evaluate_document, document)
 
 
+def test_document_scalars():
+    # Built once the evaluation has returned, unlike arrays and objects (roadmap 0.26 #7).
+    document = Document(ORDER)
+    for source in ["customer.name", "1", "2.0", "1.5", "1e20", "1e21", "2e19", "-0", "true",
+                   "false", "null", "nothing", "$sum", "items[0].sku", "'é' & customer.name"]:
+        expr = Expression(source)
+        result = expr.evaluate_document(document)
+        assert result == expr.evaluate(ORDER), source
+        assert type(result) is type(expr.evaluate(ORDER)), source
+    raises("U1001", Expression("customer.name").evaluate_document, document, max_result_size=5)
+    assert Expression("customer.name").evaluate_document(document, max_result_size=13) == "Acme Stores"
+
+
 def test_documents_are_released():
     expr = Expression("$count(items)")
     for _ in range(100):

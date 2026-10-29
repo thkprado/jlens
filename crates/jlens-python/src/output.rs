@@ -117,6 +117,70 @@ impl<'py> Builder for PyBuilder<'py> {
     }
 }
 
+/// A result that is not an array or an object, written while the evaluation runs detached from
+/// the interpreter and built once attached again: attaching costs about as much as evaluating a
+/// path (roadmap 0.26 #7).
+pub enum Scalar {
+    Null,
+    Bool(bool),
+    Number(f64),
+    String(Box<str>),
+}
+
+impl Scalar {
+    /// The Python object, as [`PyBuilder`] builds it.
+    pub fn build<'py>(self, builder: &mut PyBuilder<'py>) -> Bound<'py, PyAny> {
+        match self {
+            Scalar::Null => builder.null(),
+            Scalar::Bool(value) => builder.bool(value),
+            Scalar::Number(value) => builder.number(value),
+            Scalar::String(value) => builder.string(&value),
+        }
+    }
+}
+
+/// Writes a [`Scalar`]: given only the results that are not arrays or objects
+/// (`Output::is_array_or_object`), so its arrays and objects are never built.
+pub struct ScalarBuilder;
+
+impl Builder for ScalarBuilder {
+    type Value = Scalar;
+    type Array = ();
+    type Object = ();
+
+    fn null(&mut self) -> Scalar {
+        Scalar::Null
+    }
+
+    fn bool(&mut self, value: bool) -> Scalar {
+        Scalar::Bool(value)
+    }
+
+    fn number(&mut self, value: f64) -> Scalar {
+        Scalar::Number(value)
+    }
+
+    fn string(&mut self, value: &str) -> Scalar {
+        Scalar::String(value.into())
+    }
+
+    fn array(&mut self, _len: usize) {}
+
+    fn push(&mut self, _array: &mut (), _item: Scalar) {}
+
+    fn end_array(&mut self, _array: ()) -> Scalar {
+        Scalar::Null
+    }
+
+    fn object(&mut self, _len: usize) {}
+
+    fn insert(&mut self, _object: &mut (), _key: &str, _value: Scalar) {}
+
+    fn end_object(&mut self, _object: ()) -> Scalar {
+        Scalar::Null
+    }
+}
+
 /// No input document: an evaluation of `evaluate` without one.
 pub struct NoInput;
 

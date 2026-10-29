@@ -1026,6 +1026,33 @@ path changed but the order in which variables and functions are bound.
   `serde_json::Value` (a new string; `'a'` alone takes 0.20 µs), and two lookups. Before 0.16 a
   path of two names built a sequence for each step and took 0.69 µs; `$.customer.name` took
   1 µs and now takes 0.24 µs.
+- **The fixed cost from Python and Java.** Measured in 0.26 on one system (Windows 11, the
+  Ryzen 7 3700X of the tables, Python 3.15.2, OpenJDK 25.0.5), `customer.name` against a
+  `Document` takes 0.23 µs natively, 0.18 µs with mimalloc, which both packages use; 0.55 µs
+  from Python and 0.48 µs from Java. Timed in parts with variants of each package:
+  - From Python, about 0.19 µs is the call itself: its eleven optional arguments, the bindings
+    and options converted (about 60 ns, though none are given) and the result built.
+    `evaluate_document` releases the interpreter during the evaluation, so that other threads
+    run, and attached again to build the result: about 75 ns each time, twice. Since 0.26 a
+    result that is not an array or an object is built once the evaluation has returned, which
+    attaches once: `customer.name` takes 0.49 instead of 0.55 µs, `1` 0.36 instead of 0.47 µs,
+    the index into 10,000 items 0.84 instead of 0.92 µs. Empty bindings shared by every call
+    instead of built at each call saved another 70 ns, but made filter + aggregate, strings and
+    number formatting over Python values 3% to 5% slower, held by the expression or in a
+    static, and were not kept: the cause was not found.
+  - From Java, the C API takes about 0.19 µs beyond the evaluation, timed from Rust: finding the
+    expression and the document by their handles, each behind the lock of its table, encoding
+    the result as values, and storing the reply as a buffer (an allocation and a lock), which
+    Java reads with three more calls, its address, its length and its release (about 55 ns
+    without the JVM). Java's side is about 0.1 µs: the five calls, which leave Java's thread
+    state, and the result decoded. Since 0.26 the three calls that read the reply are critical
+    (`Linker.Option.critical`), which skips that transition: `customer.name` takes 0.44 instead
+    of 0.48 µs, the indexes into 10,000 items 2.6% less time. A reply written into memory that
+    Java passes, in one call, would save most of the rest of the reply's cost; not built.
+  - The same native library loaded from two files, which differ only in their timestamps, made
+    `evaluateFromJson` over 200 items 4.5% slower or faster depending on the file, whichever
+    JAR carried it: Java comparisons between two builds have that much noise, as natively
+    between two layouts.
 - **Names over many items.** A path step that reads an array passes it on as it is: `items`
   returns the input's array, and the step after it maps over that array's items instead of a
   copy of them. A step whose results hold no array to flatten makes them its sequence without
