@@ -781,6 +781,7 @@ dependencies = [
  "jlens-regress",
  "libtest-mimic",
  "proptest",
+ "rustix",
  "ryu-js",
  "serde",
  "serde_json",

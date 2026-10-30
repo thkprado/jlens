@@ -192,11 +192,68 @@ Linux is Ubuntu 26.04 under WSL 2, on the same machine:
 - On Windows, `mimalloc` saves 17 to 52%.
 - glibc's allocator is the fastest of the three. `mimalloc` still saves 3 to 20% on ten cases;
   `path` takes 25 ns more, and `recursion` 6% more.
-- `path` costs about 11 µs more on musl with either allocator: a fixed cost of each evaluation
-  there, which the allocator does not explain. A command evaluates once, so its start-up hides
-  it.
+- `path` cost about 11 µs more on musl with either allocator, until 0.26: a fixed cost of each
+  evaluation on the main thread, which the allocator did not explain (below).
 - macOS was not measured. Its binaries use `mimalloc` too, so that every platform runs the same
   allocator.
+
+#### The main thread on musl (0.26)
+
+The fixed cost on musl came from the stack, not from the allocator. To grow the stack on
+demand, `stacker` asks `pthread_getattr_np` where the thread's stack ends, once per thread. For
+the main thread, glibc answers with the limit the kernel grows the stack to (`RLIMIT_STACK`,
+8 MB by default); musl answers with the part mapped so far. After a shallow start that left
+125 KB, less than the 128 KiB that `stack::grow` keeps free, so every evaluation ran on a new
+4 MiB stack segment, mapped and unmapped each time. Other threads were not affected: musl
+knows the size they were created with.
+
+Now the first thread that reaches `stack::grow`, when it is the main thread and `RLIMIT_STACK`
+is at least 4 MiB, uses 1 MiB of its stack first, which the kernel maps and musl then counts.
+Deeper recursion still runs on new segments. Only the first thread is looked at, so that later
+calls cost an atomic load: a thread-local, which a library loaded at run time reaches through
+a call, made group-by 2% slower from Java. A process whose main thread evaluates only after
+another thread has keeps the cost there.
+
+`cargo xtask ab` before and after (0.26 #8), `evaluate`, the median of ten rounds, musl in WSL
+on the machine above, and the same revision with `mimalloc`:
+
+| Case | musl, before | musl, after | + mimalloc |
+|---|---:|---:|---:|
+| path | 11.4 µs | 594 ns | 339 ns |
+| names over items | 71.0 µs | 55.2 µs | 10.6 µs |
+| filter + aggregate | 134 µs | 110 µs | 45.9 µs |
+| group-by | 258 µs | 228 µs | 80.4 µs |
+| sort + map | 600 µs | 568 µs | 266 µs |
+| strings | 201 µs | 173 µs | 65.1 µs |
+| regex | 249 µs | 221 µs | 101 µs |
+| number formatting | 119 µs | 94.6 µs | 27.5 µs |
+| object constructor | 557 µs | 514 µs | 139 µs |
+| transform | 980 µs | 915 µs | 283 µs |
+| recursion | 1.01 ms | 975 µs | 743 µs |
+| shipping rule | 205 µs | 191 µs | 105 µs |
+| index into 10,000 items | 13.3 µs | 1.09 µs | 633 ns |
+| index in a variable | 13.8 µs | 1.56 µs | 869 ns |
+
+Every case takes about 11 µs less. With `mimalloc`, as the release binaries are built, `path`
+takes 339 ns, where the 0.17 table above gave 11.7 µs.
+
+The libraries pay the same cost where an application evaluates on the process's main thread.
+On Alpine 3.24 (Podman on the machine above, Python 3.14, OpenJDK 25), with the wheel and the
+C API library built in `rust:alpine` before and after, the median of three runs:
+
+| Evaluation | Before | After |
+|---|---:|---:|
+| Python, main thread, `path` against a `Document` | 13.9 µs | 0.41 µs |
+| Python, main thread, `path` against a `dict` | 14.7 µs | 0.73 µs |
+| Python, main thread, group-by against a `Document` | 91.1 µs | 73.6 µs |
+| Python, another thread, `path` against a `Document` | 0.43 µs | 0.42 µs |
+| Python, another thread, group-by against a `Document` | 70.9 µs | 73.3 µs |
+| Java, `main`, `path` against a `Document` | 0.47 µs | 0.48 µs |
+| Java, `main`, group-by against a `Document` | 76.7 µs | 76.2 µs |
+
+Java never paid it: the `java` launcher runs `main` on a thread of its own. Python's other
+threads did not either; their group-by measured 3% slower after, but 1.4% of that also with
+the new code built and never called, which points to the layout of the library.
 
 ### WebAssembly against jsonata-js (Node.js)
 

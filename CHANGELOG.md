@@ -54,6 +54,12 @@ All notable changes are recorded here. The format follows
   the text would have been longer than `max_string_length` or nested too deeply. The
   benchmark's transform over 200 items takes 543 µs instead of 921 against a `Document`, and
   568 µs instead of 1.14 ms with `evaluate`.
+- On musl (Alpine, and the Linux release binaries), an evaluation on the process's main thread
+  no longer costs about 13 µs more: musl reports only the part of the main thread's stack
+  mapped so far, so every evaluation ran on a new stack segment. jlens now uses 1 MiB of the
+  main thread's stack first. `path` takes 0.59 instead of 11.4 µs in a static musl build, and
+  0.41 instead of 13.9 µs from Python on Alpine; Java, whose `main` runs on a thread of its
+  own, and other threads were not affected.
 
 ### Fixed
 
