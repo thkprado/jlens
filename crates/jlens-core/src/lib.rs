@@ -422,8 +422,9 @@ fn limits(options: &Options) -> eval::Limits {
 #[derive(Debug, Clone, Default)]
 pub struct Bindings {
     vars: IndexMap<String, JsonValue>,
-    /// Shared with the root frame of each evaluation, which looks them up on a miss.
-    functions: Arc<IndexMap<String, HostFunction>>,
+    /// Shared with the root frame of each evaluation, which looks them up on a miss. `None`
+    /// until the first function, so that empty bindings allocate nothing.
+    functions: Option<Arc<IndexMap<String, HostFunction>>>,
 }
 
 impl Bindings {
@@ -435,8 +436,10 @@ impl Bindings {
     /// Adds (or replaces) a variable binding. The name is given without the leading `$`.
     pub fn var(mut self, name: impl Into<String>, value: impl Into<JsonValue>) -> Self {
         let name = name.into();
-        if self.functions.contains_key(&name) {
-            Arc::make_mut(&mut self.functions).shift_remove(&name);
+        if let Some(functions) = &mut self.functions
+            && functions.contains_key(&name)
+        {
+            Arc::make_mut(functions).shift_remove(&name);
         }
         self.vars.insert(name, value.into());
         self
@@ -447,7 +450,7 @@ impl Bindings {
     pub fn function(mut self, name: impl Into<String>, function: HostFunction) -> Self {
         let name = name.into();
         self.vars.shift_remove(&name);
-        Arc::make_mut(&mut self.functions).insert(name, function);
+        Arc::make_mut(self.functions.get_or_insert_default()).insert(name, function);
         self
     }
 
@@ -458,7 +461,7 @@ impl Bindings {
 
     /// Looks up a host function by name (without the leading `$`).
     pub fn get_function(&self, name: &str) -> Option<&HostFunction> {
-        self.functions.get(name)
+        self.functions.as_ref()?.get(name)
     }
 
     /// Iterates over the variable bindings in insertion order.
@@ -468,12 +471,15 @@ impl Bindings {
 
     /// The host functions, for the root frame of an evaluation; `None` when there are none.
     pub(crate) fn shared_functions(&self) -> Option<Arc<IndexMap<String, HostFunction>>> {
-        (!self.functions.is_empty()).then(|| self.functions.clone())
+        self.functions.as_ref().filter(|f| !f.is_empty()).cloned()
     }
 
     /// Iterates over the host functions in insertion order.
     pub fn functions(&self) -> impl Iterator<Item = (&str, &HostFunction)> {
-        self.functions.iter().map(|(k, f)| (k.as_str(), f))
+        self.functions
+            .iter()
+            .flat_map(|f| f.iter())
+            .map(|(k, f)| (k.as_str(), f))
     }
 }
 
@@ -481,7 +487,7 @@ impl FromIterator<(String, JsonValue)> for Bindings {
     fn from_iter<T: IntoIterator<Item = (String, JsonValue)>>(iter: T) -> Self {
         Bindings {
             vars: iter.into_iter().collect(),
-            functions: Arc::default(),
+            functions: None,
         }
     }
 }

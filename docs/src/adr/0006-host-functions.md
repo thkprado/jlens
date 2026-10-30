@@ -109,6 +109,8 @@ the host functions itself: `Bindings` keeps them behind an `Arc`, which the root
 and holds `None` when there are none. The lifetime of the values is not involved, since the
 frame owns its share of them. `Frame::lookup` and `variable` take no bindings again and are no
 longer marked `#[inline]`, as in 0.24.0. The precedence and the value kept do not change.
+Since 0.26 #11, `Bindings` itself holds `None` until its first function, so that empty bindings,
+which a host may build at each call, allocate nothing (26 ns with mimalloc).
 
 - `cargo xtask ab v0.24.0 .` puts `recursion` within 1.1% in both modes, built aligned or not
   (`evaluate` +0.7% unaligned and +1.0% aligned, `document` +0.5% and +1.1%), and every other

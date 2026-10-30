@@ -22,6 +22,9 @@ All notable changes are recorded here. The format follows
   reach them. A recursion through a lambda, which ran up to 4% slower in 0.25.0, is back
   within about 1% of 0.24.0; host functions cost what they did in 0.25.0. Cloning `Bindings`
   no longer copies its functions.
+- `Bindings::new()` allocates nothing: empty bindings, which the Python package builds at each
+  call, took 26 ns to build and release with mimalloc. From Python, `customer.name` against a
+  `Document` takes 0.44 instead of 0.47 µs, and `1` 0.31 instead of 0.35 µs.
 - The WebAssembly package's `evaluate` reads the one field a path step looks up in a
   JavaScript object, rather than the object's whole level: a path into the input takes about
   a third less time (`customer.name`: 4.9 against 7.3 µs). A field whose getter throws, or

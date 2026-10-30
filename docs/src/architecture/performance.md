@@ -1091,15 +1091,22 @@ path changed but the order in which variables and functions are bound.
   `Document` takes 0.23 µs natively, 0.18 µs with mimalloc, which both packages use; 0.55 µs
   from Python and 0.48 µs from Java. Timed in parts with variants of each package:
   - From Python, about 0.19 µs is the call itself: its eleven optional arguments, the bindings
-    and options converted (about 60 ns, though none are given) and the result built.
+    and options converted (about 60 ns, though none are given, 30 ns since 0.26 #11) and the result built.
     `evaluate_document` releases the interpreter during the evaluation, so that other threads
     run, and attached again to build the result: about 75 ns each time, twice. Since 0.26 a
     result that is not an array or an object is built once the evaluation has returned, which
     attaches once: `customer.name` takes 0.49 instead of 0.55 µs, `1` 0.36 instead of 0.47 µs,
-    the index into 10,000 items 0.84 instead of 0.92 µs. Empty bindings shared by every call
-    instead of built at each call saved another 70 ns, but made filter + aggregate, strings and
-    number formatting over Python values 3% to 5% slower, held by the expression or in a
-    static, and were not kept: the cause was not found.
+    the index into 10,000 items 0.84 instead of 0.92 µs. Empty bindings allocated the `Arc` that
+    holds their functions: natively, `Bindings::new()` and its release took 26 ns with mimalloc
+    (40 ns with the system allocator), and building them at each call made `1` 30% slower than
+    sharing one. Since 0.26 #11 the `Arc` comes with the first function, and empty bindings cost
+    4.5 ns: from Python, `customer.name` against a `Document` takes 0.44 instead of 0.47 µs,
+    `1` 0.31 instead of 0.35 µs, `nothing` over a `dict` 0.42 instead of 0.47 µs.
+  - In 0.26 #7, empty bindings shared by every call made some cases over Python values 3% to 5%
+    slower. That was the layout of the code, not the bindings: natively, `1` with shared
+    bindings, which neither change touches, takes 99 ns in one build of 0.26 #11 and 113 ns in
+    another, depending only on how the code is placed. Between builds of one change, a case of
+    `python.py speed` moves by up to 4%, in either direction, with alignment or without.
   - From Java, the C API takes about 0.19 µs beyond the evaluation, timed from Rust: finding the
     expression and the document by their handles, each behind the lock of its table, encoding
     the result as values, and storing the reply as a buffer (an allocation and a lock), which
