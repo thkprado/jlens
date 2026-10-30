@@ -72,6 +72,9 @@ commands:
   java-compare [documents|cases|threads|limits]... [--engines NAMES] [--sizes N,N]
                                     compare the Java package with the other JSONata
                                     implementations for the JVM (benches/compare/java)
+  java-compare ab <A.jar> <B.jar> [--rounds N] [<part>...] [--engines NAMES] [--sizes N,N]
+                                    the same harness on two JARs of the package, in alternation:
+                                    each number's median, the difference and the spread
   serve [--site]                    serve the repository over HTTP (for examples/web-editor),
                                     or with --site the site built by `site`
   site                              build the book and the web editor into target/site

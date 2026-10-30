@@ -31,6 +31,14 @@ python benches/compare/python.py speed jlens=<python> jsonatapy=<python> ...
 
 The script's docstring says how to set up the environments, and what `speed` and `limits` print.
 
+To compare two builds of the package, install each wheel in an environment of its own:
+
+```sh
+python benches/compare/python.py ab A=<python> B=<python>   # three rounds; --rounds N before them
+```
+
+See [below](#two-builds-of-a-package) for what it prints.
+
 ## Java
 
 ```sh
@@ -85,3 +93,37 @@ objects, which are not serialized: jlens as maps, lists and boxed values (`Expre
 
 Keep the machine idle while it runs: the three default parts take about 20 minutes in all, and
 `limits` about four more.
+
+To compare two builds of the package, keep a copy of each JAR, as the next build replaces the
+one in `crates/jlens-java/java/target`:
+
+```sh
+cargo xtask java-compare ab <A.jar> <B.jar>               # every part, jlens and jlens-objects
+cargo xtask java-compare ab <A.jar> <B.jar> cases --rounds 5
+```
+
+It builds the harness as above, takes the package's own JAR out of `target/deps`, and runs a JVM
+per run with one of the two first on the classpath. `--engines` and `--sizes` are the harness's;
+`limits` measures no time, and is refused. A JAR older than the harness must still have what
+`Engine.java` calls.
+
+## Two builds of a package
+
+`python.py ab` and `java-compare ab` do for a package what `cargo xtask ab` does natively: the
+runs alternate, A then B, then B then A, three rounds by default, so that a drift of the machine
+reaches both. They print each number's median for each build, the difference, and each build's
+spread, the slowest run against the fastest, to the nanosecond, where the tables above round
+(0.9 against 1.0 µs would read as 11%). `*` marks a difference above 2% that the runs agree on:
+no run of one build reaches the other's. An unmarked difference, however large, is one the runs
+do not settle. A JVM run is sometimes slow as a whole, by up to 1.4 times, which shows as a
+spread, not a difference; run more rounds. In `threads`, the numbers are evaluations per second,
+so that more is better there.
+
+A mark does not prove that the code differs. The runs of a build share its native library's
+file, and a time can follow the file: one wheel against a copy of itself in another environment,
+the same bytes, marked `transform` at -6.5% and `object constructor` at -3.7% (Windows, three
+rounds, 0.26 #13), and the same wheel measured 425, 449 and 456 µs on `transform` at three times
+of one day, each with its runs within 2%. So read a mark under about 7% as a question: before
+putting it down to a change, compare each build with a copy of itself, and see whether the mark
+stays. For a Python build, copy its environment; the Java package unpacks its library to one
+file per content, so a copy of a JAR shares it, and `-Djlens.library` must name the copy.

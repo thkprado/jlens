@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -17,7 +18,8 @@ import java.util.concurrent.atomic.LongAdder;
  * {@code cargo xtask java-compare}, in this project's directory; the arguments are the parts to
  * run ({@code documents}, {@code cases}, {@code threads}, all three when none is given, and
  * {@code limits}), then optionally {@code --engines jlens,jsonata-java,...} and {@code --sizes
- * 1000,100000}.
+ * 1000,100000}. With {@code --exact}, as {@code cargo xtask java-compare ab} runs it, the tables
+ * hold the numbers alone, to the tenth of a nanosecond.
  *
  * <ul>
  *   <li>{@code documents}: the documents of ADR 0021's spike, items with five fields each.
@@ -34,6 +36,7 @@ import java.util.concurrent.atomic.LongAdder;
  */
 public final class Compare {
     static final Path BENCHES = Path.of("..", "..");
+    static boolean exact;
 
     public static void main(String[] args) throws Exception {
         if (args.length == 3 && args[0].equals("--limit")) {
@@ -51,6 +54,7 @@ public final class Compare {
                 }
                 case "--sizes" ->
                     sizes = Arrays.stream(args[++i].split(",")).mapToInt(Integer::parseInt).toArray();
+                case "--exact" -> exact = true;
                 case "documents", "cases", "threads", "limits" -> parts.add(args[i]);
                 default -> throw new IllegalArgumentException("unknown argument " + args[i]);
             }
@@ -173,11 +177,20 @@ public final class Compare {
                     row.append(" differs |");
                     continue;
                 }
-                double us = measure(op);
-                row.append(String.format(us < 100 ? " %,.2f |" : " %,.0f |", us));
+                row.append(" ").append(microseconds(measure(op))).append(" |");
             }
         }
         System.out.println(row);
+    }
+
+    static String microseconds(double us) {
+        if (exact) return String.format(Locale.ROOT, "%.4f", us);
+        return String.format(us < 100 ? "%,.2f" : "%,.0f", us);
+    }
+
+    static String perSecond(double rate, double single) {
+        if (exact) return String.format(Locale.ROOT, "%.0f", rate);
+        return String.format("%,.0f (%.1f×)", rate, rate / single);
     }
 
     /** Whether two results are the same JSON, numbers compared by value (2 and 2.0). */
@@ -262,10 +275,10 @@ public final class Compare {
             for (int c : counts) {
                 double r = rate(op, c, false);
                 if (c == 1) single = r;
-                row.append(String.format(" %,.0f (%.1f×) |", r, r / single));
+                row.append(" ").append(perSecond(r, single)).append(" |");
             }
             double v = rate(op, 1000, true);
-            row.append(String.format(" %,.0f (%.1f×) |", v, v / single));
+            row.append(" ").append(perSecond(v, single)).append(" |");
             System.out.println(row);
         }
     }

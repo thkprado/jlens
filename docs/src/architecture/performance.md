@@ -27,7 +27,9 @@ cargo xtask bench-table                       # the native table below: the medi
 cargo xtask ab main .                         # two revisions against each other, native
 cargo xtask wasm && cd benches/compare && npm install && node compare.mjs   # against jsonata-js
 python benches/compare/python.py speed jlens=<python> ...   # against the Python packages
+python benches/compare/python.py ab A=<python> B=<python>   # two builds of the Python package
 cargo xtask java-compare                      # against the JVM implementations (benches/compare/README.md)
+cargo xtask java-compare ab <A.jar> <B.jar>   # two builds of the Java package
 cargo bench -p jlens-regress --bench engine   # the regular expression engine alone (below)
 ```
 
@@ -71,6 +73,15 @@ cargo xtask ab main . --mode source           # evaluate_source instead of evalu
 Comparing a revision with itself shows the noise. On the machine below, with ten rounds, the
 medians of most cases agree within 1%, and a few cases (`group-by`) within 3%. In `source`
 mode, the index into 10,000 items, which writes an object for each item, agrees within 6%.
+
+The Python and Java packages are compared the same way, wheel against wheel and JAR against
+JAR, with `python.py ab` and `cargo xtask java-compare ab`. The runs alternate, three rounds by
+default, and each prints the median of each number, the difference and the spread, to the
+nanosecond. `*` marks a difference above 2% on which no run of one build reaches the other's. An
+unmarked difference is one the runs do not settle, and a marked one under about 7% still needs
+checking: a time can follow the file of the native library, so that one wheel against a copy of
+itself marked `transform` at -6.5%
+([`benches/compare/README.md`](https://github.com/thkprado/jlens/blob/main/benches/compare/README.md#two-builds-of-a-package)).
 
 Code placement moves cases too: a change can make a case that runs none of its code 5 to 8%
 slower or faster, because the release profile (LTO, one codegen unit) lays the whole program out

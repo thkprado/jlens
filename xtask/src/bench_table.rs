@@ -65,11 +65,7 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
     for row in &rows {
         let mut times = row.times.clone();
         times.sort_by(f64::total_cmp);
-        let median = if times.len() % 2 == 1 {
-            times[times.len() / 2]
-        } else {
-            (times[times.len() / 2 - 1] + times[times.len() / 2]) / 2.0
-        };
+        let median = median(&times);
         let spread = times[times.len() - 1] / times[0] - 1.0;
         let agree = times
             .iter()
@@ -86,6 +82,15 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// The median of `sorted`, which is not empty.
+pub(crate) fn median(sorted: &[f64]) -> f64 {
+    if sorted.len() % 2 == 1 {
+        sorted[sorted.len() / 2]
+    } else {
+        (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
+    }
 }
 
 /// One benchmark, with its time in each run, in nanoseconds.

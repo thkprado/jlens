@@ -92,7 +92,8 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    docstring says how), and the Java ones with `cargo xtask java-compare`
    (`benches/compare/README.md`), together with the text that quotes their numbers. Compare the new
    numbers with the old table, not only one revision with another: a change in the benchmark
-   scripts shows only there.
+   scripts shows only there. The Python and Java packages are compared with the previous release
+   by `python.py ab` and `cargo xtask java-compare ab`.
 4. Check that everything passes, including the packages:
 
    ```sh

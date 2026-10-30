@@ -11,6 +11,10 @@ All notable changes are recorded here. The format follows
 - `cargo xtask bench-table` measures the native table of the performance page: it runs the
   native benchmark three times (`--runs`) and prints each case's median and spread, marking a
   case whose runs mostly disagree with the median by more than 2%.
+- `python.py ab` and `cargo xtask java-compare ab` compare two builds of the Python and Java
+  packages, wheel against wheel and JAR against JAR, as `cargo xtask ab` compares native ones:
+  runs in alternation, each number's median, spread and difference to the nanosecond, marking a
+  difference above 2% that the runs agree on.
 - `Output::is_array_or_object` in `jlens-core`: whether a result is an array or an object,
   before it is written, so that a host can build any other result after the evaluation has
   returned.

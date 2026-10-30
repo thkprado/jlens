@@ -5,6 +5,7 @@ environment of its own; this script runs in each of them:
 
     python python.py speed  [--max-steps N] jlens=<python> jsonatapy=<python> ...
     python python.py limits jlens=<python> jsonatapy=<python> jsonata-python=<python> ...
+    python python.py ab [--rounds N] A=<python> B=<python>
 
 where each name is a key of IMPLEMENTATIONS (`jlens`, `jsonatapy`, `jsonata-python`,
 `jsonata-rs`), and <python> the interpreter of the environment that holds that package. Only the
@@ -19,6 +20,14 @@ implementation gives jlens's result. With `--max-steps N`, jlens evaluates with 
 `limits` runs each case of LIMITS in a process of its own, so that a crash ends that process
 only, and prints what came out: a result, an exception, the process killed by a signal, or
 still running after LIMIT_WALL seconds.
+
+`ab` compares two builds of jlens, each in the environment of the interpreter given, as `cargo
+xtask ab` compares native ones: it runs `speed`'s measurement of jlens in alternation, A then B,
+then B then A, three rounds by default. It prints, for each case, each build's median, the
+difference, and each build's spread, the slowest run against the fastest, in microseconds to the
+nanosecond, as `speed`'s 0.1 µs would read 0.9 against 1.0 µs, 11%, on noise. `*` marks a
+difference above AB_MARK that the runs agree on: no run of the slower build is as fast as a run
+of the other. The names before `=` are the builds' labels.
 """
 
 import json
@@ -30,6 +39,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 LIMIT_WALL = 30  # seconds before a limits case is killed
+AB_MARK = 0.02  # the difference `ab` marks
 
 
 # --- The implementations -------------------------------------------------------------------
@@ -252,21 +262,28 @@ def _fmt(us):
     return f"{us:.1f} µs"
 
 
+def _speed_run(name, python, *limits):
+    """`speed_child`'s report from the interpreter `python`, or None if it failed."""
+    proc = subprocess.run(
+        [python, "-I", str(Path(__file__).resolve()), "speed-child", name, *limits],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if proc.returncode != 0:
+        print(f"{name}: exit code {proc.returncode}\n{proc.stderr[-2000:]}", file=sys.stderr)
+        return None
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
 def speed(pythons, max_steps=None):
     runs = {}
     for name, python in pythons.items():
         print(f"measuring {name} ...", file=sys.stderr)
         limits = [max_steps] if max_steps is not None and name == "jlens" else []
-        proc = subprocess.run(
-            [python, "-I", str(Path(__file__).resolve()), "speed-child", name, *limits],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
-        if proc.returncode != 0:
-            print(f"{name}: exit code {proc.returncode}\n{proc.stderr[-2000:]}", file=sys.stderr)
-            continue
-        runs[name] = json.loads(proc.stdout.strip().splitlines()[-1])
+        run = _speed_run(name, python, *limits)
+        if run is not None:
+            runs[name] = run
     reference = runs.get("jlens")
     order = [n for n in runs if n != "jlens"] + (["jlens"] if reference else [])
     print(", ".join(f"{n} {runs[n]['version']}" for n in order), f"on Python {runs[order[0]]['python']}")
@@ -292,6 +309,55 @@ def speed(pythons, max_steps=None):
             else:
                 cells.append(_fmt(entry[key]))
         print(f"| {case} | " + " | ".join(cells) + " |")
+
+
+def _ab_row(case, key, a, b):
+    """The cells after the case's name, for the reports `a` and `b` of the two builds."""
+    entries = [run["cases"][case] for run in a + b]
+    failed = next((entry["error"] for entry in entries if "error" in entry), None)
+    if failed is not None:
+        return f"fails: {failed}"
+    if any(entry["result"] != entries[0]["result"] for entry in entries):
+        return "differs"
+    times_a, times_b = ([run["cases"][case][key] for run in runs] for runs in (a, b))
+    median_a, median_b = statistics.median(times_a), statistics.median(times_b)
+    change = median_b / median_a - 1
+    apart = min(times_a) > max(times_b) or min(times_b) > max(times_a)
+    mark = "  *" if apart and abs(change) > AB_MARK else ""
+    spread_a, spread_b = (max(times) / min(times) - 1 for times in (times_a, times_b))
+    return (
+        f"{median_a:>10.3f}  {median_b:>10.3f}  {change:>+7.1%}  "
+        f"{spread_a:>8.1%}  {spread_b:>8.1%}{mark}"
+    )
+
+
+def ab(pythons, rounds=3):
+    if len(pythons) != 2 or rounds < 1:
+        sys.exit("ab takes at least one round and two interpreters: A=<python> B=<python>")
+    labels = list(pythons)
+    runs = {label: [] for label in labels}
+    for round_ in range(rounds):
+        print(f"round {round_ + 1} of {rounds}", file=sys.stderr)
+        for label in labels if round_ % 2 == 0 else reversed(labels):
+            run = _speed_run("jlens", pythons[label])
+            if run is None:
+                sys.exit(f"the run of {label} failed")
+            runs[label].append(run)
+    a, b = runs.values()
+    _, cases = _cases()
+    width = max(len(case) for case, *_ in cases)
+    for label in labels:
+        run = runs[label][0]
+        print(f"{label} is jlens {run['version']} on Python {run['python']}")
+    for key in ("evaluate", "document"):
+        print(f"\n{key}, {rounds} rounds: the median in microseconds, and the spread\n")
+        print(
+            f"{'case':{width}}  {labels[0] + ' median':>10}  {labels[1] + ' median':>10}"
+            f"  {'B/A':>7}  {labels[0] + ' spread':>8}  {labels[1] + ' spread':>8}"
+        )
+        for case, *_ in cases:
+            print(f"{case:{width}}  {_ab_row(case, key, a, b)}")
+    print(f"\n* a difference above {AB_MARK:.0%}, and no run of one build reaches the other's")
 
 
 # --- limits ----------------------------------------------------------------------------------
@@ -388,6 +454,11 @@ def main():
         limit_child(*args)
     elif command == "speed" and args[:1] == ["--max-steps"]:
         speed(dict(arg.split("=", 1) for arg in args[2:]), max_steps=args[1])
+    elif command == "ab":
+        rounds = 3
+        if args[:1] == ["--rounds"]:
+            rounds, args = int(args[1]), args[2:]
+        ab(dict(arg.split("=", 1) for arg in args), rounds)
     else:
         pythons = dict(arg.split("=", 1) for arg in args)
         {"speed": speed, "limits": limits}[command](pythons)
