@@ -596,7 +596,8 @@ from what they needed, missed or worked around, not guessed beforehand.
 | 3 | `jlens-schema` and `jlens-lsp` changes as ADR 0015 says | As #2 | |
 | 4 | The contracts outside Rust, as ADR 0015 says: the Wasm API, the Python package, the Java package, the JSON of audits and `jlens.json`; a test pins each, so that a change shows in review | Tests that fail on an unintended change of each contract | |
 | 5 | A stability page in the book, from ADR 0015, and the rules for changing a stable item in `CONTRIBUTING.md` | `doc-check` green; the page linked from the introduction | |
-| 6 | The release that breaks once. 1.0.0 follows when ADR 0015's criterion is met | The release checklist, with the migration notes in the release notes | |
+| 6 | A source that fails with a JSONata code. Found by 0.26 #9: `Source` and `Sources` fail with a message, which the core always turns into `U1004`, so input nested more than 1,000 levels deep fails with `U1001` as JSON text and with `U1004` as Java objects or a C API host's values, read as the expression goes; the C API also gives one message for a cycle and for deep input, as it cannot tell them apart. The error type of the reading methods carries a code (`U1004` by default, `U1001` for nesting), and each source says which limit it met; in the C API, a node inside itself that the host does not report (the Java `Reader` does) is seen as deep input. A change to public traits, so it goes with #2's batch | The same input nested too deep fails with the same code from JSON text, a `Document`, Python, JavaScript and Java values and a C API host; a cycle that the host or package detects stays `U1004`; tests in each package | |
+| 7 | The release that breaks once. 1.0.0 follows when ADR 0015's criterion is met | The release checklist, with the migration notes in the release notes | |
 
 ## Not planned
 
