@@ -5,7 +5,7 @@
 //! sequences. Tracers turn these events into something useful:
 //!
 //! * [`AuditCollector`] builds an [`AuditTree`], which records how the result was reached with
-//!   business labels from [annotations](crate::annotation). [`explain`] summarizes it.
+//!   business labels from [annotations](crate::annotation). [`explain()`] summarizes it.
 //! * [`JsonlTracer`] writes one JSON object per event, for offline analysis.
 //! * `TracingTracer` (feature `tracing`) forwards events to the `tracing` crate.
 //!

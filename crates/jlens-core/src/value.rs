@@ -1818,7 +1818,7 @@ fn write_json<'a>(
     Ok(())
 }
 
-/// The value that parsing the text of [`stringify`] gives, made without the text: a deep copy
+/// The value that parsing the text of [`stringify()`] gives, made without the text: a deep copy
 /// in which numbers are rounded to 15 significant digits, functions are `""`, and undefined is
 /// `null` in an array and left out of an object. Strings and keys are shared with `value`. It
 /// fails as `stringify` does, the text it would write counted and checked against `limit` where
