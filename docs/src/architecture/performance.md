@@ -209,10 +209,13 @@ knows the size they were created with.
 
 Now the first thread that reaches `stack::grow`, when it is the main thread and `RLIMIT_STACK`
 is at least 4 MiB, uses 1 MiB of its stack first, which the kernel maps and musl then counts.
-Deeper recursion still runs on new segments. Only the first thread is looked at, so that later
-calls cost an atomic load: a thread-local, which a library loaded at run time reaches through
-a call, made group-by 2% slower from Java. A process whose main thread evaluates only after
-another thread has keeps the cost there.
+Deeper recursion still runs on new segments. The pages used stay resident: the process keeps
+about 1 MiB more memory, where a new segment was mapped and unmapped at each evaluation. Only
+the first thread is looked at, so that later calls cost an atomic load: a thread-local, which
+a library loaded at run time reaches through a call, made group-by 2% slower from Java. A
+process whose main thread evaluates only after another thread has keeps the cost there. The
+cause is [stacker#155](https://github.com/rust-lang/stacker/issues/155); a fix there would
+replace this one.
 
 `cargo xtask ab` before and after (0.26 #8), `evaluate`, the median of ten rounds, musl in WSL
 on the machine above, and the same revision with `mimalloc`:
