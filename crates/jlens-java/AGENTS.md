@@ -8,16 +8,6 @@ Guidance for working in the Java package. The repository-wide rules are in the r
 - `java/`: the Maven project (`io.github.thkprado:jlens`), the module
   `io.github.thkprado.jlens`, built with the Maven Wrapper (`mvnw`, `mvnw.cmd`; no JAR is
   committed, the scripts download Maven and check its SHA-256).
-- `java/src/main/java/io/github/thkprado/jlens/`: the public classes (`Expression`, `Document`,
-  `Options`, `Read`, `Reads`, `Bindings`, `HostFunction`, `JsonataFunction`, `JlensException`,
-  and the audits' records: `AuditOptions`, `CaptureLimits`, `AuditLevel`, `AuditResult`,
-  `AuditTree`, `AuditNode`, `AuditError`, `Explanation`, `Span`),
-  `Native` (the C API's downcalls and the two upcalls, the loading of the library), `Reader`
-  (Java objects as input, a level at a time, for the C API's upcall), `Host` (host functions,
-  for the other upcall, and the exceptions of an evaluation), `Values` (the decoder of results
-  as Java objects), `Writer` (its encoder, for host functions' results, bindings and the input of
-  an audit), `Audits` (the records of an audit, from the C API's reply) and `Json` (the JSON
-  the package reads and writes itself).
 - `java/src/test/java/`: the JUnit suite, in the module's package.
 - `java/native/<os>-<arch>/`: the native libraries the JAR carries (not committed), put there by
   `cargo xtask java` for the host, or by the JAR workflow for the seven release targets; the

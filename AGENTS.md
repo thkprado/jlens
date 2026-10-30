@@ -2,25 +2,20 @@
 
 Guidance for coding agents working in this repository. Humans: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-jlens is a JSONata 2.2 engine in Rust, ported from jsonata-js 2.2.2. It has evaluation audits
-and schema-driven editor support, and ships as crates (`jlens-core`, `jlens-schema`,
-`jlens-lsp`, `jlens-cli`) and as the npm package `jlens-wasm`. The documentation is an mdBook
-in `docs/`.
+jlens is a JSONata 2.2 engine in Rust, ported from jsonata-js 2.2.2.
 
 ## Map
 
 | Path | What lives there |
 |---|---|
-| `crates/jlens-core/src` | `lexer.rs`, `parser.rs` (Pratt, recover mode), `process.rs` (raw tree → `Ast`), `eval.rs` (interpreter), `value.rs` (value and sequence model), `functions/` (library and catalog), `datetime.rs`, `regex.rs`, `signature.rs`, `error.rs` (codes and messages), `audit/` (tracer, collector, explain), `document.rs`, `input.rs` (the `Source` trait, ADR 0010), `stack.rs` |
 | `crates/jlens-regress` | jlens's own fork of `regress` 0.12.0 with interruptible matches (ADR 0009, 0020); upstream fixes are ported one commit at a time, never rebased; keep the diff to upstream small, mark changes `jlens-regress` |
 | `crates/jlens-wasm` | wasm-bindgen bindings; `src/source.rs` reads `evaluate`'s input object (a JavaScript helper per level); `src/types.d.ts` holds the hand-written TypeScript declarations; `tests/` holds the JS suite (`suite.mjs`), shared by Node and the browser; its own rules are in `crates/jlens-wasm/AGENTS.md` |
 | `crates/jlens-python` | the Python package `jlens` (ADR 0014), PyO3 bindings built by maturin; its Rust code is not unit-tested by `cargo test`; its own rules are in `crates/jlens-python/AGENTS.md` |
-| `crates/jlens-capi` | the C API under the Java package (ADR 0021), not published: buffers, expressions, options, documents and bindings known by handle, the host's own values read through a reader it calls back (`src/source.rs`), host functions it calls back too (`src/host.rs`), audits replied as values (`src/audit.rs`), replies with a status byte, mimalloc as its allocator; the one crate where `unsafe_code` is `deny`, allowed only on `src/exports.rs` for `#[unsafe(no_mangle)]`, which `tests/no_unsafe.rs` checks; every export catches panics (a panic in `extern "C"` aborts the JVM) |
+| `crates/jlens-capi` | the C API under the Java package (ADR 0021), not published; its own rules are in `crates/jlens-capi/AGENTS.md` |
 | `crates/jlens-java` | the Java package (ADR 0021), not a Cargo crate (the workspace excludes it): a Maven project in `java/` over `jlens-capi`, built with its Maven Wrapper; `cargo xtask java` builds the C API and runs its JUnit suite; its own rules are in `crates/jlens-java/AGENTS.md` |
 | `tests/jsonata-suite` | the vendored official suite (do not edit by hand; `cargo xtask update-suite` replaces it and applies `SUITE_EDITS`) |
 | `docs/src` | the book; `language/functions.md` and `language/errors.md` are generated |
-| `xtask/src` | `cargo xtask` commands: conformance, gen-docs, doc-check, mdbook-dedent (the book's preprocessor, `docs/book.toml`), differential, regex-corpus, regex-differential, fuzz-seed, fuzz-replay, homebrew, npm-cli, vscode, wasm, wasm-test, java, java-compare, serve, site, ab, bench-table |
-| `benches/` | the benchmark workload; `cargo xtask ab` compares two revisions; `benches/compare` compares jlens with jsonata-js (npm): speed, the book's examples, and `cargo xtask differential`; with the Python packages (`python.py`) and the JVM implementations (`java/`, `cargo xtask java-compare`); its README says how to run each |
+| `benches/` | the benchmark workload; `benches/compare` compares jlens with other engines; its README says how to run each |
 | `editors/vscode` | the VS Code extension (ADR 0013; outside the Cargo workspace); its grammar test tokenizes the suite and the book; its own rules are in `editors/vscode/AGENTS.md` |
 | `fuzz/` | cargo-fuzz targets (nightly, Linux; outside the workspace), their bodies in `src/targets.rs`; corpora seeded by `cargo xtask fuzz-seed`, run weekly by `.github/workflows/fuzz.yml`; `cargo xtask fuzz-replay` reruns saved inputs on any platform |
 
