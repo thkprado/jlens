@@ -59,7 +59,7 @@ pub const UNDEFINED: u8 = 10;
 
 /// The deepest the host's values may nest, as deep as the core lets a result nest: deeper, a
 /// value would be dropped by recursion.
-const MAX_NESTING: usize = 1_000;
+pub(crate) const MAX_NESTING: usize = 1_000;
 
 /// 2^63: the integral numbers from -2^63 up to it, not included, fit an `i64`.
 const I64_BOUND: f64 = 9_223_372_036_854_775_808.0;

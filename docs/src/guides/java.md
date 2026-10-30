@@ -112,7 +112,8 @@ a list.
 | `null` | `null` |
 
 Anything else, such as a `Date`, a key that is not a `String`, or a map or list inside itself,
-has no JSON form. Two consequences follow from reading the input as the expression goes:
+has no JSON form, and a map or list nested more than 1,000 levels deep is not read, as JSON text
+that deep is not parsed. Two consequences follow from reading the input as the expression goes:
 
 - **Errors appear when their part is read.** A value that cannot be read stops the evaluation
   with `U1004` when the expression reads it; one it never reaches does no harm.

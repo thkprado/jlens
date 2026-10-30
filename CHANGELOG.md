@@ -63,6 +63,13 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- The C API no longer reads a host's input for ever when a level holds its own array or object,
+  which made a path such as `a.b` flatten the same array again and again. Reading an array or
+  object nested more than 1,000 levels deep now fails with `U1004`; a node is one level deeper
+  than the level that last wrote it, so a node inside itself gets deeper at each read and stops
+  there. The Java package, which refuses a map or list inside itself, was not exposed; over
+  Java objects, a map or list nested more than 1,000 levels deep now fails with `U1004` when it
+  is read.
 - `$clone`, and a transform, of a value nested more than 128 levels deep failed with `D3141`:
   the JSON text was parsed with a limit of 128 levels. A value is copied up to the 1,000 levels
   that `$string` writes, as jsonata-js copies it.

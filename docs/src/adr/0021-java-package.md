@@ -1233,3 +1233,28 @@ within 2.5% between the two, `recursion` aside:
   measurements from 0.25 #12 on are close, though not of the code they name. The performance
   page's Java tables were measured under Linux, whose order of `deps/*` is the directory's;
   0.26.0 measures them again.
+
+## Results: a host's input that never ends (0.26 #9)
+
+The C API reads a host's arrays and objects as the expression reaches them, and trusted the host
+to bound them. A reader that answers a node with a level holding that same node, an array inside
+itself, made `a.b` flatten arrays for ever. The Java package refuses a map or list inside itself
+when its `Reader` writes it, so only a C API host that misses a cycle was exposed, and the
+property test whose reader returns any bytes could hang, rarely.
+
+- **Each node has a depth**, one more than the level that last wrote it (the input's level is
+  depth 1), kept in a table by node number. Reading a node deeper than 1,000 levels, as deep as
+  JSON text is parsed, fails with `U1004`. A node inside itself is written again at each read,
+  one level deeper each time, so it stops there. The C API cannot tell a cycle from deep input,
+  and the message names both.
+- **The table stays as long as the levels.** The host numbers its nodes from 0 as it writes them,
+  so a node numbered past the bytes of the levels read so far is out of the form and fails with
+  `U1004`; before, it was only not held (the CI fix of 0.26 #4).
+- **Over Java objects**, a map or list nested more than 1,000 levels deep fails with `U1004` when
+  it is read. `$string($)` on input nested 2,000 or 100,000 levels still fails with `U1001`, as
+  the core stops writing before it reads level 1,001, so the limits table does not change.
+- **The cost** is a write per array or object of a level and a look-up per read. With
+  `cargo xtask java-compare cases`, the median of three runs alternated with the code before,
+  over Java maps each case took 0.5 to 4.4% longer (median 2.5%), and over a `Document`, which
+  the change does not touch, 0 to 3.4% longer (median 0.9%): about 1 to 2%, within the 4.5% by
+  which two builds of the same library differ (0.26 #7).

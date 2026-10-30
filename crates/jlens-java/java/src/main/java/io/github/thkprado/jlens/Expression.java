@@ -140,8 +140,8 @@ public final class Expression implements AutoCloseable {
      *       {@code double}; one that is not finite as {@code null}, as JSON has none.
      * </ul>
      *
-     * <p>Any other object, a key that is not a string, or a map or list inside itself fails the
-     * evaluation with {@code U1004} when it is read. A string is a JSON string, not JSON text:
+     * <p>Any other object, a key that is not a string, a map or list inside itself, or one nested
+     * more than 1,000 levels deep fails the evaluation with {@code U1004} when it is read. A string is a JSON string, not JSON text:
      * {@link #evaluateFromJson(String)} parses text. A {@link Document} is evaluated as one.
      *
      * <p>A map or list of the input that the result holds unchanged is returned as itself, not

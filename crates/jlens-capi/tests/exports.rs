@@ -3,9 +3,10 @@
 
 use jlens_capi::exports::*;
 use jlens_capi::source::{
-    ARRAY_WITH, DECLINED, FIELD, INPUT, ITEM, LENGTH, OBJECT_SOME, OBJECT_WITH, READ, VALUES,
+    ARRAY_WITH, DECLINED, FIELD, FIELDS, INPUT, ITEM, LENGTH, OBJECT_SOME, OBJECT_WITH, READ,
+    VALUES,
 };
-use jlens_capi::values::{ARRAY, UNDEFINED};
+use jlens_capi::values::{ARRAY, OBJECT, UNDEFINED};
 use jlens_capi::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, REPLY_VALUES, buffers};
 use serde_json::{Value, json};
 
@@ -1014,6 +1015,11 @@ fn the_reader_fails_cleanly() {
             // As values, the input is returned whole, never built.
             let (reply, _, _) = on_host(whole, &deep, host::PLAIN, 1);
             assert_eq!(reply, Reply::Values(vec![INPUT, 0, 0, 0, 0]));
+            // Reading an array nested more than 1,000 levels deep fails (0.26 #9).
+            let count = compile("$count($.**)");
+            let (reply, _, _) = on_host(count, &deep, host::PLAIN, 0);
+            assert_eq!(code(&reply), "U1004", "{reply:?}");
+            assert_eq!(jlens_expression_free(count), 1);
             (stringify, whole)
         })
         .unwrap()
@@ -1035,5 +1041,85 @@ fn the_reader_fails_cleanly() {
     assert_eq!(code(&unknown), "U2002");
     for expression in [expression, stringify, whole] {
         assert_eq!(jlens_expression_free(expression), 1);
+    }
+}
+
+/// A level that holds its own node, an array or object inside itself, never makes an
+/// evaluation run for ever: the node is one level deeper at each read, and one nested more
+/// than 1,000 levels deep is not read (0.26 #9). Each expression of the property tests ends.
+#[test]
+fn a_node_inside_itself_stops_the_evaluation() {
+    let input = json!({"a": [{"b": 1}]});
+    let levels = [
+        // Every call answers node 0, the input, as an array holding node 0 ...
+        vec![10, 0, 0, 0, VALUES, 1, 0, 0, 0, ARRAY, 0, 0, 0, 0],
+        // ... as an object, the value of every field ...
+        vec![10, 0, 0, 0, VALUES, 1, 0, 0, 0, OBJECT, 0, 0, 0, 0],
+        // ... as fields holding node 0 ...
+        vec![
+            25, 0, 0, 0, FIELDS, 2, 0, 0, 0, 1, 0, 0, 0, b'a', OBJECT, 0, 0, 0, 0, 1, 0, 0, 0,
+            b'b', ARRAY, 0, 0, 0, 0,
+        ],
+        // ... or as an array written with its items, node 0 again, read without calling the
+        // reader.
+        vec![
+            19, 0, 0, 0, VALUES, 1, 0, 0, 0, ARRAY_WITH, 0, 0, 0, 0, 1, 0, 0, 0, ARRAY, 0, 0, 0, 0,
+        ],
+    ];
+    let expressions = [
+        "$",
+        "a",
+        "a.b",
+        "*",
+        "**",
+        "$.*[0]",
+        "a[0]",
+        "a[-1].b",
+        "($i := 1; a[$i])",
+        "$count(a)",
+        "$string($)",
+        "$keys($)",
+        "[$]",
+        "{'v': a}",
+        "$ ~> | $ | {'x': 1} |",
+        "a[b = 1]",
+        "$sort(a)",
+    ];
+    let (done, ended) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(move || {
+            host::Host::know(&["a", "b", "x", "v"]);
+            let mut outcomes = Vec::new();
+            for (n, level) in levels.iter().enumerate() {
+                for text in expressions {
+                    let expression = compile(text);
+                    for result in 0..2 {
+                        host::HOST.with_borrow_mut(|host| host.garbage = level.clone());
+                        let (reply, _, _) = on_host(expression, &input, host::GARBAGE, result);
+                        let outcome = match reply {
+                            Reply::Error(error) => error["code"].as_str().unwrap().to_owned(),
+                            _ => "a result".to_owned(),
+                        };
+                        outcomes.push((n, text, result, outcome));
+                    }
+                    assert_eq!(jlens_expression_free(expression), 1);
+                }
+            }
+            done.send(outcomes).unwrap();
+        })
+        .unwrap();
+    let outcomes = ended
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("every evaluation ends");
+    for (level, text, result, outcome) in outcomes {
+        match outcome.as_str() {
+            // An array inside itself, flattened for ever before 0.26 #9.
+            _ if text == "a.b" && (level == 0 || level == 3) => {
+                assert_eq!(outcome, "U1004", "level {level}")
+            }
+            "a result" | "U1001" | "U1004" => {}
+            _ => panic!("level {level}, {text}, result {result}: {outcome}"),
+        }
     }
 }

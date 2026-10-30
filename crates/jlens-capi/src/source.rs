@@ -45,7 +45,11 @@
 //! level stays as large as its values and theirs.
 //!
 //! The evaluation's input itself is given as a level of [`VALUES`] holding one value, before
-//! the evaluation starts. A level that is not in this form fails with `U1004` too.
+//! the evaluation starts. A level that is not in this form fails with `U1004` too, and so does
+//! reading an array or object nested more than 1,000 levels deep, as deep as JSON text may
+//! nest: the depth of a node is that of the level that last wrote it, plus one, so that a
+//! level holding its own node, an array inside itself, stops there rather than being read for
+//! ever (0.26 #9).
 //!
 //! A reply in values gives an array or object of the input that the result holds unchanged as
 //! the tag [`INPUT`] and its node's number, so that the host can return its own object.
@@ -56,7 +60,9 @@ use std::rc::{Rc, Weak};
 use jlens_core::input::{Sink, Source, Sources};
 
 use crate::buffers::{self, Buffer};
-use crate::values::{ARRAY, FALSE, FLOAT, INTEGER, NULL, OBJECT, STRING, TRUE, UNDEFINED};
+use crate::values::{
+    ARRAY, FALSE, FLOAT, INTEGER, MAX_NESTING, NULL, OBJECT, STRING, TRUE, UNDEFINED,
+};
 
 /// The host's reader of levels (see the [module](self) documentation).
 pub type Reader =
@@ -105,6 +111,7 @@ pub struct Host {
     /// again by its handle would take the lock of the table of buffers at each call.
     last: RefCell<Option<(u64, Buffer)>>,
     held: RefCell<Held>,
+    depths: RefCell<Depths>,
 }
 
 /// The nodes written with their contents, read from the levels that hold them.
@@ -115,10 +122,40 @@ struct Held {
     /// By node number: the index of its level plus one (0 for a node not held), where its
     /// contents start in it, and the tag it was written with.
     nodes: Vec<(u32, u32, u8)>,
+}
+
+/// The depth of each node written, by its number: how many arrays and objects hold it, itself
+/// included.
+#[derive(Default)]
+struct Depths {
+    of: Vec<u16>,
     /// The bytes of the levels decoded so far. The host numbers its nodes as it writes them,
-    /// from 0, so none has a number this large; a node that has, from a host out of the
-    /// form, is not held, and `nodes` stays no longer than the levels.
+    /// from 0, so none has a number this large: one that has is out of the form, which keeps
+    /// the tables by node number no longer than the levels.
     read: usize,
+}
+
+/// The depths a level's decoding records.
+struct Nest<'d> {
+    depths: &'d mut Depths,
+    /// The depth of the level's arrays and objects.
+    depth: u16,
+}
+
+impl Nest<'_> {
+    /// Records that node `node` is at the level's depth.
+    fn node(&mut self, node: u32) -> Result<(), String> {
+        let slot = node as usize;
+        if slot >= self.depths.read {
+            return Err(format!("node {node} is numbered past the nodes written"));
+        }
+        let of = &mut self.depths.of;
+        if slot >= of.len() {
+            of.resize(slot + 1, 0);
+        }
+        of[slot] = self.depth;
+        Ok(())
+    }
 }
 
 impl Held {
@@ -141,12 +178,9 @@ struct Record<'h, 'b> {
 
 impl Record<'_, '_> {
     /// Records that the contents of node `node`, written with `tag`, start at `rest`, a suffix
-    /// of the level.
+    /// of the level; [`Nest::node`] has checked its number.
     fn node(&mut self, node: u32, tag: u8, rest: &[u8]) {
         let slot = node as usize;
-        if slot >= self.held.read {
-            return;
-        }
         let index = match self.index {
             Some(index) => index,
             None => {
@@ -171,16 +205,32 @@ impl Host {
             this: this.clone(),
             last: RefCell::new(None),
             held: RefCell::default(),
+            depths: RefCell::default(),
         })
     }
 
-    /// Calls the reader and writes the level it returns to `sink`: `false` when it declined.
+    /// The depth of the arrays and objects that node `node` holds; an error for a node nested
+    /// more than [`MAX_NESTING`] levels deep, which is not read.
+    fn inside(&self, node: u32) -> Result<u16, String> {
+        let depths = self.depths.borrow();
+        let depth = depths.of.get(node as usize).copied().unwrap_or_default();
+        match usize::from(depth) <= MAX_NESTING {
+            true => Ok(depth + 1),
+            false => Err(format!(
+                "an array or object is nested more than {MAX_NESTING} levels deep, or inside itself"
+            )),
+        }
+    }
+
+    /// Calls the reader and writes the level it returns, at `depth`, to `sink`: `false` when
+    /// it declined.
     fn level(
         &self,
         op: u32,
         node: u32,
         index: u64,
         key: &str,
+        depth: u16,
         sink: &mut Sink<'_, '_>,
     ) -> Result<bool, String> {
         let address = key.as_ptr().expose_provenance();
@@ -194,20 +244,31 @@ impl Host {
                 &last.insert((level, buffer)).1
             }
         };
-        buffer.with(|bytes| self.write(bytes, op != READ, sink))
+        buffer.with(|bytes| self.write(bytes, op != READ, depth, sink))
     }
 
-    /// Writes the level in `bytes` to `sink`, its arrays and objects as members of this host:
-    /// `false` when the reader declined, which it `may`.
-    fn write(&self, bytes: &[u8], may: bool, sink: &mut Sink<'_, '_>) -> Result<bool, String> {
+    /// Writes the level in `bytes` to `sink`, its arrays and objects as members of this host at
+    /// `depth`: `false` when the reader declined, which it `may`.
+    fn write(
+        &self,
+        bytes: &[u8],
+        may: bool,
+        depth: u16,
+        sink: &mut Sink<'_, '_>,
+    ) -> Result<bool, String> {
         // A member is read through its `Rc`, so the host is alive.
         let this = self.this.upgrade().ok_or("the input is gone")?;
         let mut bytes = Bytes(bytes);
         let len = bytes.u32()? as usize;
         let level = bytes.0.get(..len).ok_or("a level longer than its buffer")?;
         let mut bytes = Bytes(level);
+        let mut depths = self.depths.borrow_mut();
+        depths.read = depths.read.saturating_add(level.len());
+        let mut nest = Nest {
+            depths: &mut depths,
+            depth,
+        };
         let mut held = self.held.borrow_mut();
-        held.read = held.read.saturating_add(level.len());
         let mut record = Record {
             held: &mut held,
             level,
@@ -215,7 +276,9 @@ impl Host {
         };
         let kind = bytes.byte()?;
         match kind {
-            VALUES | FIELDS => bytes.contents(kind == FIELDS, &this, sink, Some(&mut record))?,
+            VALUES | FIELDS => {
+                bytes.contents(kind == FIELDS, &this, sink, Some(&mut record), &mut nest)?
+            }
             FAILED => return Err(String::from_utf8_lossy(bytes.0).into_owned()),
             DECLINED if may => return Ok(false),
             kind => return Err(format!("a level of kind {kind} where none is expected")),
@@ -226,12 +289,17 @@ impl Host {
         }
     }
 
-    /// Runs `f` on the contents of node `node` when it was written with them, and the tag it
-    /// was written with; `None` when it was not, or when `f` gives none.
-    fn held<R>(&self, node: u32, f: impl FnOnce(Bytes<'_>, u8) -> Option<R>) -> Option<R> {
+    /// Runs `f` on the contents of node `node` when it was written with them, the tag it was
+    /// written with, and the depths of the nodes; `None` when it was not, or when `f` gives
+    /// none.
+    fn held<R>(
+        &self,
+        node: u32,
+        f: impl FnOnce(Bytes<'_>, u8, &mut Depths) -> Option<R>,
+    ) -> Option<R> {
         let held = self.held.borrow();
         let (bytes, tag) = held.contents(node)?;
-        f(bytes, tag)
+        f(bytes, tag, &mut self.depths.borrow_mut())
     }
 }
 
@@ -279,6 +347,7 @@ impl<'b> Bytes<'b> {
         host: &Rc<Host>,
         sink: &mut Sink<'_, '_>,
         mut record: Option<&mut Record<'_, '_>>,
+        nest: &mut Nest<'_>,
     ) -> Result<(), String> {
         let count = self.u32()? as usize;
         sink.reserve(count);
@@ -286,7 +355,7 @@ impl<'b> Bytes<'b> {
             if fields {
                 sink.key(self.text()?);
             }
-            self.value(host, sink, record.as_deref_mut())?;
+            self.value(host, sink, record.as_deref_mut(), nest)?;
         }
         Ok(())
     }
@@ -296,6 +365,7 @@ impl<'b> Bytes<'b> {
         host: &Rc<Host>,
         sink: &mut Sink<'_, '_>,
         record: Option<&mut Record<'_, '_>>,
+        nest: &mut Nest<'_>,
     ) -> Result<(), String> {
         match self.byte()? {
             NULL => sink.null(),
@@ -307,11 +377,18 @@ impl<'b> Bytes<'b> {
                 _ => sink.null(),
             },
             STRING => sink.string(self.text()?),
-            ARRAY => sink.array_of(host, self.u32()?),
-            OBJECT => sink.object_of(host, self.u32()?),
+            tag @ (ARRAY | OBJECT) => {
+                let node = self.u32()?;
+                nest.node(node)?;
+                match tag {
+                    ARRAY => sink.array_of(host, node),
+                    _ => sink.object_of(host, node),
+                }
+            }
             tag @ (ARRAY_WITH | OBJECT_WITH | OBJECT_SOME) => {
                 let record = record.ok_or("a node's contents inside the contents of another")?;
                 let node = self.u32()?;
+                nest.node(node)?;
                 record.node(node, tag, self.0);
                 self.skip_contents(tag)?;
                 match tag {
@@ -360,6 +437,7 @@ impl<'b> Bytes<'b> {
         some: bool,
         host: &Rc<Host>,
         sink: &mut Sink<'_, '_>,
+        nest: &mut Nest<'_>,
     ) -> Result<bool, String> {
         for _ in 0..self.u32()? {
             if self.utf8()? != key.as_bytes() {
@@ -367,7 +445,7 @@ impl<'b> Bytes<'b> {
             } else if some && self.0.first() == Some(&UNDEFINED) {
                 return Ok(true);
             } else {
-                return self.value(host, sink, None).map(|()| true);
+                return self.value(host, sink, None, nest).map(|()| true);
             }
         }
         Ok(!some)
@@ -379,13 +457,14 @@ impl<'b> Bytes<'b> {
         index: usize,
         host: &Rc<Host>,
         sink: &mut Sink<'_, '_>,
+        nest: &mut Nest<'_>,
     ) -> Result<(), String> {
         let count = self.u32()? as usize;
         if index < count {
             for _ in 0..index {
                 self.skip(false)?;
             }
-            self.value(host, sink, None)?;
+            self.value(host, sink, None, nest)?;
         }
         Ok(())
     }
@@ -401,7 +480,7 @@ pub struct Input<'h> {
 
 impl Source<'_> for Input<'_> {
     fn read(&self, sink: &mut Sink<'_, '_>) -> Result<(), String> {
-        buffers::with(self.input, |bytes| self.host.write(bytes, false, sink))
+        buffers::with(self.input, |bytes| self.host.write(bytes, false, 1, sink))
             .ok_or_else(|| no_level(self.input))?
             .map(drop)
     }
@@ -410,27 +489,35 @@ impl Source<'_> for Input<'_> {
 impl Sources<'_> for Host {
     fn read(&self, index: u32, sink: &mut Sink<'_, '_>) -> Result<(), String> {
         let this = self.this.upgrade().ok_or("the input is gone")?;
+        let depth = self.inside(index)?;
         // An object of which only some fields were written is read whole from the reader.
-        match self.held(index, |mut bytes, tag| {
-            (tag != OBJECT_SOME).then(|| bytes.contents(tag == OBJECT_WITH, &this, sink, None))
+        match self.held(index, |mut bytes, tag, depths| {
+            (tag != OBJECT_SOME).then(|| {
+                let mut nest = Nest { depths, depth };
+                bytes.contents(tag == OBJECT_WITH, &this, sink, None, &mut nest)
+            })
         }) {
             Some(read) => read,
-            None => self.level(READ, index, 0, "", sink).map(drop),
+            None => self.level(READ, index, 0, "", depth, sink).map(drop),
         }
     }
 
     fn read_field(&self, index: u32, key: &str, sink: &mut Sink<'_, '_>) -> Result<bool, String> {
         let this = self.this.upgrade().ok_or("the input is gone")?;
-        match self.held(index, |mut bytes, tag| {
-            (tag != ARRAY_WITH).then(|| bytes.field(key, tag == OBJECT_SOME, &this, sink))
+        let depth = self.inside(index)?;
+        match self.held(index, |mut bytes, tag, depths| {
+            (tag != ARRAY_WITH).then(|| {
+                let mut nest = Nest { depths, depth };
+                bytes.field(key, tag == OBJECT_SOME, &this, sink, &mut nest)
+            })
         }) {
-            Some(Ok(false)) | None => self.level(FIELD, index, 0, key, sink),
+            Some(Ok(false)) | None => self.level(FIELD, index, 0, key, depth, sink),
             Some(read) => read,
         }
     }
 
     fn length(&self, index: u32) -> Option<usize> {
-        if let Some(count) = self.held(index, |mut bytes, tag| {
+        if let Some(count) = self.held(index, |mut bytes, tag, _| {
             (tag == ARRAY_WITH).then(|| bytes.u32())
         }) {
             return count.ok().map(|count| count as usize);
@@ -441,11 +528,12 @@ impl Sources<'_> for Host {
 
     fn read_item(&self, index: u32, item: usize, sink: &mut Sink<'_, '_>) -> Result<bool, String> {
         let this = self.this.upgrade().ok_or("the input is gone")?;
-        match self.held(index, |mut bytes, tag| {
-            (tag == ARRAY_WITH).then(|| bytes.item(item, &this, sink))
+        let depth = self.inside(index)?;
+        match self.held(index, |mut bytes, tag, depths| {
+            (tag == ARRAY_WITH).then(|| bytes.item(item, &this, sink, &mut Nest { depths, depth }))
         }) {
             Some(read) => read.map(|()| true),
-            None => self.level(ITEM, index, item as u64, "", sink),
+            None => self.level(ITEM, index, item as u64, "", depth, sink),
         }
     }
 }
