@@ -5,8 +5,9 @@ import java.lang.ref.Reference;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.LongFunction;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 /**
  * A compiled JSONata expression. Compile it once and evaluate it as often as needed, from any
@@ -123,7 +124,8 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the evaluation fails
      */
     public Object evaluate(Document input, Options options) {
-        return onDocument(input, Bindings.NONE, options, Native.VALUES, Native::values);
+        return onDocument(input, Bindings.NONE, options, Native.VALUES,
+                reply -> Native.values(reply, null));
     }
 
     /**
@@ -198,7 +200,8 @@ public final class Expression implements AutoCloseable {
      */
     public Object evaluate(Object input, Bindings bindings, Options options) {
         if (input instanceof Document document) {
-            return onDocument(document, bindings, options, Native.VALUES, Native::values);
+            return onDocument(document, bindings, options, Native.VALUES,
+                    reply -> Native.values(reply, null));
         }
         long expression = live();
         long bound = bindings.live();
@@ -308,7 +311,7 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
      */
     public Object evaluateFromJson(byte[] input, Bindings bindings, Options options) {
-        return onText(input, bindings, options, Native.VALUES, Native::values);
+        return onText(input, bindings, options, Native.VALUES, reply -> Native.values(reply, null));
     }
 
     /**
@@ -415,7 +418,7 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the input is not JSON ({@code U2001}) or the evaluation fails
      */
     public String evaluateJson(byte[] input, Bindings bindings, Options options) {
-        return onText(input, bindings, options, Native.JSON, Native::json);
+        return onText(input, bindings, options, Native.JSON, (byte[] reply) -> Native.json(reply));
     }
 
     /**
@@ -463,7 +466,7 @@ public final class Expression implements AutoCloseable {
      * @throws JlensException when the evaluation fails
      */
     public String evaluateJson(Document input, Bindings bindings, Options options) {
-        return onDocument(input, bindings, options, Native.JSON, Native::json);
+        return onDocument(input, bindings, options, Native.JSON, (byte[] reply) -> Native.json(reply));
     }
 
     /**
@@ -564,7 +567,7 @@ public final class Expression implements AutoCloseable {
             if (!audit.equals(AuditOptions.DEFAULTS)) auditBuffer = Native.buffer(audit.toJson());
             long in = buffer;
             long recorded = auditBuffer;
-            LongSupplier evaluation = () -> options.evaluate(
+            LongSupplier evaluation = () -> options.<Long>evaluate(
                     o -> Native.evaluateAudited(expression, in, bound, o, recorded));
             Host host = bindings.functions ? new Host() : null;
             long reply = host == null
@@ -583,7 +586,7 @@ public final class Expression implements AutoCloseable {
 
     /** Evaluates against UTF-8 JSON text, or no input, in {@code format}, and decodes the reply. */
     private <T> T onText(byte[] input, Bindings bindings, Options options, int format,
-            LongFunction<T> decode) {
+            Function<byte[], T> decode) {
         long expression = live();
         long bound = bindings.live();
         long buffer = input == null ? 0 : Native.buffer(input);
@@ -600,7 +603,7 @@ public final class Expression implements AutoCloseable {
 
     /** Evaluates against a document, in {@code format}, and decodes the reply. */
     private <T> T onDocument(Document input, Bindings bindings, Options options, int format,
-            LongFunction<T> decode) {
+            Function<byte[], T> decode) {
         long expression = live();
         long document = input.live();
         long bound = bindings.live();
@@ -620,10 +623,11 @@ public final class Expression implements AutoCloseable {
      * Runs {@code evaluation} and decodes its reply. With host functions, the evaluation runs
      * with a {@link Host}, and an error that stands for an exception of theirs throws it again.
      */
-    private static <T> T run(Bindings bindings, LongSupplier evaluation, LongFunction<T> decode) {
-        if (!bindings.functions) return decode.apply(evaluation.getAsLong());
+    private static <T> T run(Bindings bindings, Supplier<byte[]> evaluation,
+            Function<byte[], T> decode) {
+        if (!bindings.functions) return decode.apply(evaluation.get());
         Host host = new Host();
-        long reply = ScopedValue.where(Host.CURRENT, host).call(evaluation::getAsLong);
+        byte[] reply = ScopedValue.where(Host.CURRENT, host).call(evaluation::get);
         try {
             return decode.apply(reply);
         } catch (JlensException e) {

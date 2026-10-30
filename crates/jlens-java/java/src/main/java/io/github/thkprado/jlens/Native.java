@@ -31,6 +31,7 @@ import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.stream.Stream;
 
 /**
@@ -73,11 +74,11 @@ final class Native {
     private static final MethodHandle BINDINGS_FREE = function("jlens_bindings_free", U32, U64);
     private static final MethodHandle CALL = function("jlens_call", U64, U64, U32, U64);
     private static final MethodHandle EVALUATE =
-            function("jlens_evaluate", U64, U64, U64, U64, U64, U32);
+            function("jlens_evaluate", U64, U64, U64, U64, U64, U32, U64);
     private static final MethodHandle EVALUATE_DOCUMENT =
-            function("jlens_evaluate_document", U64, U64, U64, U64, U64, U32);
+            function("jlens_evaluate_document", U64, U64, U64, U64, U64, U32, U64);
     private static final MethodHandle EVALUATE_SOURCE = function("jlens_evaluate_source",
-            U64, U64, U64, ValueLayout.ADDRESS, U64, U64, U64, U32);
+            U64, U64, U64, ValueLayout.ADDRESS, U64, U64, U64, U32, U64);
     private static final MethodHandle EVALUATE_AUDITED =
             function("jlens_evaluate_audited", U64, U64, U64, U64, U64, U64);
 
@@ -222,36 +223,100 @@ final class Native {
         }
     }
 
-    static long evaluate(long expression, long input, long bindings, long options, int format) {
+    /** Evaluates against JSON text in buffer {@code input} (0 for none): the reply's bytes. */
+    static byte[] evaluate(long expression, long input, long bindings, long options, int format) {
+        int slot = slot();
+        Scratch scratch = acquire(slot);
         try {
-            return (long) EVALUATE.invokeExact(expression, input, bindings, options, format);
+            return reply((long) EVALUATE.invokeExact(expression, input, bindings, options, format,
+                    scratch.handle()), scratch);
         } catch (Throwable e) {
             throw failed(e);
+        } finally {
+            release(slot, scratch);
         }
     }
 
-    static long evaluateDocument(long expression, long document, long bindings, long options,
+    /** Evaluates against a document: the reply's bytes. */
+    static byte[] evaluateDocument(long expression, long document, long bindings, long options,
             int format) {
+        int slot = slot();
+        Scratch scratch = acquire(slot);
         try {
-            return (long) EVALUATE_DOCUMENT.invokeExact(expression, document, bindings, options,
-                    format);
+            return reply((long) EVALUATE_DOCUMENT.invokeExact(expression, document, bindings,
+                    options, format, scratch.handle()), scratch);
         } catch (Throwable e) {
             throw failed(e);
+        } finally {
+            release(slot, scratch);
         }
     }
 
     /**
      * Evaluates against Java objects: {@code input} is the buffer of the input's level, and the C
-     * API reads the rest through {@link #READER}.
+     * API reads the rest through {@link #READER}. The reply's bytes.
      */
-    static long evaluateSource(long expression, long input, long bindings, long options,
+    static byte[] evaluateSource(long expression, long input, long bindings, long options,
             int format) {
+        int slot = slot();
+        Scratch scratch = acquire(slot);
         try {
-            return (long) EVALUATE_SOURCE.invokeExact(expression, input, READER, 0L, bindings,
-                    options, format);
+            return reply((long) EVALUATE_SOURCE.invokeExact(expression, input, READER, 0L,
+                    bindings, options, format, scratch.handle()), scratch);
         } catch (Throwable e) {
             throw failed(e);
+        } finally {
+            release(slot, scratch);
         }
+    }
+
+    /**
+     * A buffer the evaluations reply into when the reply fits, so that reading it takes no call
+     * (roadmap 0.26 #10); one evaluation uses it at a time.
+     */
+    private record Scratch(long handle, MemorySegment bytes) {}
+
+    /** The bytes of a scratch buffer. Larger replies come in a buffer of their own. */
+    private static final int SCRATCH = 4096;
+
+    /** The slots of the pool of scratch buffers, by thread. */
+    private static final int SLOTS = 64;
+
+    /** Slots this many entries apart, so that threads on different slots share no cache line. */
+    private static final int STRIDE = 16;
+
+    /**
+     * The scratch buffers not in use. An evaluation takes its thread's slot's, or makes one when
+     * the slot is empty (another thread on it, or an evaluation of a host function's on this
+     * one), and puts it back, or frees it when the slot was filled meanwhile. The buffers kept,
+     * at most 256 KiB, live as long as the process.
+     */
+    private static final AtomicReferenceArray<Scratch> POOL = new AtomicReferenceArray<>(SLOTS * STRIDE);
+
+    private static int slot() {
+        return ((int) Thread.currentThread().threadId() & (SLOTS - 1)) * STRIDE;
+    }
+
+    private static Scratch acquire(int slot) {
+        Scratch scratch = POOL.getAndSet(slot, null);
+        if (scratch != null) return scratch;
+        long handle = bufferNew(SCRATCH);
+        return new Scratch(handle, bufferBytes(handle, SCRATCH));
+    }
+
+    private static void release(int slot, Scratch scratch) {
+        if (!POOL.compareAndSet(slot, null, scratch)) free(scratch.handle());
+    }
+
+    /**
+     * The bytes of the reply an evaluation returned: in {@code scratch} when the low half of
+     * {@code replied} is 0 and the high half its length, in a buffer of its own otherwise.
+     */
+    private static byte[] reply(long replied, Scratch scratch) {
+        if ((int) replied != 0 || replied == 0) return take(replied);
+        byte[] bytes = new byte[(int) (replied >>> 32)];
+        MemorySegment.copy(scratch.bytes(), ValueLayout.JAVA_BYTE, 0, bytes, 0, bytes.length);
+        return bytes;
     }
 
     /**
@@ -336,7 +401,14 @@ final class Native {
      * undefined. A reply holding an error throws it.
      */
     static String json(long reply) {
-        byte[] bytes = take(reply);
+        return json(take(reply));
+    }
+
+    /**
+     * The JSON text that reply {@code bytes} holds, or {@code null} when it is undefined. A reply
+     * holding an error throws it.
+     */
+    static String json(byte[] bytes) {
         return switch (bytes[0]) {
             case REPLY_UNDEFINED -> null;
             case REPLY_JSON -> new String(bytes, 1, bytes.length - 1, StandardCharsets.UTF_8);
@@ -358,7 +430,15 @@ final class Native {
      * the input taken from {@code input}, by their numbers.
      */
     static Object values(long reply, Object[] input) {
-        byte[] bytes = take(reply);
+        return values(take(reply), input);
+    }
+
+    /**
+     * The result that reply {@code bytes} holds as values, decoded, its arrays and objects of the
+     * input taken from {@code input}; {@code null} when it is undefined. A reply holding an error
+     * throws it.
+     */
+    static Object values(byte[] bytes, Object[] input) {
         return switch (bytes[0]) {
             case REPLY_UNDEFINED -> null;
             case REPLY_VALUES -> Values.decode(bytes, 1, input);

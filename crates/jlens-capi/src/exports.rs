@@ -57,18 +57,19 @@ export! {
     jlens_call(frame: u64, index: u32, arguments: u64) -> u64 = crate::host::call, crate::api::panicked;
     /// Evaluates an expression against the JSON text in buffer `input` (0 for no input), with
     /// bindings `bindings` (0 for none) and options `options` (0 for the defaults): a reply with
-    /// the result, as JSON text (`result` 0) or values (`result` 1), or the error.
-    jlens_evaluate(expression: u64, input: u64, bindings: u64, options: u64, result: u32) -> u64 = crate::api::evaluate, crate::api::panicked;
+    /// the result, as JSON text (`result` 0) or values (`result` 1), or the error, in buffer
+    /// `scratch` when it fits (0 for none; see the crate's Replies).
+    jlens_evaluate(expression: u64, input: u64, bindings: u64, options: u64, result: u32, scratch: u64) -> u64 = crate::api::evaluate_into, crate::api::panicked;
     /// Evaluates an expression against a document, with bindings `bindings` (0 for none) and
     /// options `options` (0 for the defaults): a reply with the result, as JSON text (`result`
-    /// 0) or values (`result` 1), or the error.
-    jlens_evaluate_document(expression: u64, document: u64, bindings: u64, options: u64, result: u32) -> u64 = crate::api::evaluate_document, crate::api::panicked;
+    /// 0) or values (`result` 1), or the error, in buffer `scratch` when it fits.
+    jlens_evaluate_document(expression: u64, document: u64, bindings: u64, options: u64, result: u32, scratch: u64) -> u64 = crate::api::evaluate_document_into, crate::api::panicked;
     /// Evaluates an expression against the host's own values: buffer `input` holds the input
     /// as a level, and `reader`, given `context`, writes the levels of its arrays and objects
     /// (the `source` module). With bindings `bindings` (0 for none) and options `options` (0
     /// for the defaults): a reply with the result, as JSON text (`result` 0) or values
-    /// (`result` 1), or the error.
-    jlens_evaluate_source(expression: u64, input: u64, reader: Option<crate::source::Reader>, context: u64, bindings: u64, options: u64, result: u32) -> u64 = crate::api::evaluate_source, crate::api::panicked;
+    /// (`result` 1), or the error, in buffer `scratch` when it fits.
+    jlens_evaluate_source(expression: u64, input: u64, reader: Option<crate::source::Reader>, context: u64, bindings: u64, options: u64, result: u32, scratch: u64) -> u64 = crate::api::evaluate_source_into, crate::api::panicked;
     /// Evaluates an expression against the values in buffer `input` (0 for no input), with
     /// bindings `bindings` (0 for none), options `options` (0 for the defaults) and the audit
     /// options in buffer `audit`, JSON text (0 for the defaults), recording how the result was

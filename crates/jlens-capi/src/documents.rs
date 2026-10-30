@@ -14,7 +14,7 @@ use std::sync::{Arc, Weak};
 use jlens_core::Document;
 use jlens_core::reads::Read;
 
-use crate::handles::Table;
+use crate::handles::{Cache, Found, Table};
 
 /// What a document is made of, which each thread converts.
 pub(crate) struct Text {
@@ -52,10 +52,17 @@ pub(crate) static DOCUMENTS: Table<Text> = Table::new();
 static DROPPED: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
+    /// The documents this thread's evaluations found, found again without the table's lock.
+    static FOUND: RefCell<Cache<Text>> = const { RefCell::new(Cache::new()) };
     /// The documents this thread has converted, each with a weak reference to its text.
     static CONVERTED: RefCell<Vec<(Weak<Text>, Rc<Document>)>> = const { RefCell::new(Vec::new()) };
     /// `DROPPED` as this thread last swept.
     static SWEPT: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The document of `handle`, if it is live, for an evaluation ([`Table::cached`]).
+pub(crate) fn find(handle: u64) -> Option<Found<Text>> {
+    DOCUMENTS.cached(&FOUND, handle)
 }
 
 /// This thread's conversion of `text`, made on its first use.
@@ -75,8 +82,11 @@ pub(crate) fn converted(text: &Arc<Text>) -> serde_json::Result<Rc<Document>> {
 }
 
 /// Drops this thread's conversions of the documents that were freed, if any was since its last
-/// sweep. Every export calls it first ([`crate::guarded`]).
+/// sweep. Every export calls it first ([`crate::guarded`]). First this thread's cache lets go of
+/// the documents freed, so that a document is dropped once no thread holds it, which the
+/// other threads see at their next call.
 pub(crate) fn sweep_if_freed() {
+    DOCUMENTS.prune(&FOUND);
     let dropped = DROPPED.load(Ordering::Acquire);
     if SWEPT.get() != dropped {
         SWEPT.set(dropped);

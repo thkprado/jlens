@@ -1107,8 +1107,13 @@ path changed but the order in which variables and functions are bound.
     without the JVM). Java's side is about 0.1 µs: the five calls, which leave Java's thread
     state, and the result decoded. Since 0.26 the three calls that read the reply are critical
     (`Linker.Option.critical`), which skips that transition: `customer.name` takes 0.44 instead
-    of 0.48 µs, the indexes into 10,000 items 2.6% less time. A reply written into memory that
-    Java passes, in one call, would save most of the rest of the reply's cost; not built.
+    of 0.48 µs, the indexes into 10,000 items 2.6% less time. Since 0.26 #10 an evaluation
+    replies into a scratch buffer Java keeps, and each thread finds its expression and document
+    again without the tables' locks: timed from Rust, the C API's share beyond the evaluation is
+    67 instead of 177 ns, and `customer.name` takes 0.34 µs from Java. Those locks were shared by
+    every thread: on one `Document`, 16 Java threads made 1.0 million evaluations of
+    `customer.name` per second, fewer than one thread's 2.2 million, and now make 20.8 million
+    ([ADR 0021](../adr/0021-java-package.md#results-a-reply-in-one-call-and-handles-found-without-a-lock-026-10)).
   - The same native library loaded from two files, which differ only in their timestamps, made
     `evaluateFromJson` over 200 items 4.5% slower or faster depending on the file, whichever
     JAR carried it: Java comparisons between two builds have that much noise, as natively

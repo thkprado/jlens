@@ -48,6 +48,13 @@ All notable changes are recorded here. The format follows
 - The Java package reads a reply with critical downcalls (`Linker.Option.critical`), which skip
   the thread's transition out of Java: `customer.name` against a `Document` takes 0.44 instead
   of 0.48 µs.
+- The Java package reads a short result with no call after the evaluation, and evaluations on
+  many threads no longer wait for each other in the C API. An evaluation replies into a buffer
+  Java keeps from one evaluation to the next, and each thread finds the expression and document
+  again without taking a lock that every thread shared: `customer.name` against a `Document`
+  takes 0.34 µs, and 16 threads sharing a `Document` make 20.8 million evaluations of it per
+  second instead of 1.0 million, fewer than one thread made before. The C API's evaluations take
+  the scratch buffer as a last argument.
 - `$clone`, which a transform calls to copy its input, copies the value itself instead of
   writing its JSON text and parsing it back. The copy has the values the text gave, as in
   jsonata-js (numbers rounded to 15 significant digits, functions as `""`), and fails where

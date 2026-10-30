@@ -2,6 +2,7 @@
 //! the replies.
 
 use std::any::Any;
+use std::cell::RefCell;
 use std::sync::{Arc, LazyLock};
 
 use jlens_core::input::{Sink, Source};
@@ -11,7 +12,7 @@ use jlens_core::{Bindings, Document, Error, Expression, Options};
 use serde_json::{Map, Value};
 
 use crate::documents::{self, DOCUMENTS};
-use crate::handles::Table;
+use crate::handles::{Cache, Found, Table};
 use crate::host::{self, BINDINGS, Bound};
 use crate::options::{self, OPTIONS};
 use crate::source::{self, Host, Reader};
@@ -29,6 +30,20 @@ pub(crate) struct Compiled {
 
 /// The live expressions. `Expression` is `Send` and `Sync`: one serves every thread.
 pub(crate) static EXPRESSIONS: Table<Compiled> = Table::new();
+
+thread_local! {
+    /// The objects this thread's evaluations found, found again without the tables' locks.
+    static FOUND_EXPRESSIONS: RefCell<Cache<Compiled>> = const { RefCell::new(Cache::new()) };
+    static FOUND_BINDINGS: RefCell<Cache<Bound>> = const { RefCell::new(Cache::new()) };
+    static FOUND_OPTIONS: RefCell<Cache<Options>> = const { RefCell::new(Cache::new()) };
+}
+
+/// The expression of handle `expression`, for an evaluation.
+fn find_expression(expression: u64) -> Result<Found<Compiled>, Vec<u8>> {
+    EXPRESSIONS
+        .cached(&FOUND_EXPRESSIONS, expression)
+        .ok_or_else(|| unknown("expression", expression))
+}
 
 /// Compiles the expression in buffer `source`, which stays the caller's, and replies with the
 /// expression's handle or the compile error.
@@ -177,9 +192,23 @@ impl Format {
 /// values (`result` 1), or with the error. The fields of the input that the expression does not
 /// read are skipped while parsing.
 pub fn evaluate(expression: u64, input: u64, bindings: u64, options: u64, result: u32) -> u64 {
-    reply(
+    evaluate_into(expression, input, bindings, options, result, 0)
+}
+
+/// Evaluates as [`evaluate`] does, and replies into buffer `scratch` when the reply fits
+/// (see [Replies](crate#replies)).
+pub fn evaluate_into(
+    expression: u64,
+    input: u64,
+    bindings: u64,
+    options: u64,
+    result: u32,
+    scratch: u64,
+) -> u64 {
+    reply_into(
         Format::named(result)
             .and_then(|format| evaluate_text(expression, input, bindings, options, format)),
+        scratch,
     )
 }
 
@@ -190,9 +219,7 @@ fn evaluate_text(
     options: u64,
     format: Format,
 ) -> Result<Vec<u8>, Vec<u8>> {
-    let compiled = EXPRESSIONS
-        .get(expression)
-        .ok_or_else(|| unknown("expression", expression))?;
+    let compiled = find_expression(expression)?;
     let bindings = find_bindings(bindings)?;
     let options = find_options(options)?;
     let document = match input {
@@ -225,10 +252,24 @@ pub fn evaluate_document(
     options: u64,
     result: u32,
 ) -> u64 {
-    reply(
+    evaluate_document_into(expression, document, bindings, options, result, 0)
+}
+
+/// Evaluates as [`evaluate_document`] does, and replies into buffer `scratch` when the reply
+/// fits (see [Replies](crate#replies)).
+pub fn evaluate_document_into(
+    expression: u64,
+    document: u64,
+    bindings: u64,
+    options: u64,
+    result: u32,
+    scratch: u64,
+) -> u64 {
+    reply_into(
         Format::named(result).and_then(|format| {
             evaluate_on_document(expression, document, bindings, options, format)
         }),
+        scratch,
     )
 }
 
@@ -239,15 +280,11 @@ fn evaluate_on_document(
     options: u64,
     format: Format,
 ) -> Result<Vec<u8>, Vec<u8>> {
-    let compiled = EXPRESSIONS
-        .get(expression)
-        .ok_or_else(|| unknown("expression", expression))?;
+    let compiled = find_expression(expression)?;
     let bindings = find_bindings(bindings)?;
     let options = find_options(options)?;
-    let text = DOCUMENTS
-        .get(document)
-        .ok_or_else(|| unknown("document", document))?;
-    let document = documents::converted(&text).map_err(|e| not_json(e.to_string()))?;
+    let text = documents::find(document).ok_or_else(|| unknown("document", document))?;
+    let document = documents::converted(text.arc()).map_err(|e| not_json(e.to_string()))?;
     run(
         &compiled,
         Input::Document(&document),
@@ -273,42 +310,61 @@ pub fn evaluate_source(
     options: u64,
     result: u32,
 ) -> u64 {
-    reply(Format::named(result).and_then(|format| {
-        let compiled = EXPRESSIONS
-            .get(expression)
-            .ok_or_else(|| unknown("expression", expression))?;
-        let bindings = find_bindings(bindings)?;
-        let options = find_options(options)?;
-        buffers::with(input, |_| ()).ok_or_else(|| unknown("buffer", input))?;
-        let reader = reader.ok_or_else(|| invalid("reader", "no reader".into()))?;
-        let host = Host::new(reader, context);
-        run(
-            &compiled,
-            Input::Source(source::Input { host: &host, input }),
-            bindings.as_deref(),
-            options.as_deref().unwrap_or(&DEFAULTS),
-            format,
-        )
-    }))
+    evaluate_source_into(
+        expression, input, reader, context, bindings, options, result, 0,
+    )
+}
+
+/// Evaluates as [`evaluate_source`] does, and replies into buffer `scratch` when the reply fits
+/// (see [Replies](crate#replies)).
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_source_into(
+    expression: u64,
+    input: u64,
+    reader: Option<Reader>,
+    context: u64,
+    bindings: u64,
+    options: u64,
+    result: u32,
+    scratch: u64,
+) -> u64 {
+    reply_into(
+        Format::named(result).and_then(|format| {
+            let compiled = find_expression(expression)?;
+            let bindings = find_bindings(bindings)?;
+            let options = find_options(options)?;
+            buffers::with(input, |_| ()).ok_or_else(|| unknown("buffer", input))?;
+            let reader = reader.ok_or_else(|| invalid("reader", "no reader".into()))?;
+            let host = Host::new(reader, context);
+            run(
+                &compiled,
+                Input::Source(source::Input { host: &host, input }),
+                bindings.as_deref(),
+                options.as_deref().unwrap_or(&DEFAULTS),
+                format,
+            )
+        }),
+        scratch,
+    )
 }
 
 /// The bindings of handle `bindings`, or `None` for 0, none.
-pub(crate) fn find_bindings(bindings: u64) -> Result<Option<Arc<Bound>>, Vec<u8>> {
+pub(crate) fn find_bindings(bindings: u64) -> Result<Option<Found<Bound>>, Vec<u8>> {
     match bindings {
         0 => Ok(None),
         bindings => BINDINGS
-            .get(bindings)
+            .cached(&FOUND_BINDINGS, bindings)
             .map(Some)
             .ok_or_else(|| unknown("bindings", bindings)),
     }
 }
 
 /// The options of handle `options`, or `None` for 0, the defaults.
-pub(crate) fn find_options(options: u64) -> Result<Option<Arc<Options>>, Vec<u8>> {
+pub(crate) fn find_options(options: u64) -> Result<Option<Found<Options>>, Vec<u8>> {
     match options {
         0 => Ok(None),
         options => OPTIONS
-            .get(options)
+            .cached(&FOUND_OPTIONS, options)
             .map(Some)
             .ok_or_else(|| unknown("options", options)),
     }
@@ -418,6 +474,26 @@ pub fn panicked(payload: Box<dyn Any + Send>) -> u64 {
 
 pub(crate) fn reply(reply: Result<Vec<u8>, Vec<u8>>) -> u64 {
     buffers::insert(reply.unwrap_or_else(|error| error))
+}
+
+/// Writes `reply` at the start of buffer `scratch` when it fits, and returns its length in the
+/// high half, the low half 0, which no handle has. Otherwise, or when `scratch` is 0 or unknown,
+/// stores it in a buffer of its own and returns that buffer's handle, as [`reply`] does.
+pub(crate) fn reply_into(reply: Result<Vec<u8>, Vec<u8>>, scratch: u64) -> u64 {
+    let reply = reply.unwrap_or_else(|error| error);
+    if scratch != 0
+        && let Ok(len) = u32::try_from(reply.len())
+        && buffers::with_cached(scratch, |bytes| match bytes.get_mut(..reply.len()) {
+            Some(start) => {
+                start.copy_from_slice(&reply);
+                true
+            }
+            None => false,
+        }) == Some(true)
+    {
+        return u64::from(len) << 32;
+    }
+    buffers::insert(reply)
 }
 
 /// The reply holding `handle`, or the `U1001` error when its table was full.

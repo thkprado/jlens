@@ -11,7 +11,9 @@
 //! generation of its slot, so a handle that was freed stays unknown after its slot is reused:
 //! using it, or freeing it twice, fails with `U2002` instead of reaching another object.
 //! The tables of handles are global, since a virtual thread can move to another carrier thread
-//! between two calls, and they are locked only to find an entry ([`handles`]).
+//! between two calls, and they are locked only to add or remove an entry, or to find one the
+//! first time: each thread finds again the expression, document, options, bindings and scratch
+//! buffer its evaluations use without the lock, in a cache of its own ([`handles`]).
 //!
 //! # Replies
 //!
@@ -37,6 +39,13 @@
 //! handles is full. An unknown handle is reported before anything wrong with what the other
 //! handles hold. A reply handle of 0 means that no buffer could be made for the reply. A
 //! reader that fails, or writes a level not in its form, fails the evaluation with `U1004`.
+//!
+//! The evaluations also take a scratch buffer, which the host keeps from one evaluation to the
+//! next, never using one on two threads at once. A reply that fits is written at its start, and
+//! the export returns its length in the high 32 bits with the low 32 bits 0, which no handle
+//! has: the host reads it with no further call, and frees nothing. A reply that does not fit, or
+//! any reply when the scratch is 0 or unknown, comes in a buffer of its own, as above; so does
+//! the reply of a panic (roadmap 0.26 #10).
 //!
 //! # Objects
 //!

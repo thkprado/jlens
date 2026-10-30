@@ -89,19 +89,19 @@ public record Options(
      * Runs {@code evaluation} with the handle of these options' native object, 0 for the
      * defaults.
      */
-    long evaluate(java.util.function.LongUnaryOperator evaluation) {
-        if (equals(DEFAULTS)) return evaluation.applyAsLong(0);
+    <T> T evaluate(java.util.function.LongFunction<T> evaluation) {
+        if (equals(DEFAULTS)) return evaluation.apply(0);
         Long kept = NATIVE.get(this);
-        if (kept != null) return evaluation.applyAsLong(kept);
+        if (kept != null) return evaluation.apply(kept);
         long handle = make();
         if (NATIVE.size() < KEPT) {
             Long raced = NATIVE.putIfAbsent(this, handle);
-            if (raced == null) return evaluation.applyAsLong(handle);
+            if (raced == null) return evaluation.apply(handle);
             Native.optionsFree(handle);
-            return evaluation.applyAsLong(raced);
+            return evaluation.apply(raced);
         }
         try {
-            return evaluation.applyAsLong(handle);
+            return evaluation.apply(handle);
         } finally {
             Native.optionsFree(handle);
         }

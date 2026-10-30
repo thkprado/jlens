@@ -351,4 +351,21 @@ class HostFunctionTest {
         assertInstanceOf(LinkedHashMap.class, result);
         assertFalse(((Map<?, ?>) result).isEmpty());
     }
+
+    /**
+     * A host function that evaluates, while the evaluation that called it holds its thread's
+     * scratch buffer (roadmap 0.26 #10), and the reply of each reaches its own caller.
+     */
+    @Test
+    void aHostFunctionEvaluatesInside() {
+        try (Expression inner = Expression.compile("$string(n * 2)");
+                Bindings outer = Bindings.builder()
+                        .function("inner", 1, args -> inner.evaluate(Map.of("n", args.get(0))))
+                        .build();
+                Expression expression = Expression.compile("[$inner(1), $inner(2)] & '/' & n")) {
+            for (int i = 0; i < 100; i++) {
+                assertEquals("[\"2\",\"4\"]/" + i, expression.evaluate(Map.of("n", i), outer));
+            }
+        }
+    }
 }

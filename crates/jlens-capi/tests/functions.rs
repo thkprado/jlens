@@ -155,7 +155,7 @@ fn evaluate(source: &str, bindings: u64, options: u64) -> Reply {
         other => panic!("{source}: {other:?}"),
     };
     assert_eq!(jlens_buffer_free(text), 1);
-    let result = reply(jlens_evaluate(expression, 0, bindings, options, 0));
+    let result = reply(jlens_evaluate(expression, 0, bindings, options, 0, 0));
     assert_eq!(jlens_expression_free(expression), 1);
     result
 }

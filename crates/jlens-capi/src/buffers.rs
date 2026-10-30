@@ -1,12 +1,18 @@
 //! Buffers owned by Rust. The host gets a handle and the buffer's address, writes into it or
 //! reads from it, and Rust finds the buffer again by its handle.
 
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use crate::handles::Table;
+use crate::handles::{Cache, Table};
 
 /// The live buffers, each with a lock of its own: the table's lock is held only to find one.
 static BUFFERS: Table<Mutex<Vec<u8>>> = Table::new();
+
+thread_local! {
+    /// The buffers this thread found with [`with_cached`].
+    static FOUND: RefCell<Cache<Mutex<Vec<u8>>>> = const { RefCell::new(Cache::new()) };
+}
 
 /// Creates a buffer of `len` zero bytes and returns its handle, or 0 when it cannot be
 /// allocated or the table is full.
@@ -50,6 +56,15 @@ pub fn take(handle: u64) -> Option<Vec<u8>> {
 /// Runs `f` on a buffer's bytes, holding that buffer's lock only.
 pub fn with<R>(handle: u64, f: impl FnOnce(&mut Vec<u8>) -> R) -> Option<R> {
     let buffer = BUFFERS.get(handle)?;
+    let mut bytes = buffer.lock().unwrap_or_else(PoisonError::into_inner);
+    Some(f(&mut bytes))
+}
+
+/// Runs `f` on a buffer's bytes as [`with`] does, for a buffer this thread uses again and
+/// again, such as the scratch buffer an evaluation replies into: found without the table's lock
+/// after the first time ([`Table::cached`]).
+pub fn with_cached<R>(handle: u64, f: impl FnOnce(&mut Vec<u8>) -> R) -> Option<R> {
+    let buffer = BUFFERS.cached(&FOUND, handle)?;
     let mut bytes = buffer.lock().unwrap_or_else(PoisonError::into_inner);
     Some(f(&mut bytes))
 }

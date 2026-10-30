@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.OptionalInt;
 import org.junit.jupiter.api.Test;
 
@@ -89,6 +90,29 @@ class ExpressionTest {
         // Not closed: the Cleaner frees them, and the table of handles keeps working.
         for (int i = 0; i < 10_000; i++) {
             assertEquals(Integer.toString(i), Expression.compile(Integer.toString(i)).evaluateJson());
+        }
+    }
+
+    /**
+     * Replies around the 4,096 bytes of the scratch buffer the C API replies into, which a larger
+     * reply does not use (roadmap 0.26 #10), from every input.
+     */
+    @Test
+    void repliesOfEverySize() {
+        try (Expression pad = Expression.compile("$pad('', n, 'x')");
+                Document small = Document.fromJson("{\"n\": 1}")) {
+            assertEquals("x", pad.evaluate(small));
+            for (int n = 4_080; n <= 4_100; n++) {
+                String expected = "x".repeat(n);
+                String text = "{\"n\": " + n + "}";
+                try (Document document = Document.fromJson(text)) {
+                    assertEquals(expected, pad.evaluate(document));
+                    assertEquals('"' + expected + '"', pad.evaluateJson(document));
+                }
+                assertEquals(expected, pad.evaluateFromJson(text));
+                assertEquals('"' + expected + '"', pad.evaluateJson(text));
+                assertEquals(expected, pad.evaluate(Map.of("n", n)));
+            }
         }
     }
 }

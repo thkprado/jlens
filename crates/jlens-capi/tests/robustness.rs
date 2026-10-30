@@ -239,7 +239,7 @@ proptest! {
                     let Some(expression) = pick(&expressions, expression) else { continue };
                     let (input, input_live) = optional(&buffers_made, input);
                     let (given, given_live) = optional(&options, given);
-                    let replied = reply(jlens_evaluate(expression.handle, input, 0, given, 0))?;
+                    let replied = reply(jlens_evaluate(expression.handle, input, 0, given, 0, 0))?;
                     if !expression.live || !input_live || !given_live {
                         prop_assert_eq!(replied, unknown());
                     }
@@ -249,7 +249,7 @@ proptest! {
                     let Some(document) = pick(&documents, document) else { continue };
                     let (given, given_live) = optional(&options, given);
                     let replied =
-                        reply(jlens_evaluate_document(expression.handle, document.handle, 0, given, 0))?;
+                        reply(jlens_evaluate_document(expression.handle, document.handle, 0, given, 0, 0))?;
                     if !expression.live || !document.live || !given_live {
                         prop_assert_eq!(replied, unknown());
                     } else {
@@ -296,7 +296,7 @@ proptest! {
                         4 => prop_assert_eq!(jlens_options_free(handle), 0),
                         5 => prop_assert_eq!(jlens_document_free(handle), 0),
                         6 => prop_assert_eq!(reply(jlens_compile(handle))?, unknown()),
-                        7 => prop_assert_eq!(reply(jlens_evaluate(handle, some, 0, 0, 0))?, unknown()),
+                        7 => prop_assert_eq!(reply(jlens_evaluate(handle, some, 0, 0, 0, 0))?, unknown()),
                         8 => prop_assert_eq!(reply(jlens_options_new(handle))?, unknown()),
                         9 => prop_assert_eq!(reply(jlens_document_new(handle, 0))?, unknown()),
                         10 => prop_assert_eq!(reply(jlens_document_new(some, handle))?, unknown()),
@@ -304,18 +304,18 @@ proptest! {
                         12 => prop_assert_eq!(reply(jlens_union_reads(handle))?, unknown()),
                         13 => {
                             let Some(document) = document else { continue };
-                            let replied = reply(jlens_evaluate_document(handle, document, 0, 0, 0))?;
+                            let replied = reply(jlens_evaluate_document(handle, document, 0, 0, 0, 0))?;
                             prop_assert_eq!(replied, unknown());
                         }
                         14 => {
                             let Some(expression) = expression else { continue };
-                            prop_assert_eq!(reply(jlens_evaluate(expression, handle, 0, 0, 0))?, unknown());
-                            let replied = reply(jlens_evaluate_document(expression, handle, 0, 0, 0))?;
+                            prop_assert_eq!(reply(jlens_evaluate(expression, handle, 0, 0, 0, 0))?, unknown());
+                            let replied = reply(jlens_evaluate_document(expression, handle, 0, 0, 0, 0))?;
                             prop_assert_eq!(replied, unknown());
                         }
                         _ => {
                             let Some(expression) = expression else { continue };
-                            prop_assert_eq!(reply(jlens_evaluate(expression, 0, 0, handle, 0))?, unknown());
+                            prop_assert_eq!(reply(jlens_evaluate(expression, 0, 0, handle, 0, 0))?, unknown());
                         }
                     }
                 }
@@ -342,28 +342,28 @@ proptest! {
         // the tables are separate. Whatever it names, the call does not panic.
         let source = buffers::insert(source);
         let input = buffers::insert(input);
-        reply(jlens_evaluate(source, input, 0, input, 0))?;
-        reply(jlens_evaluate(source, input, 0, 0, 1))?;
-        reply(jlens_evaluate(source, input, 0, 0, u32::MAX))?;
-        reply(jlens_evaluate(input, 0, 0, source, 0))?;
-        reply(jlens_evaluate_document(source, input, 0, 0, 0))?;
+        reply(jlens_evaluate(source, input, 0, input, 0, 0))?;
+        reply(jlens_evaluate(source, input, 0, 0, 1, 0))?;
+        reply(jlens_evaluate(source, input, 0, 0, u32::MAX, 0))?;
+        reply(jlens_evaluate(input, 0, 0, source, 0, 0))?;
+        reply(jlens_evaluate_document(source, input, 0, 0, 0, 0))?;
         reply(jlens_evaluate_audited(source, input, 0, 0, input))?;
         reply(jlens_reads(source))?;
         if let Replied::Handle(options) = reply(jlens_options_new(input))? {
-            reply(jlens_evaluate(source, input, 0, options, 0))?;
+            reply(jlens_evaluate(source, input, 0, options, 0, 0))?;
             reply(jlens_document_new(options, options))?;
             prop_assert_eq!(jlens_options_free(options), 1);
         }
         if let Replied::Handle(document) = reply(jlens_document_new(input, 0))? {
-            reply(jlens_evaluate(document, document, 0, document, 0))?;
+            reply(jlens_evaluate(document, document, 0, document, 0, 0))?;
             reply(jlens_union_reads(document))?;
             prop_assert_eq!(jlens_document_free(document), 1);
         }
         if let Replied::Handle(expression) = reply(jlens_compile(source))? {
             reply(jlens_compile(expression))?;
-            reply(jlens_evaluate(expression, expression, 0, expression, 0))?;
-            reply(jlens_evaluate(expression, 0, 0, 0, 1))?;
-            reply(jlens_evaluate_document(expression, expression, 0, expression, 0))?;
+            reply(jlens_evaluate(expression, expression, 0, expression, 0, 0))?;
+            reply(jlens_evaluate(expression, 0, 0, 0, 1, 0))?;
+            reply(jlens_evaluate_document(expression, expression, 0, expression, 0, 0))?;
             reply(jlens_evaluate_audited(expression, input, 0, 0, source))?;
             reply(jlens_evaluate_audited(expression, 0, 0, 0, input))?;
             reply(jlens_evaluate_audited(expression, expression, expression, expression, expression))?;
@@ -387,8 +387,8 @@ proptest! {
             handle
         };
         let buffer = buffers::insert(text.into_bytes());
-        let as_json = buffers::take(jlens_evaluate(expression, buffer, 0, 0, 0)).unwrap();
-        let as_values = buffers::take(jlens_evaluate(expression, buffer, 0, 0, 1)).unwrap();
+        let as_json = buffers::take(jlens_evaluate(expression, buffer, 0, 0, 0, 0)).unwrap();
+        let as_values = buffers::take(jlens_evaluate(expression, buffer, 0, 0, 1, 0)).unwrap();
         match (as_json[0], as_values[0]) {
             (REPLY_JSON, REPLY_VALUES) => {
                 let json: Value = serde_json::from_slice(&as_json[1..]).unwrap();
@@ -419,7 +419,7 @@ proptest! {
         };
         let audit = format!(r#"{{"level":"{level}","limits":{{"maxItems":{max_items},"maxNodes":{max_nodes}}}}}"#);
         let audit = buffers::insert(audit.into_bytes());
-        let evaluated = buffers::take(jlens_evaluate(expression, text, 0, 0, 0)).unwrap();
+        let evaluated = buffers::take(jlens_evaluate(expression, text, 0, 0, 0, 0)).unwrap();
         let audited = buffers::take(jlens_evaluate_audited(expression, values, 0, 0, audit)).unwrap();
         prop_assert_eq!(audited[0], REPLY_VALUES);
         let audited = values::decode(&audited[1..]);
@@ -478,7 +478,16 @@ fn json() -> impl Strategy<Value = Value> {
 /// the reply's bytes, and the host's nodes.
 fn on_host(expression: u64, input: &Value, context: u64, result: u32) -> (Vec<u8>, Vec<Value>) {
     let level = host::Host::start_in(input, context);
-    let reply = jlens_evaluate_source(expression, level, Some(host::READER), context, 0, 0, result);
+    let reply = jlens_evaluate_source(
+        expression,
+        level,
+        Some(host::READER),
+        context,
+        0,
+        0,
+        result,
+        0,
+    );
     host::Host::finish();
     assert_eq!(jlens_buffer_free(level), 1);
     let nodes = host::HOST.with_borrow_mut(|host| std::mem::take(&mut host.nodes));
@@ -526,7 +535,7 @@ proptest! {
         host::Host::know(&["a", "b", "x", "v"]);
         let expression = compiled(expression);
         let text = buffers::insert(input.to_string().into_bytes());
-        let as_text = buffers::take(jlens_evaluate(expression, text, 0, 0, 0)).unwrap();
+        let as_text = buffers::take(jlens_evaluate(expression, text, 0, 0, 0, 0)).unwrap();
         prop_assert_eq!(jlens_buffer_free(text), 1);
         for context in [host::PLAIN, host::WHOLE, host::WITH, host::SOME] {
             let (as_json, _) = on_host(expression, &input, context, 0);
@@ -638,7 +647,7 @@ proptest! {
         prop_assert_eq!(jlens_buffer_free(functions), 1);
         for source in ["$f()", "$f(1, 'a')", "[$f(), $f()]", "$g(function($x) { $x })", "$g($f)"] {
             let expression = compiled(source);
-            reply(jlens_evaluate(expression, 0, bindings, 0, result))?;
+            reply(jlens_evaluate(expression, 0, bindings, 0, result, 0))?;
             for called in CALLED.with_borrow_mut(std::mem::take) {
                 reply(called)?;
             }

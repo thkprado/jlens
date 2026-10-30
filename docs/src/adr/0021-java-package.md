@@ -1258,3 +1258,53 @@ property test whose reader returns any bytes could hang, rarely.
   over Java maps each case took 0.5 to 4.4% longer (median 2.5%), and over a `Document`, which
   the change does not touch, 0 to 3.4% longer (median 0.9%): about 1 to 2%, within the 4.5% by
   which two builds of the same library differ (0.26 #7).
+
+## Results: a reply in one call, and handles found without a lock (0.26 #10)
+
+Beyond the evaluation, the C API took about 0.19 µs of the 0.44 µs `customer.name` took from
+Java against a `Document` (0.26 #7). About 110 ns of it was the reply: a new buffer for it (an
+allocation and the lock of the buffers' table), which Java then read with three more calls, its
+address, its length and its release, each finding the buffer again behind that lock. The rest
+was mostly finding the expression and the document, each behind the lock of its table, shared
+by every thread.
+
+- **The evaluations reply into a scratch buffer** that the host passes as a last argument
+  (`jlens_evaluate`, `jlens_evaluate_document`, `jlens_evaluate_source`). A reply that fits is
+  written at its start, and the export returns its length in the high 32 bits with the low 32
+  bits 0, which no handle has: the host reads it with no further call. A reply that does not
+  fit, any reply when the scratch is 0 or unknown, and the reply of a panic come in a buffer of
+  their own, as before. The scratch is a buffer of the C API, known by handle, so Rust still
+  dereferences no pointer the host gives it.
+- **Java keeps a pool of scratch buffers** of 4 KiB in `Native`: 64 slots, chosen by the
+  thread's id, each 16 entries apart so that two slots share no cache line. An evaluation takes
+  its slot's buffer, or makes one when the slot is empty (another thread with the same slot, or
+  an evaluation inside a host function's call), and puts it back, or frees it when the slot was
+  filled meanwhile. At most 256 KiB stay, for the life of the process. A buffer per
+  `ThreadLocal` was not chosen: virtual threads would each make one, and a host function that
+  evaluates needs a second buffer on the same thread.
+- **Each thread finds its objects again without the lock.** A table also keeps each entry's live
+  handle where any thread reads it with one atomic load (chunks that double in size, made under
+  the lock and never moved, so no `unsafe`). An evaluation looks the expression, document,
+  options, bindings and scratch buffer up in a cache of its thread, at most eight objects, held
+  as `Rc<Arc<T>>`: a hit is that load and a short search, and writes nothing other threads
+  read, neither the table's lock nor the object's reference count. A miss takes the lock, as
+  before. A removed object stays in a thread's cache until that thread next looks up in the
+  same table, which drops what was removed; for documents, every export does it first, so a
+  freed document is still dropped, with its conversions, once each thread that used it calls
+  again.
+- **The cost of one call**, timed from Rust: `customer.name` against a document, its reply read
+  and freed, 383 → 273 ns (the evaluation and its encoding alone take 206 ns), `1` 300 →
+  199 ns. Evaluations per second of `customer.name` on one `Document` shared by Java threads:
+  on 1, 4, 8 and 16 threads, 2.2, 3.6, 1.3 and 1.0 million before, where 16 threads did less than
+  one; 2.8, 5.7, 6.1 and 3.1 million with the scratch reply alone; 2.9, 6.7, 12.3 and 20.8
+  million with the handles found without the lock (two runs of each, alternated).
+  `java-compare threads`, whose evaluation of 100 items of JSON text takes about 43 µs, moved
+  within its noise (±4%).
+- **The cases**, with `cargo xtask java-compare cases`, the median of three runs alternated with
+  the code before: on a `Document`, `customer.name` 0.47 → 0.34 µs, the indexes into 10,000
+  items 0.78 → 0.70 and 1.10 → 1.05 µs, `recursion` 3.4% less, the other cases from 2.3% less to
+  0.7% more; from JSON text and over Java maps, from 2.6% less to 1.7% more. Over Java maps
+  parsed from JSON text by Jackson, `customer.name` and the indexes measured 1.7 to 2.1% slower,
+  within the spread of their runs (`customer.name` 97 to 109 µs before, 102 to 105 µs after;
+  the indexes 1.7 to 2.1 ms in both), where the scratch reply alone had measured
+  `customer.name` 7% faster.
