@@ -14,8 +14,9 @@ use crate::bench_table::median;
 use crate::differential::flag;
 use crate::root;
 
-/// The difference `java-compare ab` marks, when the runs agree on it.
-const AB_MARK: f64 = 0.02;
+/// The difference `java-compare ab` marks, when the runs agree on it: past the largest that one
+/// JAR showed against itself with the runs apart, 4.3% over five rounds.
+const AB_MARK: f64 = 0.05;
 
 /// The Maven project of the Java package.
 fn project() -> PathBuf {
@@ -72,17 +73,26 @@ fn build_harness() -> Result<PathBuf> {
     Ok(harness)
 }
 
-/// The JVM that runs the harness, with `jar` first on the classpath when one is given.
-fn harness_command(harness: &Path, jar: Option<&Path>) -> Result<Command> {
-    let java = std::env::var_os("JAVA_HOME").map_or_else(
-        || PathBuf::from("java"),
-        |home| Path::new(&home).join("bin/java"),
-    );
+/// The tool `name` of the JDK: in `JAVA_HOME`, or found on `PATH`.
+fn jdk_tool(name: &str) -> PathBuf {
+    std::env::var_os("JAVA_HOME").map_or_else(
+        || PathBuf::from(name),
+        |home| Path::new(&home).join("bin").join(name),
+    )
+}
+
+/// The JVM that runs the harness. With a build, a JAR and the native library to load, the JAR is
+/// first on the classpath.
+fn harness_command(harness: &Path, build: Option<(&Path, &Path)>) -> Result<Command> {
+    let (jar, library) = build.unzip();
     let classpath = std::env::join_paths(jar.map(Path::to_path_buf).into_iter().chain([
         harness.join("target/classes"),
         harness.join("target/deps/*"),
     ]))?;
-    let mut command = Command::new(&java);
+    let mut command = Command::new(jdk_tool("java"));
+    if let Some(library) = library {
+        command.arg(format!("-Djlens.library={}", library.display()));
+    }
     command
         .current_dir(harness)
         .args([
@@ -98,7 +108,8 @@ fn harness_command(harness: &Path, jar: Option<&Path>) -> Result<Command> {
 
 /// `java-compare ab <A.jar> <B.jar> [--rounds N] [<harness argument>...]`: the harness on two
 /// JARs of the package, in alternation as `cargo xtask ab` runs two programs, A then B, then B
-/// then A, three rounds by default; a JVM per run. Prints each number's median, the difference
+/// then A, five rounds by default; a JVM per run, on a new copy of the JAR's native library, as
+/// a time follows the library's file. Prints each number's median, the difference
 /// and each JAR's spread, the slowest run against the fastest. `*` marks a difference above
 /// [`AB_MARK`] that the runs agree on: no run of one JAR reaches the other's. The harness's
 /// parts are its own default, its engines `jlens,jlens-objects`.
@@ -112,7 +123,7 @@ fn ab(args: &[String]) -> Result<()> {
             bail!("no JAR at {}", jar.display());
         }
     }
-    let rounds = flag(rest, "--rounds")?.unwrap_or(3);
+    let rounds = flag(rest, "--rounds")?.unwrap_or(5);
     if rounds == 0 {
         bail!("--rounds needs at least one round");
     }
@@ -139,6 +150,14 @@ fn ab(args: &[String]) -> Result<()> {
     let copied = format!("jlens-{}.jar", check_version()?);
     fs::remove_file(harness.join("target/deps").join(&copied))
         .with_context(|| format!("removing {copied} from the harness's dependencies"))?;
+    let libraries = harness.join("target/ab");
+    if libraries.exists() {
+        fs::remove_dir_all(&libraries)?;
+    }
+    let originals = [
+        take_library(&jars[0], &libraries.join("a"))?,
+        take_library(&jars[1], &libraries.join("b"))?,
+    ];
 
     let mut order = Vec::new();
     let mut times: BTreeMap<Place, [Vec<f64>; 2]> = BTreeMap::new();
@@ -146,7 +165,9 @@ fn ab(args: &[String]) -> Result<()> {
         eprintln!("round {} of {rounds}", round + 1);
         let sides = if round % 2 == 0 { [0, 1] } else { [1, 0] };
         for side in sides {
-            let output = harness_command(&harness, Some(&jars[side]))?
+            let library = libraries.join(format!("run-{round:06}-{side}{DLL_SUFFIX}"));
+            fs::copy(&originals[side], &library)?;
+            let output = harness_command(&harness, Some((&jars[side], &library)))?
                 .args(&harness_args)
                 .stderr(Stdio::inherit())
                 .output()
@@ -154,6 +175,7 @@ fn ab(args: &[String]) -> Result<()> {
             if !output.status.success() {
                 bail!("the harness failed on {}", jars[side].display());
             }
+            fs::remove_file(&library)?;
             for (place, time) in parse_tables(&String::from_utf8(output.stdout)?)? {
                 if !times.contains_key(&place) {
                     order.push(place.clone());
@@ -170,6 +192,27 @@ fn ab(args: &[String]) -> Result<()> {
         AB_MARK * 100.0
     );
     Ok(())
+}
+
+/// Takes the host's native library out of `jar` into `dir`, and returns its path.
+fn take_library(jar: &Path, dir: &Path) -> Result<PathBuf> {
+    fs::create_dir_all(dir)?;
+    let entry = format!(
+        "io/github/thkprado/jlens/native/{}/{DLL_PREFIX}jlens_capi{DLL_SUFFIX}",
+        platform()
+    );
+    let status = Command::new(jdk_tool("jar"))
+        .current_dir(dir)
+        .arg("xf")
+        .arg(jar)
+        .arg(&entry)
+        .status()
+        .context("running jar")?;
+    let library = dir.join(&entry);
+    if !status.success() || !library.is_file() {
+        bail!("no {entry} in {}", jar.display());
+    }
+    Ok(library)
 }
 
 /// Where a number stands in the harness's tables.
@@ -406,9 +449,9 @@ Evaluations per second of `$sum(items.price)` on 12,000 bytes of JSON text:
     #[test]
     fn only_a_difference_the_runs_agree_on_is_marked() {
         assert!(ab_cells(&[1.0, 1.01, 1.02], &[0.9, 0.91, 0.92]).ends_with('*'));
-        // Above 2%, but one run of A is among B's.
+        // Above the mark, but one run of A is among B's.
         assert!(!ab_cells(&[1.0, 1.0, 0.9], &[0.9, 0.91, 0.92]).ends_with('*'));
-        // The runs are apart, under 2%.
+        // The runs are apart, under the mark.
         assert!(!ab_cells(&[1.0, 1.0, 1.0], &[0.99, 0.99, 0.99]).ends_with('*'));
         assert_eq!(
             ab_cells(&[1.0, f64::NAN], &[1.0, 1.0]),

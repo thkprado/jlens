@@ -23,7 +23,8 @@ still running after LIMIT_WALL seconds.
 
 `ab` compares two builds of jlens, each in the environment of the interpreter given, as `cargo
 xtask ab` compares native ones: it runs `speed`'s measurement of jlens in alternation, A then B,
-then B then A, three rounds by default. It prints, for each case, each build's median, the
+then B then A, five rounds by default, each run on a new copy of the build's package, as a time
+follows the file of the native library. It prints, for each case, each build's median, the
 difference, and each build's spread, the slowest run against the fastest, in microseconds to the
 nanosecond, as `speed`'s 0.1 µs would read 0.9 against 1.0 µs, 11%, on noise. `*` marks a
 difference above AB_MARK that the runs agree on: no run of the slower build is as fast as a run
@@ -31,15 +32,19 @@ of the other. The names before `=` are the builds' labels.
 """
 
 import json
+import os
+import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 LIMIT_WALL = 30  # seconds before a limits case is killed
-AB_MARK = 0.02  # the difference `ab` marks
+AB_MARK = 0.035  # the difference `ab` marks, past the largest a build shows against itself
+AB_FRESH = "JLENS_AB_FRESH"  # the directory holding the package `ab` made new for a run
 
 
 # --- The implementations -------------------------------------------------------------------
@@ -224,6 +229,8 @@ def _measure(run, rounds=7, round_s=0.2):
 
 def speed_child(name, max_steps=None):
     """Measures one implementation; prints a JSON object on its last line."""
+    if AB_FRESH in os.environ:
+        sys.path.insert(0, os.environ[AB_FRESH])
     impl = IMPLEMENTATIONS[name]()
     # Without a limit, no call passes `max_steps`: a call with `**limits`, even empty, builds a
     # tuple and a dict, which cost about 0.3 µs, as much as the smallest cases take.
@@ -262,13 +269,14 @@ def _fmt(us):
     return f"{us:.1f} µs"
 
 
-def _speed_run(name, python, *limits):
+def _speed_run(name, python, *limits, env=None):
     """`speed_child`'s report from the interpreter `python`, or None if it failed."""
     proc = subprocess.run(
         [python, "-I", str(Path(__file__).resolve()), "speed-child", name, *limits],
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=env,
     )
     if proc.returncode != 0:
         print(f"{name}: exit code {proc.returncode}\n{proc.stderr[-2000:]}", file=sys.stderr)
@@ -331,15 +339,31 @@ def _ab_row(case, key, a, b):
     )
 
 
-def ab(pythons, rounds=3):
+def _package(python):
+    """The directory of the package `jlens` in the environment of `python`."""
+    code = "import jlens; print(jlens.__path__[0])"
+    proc = subprocess.run([python, "-I", "-c", code], capture_output=True, text=True, check=True)
+    return Path(proc.stdout.strip())
+
+
+def _fresh_run(python, package):
+    """`_speed_run` on a new copy of `package`: a time follows the native library's file."""
+    with tempfile.TemporaryDirectory() as fresh:
+        ignored = shutil.ignore_patterns("__pycache__", "*.pdb")
+        shutil.copytree(package, Path(fresh) / "jlens", ignore=ignored)
+        return _speed_run("jlens", python, env={**os.environ, AB_FRESH: fresh})
+
+
+def ab(pythons, rounds=5):
     if len(pythons) != 2 or rounds < 1:
         sys.exit("ab takes at least one round and two interpreters: A=<python> B=<python>")
     labels = list(pythons)
     runs = {label: [] for label in labels}
+    packages = {label: _package(python) for label, python in pythons.items()}
     for round_ in range(rounds):
         print(f"round {round_ + 1} of {rounds}", file=sys.stderr)
         for label in labels if round_ % 2 == 0 else reversed(labels):
-            run = _speed_run("jlens", pythons[label])
+            run = _fresh_run(pythons[label], packages[label])
             if run is None:
                 sys.exit(f"the run of {label} failed")
             runs[label].append(run)
@@ -357,7 +381,7 @@ def ab(pythons, rounds=3):
         )
         for case, *_ in cases:
             print(f"{case:{width}}  {_ab_row(case, key, a, b)}")
-    print(f"\n* a difference above {AB_MARK:.0%}, and no run of one build reaches the other's")
+    print(f"\n* a difference above {AB_MARK:.1%}, and no run of one build reaches the other's")
 
 
 # --- limits ----------------------------------------------------------------------------------
@@ -455,7 +479,7 @@ def main():
     elif command == "speed" and args[:1] == ["--max-steps"]:
         speed(dict(arg.split("=", 1) for arg in args[2:]), max_steps=args[1])
     elif command == "ab":
-        rounds = 3
+        rounds = 5
         if args[:1] == ["--rounds"]:
             rounds, args = int(args[1]), args[2:]
         ab(dict(arg.split("=", 1) for arg in args), rounds)

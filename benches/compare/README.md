@@ -99,31 +99,41 @@ one in `crates/jlens-java/java/target`:
 
 ```sh
 cargo xtask java-compare ab <A.jar> <B.jar>               # every part, jlens and jlens-objects
-cargo xtask java-compare ab <A.jar> <B.jar> cases --rounds 5
+cargo xtask java-compare ab <A.jar> <B.jar> cases --rounds 7
 ```
 
 It builds the harness as above, takes the package's own JAR out of `target/deps`, and runs a JVM
-per run with one of the two first on the classpath. `--engines` and `--sizes` are the harness's;
+per run with one of the two first on the classpath, and a new copy of that JAR's native library
+through `-Djlens.library`. `--engines` and `--sizes` are the harness's;
 `limits` measures no time, and is refused. A JAR older than the harness must still have what
 `Engine.java` calls.
 
 ## Two builds of a package
 
 `python.py ab` and `java-compare ab` do for a package what `cargo xtask ab` does natively: the
-runs alternate, A then B, then B then A, three rounds by default, so that a drift of the machine
-reaches both. They print each number's median for each build, the difference, and each build's
-spread, the slowest run against the fastest, to the nanosecond, where the tables above round
-(0.9 against 1.0 µs would read as 11%). `*` marks a difference above 2% that the runs agree on:
-no run of one build reaches the other's. An unmarked difference, however large, is one the runs
-do not settle. A JVM run is sometimes slow as a whole, by up to 1.4 times, which shows as a
-spread, not a difference; run more rounds. In `threads`, the numbers are evaluations per second,
-so that more is better there.
+runs alternate, A then B, then B then A, five rounds by default, so that a drift of the machine
+reaches both, and each run has a new copy of its build's native library. They print each number's
+median for each build, the difference, and each build's spread, the slowest run against the
+fastest, to the nanosecond, where the tables above round (0.9 against 1.0 µs would read as 11%).
+`*` marks a difference above 3.5% in Python and 5% in Java that the runs agree on: no run of one
+build reaches the other's. An unmarked difference, however large, is one the runs do not settle.
+A JVM run is sometimes slow as a whole, by up to 1.4 times, which shows as a spread, not a
+difference; run more rounds. In `threads`, the numbers are evaluations per second, so that more
+is better there.
 
-A mark does not prove that the code differs. The runs of a build share its native library's
-file, and a time can follow the file: one wheel against a copy of itself in another environment,
-the same bytes, marked `transform` at -6.5% and `object constructor` at -3.7% (Windows, three
-rounds, 0.26 #13), and the same wheel measured 425, 449 and 456 µs on `transform` at three times
-of one day, each with its runs within 2%. So read a mark under about 7% as a question: before
-putting it down to a change, compare each build with a copy of itself, and see whether the mark
-stays. For a Python build, copy its environment; the Java package unpacks its library to one
-file per content, so a copy of a JAR shares it, and `-Djlens.library` must name the copy.
+The copies matter because a time follows the file of the native library: one wheel against a
+copy of itself, each with its one file, marked `transform` at -6.5% (0.26 #13). With a new copy at
+each run, a build against itself (Windows, 0.26 #14) gives these differences, and the marks are
+set past them:
+
+| Command | Comparisons | Half of the numbers within | Nine in ten within | Largest |
+|---|---|---:|---:|---:|
+| `python.py ab`, 5 rounds | 3, 28 numbers | 1.1% | 2.1% | 3.2% |
+| `java-compare ab`, 5 rounds | 2, 108 numbers | 0.8% | 2.8% | 6.2% |
+
+The largest difference in Java is in `threads`, where the runs spread by up to 59%, and is not
+one the runs agree on; the largest they agreed on is 4.3%. Three rounds are too few: two sets of
+three runs fall apart by chance one time in ten (with five, one in 126), and they marked 1 of 84
+and 7 of 324 numbers in a build against itself. A difference under the mark can be real, on a
+number under 2 µs above all; it is settled when two comparisons give it. A build compared with
+itself needs no copy of its own: `A=<python> B=<python>`, or the same JAR twice.

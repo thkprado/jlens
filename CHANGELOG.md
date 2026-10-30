@@ -13,8 +13,10 @@ All notable changes are recorded here. The format follows
   case whose runs mostly disagree with the median by more than 2%.
 - `python.py ab` and `cargo xtask java-compare ab` compare two builds of the Python and Java
   packages, wheel against wheel and JAR against JAR, as `cargo xtask ab` compares native ones:
-  runs in alternation, each number's median, spread and difference to the nanosecond, marking a
-  difference above 2% that the runs agree on.
+  runs in alternation, each run on a new copy of the native library, as a time follows its file;
+  each number's median, spread and difference to the nanosecond, marking a difference that the
+  runs agree on, above 3.5% in Python and 5% in Java. `cargo xtask ab` gives each run a new copy
+  of its program too, so that a revision compared with itself now shows that noise.
 - `Output::is_array_or_object` in `jlens-core`: whether a result is an array or an object,
   before it is written, so that a host can build any other result after the evaluation has
   returned.

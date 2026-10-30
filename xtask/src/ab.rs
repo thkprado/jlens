@@ -10,6 +10,10 @@
 //! the median of the rounds, which a rare fast process does not move; the fastest round is
 //! printed beside it.
 //!
+//! A time also follows the file: copies of one program differ by up to 5%, with each copy's runs
+//! agreeing. So every run gets a new copy of its program, which turns that into spread, and a
+//! program compared with itself shows the noise a comparison of two has.
+//!
 //! `--mode` picks how the cases read their input: `evaluate` from the `serde_json::Value`,
 //! `document` from a `Document` converted once, `source` through a `Source` in the probe, one
 //! level at a time, as the Python package reads its values.
@@ -179,7 +183,8 @@ pub fn run(args: &[String]) -> Result<()> {
         eprintln!("round {} of {rounds}", round + 1);
         let sides = if round % 2 == 0 { [0, 1] } else { [1, 0] };
         for side in sides {
-            let output = Command::new(&programs[side])
+            let program = work.fresh(&programs[side], round, side)?;
+            let output = Command::new(&program)
                 .arg(&benches)
                 .arg(&mode)
                 .arg(sample_ms.to_string())
@@ -283,6 +288,15 @@ impl Work {
         let dir = ab.join(format!("run-{}", std::process::id()));
         fs::create_dir_all(&dir)?;
         Ok(Work { dir, target })
+    }
+
+    /// A new copy of `program` for one run. Its name has one length for every run, as a program's
+    /// path changes what its process has on the stack.
+    fn fresh(&self, program: &Path, round: u64, side: usize) -> Result<PathBuf> {
+        let name = format!("run-{round:06}-{side}{}", env::consts::EXE_SUFFIX);
+        let copy = self.dir.join(name);
+        fs::copy(program, &copy).with_context(|| format!("copying {}", program.display()))?;
+        Ok(copy)
     }
 
     /// Builds the probe against the `jlens-core` of `rev`, as `with` asks, and returns the path

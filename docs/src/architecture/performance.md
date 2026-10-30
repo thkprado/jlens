@@ -70,18 +70,34 @@ cargo xtask ab main . --mode source           # evaluate_source instead of evalu
   then the same for the fastest round. Judge by the median. A whole process is sometimes faster
   than usual, by up to 10% on the machine below, and one such run sets the fastest time.
 
-Comparing a revision with itself shows the noise. On the machine below, with ten rounds, the
-medians of most cases agree within 1%, and a few cases (`group-by`) within 3%. In `source`
-mode, the index into 10,000 items, which writes an object for each item, agrees within 6%.
+A time also follows the file. Six copies of one program, the same bytes, differ by up to 5.6%
+(`path`) and 4.9% (`recursion`), the medians of sixteen runs of each copy, where one file run
+under six labels differs by less than 1%, `transform` aside (3.6%). Windows gives an image its
+address once per file, not once per process, but that is not the whole cause: with the address
+fixed by the file's header, one copy of six ran `names over items` 8.6% slower. The bytes, the
+address and the length of the path being the same, what remains is the memory the file's code
+was given, which stays with the file while it is cached, and which caches indexed by physical
+address would see; that is inferred, not observed, and other systems were not measured. It would
+explain why one wheel measured 425, 449 and 456 µs on `transform` at three times of one day.
+
+So each run of `ab` has a new copy of its program, which turns this into spread, and the median
+of the rounds settles it: with new copies, the six medians differ by 1.5% at most. A revision
+compared with itself then shows the noise of a comparison, which it did not before 0.26, when
+both sides ran one file. On the machine below, with ten rounds, eleven comparisons in the three
+modes: most cases agree within 1.7%, `transform` within 2.9% and the object constructor within
+4.1%.
 
 The Python and Java packages are compared the same way, wheel against wheel and JAR against
-JAR, with `python.py ab` and `cargo xtask java-compare ab`. The runs alternate, three rounds by
-default, and each prints the median of each number, the difference and the spread, to the
-nanosecond. `*` marks a difference above 2% on which no run of one build reaches the other's. An
-unmarked difference is one the runs do not settle, and a marked one under about 7% still needs
-checking: a time can follow the file of the native library, so that one wheel against a copy of
-itself marked `transform` at -6.5%
+JAR, with `python.py ab` and `cargo xtask java-compare ab`, each run on a new copy of the native
+library. The runs alternate, five rounds by default, and each prints the median of each number,
+the difference and the spread, to the nanosecond. `*` marks a difference on which no run of one
+build reaches the other's, above 3.5% in Python and 5% in Java, past what a build shows against
+itself: nine numbers in ten within 2.1% and 2.8%, the largest 3.2% and 6.2%, and with those marks
+nothing marked
 ([`benches/compare/README.md`](https://github.com/thkprado/jlens/blob/main/benches/compare/README.md#two-builds-of-a-package)).
+An unmarked difference is one the runs do not settle. The tables below come from one file for
+each run of the benchmark, so that a change of a few percent from an earlier table can be that
+file's; the release checks such a case with `ab`.
 
 Code placement moves cases too: a change can make a case that runs none of its code 5 to 8%
 slower or faster, because the release profile (LTO, one codegen unit) lays the whole program out
