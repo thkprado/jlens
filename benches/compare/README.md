@@ -34,7 +34,7 @@ The script's docstring says how to set up the environments, and what `speed` and
 To compare two builds of the package, install each wheel in an environment of its own:
 
 ```sh
-python benches/compare/python.py ab A=<python> B=<python>   # three rounds; --rounds N before them
+python benches/compare/python.py ab A=<python> B=<python>   # five rounds; --rounds N before them
 ```
 
 See [below](#two-builds-of-a-package) for what it prints.
@@ -123,16 +123,19 @@ is better there.
 
 The copies matter because a time follows the file of the native library: one wheel against a
 copy of itself, each with its one file, marked `transform` at -6.5% (0.26 #13). With a new copy at
-each run, a build against itself (Windows, 0.26 #14) gives these differences, and the marks are
-set past them:
+each run, a build against itself gives these differences (Windows, 0.26 #14; Ubuntu 26.04 under
+WSL 2, 0.26 #15), and the marks are set past them, one mark for both systems:
 
-| Command | Comparisons | Half of the numbers within | Nine in ten within | Largest |
-|---|---|---:|---:|---:|
-| `python.py ab`, 5 rounds | 3, 28 numbers | 1.1% | 2.1% | 3.2% |
-| `java-compare ab`, 5 rounds | 2, 108 numbers | 0.8% | 2.8% | 6.2% |
+| Command | System | Comparisons | Half of the numbers within | Nine in ten within | Largest |
+|---|---|---|---:|---:|---:|
+| `python.py ab`, 5 rounds | Windows | 3, 28 numbers | 1.1% | 2.1% | 3.2% |
+| `python.py ab`, 5 rounds | Linux | 3, 28 numbers | 1.4% | 2.6% | 2.9% |
+| `java-compare ab`, 5 rounds | Windows | 2, 108 numbers | 0.8% | 2.8% | 6.2% |
+| `java-compare ab`, 5 rounds | Linux | 2, 108 numbers | 1.0% | 2.8% | 4.8% |
 
-The largest difference in Java is in `threads`, where the runs spread by up to 59%, and is not
-one the runs agree on; the largest they agreed on is 4.3%. Three rounds are too few: two sets of
+Nothing was marked on Linux. On Windows, the largest difference in Java is in `threads`, where
+the runs spread by up to 59%, and is not one the runs agree on; the largest they agreed on is
+4.3%. Three rounds are too few: two sets of
 three runs fall apart by chance one time in ten (with five, one in 126), and they marked 1 of 84
 and 7 of 324 numbers in a build against itself. A difference under the mark can be real, on a
 number under 2 µs above all; it is settled when two comparisons give it. A build compared with

@@ -74,26 +74,39 @@ A time also follows the file. Six copies of one program, the same bytes, differ 
 (`path`) and 4.9% (`recursion`), the medians of sixteen runs of each copy, where one file run
 under six labels differs by less than 1%, `transform` aside (3.6%). Windows gives an image its
 address once per file, not once per process, but that is not the whole cause: with the address
-fixed by the file's header, one copy of six ran `names over items` 8.6% slower. The bytes, the
-address and the length of the path being the same, what remains is the memory the file's code
-was given, which stays with the file while it is cached, and which caches indexed by physical
-address would see; that is inferred, not observed, and other systems were not measured. It would
-explain why one wheel measured 425, 449 and 456 µs on `transform` at three times of one day.
+fixed by the file's header, one copy of six ran `names over items` 8.6% slower.
+
+Linux (Ubuntu 26.04 under WSL 2, on the same machine, 0.26 #15) shows what remains. A program
+has a new address in every process there, and copies differ all the same: of twelve copies, one
+ran `index into 10,000 items` 10.4% and `index in a variable` 8.5% slower in all of its sixteen
+runs, another `strings` 5.0% slower, where one file under six labels differs by 1.5% at most,
+`transform` aside (2.6%). With four copies measured in eight sets of runs, the file's pages
+dropped from the page cache between sets, so that its path, inode and bytes stay and its memory
+is new, the slowness comes and goes between the sets of one file, by about 5% in
+`index in a variable`, and the files come together: `strings` from 2.2% with the pages kept to
+0.9% and 0.2%, `path` from 2.2% to 0.5% and 0.2%. So a time follows the memory the code was
+given, which stays with a file while it is cached. Which part of the processor sees it was not observed; on Windows
+the memory is inferred, by elimination. It would explain why one wheel measured 425, 449 and
+456 µs on `transform` at three times of one day.
 
 So each run of `ab` has a new copy of its program, which turns this into spread, and the median
-of the rounds settles it: with new copies, the six medians differ by 1.5% at most. A revision
-compared with itself then shows the noise of a comparison, which it did not before 0.26, when
-both sides ran one file. On the machine below, with ten rounds, eleven comparisons in the three
-modes: most cases agree within 1.7%, `transform` within 2.9% and the object constructor within
-4.1%.
+of the rounds settles it: on Windows, with new copies, the six medians differ by 1.5% at most;
+under WSL by 1.9% at most, `strings` aside (2.9%) and but for one label of `index in a variable`,
+6.1% off, half of whose new copies ran slowly in turn. A script made those copies, deleting the
+one before, which `ab` does not, and may have been given the same memory again; that was not
+observed. A revision compared with itself then shows the noise of a comparison, which it did not
+before 0.26, when both sides ran one file. On the machine below, with ten rounds, eleven
+comparisons in the three modes: most cases agree within 1.7%, `transform` within 2.9% and the
+object constructor within 4.1%. Under WSL, nine comparisons: most within 1.7%, the largest 2.6%
+(`recursion`).
 
 The Python and Java packages are compared the same way, wheel against wheel and JAR against
 JAR, with `python.py ab` and `cargo xtask java-compare ab`, each run on a new copy of the native
 library. The runs alternate, five rounds by default, and each prints the median of each number,
 the difference and the spread, to the nanosecond. `*` marks a difference on which no run of one
 build reaches the other's, above 3.5% in Python and 5% in Java, past what a build shows against
-itself: nine numbers in ten within 2.1% and 2.8%, the largest 3.2% and 6.2%, and with those marks
-nothing marked
+itself: nine numbers in ten within 2.1% and 2.8% on Windows and 2.6% and 2.8% under WSL, the
+largest 3.2% and 6.2%, and 2.9% and 4.8%. With those marks, nothing is marked on either system
 ([`benches/compare/README.md`](https://github.com/thkprado/jlens/blob/main/benches/compare/README.md#two-builds-of-a-package)).
 An unmarked difference is one the runs do not settle. The tables below come from one file for
 each run of the benchmark, so that a change of a few percent from an earlier table can be that
