@@ -1,20 +1,23 @@
 //! `cargo xtask bench-table`: measures the native table of the performance page.
 //!
-//! One run of `cargo bench -p jlens-core --bench evaluate` can be far off: for 0.25.0, one run
-//! gave 1.19 ms on `regex` against a `Document`, where the next two gave 179 and 182 µs. So the
-//! table takes, for each benchmark, the median of several runs (three by default). Each run
-//! saves its results as a criterion baseline, `table-<n>`, and this command reads them back:
-//! for each benchmark, the time criterion prints (its slope, or its mean when it has none), in
-//! each run, the median and the spread, the slowest run against the fastest. The median stands
-//! when most runs are within 2% of it, so that one run far off does not move it; a case where
-//! they are not is marked: run again, with more runs, before reading it.
+//! One run of `jlens-core`'s benchmark `evaluate` can be far off: for 0.25.0, one run gave
+//! 1.19 ms on `regex` against a `Document`, where the next two gave 179 and 182 µs. So the table
+//! takes, for each benchmark, the median of several runs (three by default). A time also follows
+//! the memory the program's file was given, which stays with the file while it is cached, so each
+//! run has a new copy of the program, built once by `cargo bench --no-run`, and every copy stays
+//! until the last run, as a copy deleted may give its memory to the next. Each run saves its
+//! results as a criterion baseline, `table-<n>`, and this command reads them back: for each
+//! benchmark, the time criterion prints (its slope, or its mean when it has none), in each run,
+//! the median and the spread, the slowest run against the fastest. The median stands when most
+//! runs are within 2% of it, so that one run far off does not move it; a case where they are not
+//! is marked: run again, with more runs, before reading it.
 //!
 //! `--reuse` reads the baselines `table-1` to `table-<runs>` already saved, without running.
 //! The target directory is `CARGO_TARGET_DIR`'s, as Cargo's is, so that a run built with other
 //! `RUSTFLAGS`, such as the alignment flags, keeps its own.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::{env, fs};
 
 use anyhow::{Context, Result, bail};
@@ -37,19 +40,30 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
         None => root().join("target"),
     };
     if !args.iter().any(|a| a == "--reuse") {
+        let program = build(&target)?;
+        let copies = target.join("bench-table");
+        if copies.exists() {
+            fs::remove_dir_all(&copies).context("removing the copies of an earlier run")?;
+        }
+        fs::create_dir_all(&copies)?;
         for n in 1..=runs {
             eprintln!("bench-table: run {n} of {runs}");
-            let status = Command::new(env!("CARGO"))
-                .current_dir(root())
-                .args(["bench", "-p", "jlens-core", "--bench", "evaluate", "--"])
-                .args(["--save-baseline", &format!("table-{n}")])
+            // The name has one length for every run, as a program's path changes what its process
+            // has on the stack.
+            let copy = copies.join(format!("run-{n:06}{}", env::consts::EXE_SUFFIX));
+            fs::copy(&program, &copy).with_context(|| format!("copying {}", program.display()))?;
+            // As `cargo bench` runs it, with the package as its directory.
+            let status = Command::new(&copy)
+                .current_dir(root().join("crates/jlens-core"))
+                .args(["--bench", "--save-baseline", &format!("table-{n}")])
                 .env("CARGO_TARGET_DIR", &target)
                 .status()
-                .context("running cargo bench")?;
+                .with_context(|| format!("running {}", copy.display()))?;
             if !status.success() {
-                bail!("cargo bench failed in run {n}");
+                bail!("the benchmark failed in run {n}");
             }
         }
+        fs::remove_dir_all(&copies).context("removing the copies")?;
     }
 
     let mut rows = Vec::new();
@@ -82,6 +96,35 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Builds the benchmark as `cargo bench` does, and returns the path of its program.
+fn build(target: &Path) -> Result<PathBuf> {
+    let output = Command::new(env!("CARGO"))
+        .current_dir(root())
+        .args(["bench", "-p", "jlens-core", "--bench", "evaluate"])
+        .args(["--no-run", "--message-format=json"])
+        .env("CARGO_TARGET_DIR", target)
+        .stderr(Stdio::inherit())
+        .output()
+        .context("running cargo bench")?;
+    if !output.status.success() {
+        bail!("cargo bench could not build the benchmark");
+    }
+    program(&String::from_utf8_lossy(&output.stdout))
+        .context("cargo bench named no program for the benchmark")
+}
+
+/// The program of the benchmark `evaluate`, in the messages Cargo prints.
+fn program(messages: &str) -> Option<PathBuf> {
+    messages.lines().find_map(|line| {
+        let message: serde_json::Value = serde_json::from_str(line).ok()?;
+        let target = &message["target"];
+        let is_bench = target["kind"].as_array()?.iter().any(|k| k == "bench");
+        (is_bench && target["name"] == "evaluate")
+            .then(|| message["executable"].as_str().map(PathBuf::from))
+            .flatten()
+    })
 }
 
 /// The median of `sorted`, which is not empty.
@@ -177,4 +220,23 @@ fn format_ns(ns: f64) -> String {
         2
     };
     format!("{value:.decimals$} {unit}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_program_is_the_benchmark_s_own() {
+        let messages = [
+            r#"{"reason":"compiler-artifact","target":{"name":"jlens_core","kind":["lib"]},"executable":null}"#,
+            r#"{"reason":"compiler-artifact","target":{"name":"host_state","kind":["bench"]},"executable":"host"}"#,
+            "not a message",
+            r#"{"reason":"build-finished","success":true}"#,
+            r#"{"reason":"compiler-artifact","target":{"name":"evaluate","kind":["bench"]},"executable":"evaluate-1"}"#,
+        ]
+        .join("\n");
+        assert_eq!(program(&messages), Some(PathBuf::from("evaluate-1")));
+        assert_eq!(program(&messages[..messages.rfind('\n').unwrap()]), None);
+    }
 }

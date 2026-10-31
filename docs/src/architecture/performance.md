@@ -108,9 +108,10 @@ build reaches the other's, above 3.5% in Python and 5% in Java, past what a buil
 itself: nine numbers in ten within 2.1% and 2.8% on Windows and 2.6% and 2.8% under WSL, the
 largest 3.2% and 6.2%, and 2.9% and 4.8%. With those marks, nothing is marked on either system
 ([`benches/compare/README.md`](https://github.com/thkprado/jlens/blob/main/benches/compare/README.md#two-builds-of-a-package)).
-An unmarked difference is one the runs do not settle. The tables below come from one file for
-each run of the benchmark, so that a change of a few percent from an earlier table can be that
-file's; the release checks such a case with `ab`.
+An unmarked difference is one the runs do not settle. The native table below has a new copy for
+each run as well. The WebAssembly, Python and Java tables come from one file each, so that a
+change of a few percent from an earlier table can be that file's; the release compares the Python
+and Java packages with the previous release by the commands above.
 
 Code placement moves cases too: a change can make a case that runs none of its code 5 to 8%
 slower or faster, because the release profile (LTO, one codegen unit) lays the whole program out
@@ -126,12 +127,29 @@ different absolute values.
 
 ### Native (criterion)
 
-The table is measured with `cargo xtask bench-table`. It runs `cargo bench -p jlens-core --bench
-evaluate` three times and prints, for each benchmark, the time criterion gives in each run and
-their median. One run alone can be far off: for 0.25.0, one run gave 1.19 ms on `regex` against
-a `Document`, where the next two gave 179 and 182 µs, and later one gave 1.99 ms on `recursion`
-where the next two gave 1.03 ms. The median sets such a run aside when the other two agree. A
-case where most runs are more than 2% from the median is marked, and run again with `--runs 5`.
+The table is measured with `cargo xtask bench-table`, in about ten minutes. It builds the program
+of `cargo bench -p jlens-core --bench evaluate` once, runs a new copy of it three times, keeping
+every copy until the last run, and prints, for each benchmark, the time criterion gives in each
+run and their median. One run alone can be far off: for 0.25.0, one run gave 1.19 ms on `regex`
+against a `Document`, where the next two gave 179 and 182 µs, and later one gave 1.99 ms on
+`recursion` where the next two gave 1.03 ms. The median sets such a run aside when the other two
+agree. A case where most runs are more than 2% from the median is marked, and run again with
+`--runs 5`.
+
+The copies settle what a median of one file cannot, the file ([above](#comparing-two-revisions)).
+Eight tables of one commit, alternated, on the machine below (0.26 #16), each compared with the
+others of its method, for the 42 cases:
+
+| Each table from | Nine differences in ten within | Largest | Cases over 3% in some pair |
+|---|---:|---:|---:|
+| one file, three runs, as before 0.26 | 3.1% | 8.9% | 12 |
+| three new copies | 1.8% | 3.2% | 2 |
+| five new copies | 1.7% | 3.7% | 1 |
+
+Three copies are kept: two more add six minutes for little, as the slow runs of `wide
+Document::parse`, up to 7% off in the fourth and fifth runs of three tables, came in a row across
+copies, so that they are the machine's, not a file's. Two tables of one commit can still differ
+by 3%, so that a move of that size from the previous table goes to `ab`, as below.
 
 The programs are built with the release profile, without the alignment flags, as an
 application builds them. Aligned, the same code measured up to 7% faster (`path` against a

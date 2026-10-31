@@ -87,8 +87,9 @@ commands:
                                     use mimalloc or a step limit, both can have a timeout, and
                                     both can be built for another local target
   bench-table [--runs N] [--reuse]  run the native benchmark (cargo bench -p jlens-core --bench
-                                    evaluate) N times (3) and print each case's median and spread,
-                                    for the performance page; --reuse reads the runs saved before
+                                    evaluate) N times (3), each on a new copy of its program, and
+                                    print each case's median and spread, for the performance page;
+                                    --reuse reads the runs saved before
 ";
 
 fn main() -> Result<()> {

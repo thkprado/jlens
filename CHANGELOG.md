@@ -9,8 +9,9 @@ All notable changes are recorded here. The format follows
 ### Added
 
 - `cargo xtask bench-table` measures the native table of the performance page: it runs the
-  native benchmark three times (`--runs`) and prints each case's median and spread, marking a
-  case whose runs mostly disagree with the median by more than 2%.
+  native benchmark three times (`--runs`), each run on a new copy of its program, as a time
+  follows its file, and prints each case's median and spread, marking a case whose runs mostly
+  disagree with the median by more than 2%.
 - `python.py ab` and `cargo xtask java-compare ab` compare two builds of the Python and Java
   packages, wheel against wheel and JAR against JAR, as `cargo xtask ab` compares native ones:
   runs in alternation, each run on a new copy of the native library, as a time follows its file;

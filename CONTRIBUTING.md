@@ -85,8 +85,8 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    (`](docs/...)`) at the files of the tag.
 3. Measure the tables of the [performance page](docs/src/architecture/performance.md) again
    and set the new version in the sentence above them (`for jlens X.Y.Z`): the native table
-   with `cargo xtask bench-table`, the median of three runs built without the alignment flags
-   (the [performance page](docs/src/architecture/performance.md#native-criterion) says how to
+   with `cargo xtask bench-table`, the median of three runs, each on a new copy of the program,
+   built without the alignment flags (the [performance page](docs/src/architecture/performance.md#native-criterion) says how to
    read it), the WebAssembly one with `node compare.mjs` in
    `benches/compare` after `cargo xtask wasm`, the Python one with `python.py speed` (its
    docstring says how), and the Java ones with `cargo xtask java-compare`
