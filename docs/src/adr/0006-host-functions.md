@@ -134,3 +134,19 @@ could not explain](../architecture/performance.md#recursion-and-the-frames-026-1
 The cost falls on frames with many names: a block with eight or more takes 4 to 12% longer, 0.1 to
 0.2 µs on twenty lookups, as searching eight names of one length costs more than hashing one,
 while up to four names take 7 to 8% less. Eight was kept for that: most frames hold far fewer.
+
+### Follow-up: a lambda's frame (0.26 #20)
+
+A frame of a call now holds the list that carried the arguments and a reference to the function,
+whose parameters name them, instead of a list of its own with a copy of each name. The function is
+an `Rc` of the evaluation, not the `Arc<LambdaDef>` of the syntax tree, as a count on the tree is
+one cache line for every thread. A name the body binds in that frame moves it to the list of
+names. Of two parameters of one name the last holds, as when they were bound in turn. A call makes
+two allocations instead of four, and takes no share of the tree: `recursion` takes 18 to 20% less
+time on Windows, 8 to 10% less under Linux, and 44% more evaluations on eight threads
+([performance](../architecture/performance.md#a-lambdas-frame-026-20)).
+
+The new reference from a frame to its function makes no new cycle that an evaluation would keep:
+the function reaches the frame's parent, which the frame holds anyway, and its input, made before
+the frame. Any other way back goes through a frame's variables, and a frame holding a function, an
+array or an object is on the list that is cleared when the evaluation ends.

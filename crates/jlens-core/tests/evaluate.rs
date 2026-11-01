@@ -129,6 +129,60 @@ fn a_frame_keeps_its_variables_however_many_it_holds() {
 }
 
 #[test]
+fn a_lambda_frame_names_its_arguments_as_if_each_were_bound() {
+    // A call's frame holds the arguments it was given and takes their names from the function.
+    // The results are those of jsonata-js.
+    let cases = [
+        // Of two parameters of one name the last holds, given or not.
+        ("function($x, $x){ $x }(1, 2)", Some(json!(2))),
+        ("function($x, $x){ $x }(1)", None),
+        // Arguments too many are dropped; one missing hides the variable outside.
+        ("function($x){ $x }(1, 2, 3)", Some(json!(1))),
+        ("($x := 1; function($x){ $x }())", None),
+        // The body binds in the frame, a parameter or a name of its own, with no block around.
+        ("function($x){ $x := 2 }(1)", Some(json!(2))),
+        ("function($x){ $y := $x + 1 }(1)", Some(json!(2))),
+        (
+            "function($x){ $append($x := 5, $x) }(1)",
+            Some(json!([5, 5])),
+        ),
+        (
+            "function($x){ $append($y := $x + 1, $append($y, $x)) }(1)",
+            Some(json!([2, 2, 1])),
+        ),
+        (
+            "function($x, $x){ $append($y := 5, $x) }(1, 2)",
+            Some(json!([5, 2])),
+        ),
+        // Past the number of variables a list holds.
+        (
+            "function($a, $b, $c, $d, $e, $f, $g, $h, $i, $j){ \
+             $append($k := 11, $append($a, $append($j, $k))) }(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)",
+            Some(json!([11, 1, 10, 11])),
+        ),
+        // A closure keeps the frame after the call, and sees what the body binds after it.
+        (
+            "($f := function($x){ function(){ $x } }; $f(3)())",
+            Some(json!(3)),
+        ),
+        (
+            "function($x){ $append($string($h := function(){ $y + $x }), \
+             $append($y := 1, $h())) }(2)",
+            Some(json!(["", 1, 3])),
+        ),
+        // A partial application names what is left to supply.
+        (
+            "($f := function($a, $b, $c){ [$a, $b, $c] }; \
+             $g := $f(?, 2, ?); $h := $g(1, ?); $h(3))",
+            Some(json!([1, 2, 3])),
+        ),
+    ];
+    for (expr, expected) in cases {
+        assert_eq!(eval(expr, json!(null)), expected, "{expr}");
+    }
+}
+
+#[test]
 fn bindings_and_closures() {
     let expr = Expression::compile("$limit < $sum(values) ? 'over' : 'under'").unwrap();
     let bindings = Bindings::new().var("limit", 10);

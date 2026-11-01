@@ -1448,3 +1448,63 @@ its two index cases may read 0.1 µs less by rounding, and no other number of ei
 by the change. Against the table of 0.25.0, those 40 ns of `path`, and the 20 to 50 ns of the
 index cases with Python values, come from the script, not from the package. `python.py ab` calls
 both builds with one script, and so compares them as it did.
+
+### A lambda's frame (0.26 #20)
+
+A call of a lambda made four allocations: the list of its arguments, the frame, the frame's list
+of variables, and a copy of the name of each parameter. The frame now keeps the arguments in the
+list that carried them, and takes their names from the function, so that a call of one parameter
+makes two, and a call of two parameters two instead of five. The frame shares the function by a
+reference count of the evaluation's own, where the call took a share of the syntax tree, which
+every thread evaluating the expression counts on one cache line.
+
+The share of each part, measured apart on Windows with `mimalloc`, which the packages use: a probe
+of one process per build, the median of five alternated runs, each on a new copy, at 1861ee8.
+"Names and list" has the frame's new form and still takes the share of the syntax tree:
+
+| Case, per evaluation | Before | Names and list | Both | Allocations per call |
+|---|---:|---:|---:|---:|
+| `recursion` | 815 µs | 705 µs | 710 µs | 4.0 → 2.0 |
+| `$map`, one parameter, 200 items | 51.1 µs | 42.5 µs | 43.2 µs | 6.9 → 4.9 |
+| `$map`, two parameters | 64.3 µs | 49.1 µs | 50.6 µs | 6.1 → 3.1 |
+| `$reduce`, two parameters | 51.7 µs | 38.8 µs | 38.7 µs | 5.1 → 2.1 |
+| `$filter` | 46.8 µs | 38.5 µs | 39.3 µs | 4.2 → 2.2 |
+| A block binding one name in the lambda | 94.4 µs | 85.9 µs | 86.4 µs | 7.1 → 5.1 |
+| A name bound with no block around it | 61.4 µs | 64.2 µs | 64.9 µs | 5.1 → 5.1 |
+| `recursion`, evaluations per second, 1 thread | 1,205 | 1,391 | 1,399 | |
+| 4 threads sharing the expression | 4,149 | 4,413 | 5,233 | |
+| 8 threads | 5,534 | 5,923 | 8,513 | |
+| 16 threads | 7,890 | 8,455 | 10,753 | |
+
+So the allocations are the whole gain on one thread, 13% of `recursion`, more than the 10% the
+roadmap estimated, and the share of the syntax tree costs nothing there but most of what threads
+lose: on eight threads, 44% more evaluations. A name that a lambda's body binds with no block
+around it moves the frame to the list, about 18 ns more per call; a block has a frame of its own,
+so that only a body that is the binding itself pays.
+
+`cargo xtask ab 1861ee8 .`, ten rounds, `recursion`, with the system allocator as `ab` builds it:
+
+| | `evaluate` | `document` | `source` |
+|---|---:|---:|---:|
+| Windows | −19.8% | −20.3% | −19.9% |
+| Windows, aligned | −19.2% | −18.3% | −18.0% |
+| Linux | −8.4% | −9.2% | −9.9% |
+| Linux, aligned | −9.5% | −8.0% | −7.7% |
+
+`recursion` takes 964 → 773 µs on Windows and 560 → 513 µs under Linux with `evaluate`. Windows's
+allocator gains the most from each allocation less: `sort + map`, whose `$map` calls a lambda for
+each item, takes 1.5 to 5.6% less there and within 1.1% under Linux. Every other case stays within 2.5%, but
+for four readings, none repeated in another run, mode or build. On Windows, `object constructor`
+against a `Document` built as usual read +5.6% in one of three runs, −1.1% and −0.1% in the others;
+its rounds spread widely, the fastest of that run 251 against 274 µs. Under Linux, `transform`
+read +3.4% aligned with `evaluate` (−0.1% built as usual), `object constructor` +3.2% built as
+usual against a `Document` (+0.4% aligned), and `filter + aggregate` +2.7% built as usual from a
+source (−0.3% aligned). Within 2.5% but in all three runs: on Windows, against a `Document` built
+as usual, `filter + aggregate` +1.5 to +2.5% and `group-by` +1.3 to +2.1%. Neither calls a lambda,
+and aligned they read −0.0% and +0.8%, so that this is placement.
+
+The names of blocks, of tuples and of the host's variables are still copied, one allocation for
+each name bound. They could be shared by an `Arc<str>` in the syntax tree, which would count on
+one cache line for every thread at each binding, what the threads above just got rid of; or be
+kept in place when short, a type of its own for one allocation of the five a call in the block
+case above makes. Neither was built.

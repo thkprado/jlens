@@ -28,6 +28,11 @@ All notable changes are recorded here. The format follows
   of a lambda makes no table for its parameters. A recursion through a lambda takes about 21%
   less time under Linux and 4.6% less on Windows, and from Python it no longer depends on
   whether the call passes keyword arguments.
+- A call of a lambda makes two allocations instead of four, or five with two parameters: its
+  frame keeps the list of arguments and takes their names from the function. A recursion through
+  a lambda takes 18 to 20% less time on Windows and 8 to 10% less under Linux. A call also no
+  longer counts on the shared expression: on eight threads that evaluate one expression, it made
+  44% more evaluations of that recursion.
 - Variables are looked up as fast as in 0.24.0 again: the root frame of an evaluation holds the
   host functions, shared with the `Bindings`, instead of every lookup carrying the bindings to
   reach them. A recursion through a lambda, which ran up to 4% slower in 0.25.0, is back

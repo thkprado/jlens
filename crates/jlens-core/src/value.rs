@@ -721,6 +721,14 @@ impl<'a> Function<'a> {
         }
     }
 
+    /// The names of a lambda's parameters; no other function has any.
+    pub fn params(&self) -> &[String] {
+        match self {
+            Function::Lambda(l) => l.params(),
+            _ => &[],
+        }
+    }
+
     pub fn is_thunk(&self) -> bool {
         matches!(self, Function::Lambda(l) if l.def.thunk)
     }

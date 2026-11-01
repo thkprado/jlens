@@ -35,6 +35,9 @@ const FEW_VARS: usize = 8;
 /// until they are too many to search one by one, as in the root frame of an evaluation with
 /// many bindings.
 enum Vars<'a> {
+    /// A lambda's call: the arguments, in the list that carried them, named by the parameters
+    /// of the function, so that the call allocates neither a list nor the names (0.26 #20).
+    Call(Rc<Function<'a>>, Vec<Value<'a>>),
     Few(Vec<(String, Value<'a>)>),
     Many(HashMap<String, Value<'a>, foldhash::fast::RandomState>),
 }
@@ -42,6 +45,7 @@ enum Vars<'a> {
 impl<'a> Vars<'a> {
     fn get(&self, name: &str) -> Option<&Value<'a>> {
         match self {
+            Vars::Call(function, values) => values.get(param(function, name)?),
             Vars::Few(vars) => vars.iter().find(|(n, _)| n == name).map(|(_, v)| v),
             Vars::Many(vars) => vars.get(name),
         }
@@ -49,6 +53,19 @@ impl<'a> Vars<'a> {
 
     fn set(&mut self, name: &str, value: Value<'a>) {
         match self {
+            Vars::Call(function, values) => {
+                if let Some(slot) = param(function, name).and_then(|i| values.get_mut(i)) {
+                    *slot = value;
+                } else {
+                    // A name of the lambda's body, bound with no block around it.
+                    let mut named = Vars::Few(Vec::with_capacity(values.len() + 1));
+                    for (param, value) in function.params().iter().zip(values.drain(..)) {
+                        named.set(param, value);
+                    }
+                    named.set(name, value);
+                    *self = named;
+                }
+            }
             Vars::Few(vars) => {
                 if let Some((_, slot)) = vars.iter_mut().find(|(n, _)| n == name) {
                     *slot = value;
@@ -68,10 +85,25 @@ impl<'a> Vars<'a> {
 
     fn clear(&mut self) {
         match self {
+            Vars::Call(..) => *self = Vars::Few(Vec::new()),
             Vars::Few(vars) => vars.clear(),
             Vars::Many(vars) => vars.clear(),
         }
     }
+}
+
+/// The place of a parameter among a function's. Of two of one name the last holds, as when each
+/// was bound in turn.
+fn param(function: &Function<'_>, name: &str) -> Option<usize> {
+    function.params().iter().rposition(|n| n == name)
+}
+
+/// Whether a value can reach a frame, so that a frame holding it may be part of a cycle.
+fn may_hold_frame(value: &Value<'_>) -> bool {
+    matches!(
+        value,
+        Value::Function(_) | Value::Array(_) | Value::Object(_)
+    )
 }
 
 /// A scope of variable bindings.
@@ -488,10 +520,7 @@ impl<'a> Evaluator<'_, 'a> {
     }
 
     pub(crate) fn bind(&mut self, env: &Env<'a>, name: &str, value: Value<'a>) {
-        if matches!(
-            value,
-            Value::Function(_) | Value::Array(_) | Value::Object(_)
-        ) {
+        if may_hold_frame(&value) {
             self.cyclic.push(Rc::downgrade(env));
         }
         env.vars.borrow_mut().set(name, value);
@@ -1869,7 +1898,7 @@ impl<'a> Evaluator<'_, 'a> {
                     (Some(sig), true) => sig.validate(args, input)?,
                     _ => args,
                 };
-                self.apply_lambda(lambda, args)
+                self.apply_lambda(f, lambda, args)
             }
             Function::Native(native) => {
                 let args = match &native.signature {
@@ -1963,16 +1992,25 @@ impl<'a> Evaluator<'_, 'a> {
         host.call(args, input, limit, &HostCaller::new(self, args, env))
     }
 
-    fn apply_lambda(&mut self, lambda: &Lambda<'a>, args: Vec<Value<'a>>) -> Result<Value<'a>> {
-        let frame = self.child(&lambda.env);
-        let mut args = args.into_iter();
-        for param in lambda.params() {
-            // Missing arguments are bound as undefined so they shadow outer variables.
-            let value = args.next().unwrap_or_default();
-            self.bind(&frame, param, value);
+    fn apply_lambda(
+        &mut self,
+        function: &Rc<Function<'a>>,
+        lambda: &Lambda<'a>,
+        mut args: Vec<Value<'a>>,
+    ) -> Result<Value<'a>> {
+        // Missing arguments are undefined so that they shadow outer variables.
+        args.resize_with(lambda.params().len(), Value::default);
+        let cyclic = args.iter().any(may_hold_frame);
+        let frame = Rc::new(Frame {
+            vars: RefCell::new(Vars::Call(function.clone(), args)),
+            parent: Some(lambda.env.clone()),
+            input: Value::Undefined,
+            functions: None,
+        });
+        if cyclic {
+            self.cyclic.push(Rc::downgrade(&frame));
         }
-        let def = lambda.def.clone();
-        self.eval(&def.body, &lambda.input, &frame)
+        self.eval(&lambda.def.body, &lambda.input, &frame)
     }
 
     /// Partial application (jsonata-js `evaluatePartialApplication`).
