@@ -183,6 +183,24 @@ fn a_lambda_frame_names_its_arguments_as_if_each_were_bound() {
 }
 
 #[test]
+fn a_constructor_evaluates_its_items_in_order() {
+    // The first two differ from jsonata-js on purpose (compatibility.md): its items run
+    // concurrently, so that a plain `$x` reads the value from before the binding.
+    let cases = [
+        ("($x := 1; [$x := 5, $x])", json!([5, 5])),
+        (
+            r#"($x := 1; {"a": $x := 5, "b": $x})"#,
+            json!({"a": 5, "b": 5}),
+        ),
+        ("($x := 1; [$x := 5, 0 + $x])", json!([5, 5])),
+        ("($x := 1; [$x, $x := 5])", json!([1, 5])),
+    ];
+    for (expr, expected) in cases {
+        assert_eq!(eval(expr, json!(null)), Some(expected), "{expr}");
+    }
+}
+
+#[test]
 fn bindings_and_closures() {
     let expr = Expression::compile("$limit < $sum(values) ? 'over' : 'under'").unwrap();
     let bindings = Bindings::new().var("limit", 10);
