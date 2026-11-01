@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.26.0]
+
+Faster where measuring 0.25 left work: a recursion through a lambda takes 21 to 25% less time than
+in 0.25.0, a transform 40 to 52% less, and in WebAssembly and Java the cases that read an order's
+items up to 85% and 33% less. Java threads no longer wait for each other, and musl's main thread
+no longer pays for a new stack at each evaluation. Dependencies moved to their newest versions,
+which closes a moderate advisory in what the VS Code extension bundles.
+
 ### Added
 
 - `cargo xtask bench-table` measures the native table of the performance page: it runs the
@@ -86,6 +94,15 @@ All notable changes are recorded here. The format follows
   main thread's stack first. `path` takes 0.59 instead of 11.4 µs in a static musl build, and
   0.41 instead of 13.9 µs from Python on Alpine; Java, whose `main` runs on a thread of its
   own, and other threads were not affected.
+- Dependencies at their newest versions: 25 packages in `Cargo.lock`, `wasm-bindgen` 0.2.130
+  among them, which the WebAssembly package is built with; `vscode-languageclient` 11, `@vscode/vsce`
+  4.1 and TypeScript 7 in the VS Code extension.
+
+### Security
+
+- The VS Code extension bundles `minimatch` 11.0.3 instead of 10.2.6, past
+  [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249), a denial of service by
+  a crafted pattern.
 
 ### Fixed
 
@@ -1087,7 +1104,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/thkprado/jlens/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/thkprado/jlens/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/thkprado/jlens/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/thkprado/jlens/compare/v0.23.0...v0.24.0

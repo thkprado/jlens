@@ -46,7 +46,7 @@ jobs:
         working-directory: crates/jlens-python
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v10
       # On Linux the wheels build in a manylinux or musllinux container, which has its own
       # interpreters; elsewhere maturin finds python3.10 and python3.15t on the PATH.
       - if: runner.os != 'Linux'
@@ -110,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v10
       - uses: PyO3/maturin-action@v1
         with:
           command: sdist

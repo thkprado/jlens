@@ -78,7 +78,12 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    `jlens-lsp` and `regress` (`jlens-regress`) entries of `[workspace.dependencies]`
    (`Cargo.toml`), and the project's `<version>` in `crates/jlens-java/java/pom.xml`
    (`cargo xtask java` fails while they differ). Also the version of the Maven and Gradle snippets of `docs/src/getting-started/installation.md` and
-   `docs/src/guides/java.md`.
+   `docs/src/guides/java.md`. Before measuring, bring the dependencies to their newest versions,
+   as new advisories keep coming: `cargo update`, here and in `fuzz/`; `npm outdated` and
+   `npm audit` in `editors/vscode` and `benches/compare`; the versions in both `pom.xml` files,
+   the Maven Wrapper's and the actions'. Keep an older version only for a stated reason, such as
+   the minimum Rust version, or a floor the package supports (`@types/vscode` is
+   `engines.vscode`'s).
 2. Move the `Unreleased` entries of `CHANGELOG.md` under the new version, and open the section
    with a sentence that sums up the release. The section becomes the GitHub release notes;
    preview them with `cargo xtask release-notes X.Y.Z`, which points relative links
