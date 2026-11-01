@@ -414,9 +414,12 @@ compiles the expression at each call, taking up to 3.5 s on these cases.
 Measured for 0.25.0 (at a378f23, whose code is the release's), on Python 3.14.8, under Linux:
 Ubuntu 26.04 under WSL 2, on the machine above. `jsonatapy` has wheels up to Python 3.13 and was
 built from its source distribution. The input is the document as Python values; for jlens and
-`jsonatapy`, also an input converted once (`Document`, `JsonataData`). jlens and `jsonatapy` are
-the median of three runs, which agreed within 4% (`jsonatapy`'s index into 10,000 items converted
-once 0.4 to 0.5 µs); `jsonata-python` and `jsonata-rs` one run:
+`jsonatapy`, also an input converted once (`Document`, `JsonataData`). In this table, `evaluate`
+is called on jlens and `jsonatapy` with its options as `None`; from the 0.26.0 table on, a
+keyword is passed only when its option is given, as an application calls, which takes about
+40 ns from `path` (see [The calls of `python.py`](#the-calls-of-pythonpy-026-19)). jlens and
+`jsonatapy` are the median of three runs, which agreed within 4% (`jsonatapy`'s index into 10,000
+items converted once 0.4 to 0.5 µs); `jsonata-python` and `jsonata-rs` one run:
 
 | Case | jsonata-python 0.7.1 | jsonata-rs 0.1.4 | jsonatapy 2.2.11 | jsonatapy, `JsonataData` | jlens `evaluate` | jlens `evaluate_document` |
 |---|---:|---:|---:|---:|---:|---:|
@@ -519,8 +522,8 @@ by 2%. A first version made each lazy object 16 bytes larger, to hold the member
 names over items 17% slower; the index now sits in room the layout of an object left free.
 
 From 0.19 on, the options of the `evaluate` methods are keyword-only parameters instead of
-`**options`, so that a call with options builds no tuple and no `dict`. `python.py speed` passes
-`timeout=None, max_depth=None` to jlens. Measured before and after on the same system, the
+`**options`, so that a call with options builds no tuple and no `dict`. `python.py speed` then
+passed `timeout=None, max_depth=None` to jlens. Measured before and after on the same system, the
 median of three alternated runs: `path` went from 1.1 to 0.9 µs, the other cases within 3%.
 `customer.name` took 1.01 µs with these two keywords and 0.82 µs without before, and now 0.86
 against 0.82 µs.
@@ -1411,3 +1414,37 @@ one. A block of `:=` and twenty lookups under Linux, the median of five alternat
 to 0.1 µs: two names 1.2 → 1.1 µs, four 1.4 → 1.3 µs, eight 1.7 → 1.8 µs, and 1.7 → 1.9 µs when
 every lookup is of the last of the eight. Past eight, the move to a table costs once: nine names
 1.8 → 1.9 µs, sixteen 2.4 → 2.5 µs. A frame of a lambda rarely holds more than a few.
+
+### The calls of `python.py` (0.26 #19)
+
+#17 found `python.py` calling `evaluate` with `timeout` and `max_depth` as `None` and
+`evaluate_document` with neither, so that the column over Python values showed a call that
+applications do not make. The same went for `jsonatapy`, whose `evaluate` took `timeout` and
+`max_stack_depth`. On both packages a keyword is now passed only when its option is given.
+`jsonata-python` and `jsonata-rs` were called so already.
+
+What the change moves, at 2c4c001 under Linux: one wheel of jlens and `jsonatapy` 2.2.11, each
+called both ways by a copy of `python.py` that chose the call by label, `python.py ab`'s
+alternation over new copies of the package, two comparisons of five rounds in opposite orders.
+With keywords → without, and the two differences:
+
+| Case | jlens | `jsonatapy` |
+|---|---:|---:|
+| path | 0.886 → 0.842, 0.878 → 0.843 µs (−5.0%, −4.0%) | 0.702 → 0.682, 0.711 → 0.673 µs (−2.8%, −5.3%) |
+| index into 10,000 items | 1.366 → 1.334, 1.367 → 1.348 µs (−2.4%, −1.4%) | 310 → 301, 310 → 299 µs (−3.1%, −3.5%) |
+| index in a variable | 1.666 → 1.632, 1.690 → 1.639 µs (−2.0%, −3.0%) | 619 → 608, 620 → 607 µs (−1.8%, −2.2%) |
+| recursion | 620 → 626, 623 → 622 µs (+0.9%, −0.1%) | 735 → 739, 732 → 735 µs (+0.6%, +0.5%) |
+
+The keywords cost about 40 ns of a call, as the `max_depth` and `max_steps` of
+[What the limits cost](#what-the-limits-cost) do. Only `jsonatapy`'s `path` in the second
+comparison is past the mark. `jsonatapy`'s two index cases take 300 and 600 µs, where 40 ns does
+not show: their differences are within their spread, up to 12%. Every other case over Python
+values is within 2.9%, on either package, and the columns against a `Document` or `JsonataData`,
+the same call on both sides, within 4.5%. `recursion` does not move: #18 took out the whole of
+what the keywords had made of it.
+
+The Python table reads this to 0.1 µs: from 0.26.0 on jlens's `path` reads 0.8 instead of 0.9 µs,
+its two index cases may read 0.1 µs less by rounding, and no other number of either package moves
+by the change. Against the table of 0.25.0, those 40 ns of `path`, and the 20 to 50 ns of the
+index cases with Python values, come from the script, not from the package. `python.py ab` calls
+both builds with one script, and so compares them as it did.

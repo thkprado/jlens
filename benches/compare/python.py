@@ -61,8 +61,11 @@ class Jlens:
         return self.jlens.Expression(source)
 
     def evaluate(self, compiled, input, timeout=None, max_depth=None, max_steps=None):
-        if max_steps is None:
-            return compiled.evaluate(input, timeout=timeout, max_depth=max_depth)
+        # A keyword only when its option is given, as an application calls.
+        if timeout is None and max_depth is None:
+            if max_steps is None:
+                return compiled.evaluate(input)
+            return compiled.evaluate(input, max_steps=max_steps)
         return compiled.evaluate(input, timeout=timeout, max_depth=max_depth, max_steps=max_steps)
 
     def document(self, input):
@@ -92,6 +95,8 @@ class Jsonatapy:
         return self.jsonatapy.compile(source)
 
     def evaluate(self, compiled, input, timeout=None, max_depth=None):
+        if timeout is None and max_depth is None:
+            return compiled.evaluate(input)
         return compiled.evaluate(input, timeout=_ms(timeout), max_stack_depth=max_depth)
 
     def document(self, input):
