@@ -662,7 +662,8 @@ jsonata-jvm-compiler, and a `Document` for `evaluate(Document)`:
   ([ADR 0021, amended](../adr/0021-java-package.md#amendment-maps-written-with-what-the-expression-reads-026-4)):
   measured on Windows, `names over items` takes 30 instead of 67 µs, the shipping rule 235
   instead of 484, the other cases that read the items 22 to 42% less, and number formatting
-  16% more. The table above is 0.25.0's.
+  16% more, 30 to 35% more under Linux
+  ([0.26 against 0.25.0](#026-against-0250)). The table above is 0.25.0's.
 
 From JSON text, parsed at each evaluation, by its own parser for jsonata-java, by Jackson for
 jsonata-jvm-compiler, and by `evaluateFromJson` for jlens, which skips the fields the expression
@@ -1300,3 +1301,88 @@ path changed but the order in which variables and functions are bound.
   round the numbers it shares. The update spends about 0.2 µs per item on the object it
   builds and the fields it sets, and about as much again when the field is new and the copied
   object grows. Building the result is the conversion every result pays.
+
+## 0.26 against 0.25.0
+
+Measured at c6f958f (roadmap 0.26 #17), each run on a new copy of its build, against builds of
+0.25.0 made the same way on the same machine. A difference is read against
+[what a build shows against itself](#comparing-two-revisions).
+
+**Natively**, on Windows, `cargo xtask ab v0.25.0 HEAD`, ten rounds, in each mode, built as an
+application builds it (two comparisons) and aligned (one):
+
+| Mode | Transform, usual build | Transform, aligned | `recursion`, usual build | `recursion`, aligned |
+|---|---:|---:|---:|---:|
+| `evaluate` | −50.0%, −49.3% | −50.2% | −5.4%, −5.6% | −0.3% |
+| `document` | −45.5%, −46.0% | −45.5% | −4.5%, −5.8% | −1.4% |
+| `source` | −40.3%, −40.2% | −39.5% | −4.6%, −4.8% | −1.2% |
+
+Of the 108 other numbers, four are more than 2% from 0.25.0: the object constructor against a
+`Document` −3.5% in one comparison (+0.2% and +1.9% in the others), `filter + aggregate` through
+a `Source` +2.4% aligned (−2.0% in the other two), `group-by` with `evaluate` +2.1%, and number
+formatting against a `Document` −2.1% aligned. Nothing there is a change: each moves in the
+other comparisons, and all are under the 4.1% a build shows against itself. The one pattern is
+`group-by`, slower in all nine numbers, by 1.4% in the median. `recursion`'s 5% in the usual
+build is layout, as aligned builds show. Under Linux (WSL), it is −1.1% with `evaluate` and
++0.5% against a `Document`.
+
+**In Python**, under Linux, `python.py ab`, two comparisons of five rounds:
+
+- Faster, marked in both: the transform −38.0% and −37.5% with Python values, −46.0% and −45.3%
+  against a `Document`; `names over items` with Python values −3.8% and −6.0%; against a
+  `Document`, `path` −9.7% and −9.4%, the index into 10,000 items −10.6% twice, and the index in
+  a variable −4.5% and −4.1%: the cost of a call that 0.26 #7 and #11 took out.
+- Slower, marked in both: `recursion` against a `Document`, +12.1% and +12.5%, 683 against
+  767 µs. Every other number is within the 2.9% a build shows against itself; the largest is the
+  object constructor, +2.7% in one comparison and −0.1% in the other.
+
+That `recursion` number is not more work. One wheel takes 685 µs called with keyword arguments
+and 760 µs without, though both give the core the same options; 0.25.0 takes 690 µs either way.
+Counted with `perf` over 1,500 evaluations against a `Document`:
+
+| Build, call | Cycles | Instructions | Branch misses | L1 instruction misses |
+|---|---:|---:|---:|---:|
+| 0.25.0, no keywords | 4.52 G | 10.54 G | 12.4 M | 14.0 M |
+| 0.25.0, keywords | 4.50 G | 10.59 G | 12.5 M | 13.7 M |
+| 0.26, no keywords | 4.74 to 4.93 G | 10.61 G | 12.6 M | 1.1 M |
+| 0.26, keywords | 4.41 G | 10.62 G | 12.8 M | 1.0 M |
+
+The instructions, branches and misses do not follow the time; the cycles alone do. Without
+address randomization, moving the stack by 16 bytes at a time, through the size of the
+environment, moves the call without keywords between about 680 and 780 µs; the call with
+keywords stays at 685 µs, and 0.25.0 at 690 µs, whatever the position. So in 0.26, a position in
+memory decides this one case. Which part of the CPU it reaches was not observed, nor why 0.25.0
+escapes it, and only this processor was measured.
+
+It appears with 0.26 #2, at +14% (the root frame takes the host functions, and `Frame::lookup`
+stops being inlined), and these do not bring it back: `#[inline]` restored; a 0.25.0 with
+an unused field added to `Frame`, the size #2 gave it, which stays at 0.25.0's time; building
+aligned (+13.7%); and no mimalloc (+11.2%). No code was changed for it, as there is no work to
+take out. `python.py` calls `evaluate` with keyword arguments and `evaluate_document` without, so
+its two columns fall on either side: `recursion` over Python values stays at 684 µs in the
+harness, where a call without keywords takes 720 to 755 µs.
+
+**In Java**, under Linux, `java-compare ab`, two comparisons of five rounds, against a
+`Document` and over Java maps, 108 numbers each:
+
+- Faster, marked in both: the transform −28.8 to −46.5%; against a `Document`, `path` −21.4% and
+  −16.5%, and the indexes −7.3 to −14.9%; over Java maps from 0.26 #4, the cases that read the
+  items −5.3 to −32.7%, and evaluations per second of `$sum(items.price)` from 6.1% more on one
+  thread to 35% more on sixteen.
+- Slower, marked in both, over Java maps alone: number formatting +34.7% and +29.8% (43 → 58 µs,
+  and +10.5% and +8.0% from JSON text), `$` +11.2 to +13.5% (0.70 → 0.79 µs), and `path` +5.8%
+  and +7.3% (1.39 → 1.48 µs).
+- Timed directly, each of the seven builds between 0.25.0 and c6f958f in its own JVM, number
+  formatting and `$` both rise with 0.26 #4, whose cost
+  [ADR 0021 records](../adr/0021-java-package.md#amendment-maps-written-with-what-the-expression-reads-026-4):
+  it reads the list of 200 items whole for the 20 it uses, and writes the map of a `$` with its
+  level. Number formatting costs more under Linux than the 16% measured on Windows. `path` does
+  not rise with any of them: 1.43 to 1.47 µs, +0.4% from 0.25.0 to c6f958f. Its difference shows
+  only inside the harness, and its cause was not found; it is 0.1 µs.
+- Under the mark but in both comparisons: `path` from JSON text +2.3% and +2.6%, and `$count(items)`
+  over 1,000 items from JSON text +3.4% and +3.0%, within what a build shows against itself
+  (2.8% for nine numbers in ten, 4.8% at most). Over Java maps from JSON text, what 0.26 #6 left
+  unsettled is settled: `path` +1.5% and +3.8%, the indexes −1.3 to +1.2%. #9 and #10 together
+  leave Java maps as they were: `recursion` +0.2 to +0.4%.
+
+WebAssembly has no measured floor, and is compared in the release's table alone.
