@@ -1,0 +1,76 @@
+# Version updates, a pull request a week per place; security updates come as soon as an advisory
+# is published, past the cooldown. Before a release, CONTRIBUTING.md brings the rest up to date.
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directories:
+      - /
+      - /fuzz
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      cargo:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /editors/vscode
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      vscode:
+        patterns: ["*"]
+    ignore:
+      # The floor the extension supports, `engines.vscode`.
+      - dependency-name: "@types/vscode"
+      # jlens behaves like jsonata-js 2.2.2.
+      - dependency-name: jsonata
+
+  - package-ecosystem: npm
+    directory: /benches/compare
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      compare:
+        patterns: ["*"]
+    ignore:
+      # jlens behaves like jsonata-js 2.2.2.
+      - dependency-name: jsonata
+
+  - package-ecosystem: maven
+    directories:
+      - /crates/jlens-java/java
+      - /benches/compare/java
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      maven:
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directory: /crates/jlens-python
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      actions:
+        patterns: ["*"]
