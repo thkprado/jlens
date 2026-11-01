@@ -27,6 +27,9 @@ updates:
     ignore:
       # The floor the extension supports, `engines.vscode`.
       - dependency-name: "@types/vscode"
+      # Near the Node.js of that floor, so that the types offer no API it lacks.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
       # jlens behaves like jsonata-js 2.2.2.
       - dependency-name: jsonata
 
@@ -74,3 +77,7 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # Its ref names a toolchain, not a version of the action: `@1.88` is the minimum Rust version,
+      # and `@stable` needs no update.
+      - dependency-name: dtolnay/rust-toolchain
