@@ -1304,85 +1304,110 @@ path changed but the order in which variables and functions are bound.
 
 ## 0.26 against 0.25.0
 
-Measured at c6f958f (roadmap 0.26 #17), each run on a new copy of its build, against builds of
-0.25.0 made the same way on the same machine. A difference is read against
-[what a build shows against itself](#comparing-two-revisions).
+Measured at c6f958f (roadmap 0.26 #17) and again with the frames of 0.26 #18, each run on a new
+copy of its build, against builds of 0.25.0 made the same way on the same machine. A difference
+is read against [what a build shows against itself](#comparing-two-revisions). The numbers
+below are #18's.
 
 **Natively**, on Windows, `cargo xtask ab v0.25.0 HEAD`, ten rounds, in each mode, built as an
 application builds it (two comparisons) and aligned (one):
 
 | Mode | Transform, usual build | Transform, aligned | `recursion`, usual build | `recursion`, aligned |
 |---|---:|---:|---:|---:|
-| `evaluate` | −50.0%, −49.3% | −50.2% | −5.4%, −5.6% | −0.3% |
-| `document` | −45.5%, −46.0% | −45.5% | −4.5%, −5.8% | −1.4% |
-| `source` | −40.3%, −40.2% | −39.5% | −4.6%, −4.8% | −1.2% |
+| `evaluate` | −49.7%, −49.9% | −49.9% | −8.9%, −9.1% | −10.0% |
+| `document` | −46.1%, −46.4% | −45.4% | −9.8%, −8.9% | −9.1% |
+| `source` | −40.4%, −41.0% | −39.5% | −9.7%, −8.8% | −9.6% |
 
-Of the 108 other numbers, four are more than 2% from 0.25.0: the object constructor against a
-`Document` −3.5% in one comparison (+0.2% and +1.9% in the others), `filter + aggregate` through
-a `Source` +2.4% aligned (−2.0% in the other two), `group-by` with `evaluate` +2.1%, and number
-formatting against a `Document` −2.1% aligned. Nothing there is a change: each moves in the
-other comparisons, and all are under the 4.1% a build shows against itself. The one pattern is
-`group-by`, slower in all nine numbers, by 1.4% in the median. `recursion`'s 5% in the usual
-build is layout, as aligned builds show. Under Linux (WSL), it is −1.1% with `evaluate` and
-+0.5% against a `Document`.
+Of the 108 other numbers, ten are more than 2% from 0.25.0: the object constructor in six (from
+−5.9% aligned against a `Document` to +3.7% built as usual in that mode), the shipping rule in
+three (−3.2 to +2.6%), and `path` once (+2.1%). Nothing there is a change: each moves both ways
+between comparisons, and only that −5.9% is past the 4.1% a build shows against itself. Against
+the code before #18, `recursion` is −4.2 to −4.6% on Windows and, under Linux (WSL), −20.6 to
+−21.2%, 728 → 574 µs against a `Document`; every other case, on either, is within what a build
+shows against itself.
 
 **In Python**, under Linux, `python.py ab`, two comparisons of five rounds:
 
-- Faster, marked in both: the transform −38.0% and −37.5% with Python values, −46.0% and −45.3%
-  against a `Document`; `names over items` with Python values −3.8% and −6.0%; against a
-  `Document`, `path` −9.7% and −9.4%, the index into 10,000 items −10.6% twice, and the index in
-  a variable −4.5% and −4.1%: the cost of a call that 0.26 #7 and #11 took out.
-- Slower, marked in both: `recursion` against a `Document`, +12.1% and +12.5%, 683 against
-  767 µs. Every other number is within the 2.9% a build shows against itself; the largest is the
-  object constructor, +2.7% in one comparison and −0.1% in the other.
-
-That `recursion` number is not more work. One wheel takes 685 µs called with keyword arguments
-and 760 µs without, though both give the core the same options; 0.25.0 takes 690 µs either way.
-Counted with `perf` over 1,500 evaluations against a `Document`:
-
-| Build, call | Cycles | Instructions | Branch misses | L1 instruction misses |
-|---|---:|---:|---:|---:|
-| 0.25.0, no keywords | 4.52 G | 10.54 G | 12.4 M | 14.0 M |
-| 0.25.0, keywords | 4.50 G | 10.59 G | 12.5 M | 13.7 M |
-| 0.26, no keywords | 4.74 to 4.93 G | 10.61 G | 12.6 M | 1.1 M |
-| 0.26, keywords | 4.41 G | 10.62 G | 12.8 M | 1.0 M |
-
-The instructions, branches and misses do not follow the time; the cycles alone do. Without
-address randomization, moving the stack by 16 bytes at a time, through the size of the
-environment, moves the call without keywords between about 680 and 780 µs; the call with
-keywords stays at 685 µs, and 0.25.0 at 690 µs, whatever the position. So in 0.26, a position in
-memory decides this one case. Which part of the CPU it reaches was not observed, nor why 0.25.0
-escapes it, and only this processor was measured.
-
-It appears with 0.26 #2, at +14% (the root frame takes the host functions, and `Frame::lookup`
-stops being inlined), and these do not bring it back: `#[inline]` restored; a 0.25.0 with
-an unused field added to `Frame`, the size #2 gave it, which stays at 0.25.0's time; building
-aligned (+13.7%); and no mimalloc (+11.2%). No code was changed for it, as there is no work to
-take out. `python.py` calls `evaluate` with keyword arguments and `evaluate_document` without, so
-its two columns fall on either side: `recursion` over Python values stays at 684 µs in the
-harness, where a call without keywords takes 720 to 755 µs.
+- Faster, marked in both: the transform −35.5% and −35.1% with Python values, −45.6% twice
+  against a `Document`; `recursion` −9.5% and −10.0% with Python values, −8.8% and −9.2% against
+  a `Document`; against a `Document` too, `path` −11.4% and −9.2%, the index into 10,000 items
+  −7.5% and −4.5%, the index in a variable −8.0% and −7.2%, and `sort + map` −4.1% and −5.3%: the
+  cost of a call that 0.26 #7 and #11 took out.
+- Nothing is marked slower. At #17, `recursion` against a `Document` was, at +12.1% and +12.5%.
 
 **In Java**, under Linux, `java-compare ab`, two comparisons of five rounds, against a
 `Document` and over Java maps, 108 numbers each:
 
-- Faster, marked in both: the transform −28.8 to −46.5%; against a `Document`, `path` −21.4% and
-  −16.5%, and the indexes −7.3 to −14.9%; over Java maps from 0.26 #4, the cases that read the
-  items −5.3 to −32.7%, and evaluations per second of `$sum(items.price)` from 6.1% more on one
-  thread to 35% more on sixteen.
-- Slower, marked in both, over Java maps alone: number formatting +34.7% and +29.8% (43 → 58 µs,
-  and +10.5% and +8.0% from JSON text), `$` +11.2 to +13.5% (0.70 → 0.79 µs), and `path` +5.8%
-  and +7.3% (1.39 → 1.48 µs).
-- Timed directly, each of the seven builds between 0.25.0 and c6f958f in its own JVM, number
-  formatting and `$` both rise with 0.26 #4, whose cost
+- Faster, marked in both: the transform −29.1 to −46.1%; `recursion` −10.9 to −13.4% in every
+  mode, where #17 measured +0.2 to +1.7%; against a `Document`, `path` −18.8% and −20.4%, and the
+  indexes −10.1 to −14.2%; over Java maps from 0.26 #4, the cases that read the items −6.0 to
+  −31.8%, and evaluations per second of `$sum(items.price)` from 7% more on one thread to 28%
+  and 38% more on sixteen.
+- Slower, marked in both, over Java maps alone: number formatting +31.0% and +28.9% (44 → 58 µs),
+  and `$` +12.4 to +13.2% (0.70 → 0.79 µs). Under the mark: `path` +4.4% and +4.9% (1.40 → 1.47
+  µs), and number formatting from JSON text read into maps +7.5%, marked once, and +4.1%. Marked
+  in one comparison alone: `items[0].name` from JSON text +6.5%.
+- Timed directly at #17, each of the seven builds between 0.25.0 and c6f958f in its own JVM,
+  number formatting and `$` both rise with 0.26 #4, whose cost
   [ADR 0021 records](../adr/0021-java-package.md#amendment-maps-written-with-what-the-expression-reads-026-4):
   it reads the list of 200 items whole for the 20 it uses, and writes the map of a `$` with its
-  level. Number formatting costs more under Linux than the 16% measured on Windows. `path` does
+  level. Number formatting costs more under Linux than the 16% measured on Windows. `path` did
   not rise with any of them: 1.43 to 1.47 µs, +0.4% from 0.25.0 to c6f958f. Its difference shows
   only inside the harness, and its cause was not found; it is 0.1 µs.
-- Under the mark but in both comparisons: `path` from JSON text +2.3% and +2.6%, and `$count(items)`
-  over 1,000 items from JSON text +3.4% and +3.0%, within what a build shows against itself
-  (2.8% for nine numbers in ten, 4.8% at most). Over Java maps from JSON text, what 0.26 #6 left
-  unsettled is settled: `path` +1.5% and +3.8%, the indexes −1.3 to +1.2%. #9 and #10 together
-  leave Java maps as they were: `recursion` +0.2 to +0.4%.
+- At #17, under the mark but in both comparisons: `path` from JSON text +2.3% and +2.6%, and
+  `$count(items)` over 1,000 items from JSON text +3.4% and +3.0%, within what a build shows
+  against itself (2.8% for nine numbers in ten, 4.8% at most). Over Java maps from JSON text, what
+  0.26 #6 left unsettled was settled: `path` +1.5% and +3.8%, the indexes −1.3 to +1.2%.
 
 WebAssembly has no measured floor, and is compared in the release's table alone.
+
+### `recursion` and the frames (0.26 #18)
+
+#17 found one wheel taking 685 µs on `recursion` called with keyword arguments and 760 µs
+without, with the same instructions, branches and cache misses, and 0.25.0 taking 690 µs either
+way. It read that as a position of the stack, from one pass over 16-byte steps of the
+environment's size. That reading was wrong. Six positions, each repeated six times without
+address randomization, give the whole range at each position: 682 to 766 µs at one, and at
+another 671 to 686 µs and then 768 µs. The time belongs to the process: within one, each call
+keeps its time over alternated sets, in either order, also pinned to one CPU. The call without
+keywords takes 672 to 785 µs from process to process, the call with them about 690 µs. In a
+native program that moves the stack in 16-byte steps within one process, the time stays
+within 718 to 737 µs.
+
+Sixteen processes of one call, on the counters of the processor (a Ryzen 7 3700X), by how they
+follow the cycles, which ranged over 2.33 to 2.74 G:
+
+| Counter | Correlation | Slowest quarter against fastest |
+|---|---:|---:|
+| Fetch stalled, any cause | +1.00 | +23.5% |
+| Fetch stalled, branch prediction queue empty | +0.98 | +178% |
+| Micro-operations from the decoder | +0.99 | +8.7% |
+| Micro-operations from the op cache | +0.68 | +0.4% |
+| L1 branch target buffer corrections | +0.98 | +4.9% |
+| Branch mispredictions | −0.56 | −2.5% |
+| Store-to-load conflicts | −0.62 | −2.0% |
+| L1 data accesses | +0.98 | +1.2% |
+
+So the front end stalls; the data caches and memory dependencies do not explain it. A profile
+of the two calls side by side, on a wheel without `mimalloc`, where they differ most steadily,
+puts 550 of the 595 samples between them at two addresses, about 70 cycles each per call of
+`$f`: the entry of `memset`, which sets the control bytes of the table a frame held its variables
+in, and the first read of the arguments in `apply_inner`. With `mimalloc`, the entry of `memset`
+and a lookup in that table. The seed of that table's hasher, which `foldhash` makes for each table
+from the stack pointer and a thread-local, looked like the link to the stack, but with a fixed
+seed the time still ranges over 700 to 793 µs.
+
+Without the table, it does not. A frame now holds up to eight variables in a list, and moves
+them to a table past that. Both calls take about 604 µs in each of eight processes, and natively,
+in eight processes, `recursion` takes 533 to 542 µs under Linux, where it took 698 to 718 µs.
+Which part of the front end the table reached, and why 0.25.0 escaped it, stays unknown; only
+this processor was measured. On Windows the same change gives 4.6%.
+
+The cost of `mimalloc` on `recursion` is another thing: without the table it stands at 8.8%
+over glibc's allocator (582 against 535 µs), from one process to the next.
+
+A list costs more than a table once it holds many names, as each lookup searches them one by
+one. A block of `:=` and twenty lookups under Linux, the median of five alternated runs, timed
+to 0.1 µs: two names 1.2 → 1.1 µs, four 1.4 → 1.3 µs, eight 1.7 → 1.8 µs, and 1.7 → 1.9 µs when
+every lookup is of the last of the eight. Past eight, the move to a table costs once: nine names
+1.8 → 1.9 µs, sixteen 2.4 → 2.5 µs. A frame of a lambda rarely holds more than a few.

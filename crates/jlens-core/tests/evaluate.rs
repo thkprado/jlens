@@ -69,6 +69,66 @@ fn sequences_and_singletons() {
 }
 
 #[test]
+fn a_frame_keeps_its_variables_however_many_it_holds() {
+    // Up to, at and past the number of variables a frame lists before it moves them to a table.
+    for count in [1, 7, 8, 9, 10, 40] {
+        let names: Vec<String> = (0..count).map(|i| format!("v{i}")).collect();
+        let binds: String = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| format!("${n} := {i}; "))
+            .collect();
+        let sum = names
+            .iter()
+            .map(|n| format!("${n}"))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let total: i64 = (0..count).sum();
+
+        // Each one found, and each one bound again in the same frame, before and after a move.
+        let rebound = format!(
+            "({binds}$v0 := 100; ${} := 200; {sum})",
+            names[count as usize - 1]
+        );
+        let expected = if count == 1 {
+            200
+        } else {
+            total + 100 + 200 - (count - 1)
+        };
+        assert_eq!(
+            eval(&rebound, json!(null)),
+            Some(json!(expected)),
+            "{rebound}"
+        );
+
+        // A closure sees them, a function's name is kept with them, and an inner frame hides one.
+        let closure = format!(
+            "({binds}$f := function($v0){{ {sum} }}; $g := function(){{ $sum([1, {sum}]) }}; [$f(1000), $g()])"
+        );
+        assert_eq!(
+            eval(&closure, json!(null)),
+            Some(json!([total + 1000, total + 1])),
+            "{closure}"
+        );
+
+        // As many variables from the host, in the root frame, with the built-ins it keeps.
+        let bindings = names
+            .iter()
+            .enumerate()
+            .fold(Bindings::new(), |b, (i, n)| b.var(n.clone(), i));
+        let bound = format!("$sum([{}]) + $count([$v0]) + $max([$v0])", sum);
+        assert_eq!(
+            Expression::compile(&bound)
+                .unwrap()
+                .evaluate(None, &bindings)
+                .unwrap(),
+            Some(json!(total + 1)),
+            "{bound}"
+        );
+    }
+}
+
+#[test]
 fn bindings_and_closures() {
     let expr = Expression::compile("$limit < $sum(values) ? 'over' : 'under'").unwrap();
     let bindings = Bindings::new().var("limit", 10);

@@ -24,6 +24,10 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- A frame holds up to eight variables in a list, and in a hash table past that, so that a call
+  of a lambda makes no table for its parameters. A recursion through a lambda takes about 21%
+  less time under Linux and 4.6% less on Windows, and from Python it no longer depends on
+  whether the call passes keyword arguments.
 - Variables are looked up as fast as in 0.24.0 again: the root frame of an evaluation holds the
   host functions, shared with the `Bindings`, instead of every lookup carrying the bindings to
   reach them. A recursion through a lambda, which ran up to 4% slower in 0.25.0, is back

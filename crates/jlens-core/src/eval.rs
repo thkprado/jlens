@@ -26,9 +26,57 @@ use crate::value::{
     TUPLE_STREAM, Value,
 };
 
+/// The variables a frame holds in a list; one more moves them to a table.
+const FEW_VARS: usize = 8;
+
+/// The variables of a frame. A lambda's call makes a frame for its one or two parameters, and a
+/// table for so few took a fifth of the time of a recursion under Linux: a seed for its hasher,
+/// its control bytes set, each name hashed (ADR 0006, follow-up of 0.26 #18). A list holds them
+/// until they are too many to search one by one, as in the root frame of an evaluation with
+/// many bindings.
+enum Vars<'a> {
+    Few(Vec<(String, Value<'a>)>),
+    Many(HashMap<String, Value<'a>, foldhash::fast::RandomState>),
+}
+
+impl<'a> Vars<'a> {
+    fn get(&self, name: &str) -> Option<&Value<'a>> {
+        match self {
+            Vars::Few(vars) => vars.iter().find(|(n, _)| n == name).map(|(_, v)| v),
+            Vars::Many(vars) => vars.get(name),
+        }
+    }
+
+    fn set(&mut self, name: &str, value: Value<'a>) {
+        match self {
+            Vars::Few(vars) => {
+                if let Some((_, slot)) = vars.iter_mut().find(|(n, _)| n == name) {
+                    *slot = value;
+                } else if vars.len() < FEW_VARS {
+                    vars.push((name.to_owned(), value));
+                } else {
+                    let mut many: HashMap<_, _, _> = std::mem::take(vars).into_iter().collect();
+                    many.insert(name.to_owned(), value);
+                    *self = Vars::Many(many);
+                }
+            }
+            Vars::Many(vars) => {
+                vars.insert(name.to_owned(), value);
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        match self {
+            Vars::Few(vars) => vars.clear(),
+            Vars::Many(vars) => vars.clear(),
+        }
+    }
+}
+
 /// A scope of variable bindings.
 pub(crate) struct Frame<'a> {
-    vars: RefCell<HashMap<String, Value<'a>, foldhash::fast::RandomState>>,
+    vars: RefCell<Vars<'a>>,
     parent: Option<Env<'a>>,
     /// In the root frame, the input of the evaluation (`$$`) when no binding of `$` hides it;
     /// keeping it out of `vars` spares every evaluation a binding.
@@ -44,7 +92,7 @@ pub(crate) type Env<'a> = Rc<Frame<'a>>;
 impl<'a> Frame<'a> {
     fn new(parent: Option<&Env<'a>>) -> Env<'a> {
         Rc::new(Frame {
-            vars: RefCell::new(HashMap::default()),
+            vars: RefCell::new(Vars::Few(Vec::new())),
             parent: parent.cloned(),
             input: Value::Undefined,
             functions: None,
@@ -79,9 +127,7 @@ impl<'a> Frame<'a> {
             None => functions::native_value(name).unwrap_or_default(),
         };
         if !value.is_undefined() {
-            self.vars
-                .borrow_mut()
-                .insert(name.to_owned(), value.clone());
+            self.vars.borrow_mut().set(name, value.clone());
         }
         value
     }
@@ -341,7 +387,7 @@ pub(crate) fn evaluate<'a, 'v, R>(
     };
     let mut input = input;
     let env = Rc::new(Frame {
-        vars: RefCell::new(HashMap::default()),
+        vars: RefCell::new(Vars::Few(Vec::new())),
         parent: None,
         input: input.clone(),
         functions: bindings.shared_functions(),
@@ -448,7 +494,7 @@ impl<'a> Evaluator<'_, 'a> {
         ) {
             self.cyclic.push(Rc::downgrade(env));
         }
-        env.vars.borrow_mut().insert(name.to_owned(), value);
+        env.vars.borrow_mut().set(name, value);
     }
 
     fn child(&mut self, parent: &Env<'a>) -> Env<'a> {

@@ -121,3 +121,16 @@ which a host may build at each call, allocate nothing (26 ns with mimalloc).
   sixteen 0.72 µs, as before within 1%.
 - Cloning `Bindings` shares the functions' map instead of copying it; adding or removing a
   function on a clone copies the map then, as cloning did before.
+
+### Follow-up: the variables of a frame (0.26 #18)
+
+A call of a lambda makes a frame, and each frame held its variables in a hash table: a seed for
+its hasher, read through a thread-local, an allocation, control bytes to set and a hash per name,
+for one or two names. A frame now holds up to eight variables in a list and moves them to a table
+at the ninth, as the root frame does when a host binds many. `recursion` takes about 21% less
+time under Linux and 4.6% less on Windows, and the difference between two calls that [0.26 #17
+could not explain](../architecture/performance.md#recursion-and-the-frames-026-18) is gone.
+
+The cost falls on frames with many names: a block with eight or more takes 4 to 12% longer, 0.1 to
+0.2 µs on twenty lookups, as searching eight names of one length costs more than hashing one,
+while up to four names take 7 to 8% less. Eight was kept for that: most frames hold far fewer.
