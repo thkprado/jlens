@@ -108,6 +108,11 @@ through `-Djlens.library`. `--engines` and `--sizes` are the harness's;
 `limits` measures no time, and is refused. A JAR older than the harness must still have what
 `Engine.java` calls.
 
+A case's time depends on what the JVM ran before it: `path` over Java maps reads 2.2% faster than
+0.25.0 alone and 5.3% slower after `documents`, with no more work in the package (0.27 #4). A
+program that times one case alone gives its best case, so compare two builds after other cases
+too.
+
 ## Two builds of a package
 
 `python.py ab` and `java-compare ab` do for a package what `cargo xtask ab` does natively: the

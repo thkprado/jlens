@@ -1463,7 +1463,8 @@ and over Java maps, 108 numbers each:
   0.26 #4, which [ADR 0021 records](../adr/0021-java-package.md#amendment-maps-written-with-what-the-expression-reads-026-4):
   it reads the list of 200 items whole for the 20 it uses, and writes the map of a `$` with its
   level. `path` is not: it rises only inside the harness, and there, from JSON text, by 5 to 11
-  µs where the evaluation takes 1.5, which no work of the package can be. Its cause was not found.
+  µs where the evaluation takes 1.5, which no work of the package can be. 0.27 #4 found why:
+  [what the JVM ran before it](#path-over-java-maps-in-the-harness-027-4).
 
 **Threads.** `java-compare ab` from the commit before #20, `threads` part, five rounds: every number
 within 4.5%, nothing marked. Its expression, `$sum(items.price)`, calls no lambda, so that #20 does
@@ -1486,6 +1487,52 @@ WebAssembly has no measured floor, and is compared in the release's table alone.
 The updates of 0.26.0's dependencies change nothing here: the WebAssembly module is the same to the
 byte with and without them, and `cargo xtask ab` compares the two locks within 1.8% in every
 mode.
+
+### `path` over Java maps in the harness (0.27 #4)
+
+`java-compare ab` gave `path` over Java maps +6.4 and +10.5% against 0.25.0, where a program that
+times it alone gave +1.4%. The two differ in what the JVM has run before the case. What the
+compiler makes of the package depends on it, and no work of the package was added.
+
+`customer.name` over Java maps, 0.25.0 against the code of 0.26.0, five alternated runs of each
+JAR, each in a JVM of its own on a new copy of its library, timed as the harness times it, under
+Linux. `apart` means that no run of one JAR reaches the other's:
+
+| What the JVM ran first | 0.25.0 | 0.26.0 | |
+|---|---:|---:|---:|
+| Nothing | 1.412 µs | 1.382 µs | −2.2%, apart |
+| `path` through a `Document` and from JSON text | 1.400 µs | 1.384 µs | −1.1% |
+| One expression of `documents`, for each of the six | | | −0.9 to +1.9% |
+| The six over Java maps | 1.426 µs | 1.488 µs | +4.3% |
+| The six over Java maps, again | 1.445 µs | 1.495 µs | +3.5%, apart |
+| The six from JSON text | 1.413 µs | 1.482 µs | +4.9%, apart |
+| `documents` on 1,000 items, then the case by call sites of its own | 1.393 µs | 1.472 µs | +5.7%, apart |
+| `documents` on 1,000 items, with `-XX:+UseParallelGC` | 1.401 µs | 1.455 µs | +3.9% |
+| `documents` as the harness runs it | 1.391 µs | 1.464 µs | +5.3%, apart |
+| The six over Java maps, with `-XX:InlineSmallCode=16000` | 1.486 µs | 1.497 µs | +0.7% |
+
+- It takes several expressions: none of the six does it alone. It needs neither a `Document`, nor
+  the harness's call sites, nor Jackson's parse of the document, and the collector does not
+  change it.
+- A compilation log of one run of each shows how. After one expression, the compiled
+  `Values.decode` of 0.26.0 takes 736 bytes. After the six, which give it other results to
+  decode, it takes 5,568, past the 2,500 of `InlineSmallCode`, so that C2 leaves it out of
+  `Expression.evaluate` ("already compiled into a big method"), which then takes in 2,891 bytes of
+  bytecode instead of 4,460. Compiled after the six, the same method of 0.25.0 takes in 5,689.
+- With that limit raised, the two JARs take the same time, but 0.26.0 is not the one that moves:
+  1.495 → 1.497 µs, and 0.25.0 1.445 → 1.486 µs. So a JVM that has seen several expressions costs
+  both about 5% on this case, and at the default limit 0.25.0 escapes part of it, by 0.05 µs,
+  through what the compiler happens to inline. Why the code of 0.26.0 falls on the other side was
+  not looked for.
+- From JSON text, the 5 to 11 µs were not a cost. In the runs above the difference goes from −9.0
+  to +5.9%, either way round, as one JVM's parse by Jackson takes from 98 to 165 µs with either
+  JAR. The spread of those numbers, 11.9% at #22, already said so.
+
+So no code changes, and the harness stays as it is: a JVM that runs one expression is the
+exception, and the number inside the harness is the one an application with several expressions
+gets. It does mean that a case over Java maps can move by 5% with what runs before it, and that
+what a program timing one case alone says is its best case. To compare two builds on one case,
+time it after others too.
 
 ### `recursion` and the frames (0.26 #18)
 
