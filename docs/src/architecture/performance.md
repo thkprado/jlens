@@ -1829,8 +1829,74 @@ source (−0.3% aligned). Within 2.5% but in all three runs: on Windows, against
 as usual, `filter + aggregate` +1.5 to +2.5% and `group-by` +1.3 to +2.1%. Neither calls a lambda,
 and aligned they read −0.0% and +0.8%, so that this is placement.
 
-The names of blocks, of tuples and of the host's variables are still copied, one allocation for
-each name bound. They could be shared by an `Arc<str>` in the syntax tree, which would count on
-one cache line for every thread at each binding, what the threads above just got rid of; or be
-kept in place when short, a type of its own for one allocation of the five a call in the block
-case above makes. Neither was built.
+The names of blocks, of tuples and of the host's variables were left, one allocation for each name
+bound, and 0.27 #7 took them.
+
+### Names in a frame (0.27 #7)
+
+A name of up to 14 bytes now stays in the frame's entry, which takes no allocation, and a frame with
+one name holds it with no list, which takes out a second one. An `Arc<str>` in the syntax tree was
+not built: it would count on one cache line for every thread at each binding, what 0.26 #20 got
+rid of. A name of 15 bytes or more is a pointer to a string, one allocation more than the copy it
+replaces.
+
+On Windows with `mimalloc`, which the packages use, built aligned, one process per build, the median
+of seven alternated runs, each on a new copy, against a `Document` with two variables bound, on the
+200 items of the workload:
+
+| Case, per evaluation | Before | After | | Allocations |
+|---|---:|---:|---:|---:|
+| A block of one name in a lambda | 79.7 µs | 75.5 µs | −5.3% | 1,023 → 621 |
+| A block of two names in a lambda | 105.0 µs | 105.4 µs | +0.4% | 1,223 → 821 |
+| A name bound in a lambda with no block | 57.7 µs | 59.2 µs | +2.6% | 1,023 → 621 |
+| A name of 34 bytes in a lambda's block | 80.5 µs | 78.9 µs | −1.9% | 1,023 → 1,021 |
+| A block at the top, one name | 318 ns | 288 ns | −9.4% | 4 → 2 |
+| A block of nine names | 1,117 ns | 1,105 ns | −1.1% | 14 → 5 |
+| Four nested blocks, one name each | 881 ns | 789 ns | −10.4% | 13 → 5 |
+| A tuple's focus, `items@$i` | 135.9 µs | 133.7 µs | −1.6% | 4,658 → 3,854 |
+| A tuple's index, `items#$n` | 81.3 µs | 79.2 µs | −2.6% | 2,847 → 2,443 |
+| Two host variables | 299 ns | 283 ns | −5.4% | 4 → 2 |
+| A built-in looked up | 548 ns | 499 ns | −8.9% | 12 → 10 |
+| `recursion`, which binds one name per evaluation | 708 µs | 697 µs | −1.5% | 3,952 → 3,950 |
+
+Threads sharing an expression, a recursion with a block in the lambda, evaluations per second, the
+median of seven alternated runs:
+
+| Threads | Before | After | |
+|---:|---:|---:|---:|
+| 1 | 3,840 | 4,082 | +6.3% |
+| 4 | 14,660 | 15,590 | +6.3% |
+| 8 | 26,742 | 28,820 | +7.8% |
+| 16 | 29,414 | 31,040 | +5.5% |
+
+The time saved is less than the allocations suggest, as a copy of the name is not free, and an
+allocation with `mimalloc` takes little: a block of one name makes two allocations less, about
+21 ns of 398. Most of a tuple's allocations are not the frame's: each step builds a map of its
+own, with a `Rc<str>` per key, which this item leaves as it was.
+
+Names are compared by a loop, not by `memcmp`, which a call of the C runtime makes slower for
+names this short: with `memcmp`, the block of nine names reads +6.4% where the loop reads −1.1%,
+and a tuple's index +1.8% where the loop reads −2.6%.
+
+`cargo xtask ab 7c624d8 .`, ten rounds, in percent, with the system allocator:
+
+| | `recursion`: `evaluate` | `document` | `source` | `index in a variable`: `evaluate` | `document` | `source` |
+|---|---:|---:|---:|---:|---:|---:|
+| Windows | +2.8 | +2.6 | +2.5 | −3.2 | −6.1 | −3.7 |
+| Windows, aligned, five rounds | +1.7 | +0.6 | −0.3 | −5.7 | −6.0 | −4.1 |
+| Linux | −1.2 | +0.2 | −0.8 | −1.3 | −1.0 | −1.6 |
+
+No case reaches the mark of 3.5%, in any mode, on Windows or under Linux. The largest are
+under Linux from a source, built as usual, `strings` +3.4% and `shipping rule` +3.2%, and from a
+`serde_json::Value` `filter + aggregate` +3.0%, within the floor and not hunted. The aligned runs
+above were read on six cases, those two, `path`, `object constructor`, `transform` and
+`shipping rule`: none takes more than 2.2% longer.
+
+The first form of the name took 24 bytes, a `Box<str>` beside 22 bytes in place. `ab` read
+`recursion`, which runs none of that code, at +5.7%, and aligned at +0.2%: placement. But the
+probe with `mimalloc` kept +3.5 to +4.2% aligned, where a change with no effect read −0.8%. Going
+by steps, the name alone took +0.9%, and the variants of a frame with no name or with one took the
+rest, with or without a call's frame tested first, and with the binding kept out of `eval`, so
+neither of those is the cause. A name of 16 bytes, with a long name behind one pointer, leaves the
+frame's variables room and reads +0.4%, and so was kept. At 24, the new variant filled the 48 bytes
+of its type exactly, where its discriminant has to go; that this is the reason was not traced.

@@ -150,3 +150,15 @@ The new reference from a frame to its function makes no new cycle that an evalua
 the function reaches the frame's parent, which the frame holds anyway, and its input, made before
 the frame. Any other way back goes through a frame's variables, and a frame holding a function, an
 array or an object is on the list that is cleared when the evaluation ends.
+
+### Follow-up: names kept in place (0.27 #7)
+
+The other frames kept a copy of each name, an allocation per binding. A name of up to 14 bytes now
+stays in the list's entry, and a frame with one name holds it with no list, so that a block of one
+name makes no allocation for its frame's variables. An `Arc<str>` in the syntax tree, the other
+candidate, was not built: it would count on one cache line for every thread at each binding, what
+0.26 #20 took out. A name of 15 bytes or more takes one pointer, so one allocation more than
+before; the list a one-name frame no longer makes pays it back. The name is 16 bytes, not 24 as a
+`Box<str>` beside 22 bytes would take: at 24, a frame's variables fill their type and `recursion`,
+which binds no name, took 3.5% more with `mimalloc`
+([performance](../architecture/performance.md#names-in-a-frame-027-7)).

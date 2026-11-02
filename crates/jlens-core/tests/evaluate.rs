@@ -129,6 +129,87 @@ fn a_frame_keeps_its_variables_however_many_it_holds() {
 }
 
 #[test]
+fn a_frame_keeps_names_of_any_length() {
+    // Around the bytes kept in place, by characters of one and of two bytes.
+    let names = [
+        "a".to_owned(),
+        "n".repeat(13),
+        "n".repeat(14),
+        "n".repeat(15),
+        "n".repeat(16),
+        "n".repeat(100),
+        "é".repeat(7),
+        "é".repeat(8),
+    ];
+    for name in &names {
+        // A name that differs in its last byte, one that is one byte longer and one shorter.
+        let other = format!(
+            "{}x",
+            &name[..name.len() - name.chars().last().unwrap().len_utf8()]
+        );
+        let longer = format!("{name}x");
+        let cases = [
+            (format!("(${name} := 1; ${name})"), json!(1)),
+            (format!("(${name} := 1; ${name} := 2; ${name})"), json!(2)),
+            (
+                format!(
+                    "(${name} := 1; ${other} := 2; ${longer} := 3; [${name}, ${other}, ${longer}])"
+                ),
+                json!([1, 2, 3]),
+            ),
+            (
+                format!("(${other} := 2; ${name} := 1; ${other} := 4; [${name}, ${other}])"),
+                json!([1, 4]),
+            ),
+            // A name held that starts with the one looked up, in the frame's one place and list.
+            (
+                format!("(${longer} := 3; [${name}, ${longer}])"),
+                json!([3]),
+            ),
+            (
+                format!("(${longer} := 3; ${name} := 1; [${name}, ${longer}])"),
+                json!([1, 3]),
+            ),
+            // In the list and in the table of a frame, bound again.
+            (
+                format!(
+                    "($v0 := 0; $v1 := 1; $v2 := 2; $v3 := 3; $v4 := 4; $v5 := 5; $v6 := 6;                      $v7 := 7; ${name} := 8; ${name} := 9; ${longer} := 10; [${name}, ${longer}, $v0])"
+                ),
+                json!([9, 10, 0]),
+            ),
+            // An inner frame hides it, and the outer one still holds it.
+            (
+                format!("(${name} := 1; [(${name} := 2; ${name}), ${name}])"),
+                json!([2, 1]),
+            ),
+            // The frames of a tuple's step.
+            (format!("v@${name}.${name}"), json!([3, 4])),
+            (format!("v#${name}.${name}"), json!([0, 1])),
+            // In a lambda's frame, a name of its body.
+            (
+                format!("function($p){{ $append(${name} := 5, ${name} + $p) }}(1)"),
+                json!([5, 6]),
+            ),
+        ];
+        for (expr, expected) in cases {
+            assert_eq!(eval(&expr, json!({"v": [3, 4]})), Some(expected), "{expr}");
+        }
+
+        // From the host, in the root frame, where a name shorter or longer finds nothing.
+        let bindings = Bindings::new().var(name.clone(), 1);
+        let bound = format!("[${name}, ${other}, ${longer}]");
+        assert_eq!(
+            Expression::compile(&bound)
+                .unwrap()
+                .evaluate(None, &bindings)
+                .unwrap(),
+            Some(json!([1])),
+            "{bound}"
+        );
+    }
+}
+
+#[test]
 fn a_lambda_frame_names_its_arguments_as_if_each_were_bound() {
     // A call's frame holds the arguments it was given and takes their names from the function.
     // The results are those of jsonata-js.

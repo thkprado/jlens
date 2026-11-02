@@ -7,6 +7,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, OnceLock};
 
@@ -29,6 +30,74 @@ use crate::value::{
 /// The variables a frame holds in a list; one more moves them to a table.
 const FEW_VARS: usize = 8;
 
+/// The bytes of the longest name kept in place: a [`Name`] takes 16 bytes.
+const SHORT_NAME: usize = 14;
+
+/// A name in a frame. Each binding of a block or a tuple, each host variable and each built-in
+/// looked up keeps one. Sharing the syntax tree's would count on one cache line for every thread
+/// (0.26 #20), so a name is copied, and a short one, as most are, needs no allocation (0.27 #7).
+/// At 24 bytes, a `Box<str>` beside 22 of them, [`Vars::One`] fills `Vars`, and `recursion`, which
+/// binds no name, takes 3.5% more with `mimalloc`.
+enum Name {
+    Short(u8, [u8; SHORT_NAME]),
+    // One pointer, as `Box<str>` takes two and would make the name 24 bytes.
+    #[allow(clippy::box_collection)]
+    Long(Box<String>),
+}
+
+impl Name {
+    fn new(name: &str) -> Name {
+        let len = name.len();
+        if len > SHORT_NAME {
+            return Name::Long(Box::new(name.to_owned()));
+        }
+        let mut bytes = [0; SHORT_NAME];
+        bytes[..len].copy_from_slice(name.as_bytes());
+        Name::Short(len as u8, bytes)
+    }
+
+    /// Whether this is `name`. Names are short, so a loop takes less than a call of `memcmp`:
+    /// up to 7% of a block of nine names, measured.
+    #[inline]
+    fn is(&self, name: &str) -> bool {
+        match self {
+            Name::Short(len, bytes) => {
+                usize::from(*len) == name.len()
+                    && bytes.iter().zip(name.bytes()).all(|(a, b)| *a == b)
+            }
+            Name::Long(long) => long.as_str() == name,
+        }
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            Name::Short(len, bytes) => &bytes[..usize::from(*len)],
+            Name::Long(name) => name.as_bytes(),
+        }
+    }
+}
+
+impl PartialEq for Name {
+    fn eq(&self, other: &Name) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
+
+impl Eq for Name {}
+
+// A table looks a name up by its bytes, which `Borrow` requires to hash the same.
+impl Hash for Name {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_bytes().hash(state);
+    }
+}
+
+impl std::borrow::Borrow<[u8]> for Name {
+    fn borrow(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
 /// The variables of a frame. A lambda's call makes a frame for its one or two parameters, and a
 /// table for so few took a fifth of the time of a recursion under Linux: a seed for its hasher,
 /// its control bytes set, each name hashed (ADR 0006, follow-up of 0.26 #18). A list holds them
@@ -38,16 +107,21 @@ enum Vars<'a> {
     /// A lambda's call: the arguments, in the list that carried them, named by the parameters
     /// of the function, so that the call allocates neither a list nor the names (0.26 #20).
     Call(Rc<Function<'a>>, Vec<Value<'a>>),
-    Few(Vec<(String, Value<'a>)>),
-    Many(HashMap<String, Value<'a>, foldhash::fast::RandomState>),
+    /// A frame that binds nothing yet, or one name, as a block often does: no list (0.27 #7).
+    Empty,
+    One(Name, Value<'a>),
+    Few(Vec<(Name, Value<'a>)>),
+    Many(HashMap<Name, Value<'a>, foldhash::fast::RandomState>),
 }
 
 impl<'a> Vars<'a> {
     fn get(&self, name: &str) -> Option<&Value<'a>> {
         match self {
             Vars::Call(function, values) => values.get(param(function, name)?),
-            Vars::Few(vars) => vars.iter().find(|(n, _)| n == name).map(|(_, v)| v),
-            Vars::Many(vars) => vars.get(name),
+            Vars::Empty => None,
+            Vars::One(n, value) => n.is(name).then_some(value),
+            Vars::Few(vars) => vars.iter().find(|(n, _)| n.is(name)).map(|(_, v)| v),
+            Vars::Many(vars) => vars.get(name.as_bytes()),
         }
     }
 
@@ -66,28 +140,35 @@ impl<'a> Vars<'a> {
                     *self = named;
                 }
             }
+            Vars::Empty => *self = Vars::One(Name::new(name), value),
+            Vars::One(first, slot) if first.is(name) => *slot = value,
+            Vars::One(..) => {
+                if let Vars::One(first, old) = std::mem::replace(self, Vars::Empty) {
+                    *self = Vars::Few(vec![(first, old), (Name::new(name), value)]);
+                }
+            }
             Vars::Few(vars) => {
-                if let Some((_, slot)) = vars.iter_mut().find(|(n, _)| n == name) {
+                if let Some((_, slot)) = vars.iter_mut().find(|(n, _)| n.is(name)) {
                     *slot = value;
                 } else if vars.len() < FEW_VARS {
-                    vars.push((name.to_owned(), value));
+                    vars.push((Name::new(name), value));
                 } else {
                     let mut many: HashMap<_, _, _> = std::mem::take(vars).into_iter().collect();
-                    many.insert(name.to_owned(), value);
+                    many.insert(Name::new(name), value);
                     *self = Vars::Many(many);
                 }
             }
             Vars::Many(vars) => {
-                vars.insert(name.to_owned(), value);
+                vars.insert(Name::new(name), value);
             }
         }
     }
 
     fn clear(&mut self) {
         match self {
-            Vars::Call(..) => *self = Vars::Few(Vec::new()),
             Vars::Few(vars) => vars.clear(),
             Vars::Many(vars) => vars.clear(),
+            Vars::Call(..) | Vars::Empty | Vars::One(..) => *self = Vars::Empty,
         }
     }
 }
@@ -124,7 +205,7 @@ pub(crate) type Env<'a> = Rc<Frame<'a>>;
 impl<'a> Frame<'a> {
     fn new(parent: Option<&Env<'a>>) -> Env<'a> {
         Rc::new(Frame {
-            vars: RefCell::new(Vars::Few(Vec::new())),
+            vars: RefCell::new(Vars::Empty),
             parent: parent.cloned(),
             input: Value::Undefined,
             functions: None,
@@ -419,7 +500,7 @@ pub(crate) fn evaluate<'a, 'v, R>(
     };
     let mut input = input;
     let env = Rc::new(Frame {
-        vars: RefCell::new(Vars::Few(Vec::new())),
+        vars: RefCell::new(Vars::Empty),
         parent: None,
         input: input.clone(),
         functions: bindings.shared_functions(),
