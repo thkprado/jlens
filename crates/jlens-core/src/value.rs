@@ -1790,33 +1790,21 @@ impl DeepHasher {
     }
 
     fn value(&mut self, value: &Value<'_>, depth: usize) -> Hashed {
-        let mut hasher = self.state.build_hasher();
         match value {
-            Value::Undefined => hasher.write_u8(0),
-            Value::Null => hasher.write_u8(1),
-            Value::Bool(b) => hasher.write_u8(2 + u8::from(*b)),
-            Value::Number(n) => {
-                hasher.write_u8(4);
-                hasher.write_u64(if *n == 0.0 { 0 } else { n.to_bits() });
-            }
-            Value::String(s) => {
-                hasher.write_u8(5);
-                hasher.write(s.as_bytes());
-            }
-            Value::Function(f) => {
-                hasher.write_u8(6);
-                hasher.write_usize(Rc::as_ptr(f).cast::<()>().addr());
-            }
             Value::Array(a) => {
                 let address = Rc::as_ptr(a).cast::<()>().addr();
-                return self.nested(address, depth, |this| this.array(a.try_items()?, depth));
+                self.nested(address, depth, |this| this.array(a.try_items()?, depth))
             }
             Value::Object(o) => {
                 let address = Rc::as_ptr(o).cast::<()>().addr();
-                return self.nested(address, depth, |this| this.object(&*o.try_borrow()?, depth));
+                self.nested(address, depth, |this| this.object(&*o.try_borrow()?, depth))
+            }
+            _ => {
+                let mut hasher = self.state.build_hasher();
+                write_scalar(&mut hasher, value, usize::MAX);
+                Some((hasher.finish(), 0))
             }
         }
-        Some((hasher.finish(), 0))
     }
 
     /// The hash that `walk` gives the array or object at `address`, remembered past the budget.
@@ -1873,6 +1861,33 @@ impl DeepHasher {
         hasher.write_usize(map.len());
         hasher.write_u64(fields);
         Some((hasher.finish(), levels + 1))
+    }
+}
+
+/// Hashes a value that is not an array or an object, so that what [`Value::strict_eq`] finds equal
+/// hashes the same: of a string, its first `string` bytes, and its length if it is longer.
+#[inline(always)]
+pub(crate) fn write_scalar(hasher: &mut impl Hasher, value: &Value<'_>, string: usize) {
+    match value {
+        Value::Undefined => hasher.write_u8(0),
+        Value::Null => hasher.write_u8(1),
+        Value::Bool(b) => hasher.write_u8(2 + u8::from(*b)),
+        Value::Number(n) => {
+            hasher.write_u8(4);
+            hasher.write_u64(if *n == 0.0 { 0 } else { n.to_bits() });
+        }
+        Value::String(s) => {
+            hasher.write_u8(5);
+            if s.len() > string {
+                hasher.write_usize(s.len());
+            }
+            hasher.write(&s.as_bytes()[..s.len().min(string)]);
+        }
+        Value::Function(f) => {
+            hasher.write_u8(6);
+            hasher.write_usize(Rc::as_ptr(f).cast::<()>().addr());
+        }
+        Value::Array(_) | Value::Object(_) => {}
     }
 }
 

@@ -20,12 +20,15 @@ All notable changes are recorded here. The format follows
   a variable of 1,000 records takes 0.64 µs, where it took 1,050 µs, and a variable the expression
   does not read costs nothing. A binding named after a built-in that the expression names keeps
   the whole conversion.
-- `$distinct` takes time linear in its array, past 16 distinct items: each item is looked up by a
-  hash of its whole value where it was compared with every item kept. 100,000 numbers take 9.8 ms,
-  where they took 17.5 s, and 100,000 objects 89 ms, where they took 392 s; arrays with few distinct
-  values and short arrays take what they took. Its result and errors do not change. From a `Source`,
-  an array past 16 distinct items now has each item read whole; a level that cannot be read is
-  left unread, and fails the evaluation only where comparing the items reaches it, as before.
+- `$distinct` takes time linear in its array, past 16 distinct items: each item is looked up by
+  the first fields of an object, or by a hash of its whole value when those do not tell the items
+  apart, where it was compared with every item kept. 100,000 numbers take 9.5 ms, where they took
+  17.5 s, 100,000 objects 85 ms, where they took 392 s, and records with an `id` take no longer for
+  what they hold below it; arrays with few distinct values and short arrays take what they took.
+  Items that differ only below a field they share, or arrays, are read whole, one walk of the
+  input. Its result and errors do not change. From a `Source`, such an item is now read whole; a
+  level that cannot be read is left unread, and fails the evaluation only where comparing the
+  items reaches it, as before.
 
 ### Fixed
 

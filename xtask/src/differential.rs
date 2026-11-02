@@ -880,12 +880,16 @@ fn constructed(rng: &mut Rng, depth: u32) -> String {
 fn distinct_call(rng: &mut Rng, depth: u32) -> String {
     let n = 25 + rng.below(40);
     let m = 17 + rng.below(30);
-    let item = match rng.below(6) {
+    let item = match rng.below(9) {
         0 => format!("$e % {m}"),
         1 => format!("'k' & ($e % {m})"),
         2 => format!("{{'a': $e % {m}, 'b': [$e % 3, 's']}}"),
         3 => format!("($e % 2 = 0 ? {{'a': $e % {m}, 'b': 1}} : {{'b': 1, 'a': $e % {m}}})"),
         4 => format!("[$e % {m}, {{'c': ($e % 2 - 0.5) * 0}}]"),
+        // First fields that tell few items apart, or none, and an item that lacks them.
+        5 => format!("{{'g': $e % 3, 'b': [$e % {m}]}}"),
+        6 => format!("{{'g': 's', 'b': {{'c': $e % {m}}}}}"),
+        7 => format!("($e = 30 ? [$e] : {{'a': $e % {m}, 'b': [1]}})"),
         _ => expression(rng, depth - 1),
     };
     format!("$distinct($map([1..{n}], function($e){{ {item} }}))")

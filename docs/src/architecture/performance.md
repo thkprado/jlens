@@ -1467,20 +1467,22 @@ variables measures +0.8 to +1.9% aligned, over seven rounds on new copies, withi
 - **`$distinct`.** Until 0.27 each item was compared with every item kept, so the time grew with
   the square of the distinct items. Now the first 16 distinct items are kept by comparing, as an
   array with few distinct items never gains from anything else, and past them items are looked up
-  by a hash of their whole value, with `=` settling those that hash the same. The hash adds the
-  fields of an object up, so that their order does not count, and gives `0` and `-0` one number.
-  When 16 are kept and 8 or fewer items are left, those are compared too: hashing the 16 costs
-  more. Against a `Document`, in µs but where marked, the fastest of a process
+  by a hash, with `=` settling those that hash the same: of the first fields of an object when
+  those tell the items apart, as below, and otherwise of the whole value. The hash adds the fields
+  of an object up, so that their order does not count, and gives `0` and `-0` one number. When 16
+  are kept and 8 or fewer items are left, those are compared too: hashing the 16 costs more.
+  Against a `Document`, in µs but where marked, before 0.27 the fastest of a process, after it the
+  median of seven processes, each on a new copy of the program
   (`$distinct($)`, the result converted; the items half repeated in `nested`, and eight values
   repeated in `few`):
 
   | Items | 10, before | after | 1,000, before | after | 100,000, before | after |
   |---|---:|---:|---:|---:|---:|---:|
-  | numbers | 1.49 | 1.54 | 1,795 | 63.7 | 17.5 s | 9.84 ms |
-  | `i % 8` | 1.30 | 1.34 | 17.1 | 16.1 | 1.59 ms | 1.48 ms |
-  | strings | 2.02 | 2.08 | 3,618 | 96.2 | 35.7 s | 17.7 ms |
-  | objects of three fields | 6.58 | 6.52 | 13,060 | 501 | 392 s | 89.0 ms |
-  | nested objects | 7.19 | 7.25 | 7,027 | 641 | 247 s | 121 ms |
+  | numbers | 1.49 | 1.50 | 1,795 | 64.5 | 17.5 s | 9.51 ms |
+  | `i % 8` | 1.30 | 1.32 | 17.1 | 16.1 | 1.59 ms | 1.48 ms |
+  | strings | 2.02 | 2.02 | 3,618 | 96.8 | 35.7 s | 14.8 ms |
+  | objects of three fields | 6.58 | 6.80 | 13,060 | 501 | 392 s | 84.6 ms |
+  | nested objects | 7.19 | 7.39 | 7,027 | 558 | 247 s | 101 ms |
 
   jsonata-js 2.2.2 is quadratic as well: on the same arrays, 1.7 µs, 156 µs and 1.71 s for numbers,
   2.1 µs, 2.92 ms and 32.2 s for strings, and 128 ms for 1,000 objects, whose 100,000 did not
@@ -1488,18 +1490,79 @@ variables measures +0.8 to +1.9% aligned, over seven rounds on new copies, withi
   100,000 items, as it did before. Around the switch, from 8 to 64 items, each kind within 2.7%
   of the list up to 24 items against a `Document`, and within 4.2% with `evaluate`. Strings and
   objects gain 14 to 16% at 25 items, numbers 17% at 32, and nested objects half repeated from 48
-  items on. `cargo xtask ab main .` runs no `$distinct`: it finds every case within −4.3 and
-  +2.2% in the three modes, none past the floor.
+  items on.
+
+  A hash of the whole value reads each item to its end, where comparing stops at the first
+  difference. Measuring that (0.27 #12) found 25 items of 1 KB that differ in a first field at 29
+  times the list's time with `evaluate`, and of 100 KB at 4,500 times: the hash had made the common
+  shape of a record, an `id` and data below it, the slowest. So past the first 16, an array of
+  objects is first looked up by the first fields of the first item kept, up to eight, as far as
+  they are not arrays or objects. An item that starts with those fields is compared only with the
+  items kept that hold the same values there, found by key, so that the order of their fields does
+  not count. The comparisons left out are false before anything below those fields is read, and
+  those made are in the list's order, so that the result and the errors are the list's, with a
+  source as well, and nothing more of an item is read than comparing reads. An item that does not
+  start with those fields, or that 16 items share them with, goes on to the hash of the whole
+  value. Of a string, the first fields hash the length and 64 bytes.
+
+  In µs but where marked, the fastest of two processes: the list, as before 0.27 #6; the whole
+  hash, 0.27 #6; and now. `{id, rows}` is an `id` and a list of small records, `{id, 7,000 fields}`
+  numbers in fields of its own, `{id, text}` one long string, `{rows, id}` the `id` after the list,
+  `{kind, list}` a field all the items share and a list that starts with what differs, and `[id,
+  ...]` an array:
+
+  | Items | Against a `Document`: list | whole hash | now | `evaluate`: list | whole hash | now |
+  |---|---:|---:|---:|---:|---:|---:|
+  | 25 of `{id, rows}`, 1 KB | 9.8 | 76.4 | 6.1 | 17.7 | 501 | 14.1 |
+  | 25 of `{id, rows}`, 100 KB | 9.1 | 21,783 | 5.5 | 17.3 | 79,158 | 13.7 |
+  | 128 of `{id, rows}`, 100 KB | 225 | 130,603 | 8.9 | 247 | 434,760 | 51.2 |
+  | 128 of `{id, 7,000 fields}`, 100 KB | 266 | 11,443 | 14.6 | 93,252 | 100,310 | 92,114 |
+  | 128 of `{id, text}`, 100 KB | 196 | 367 | 9.9 | 1,474 | 1,637 | 1,284 |
+  | 128 of `{rows, id}`, 10 KB | 382,007 | 13,921 | 13,571 | 526,823 | 42,338 | 41,815 |
+  | 25 of `{kind, list}`, 100 KB | 17.5 | 4,635 | 2,654 | 4,872 | 9,655 | 7,517 |
+  | 25 of `[id, ...]`, 100 KB | 5.5 | 4,630 | 2,645 | 4,787 | 9,626 | 7,617 |
+
+  Through a `Source`, one level at a time, the times follow `evaluate`: 128 of `{id, rows}` of 100
+  KB take 260 µs with the list and 65.2 µs now. `{id, 7,000 fields}` with `evaluate` is about the
+  same in all three, as both ways read the level of each item, which is the cost. The last two rows
+  are what is left: the difference is below a field all the items share, or in an array, so the
+  hash reads each item whole, about 6 ns per value. The time is one walk of the input, and linear,
+  where the list's grows with the square of the items; it costs from 1.3 to 1.6 times the list with
+  `evaluate` up to 128 such items of 10 KB or more, and with 128 of 1 KB it gains. Reaching that
+  difference would need first fields that follow the comparison into nested values, for items
+  whose whole cost is one walk of the input, so it stays recorded. The packages show the same,
+  before 0.27 #6 and now, the fastest of three processes in Python and two in Java:
+
+  | Items | Python objects, before | now | `Document`, before | now | Java maps, before | now | `Document`, before | now |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|
+  | 25 of `{id, rows}`, 100 KB | 17.7 | 14.0 | 8.4 | 4.7 | 18.8 | 15.6 | 7.9 | 4.5 |
+  | 128 of `{id, rows}`, 100 KB | 240 | 53.1 | 220 | 8.5 | 219 | 57.4 | 211 | 7.7 |
+  | 128 of `{id, 7,000 fields}`, 100 KB | 79,741 | 78,325 | 300 | 13.6 | 91,217 | 86,630 | 273 | 13.9 |
+  | 128 of `{rows, id}`, 100 KB | 3.14 s | 409 ms | 2.51 s | 121 ms | 2.62 s | 491 ms | 1.97 s | 103 ms |
+  | 25 of `{kind, list}`, 100 KB | 9,900 | 13,013 | 17.1 | 2,660 | 8,640 | 10,385 | 13.3 | 1,851 |
+
+  The workload has a case of this now, `distinct items`, `$count($distinct(items))` over the 200
+  items of the orders: `cargo xtask ab` before 0.27 #6 and now, 656 → 176 µs with `evaluate`, 489 →
+  18.3 µs against a `Document`, 671 → 187 µs through a `Source`; `python.py ab`, 458 → 15.2 µs
+  against a `Document` and 595 → 148 µs over Python values; `java-compare ab`, 408 → 14.6 µs and 627
+  → 193 µs over maps; `compare.mjs`, 25.9 µs against a `Document` where jsonata-js takes 9.17 ms.
+  `ab` against 0.27 #6 finds that case 26.6% faster against a `Document`, with `evaluate` and through
+  a `Source` −1.4 and −1.9%, and every other case within −1.7 and +2.7%, none past the floor. The
+  benchmark of the application that reported #5 and #6 runs no `$distinct`, and finds −0.1 to −0.5%.
+  Measured with short arrays too: from 10 to 25 items of any kind within 2.9% of 0.27 #6, past them
+  numbers +3.9% at most and strings +3.0%, under the 8.9% that copies of one program spread, and
+  objects up to −4.2%, nested ones up to −13.5%, the medians of seven processes against a
+  `Document`; with `evaluate`, at 25 and 1,000 items, within +1.4%.
 
   A value can hold one array many times, at each of many levels, which `=` passes over by
   comparing pointers. So the hash has a budget of 64 values per item, and past it remembers
   arrays and objects by address, and the time stays linear in the array, however many paths lead
   to a value. A value nested past the limit of 1,000 levels is not hashed: whether comparing it
   fails depends on what it meets, so the items from there on go back to comparing, which gives the
-  same result and the same error. An array from a `Source` past 16 distinct items has each item
-  read whole, as a hash needs, where comparing could tell two items apart at a first field. A
-  level that cannot be read stays unread and the items from there go back to comparing, so that
-  it fails the evaluation only if comparing reaches it
+  same result and the same error. An array from a `Source` past 16 distinct items that the first
+  fields do not settle has each item read whole, as a hash needs. A level that cannot be read stays
+  unread and the items from there go back to comparing, so that it fails the evaluation only if
+  comparing reaches it
   ([ADR 0010](../adr/0010-lazy-input.md#amendment-a-level-read-in-case-it-is-needed-027)).
 
 ## 0.26 against 0.25.0

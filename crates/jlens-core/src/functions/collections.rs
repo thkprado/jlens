@@ -2,11 +2,12 @@
 
 use super::{Call, arg, boolean, hof_args, merge_sort, text};
 use std::collections::HashMap;
+use std::hash::{BuildHasher, Hasher};
 use std::rc::Rc;
 
 use crate::error::{Error, Result};
 use crate::eval::Evaluator;
-use crate::value::{self, DeepHasher, Map, SEQUENCE, Value};
+use crate::value::{self, DeepHasher, Map, SEQUENCE, Value, write_scalar};
 
 type R<'a> = Result<Value<'a>>;
 
@@ -367,8 +368,12 @@ const DISTINCT_BY_LIST: usize = 16;
 fn distinct_items<'a>(items: &[Value<'a>]) -> Result<Vec<Value<'a>>> {
     let mut out = Vec::new();
     let mut rest = keep_by_list(&mut out, items, DISTINCT_BY_LIST)?;
-    if out.len() == DISTINCT_BY_LIST && rest.len() > DISTINCT_BY_LIST / 2 {
-        rest = keep_by_hash(&mut out, rest, items.len())?;
+    let worth_a_table = |rest: &[Value<'a>]| rest.len() > DISTINCT_BY_LIST / 2;
+    if out.len() == DISTINCT_BY_LIST && worth_a_table(rest) && items.len() < Kept::MOST {
+        rest = keep_by_first_fields(&mut out, rest)?;
+        if worth_a_table(rest) {
+            rest = keep_by_hash(&mut out, rest, items.len())?;
+        }
     }
     keep_by_list(&mut out, rest, usize::MAX)?;
     Ok(out)
@@ -399,6 +404,33 @@ fn keep_by_list<'i, 'a>(
     Ok(&[])
 }
 
+/// What [`keep_by_list`] does with no limit, comparing each item only with those kept that hold
+/// the same values in the first fields of the first item kept ([`FirstFields`]). Those comparisons
+/// are some of the list's, in its order, and the rest are false with nothing below those fields
+/// read, so the result and the errors are the list's. It reads no more of an item than comparing
+/// does, where [`keep_by_hash`] reads it whole.
+///
+/// It stops at an item that does not start with those fields, and when the fields leave
+/// [`DISTINCT_BY_LIST`] items to compare one with, returning the items from there.
+fn keep_by_first_fields<'i, 'a>(
+    out: &mut Vec<Value<'a>>,
+    items: &'i [Value<'a>],
+) -> Result<&'i [Value<'a>]> {
+    let Some(fields) = FirstFields::of(&out[0]) else {
+        return Ok(items);
+    };
+    let mut table = Kept::new(out.len(), items.len());
+    for kept in out.iter() {
+        let Some(hash) = fields.of_kept(kept) else {
+            return Ok(items);
+        };
+        table.add(hash);
+    }
+    keep_by_table(out, items, &mut table, DISTINCT_BY_LIST, |v| {
+        fields.of_item(v)
+    })
+}
+
 /// What [`keep_by_list`] does with no limit, comparing each item only with those kept that hash
 /// the same. It stops at a value it cannot hash, nested too deep or holding a level of a source
 /// that cannot be read, returning the items from there: whether comparing that one fails depends
@@ -409,38 +441,177 @@ fn keep_by_hash<'i, 'a>(
     all: usize,
 ) -> Result<&'i [Value<'a>]> {
     let mut hasher = DeepHasher::new(all);
-    // The last item kept with each hash, and for each item kept the one before it with its hash.
-    let room = out.len() + items.len().min(3 * out.len());
-    let mut last = HashMap::<u64, usize, foldhash::fast::RandomState>::with_capacity_and_hasher(
-        room,
-        Default::default(),
-    );
-    let mut before = Vec::with_capacity(room);
-    for (i, kept) in out.iter().enumerate() {
+    let mut table = Kept::new(out.len(), items.len());
+    for kept in out.iter() {
         let Some(hash) = hasher.hash(kept) else {
             return Ok(items);
         };
-        before.push(last.insert(hash, i));
+        table.add(Some(hash));
     }
+    keep_by_table(out, items, &mut table, usize::MAX, |v| hasher.hash(v))
+}
+
+/// Keeps each of `items` that equals none of those kept that `table` holds with its hash. Stops
+/// at an item with no hash, or that differs from `limit` items with its hash, returning the items
+/// from that one. Inlined with the hash it is given: a call for each item costs arrays of numbers
+/// 5 ns per item, 7% of what they take.
+#[inline(always)]
+fn keep_by_table<'i, 'a>(
+    out: &mut Vec<Value<'a>>,
+    items: &'i [Value<'a>],
+    table: &mut Kept,
+    limit: usize,
+    mut hash: impl FnMut(&Value<'a>) -> Option<u64>,
+) -> Result<&'i [Value<'a>]> {
     for (i, v) in items.iter().enumerate() {
-        let Some(hash) = hasher.hash(v) else {
+        let Some(hash) = hash(v) else {
             return Ok(&items[i..]);
         };
-        let mut earlier = last.get(&hash).copied();
+        let mut compared = 0;
+        let mut earlier = table.first(hash);
         let mut seen = false;
         while let Some(kept) = earlier {
-            if v.deep_eq(&out[kept])? {
+            if v.deep_eq(&out[kept as usize])? {
                 seen = true;
                 break;
             }
-            earlier = before[kept];
+            compared += 1;
+            if compared == limit {
+                return Ok(&items[i..]);
+            }
+            earlier = table.after(kept);
         }
         if !seen {
-            before.push(last.insert(hash, out.len()));
+            table.add(Some(hash));
             out.push(v.clone());
         }
     }
     Ok(&[])
+}
+
+/// The items kept by a hash, each hash's in the order they were kept. Indexes are 32 bits, which
+/// on 100,000 numbers takes 19% off what `usize` costs: an array of [`Kept::MOST`] items or more
+/// stays with the list.
+struct Kept {
+    /// The first and the last item kept with each hash.
+    ends: HashMap<u64, (u32, u32), foldhash::fast::RandomState>,
+    /// For each item kept, the next one with its hash, or [`Kept::LAST`].
+    next: Vec<u32>,
+}
+
+impl Kept {
+    /// How many items an array may have to have a table.
+    const MOST: usize = u32::MAX as usize;
+    /// What [`Kept::next`] holds for the last item with a hash, never an index.
+    const LAST: u32 = u32::MAX;
+
+    /// A table for `kept` items, reserved for a few times as many of the `left` to come.
+    fn new(kept: usize, left: usize) -> Kept {
+        let room = kept + left.min(3 * kept);
+        Kept {
+            ends: HashMap::with_capacity_and_hasher(room, Default::default()),
+            next: Vec::with_capacity(room),
+        }
+    }
+
+    /// The first item kept with `hash`.
+    fn first(&self, hash: u64) -> Option<u32> {
+        self.ends.get(&hash).map(|&(first, _)| first)
+    }
+
+    /// The item kept after `item` with its hash.
+    fn after(&self, item: u32) -> Option<u32> {
+        Some(self.next[item as usize]).filter(|&next| next != Kept::LAST)
+    }
+
+    /// Adds the next item kept, which no item is looked up with when it has no hash.
+    fn add(&mut self, hash: Option<u64>) {
+        let item = self.next.len() as u32;
+        self.next.push(Kept::LAST);
+        if let Some(hash) = hash
+            && let Some((first, last)) = self.ends.insert(hash, (item, item))
+        {
+            self.next[last as usize] = item;
+            self.ends.insert(hash, (first, item));
+        }
+    }
+}
+
+/// The fields an object of the array starts with, when they are not arrays or objects. Comparing
+/// an item that starts with them with another goes through those fields first: if the other holds
+/// something else in one of them, the comparison is false, with neither item read below them.
+/// Looked up by key in the items kept, so that the order of their fields does not count.
+struct FirstFields {
+    keys: Vec<Rc<str>>,
+    state: foldhash::fast::RandomState,
+}
+
+impl FirstFields {
+    /// How many fields it looks at.
+    const MOST: usize = 8;
+    /// How much of a string it hashes: a long one is told from another by its length, or when the
+    /// items with one hash are compared.
+    const STRING: usize = 64;
+
+    /// The first fields of `item`, if it is an object that can be read and has some.
+    fn of(item: &Value<'_>) -> Option<FirstFields> {
+        let Value::Object(object) = item else {
+            return None;
+        };
+        let keys: Vec<_> = object
+            .try_borrow()?
+            .iter()
+            .take(Self::MOST)
+            .take_while(|(_, value)| !is_nested(value))
+            .map(|(key, _)| key.clone())
+            .collect();
+        (!keys.is_empty()).then(|| FirstFields {
+            keys,
+            state: Default::default(),
+        })
+    }
+
+    /// The hash of an item, or `None` when it does not start with the fields or cannot be read.
+    fn of_item(&self, item: &Value<'_>) -> Option<u64> {
+        let Value::Object(object) = item else {
+            return None;
+        };
+        let map = object.try_borrow()?;
+        let mut fields = map.iter();
+        let mut hasher = self.state.build_hasher();
+        for key in &self.keys {
+            let (field, value) = fields.next()?;
+            if field != key || is_nested(value) {
+                return None;
+            }
+            write_scalar(&mut hasher, value, Self::STRING);
+        }
+        Some(hasher.finish())
+    }
+
+    /// The hash of an item kept, by key, or `Some(None)` when no item that starts with the fields
+    /// can equal it; `None` when it cannot be read.
+    fn of_kept(&self, item: &Value<'_>) -> Option<Option<u64>> {
+        let Value::Object(object) = item else {
+            return Some(None);
+        };
+        let map = object.try_borrow()?;
+        let mut hasher = self.state.build_hasher();
+        for key in &self.keys {
+            match map.get(key) {
+                Some(value) if !is_nested(value) => {
+                    write_scalar(&mut hasher, value, Self::STRING);
+                }
+                _ => return Some(None),
+            }
+        }
+        Some(Some(hasher.finish()))
+    }
+}
+
+/// Whether `value` is an array or an object, which comparing may read further.
+fn is_nested(value: &Value<'_>) -> bool {
+    matches!(value, Value::Array(_) | Value::Object(_))
 }
 
 pub(super) fn error<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
@@ -592,9 +763,64 @@ mod tests {
         }
     }
 
+    /// An object that mostly starts with scalars and holds more below them, its fields in either
+    /// order, with some of them left out or nested: many items, few of them equal, so that they
+    /// get past the list.
+    fn record() -> impl Strategy<Value = JsonValue> {
+        let scalar = prop_oneof![
+            8 => (0..48).prop_map(|n| json!(n)),
+            1 => Just(json!(0.0)),
+            1 => Just(json!(-0.0)),
+            1 => Just(json!(null)),
+            // Longer than what is hashed of a string, told apart by their ends.
+            2 => (0..4).prop_map(|n| json!(format!("{}{n}", "x".repeat(70)))),
+            1 => (0..4).prop_map(|n| json!(vec![n])),
+        ];
+        let rest = prop_oneof![
+            (0..3).prop_map(|n| json!(n)),
+            (0..3).prop_map(|n| json!([n, {"a": n}])),
+            (0..3).prop_map(|n| json!({"a": [n]})),
+        ];
+        (scalar, 0..2, rest, 0..24u8).prop_map(|(id, group, rest, shape)| match shape {
+            0 => json!({"rest": rest, "group": group, "id": id}),
+            1 => json!({"id": id, "group": group}),
+            2 => json!({"group": group, "id": id, "rest": rest}),
+            _ => json!({"id": id, "group": group, "rest": rest}),
+        })
+    }
+
+    /// Items that start with `id`, and hold a value below it that comparing them may not reach.
+    fn with_below<'a>(
+        ids: impl Iterator<Item = usize>,
+        below: impl Fn() -> Value<'a>,
+    ) -> Vec<Value<'a>> {
+        ids.map(|id| {
+            let mut object = Map::default();
+            object.insert(Rc::from("id"), Value::Number(id as f64));
+            object.insert(Rc::from("below"), below());
+            Value::object(object)
+        })
+        .collect()
+    }
+
+    /// `items`, the first `kept` by the list, and what the first fields leave of the rest.
+    fn left_by_first_fields(items: &[Value<'_>], kept: usize) -> usize {
+        let mut out = Vec::new();
+        let rest = keep_by_list(&mut out, items, kept).unwrap();
+        keep_by_first_fields(&mut out, rest).unwrap().len()
+    }
+
     proptest! {
         #[test]
         fn the_hash_gives_what_the_list_gives(items in prop::collection::vec(item(), 0..64)) {
+            let items: Vec<Value<'_>> = items.iter().map(Value::from_json).collect();
+            agree(&items);
+        }
+
+        #[test]
+        fn the_first_fields_give_what_the_list_gives(
+            items in prop::collection::vec(record(), 0..96),
+        ) {
             let items: Vec<Value<'_>> = items.iter().map(Value::from_json).collect();
             agree(&items);
         }
@@ -680,6 +906,60 @@ mod tests {
         first.extend(numbers(40));
         assert_eq!(distinct_items(&first).unwrap().len(), 41);
         agree(&first);
+    }
+
+    /// The first fields tell the items apart, so that a value below them is never compared, and
+    /// comparing fails only for the items that hold the same in those fields.
+    #[test]
+    fn a_value_too_deep_below_the_first_fields_is_reached_as_in_the_list() {
+        let too_deep = || deep(MAX_NESTING + 2);
+        let apart = with_below(0..40, too_deep);
+        assert_eq!(distinct_items(&apart).unwrap().len(), 40);
+        agree(&apart);
+        let two_alike = with_below((0..40).chain([7]), too_deep);
+        assert_eq!(distinct_items(&two_alike).unwrap_err().code(), "U1001");
+        agree(&two_alike);
+    }
+
+    #[test]
+    fn the_first_fields_settle_the_items_that_start_with_them() {
+        let items = with_below(0..40, || Value::array(numbers(3), 0));
+        assert_eq!(left_by_first_fields(&items, 16), 0);
+    }
+
+    #[test]
+    fn the_first_fields_stop_at_an_item_that_does_not_start_with_them() {
+        let mut items = with_below(0..30, || Value::Null);
+        items.push(Value::Number(1.0));
+        items.extend(with_below(30..40, || Value::Null));
+        assert_eq!(left_by_first_fields(&items, 16), 11);
+        agree(&items);
+    }
+
+    #[test]
+    fn the_first_fields_give_up_when_they_tell_too_few_apart() {
+        // One `id` and a nested value that differs in each: 16 kept, all with that `id`.
+        let item = |i: usize| {
+            let below = || Value::array(vec![Value::Number(i as f64)], 0);
+            with_below(0..1, below).remove(0)
+        };
+        let items: Vec<Value<'_>> = (0..40).map(item).collect();
+        assert_eq!(left_by_first_fields(&items, 16), 24);
+        assert_eq!(distinct_items(&items).unwrap().len(), 40);
+    }
+
+    #[test]
+    fn items_that_do_not_start_with_scalars_have_no_first_fields() {
+        let nested = with_below(0..1, || Value::Null).remove(0);
+        let Value::Object(object) = &nested else {
+            unreachable!();
+        };
+        object
+            .borrow_mut()
+            .shift_insert(0, Rc::from("list"), Value::array(Vec::new(), 0));
+        assert!(FirstFields::of(&nested).is_none());
+        assert!(FirstFields::of(&Value::Number(1.0)).is_none());
+        assert!(FirstFields::of(&Value::object(Map::default())).is_none());
     }
 
     #[test]

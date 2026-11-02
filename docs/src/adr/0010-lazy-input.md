@@ -453,7 +453,9 @@ within 2.3% (the median of three alternated runs, both builds aligned).
 
 `$distinct` past 16 distinct items hashes each item whole ([0.27 #6](../architecture/roadmap.md)),
 where comparing stops at the first difference. So it reads levels that comparing would not, and
-with decision 6 alone a level no comparison reaches would stop the evaluation.
+with decision 6 alone a level no comparison reaches would stop the evaluation. Since 0.27 #12 this
+is only for items that the first fields of an object do not settle: those read what comparing
+reads, as the comparisons they leave out are false before anything below those fields is read.
 
 1. **`Array::try_items` and `Object::try_borrow` read a level that nothing needs yet.** They give
    `None` when the source fails, record nothing, and leave the level as it was, with what was
