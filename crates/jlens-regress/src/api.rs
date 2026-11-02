@@ -552,6 +552,14 @@ impl Regex {
     }
 
     /// Returns an iterator for matches found in 'text' starting at index `start`.
+    ///
+    /// If `start` is the low surrogate of a surrogate pair, searching begins
+    /// at the pair's high surrogate. A match found there is reported as
+    /// starting at that high surrogate, which is one code unit before `start`.
+    /// This follows established JavaScript engine behavior and the proposed
+    /// correction to RegExpBuiltinExec in [TC39 issue #128].
+    ///
+    /// [TC39 issue #128]: https://github.com/tc39/ecma262/issues/128
     #[cfg(feature = "utf16")]
     pub fn find_from_utf16<'r, 't>(
         &'r self,
@@ -565,7 +573,7 @@ impl Regex {
                 input,
                 MatchAttempter::new(&self.cr, input.left_end()),
             ),
-            start,
+            input.match_start(start),
         )
     }
 

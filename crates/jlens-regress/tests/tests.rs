@@ -2106,6 +2106,120 @@ mod utf16_tests {
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().range, 1..2);
     }
+
+    #[test]
+    fn test_utf16_start_inside_surrogate_pair() {
+        // Cases from the proposed RegExpBuiltinExec correction in
+        // https://github.com/tc39/ecma262/issues/128#issuecomment-6379961289
+        let re = |pattern, flags| regress::Regex::with_flags(pattern, flags).unwrap();
+        let pair = to_utf16("\u{10400}");
+        let pair_a = to_utf16("\u{10400}a");
+        let pair_x = to_utf16("\u{10400}x");
+        let a_pair = to_utf16("a\u{10400}");
+        let mut pair_lone = to_utf16("\u{1D306}");
+        pair_lone.push(0xDF06);
+
+        // Lookbehind sees nothing before the pair.
+        let m = re(r"(?<!a)", "u")
+            .find_from_utf16(&pair_a, 1)
+            .next()
+            .unwrap();
+        assert_eq!(m.range(), 0..0);
+
+        // Lookbehind into the code point before the pair.
+        let m = re(r"(?<=(.))", "u")
+            .find_from_utf16(&a_pair, 2)
+            .next()
+            .unwrap();
+        assert_eq!(m.range(), 1..1);
+        assert_eq!(m.group(1), Some(0..1));
+
+        // Assertions are evaluated at the start of the pair.
+        let m = re(r"^", "u").find_from_utf16(&pair, 1).next().unwrap();
+        assert_eq!(m.range(), 0..0);
+        let m = re(r"\b", "u").find_from_utf16(&a_pair, 2).next().unwrap();
+        assert_eq!(m.range(), 1..1);
+
+        // The 'v' flag behaves like 'u'.
+        let m = re(r".", "v").find_from_utf16(&pair, 1).next().unwrap();
+        assert_eq!(m.range(), 0..2);
+
+        // Captures, including a named group, are reported at their positions.
+        let m = re(r"(.)(?<n>x)?", "u")
+            .find_from_utf16(&pair_x, 1)
+            .next()
+            .unwrap();
+        assert_eq!(m.range(), 0..3);
+        assert_eq!(m.group(1), Some(0..2));
+        assert_eq!(m.named_group("n"), Some(2..3));
+
+        // A lone low surrogate after a pair is not part of it.
+        let m = re(r".", "u").find_from_utf16(&pair_lone, 1).next().unwrap();
+        assert_eq!(m.range(), 0..2);
+        let m = re(r"\uDF06", "u")
+            .find_from_utf16(&pair_lone, 1)
+            .next()
+            .unwrap();
+        assert_eq!(m.range(), 2..3);
+
+        // A literal prefix is searched for from the start of the pair.
+        let m = re(r"\u{10400}x", "u")
+            .find_from_utf16(&pair_x, 1)
+            .next()
+            .unwrap();
+        assert_eq!(m.range(), 0..3);
+        let m = re(r"x", "u").find_from_utf16(&pair_x, 1).next().unwrap();
+        assert_eq!(m.range(), 2..3);
+
+        // Matching steps back only to the high surrogate of the same pair.
+        let two_pairs = to_utf16("\u{1F600}\u{1F601}");
+        let m = re(r".", "u").find_from_utf16(&two_pairs, 3).next().unwrap();
+        assert_eq!(m.range(), 2..4);
+        let high_high_low = [0xD83D, 0xD83D, 0xDE00];
+        let m = re(r".", "u")
+            .find_from_utf16(&high_high_low, 2)
+            .next()
+            .unwrap();
+        assert_eq!(m.range(), 1..3);
+        let m = re(r".", "u")
+            .find_from_utf16(&high_high_low, 1)
+            .next()
+            .unwrap();
+        assert_eq!(m.range(), 1..3);
+
+        // The ends of the input are never inside a pair.
+        let m = re(r"$", "u").find_from_utf16(&pair, 2).next().unwrap();
+        assert_eq!(m.range(), 2..2);
+        let re_low = re(r"[\uDC00-\uDFFF]", "u");
+        let lone = [0xDE00];
+        assert_eq!(
+            re_low.find_from_utf16(&lone, 0).next().unwrap().range(),
+            0..1
+        );
+
+        // UCS-2 never steps back, as it matches code units.
+        let m = re_low.find_from_ucs2(&pair, 1).next().unwrap();
+        assert_eq!(m.range(), 1..2);
+        let m = re(r".", "u").find_from_ucs2(&pair, 1).next().unwrap();
+        assert_eq!(m.range(), 1..2);
+    }
+
+    #[test]
+    fn test_utf16_iteration_from_inside_surrogate_pair() {
+        let text = to_utf16("😀abc"); // 😀 is 2 code units: [0xD83D, 0xDE00]
+        let re_dot = regress::Regex::new(r".").unwrap();
+        let re_empty = regress::Regex::new(r"").unwrap();
+        let dots: Vec<_> = re_dot
+            .find_from_utf16(&text, 1)
+            .map(|m| m.range())
+            .collect();
+        assert_eq!(dots, vec![0..2, 2..3, 3..4, 4..5]);
+        let empties: Vec<_> = re_empty
+            .find_from_utf16(&text, 1)
+            .map(|m| m.range())
+            .collect();
+        assert_eq!(empties, vec![0..0, 2..2, 3..3, 4..4, 5..5]);
+    }
 }
 
 #[test]
