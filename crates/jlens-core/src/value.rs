@@ -22,7 +22,7 @@ use crate::eval::Env;
 use crate::functions::Native;
 use crate::host::HostFunction;
 use crate::output::Builder;
-use crate::regex::Regex;
+use crate::regex::{Offset, Regex};
 
 /// The fields of an object, in insertion order. Keys are shared: the objects of a converted
 /// document that have the same key point to one string (see [`Keys`]).
@@ -693,7 +693,7 @@ pub(crate) enum Function<'a> {
     RegexNext {
         re: Rc<Regex>,
         text: Rc<str>,
-        last: usize,
+        last: Offset,
     },
 }
 

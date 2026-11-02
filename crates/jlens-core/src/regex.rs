@@ -35,36 +35,59 @@ impl Regex {
     }
 }
 
-fn utf16_offset(text: &str, byte: usize) -> f64 {
-    text[..byte].encode_utf16().count() as f64
+/// A place in a text, in both of its units. Each match counts its UTF-16 offsets from the place
+/// the search started, so the matches of a text together count it once.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Offset {
+    pub byte: usize,
+    pub utf16: usize,
 }
 
-/// Converts a UTF-16 offset into a byte offset (clamped to the end of the text).
-pub(crate) fn byte_offset(text: &str, utf16: usize) -> usize {
-    let mut units = 0;
-    for (i, c) in text.char_indices() {
-        if units >= utf16 {
-            return i;
+impl Offset {
+    pub const START: Offset = Offset { byte: 0, utf16: 0 };
+
+    /// The first character boundary at or after a UTF-16 offset (the end of the text past it).
+    pub fn from_utf16(text: &str, utf16: usize) -> Offset {
+        let mut place = Offset::START;
+        for c in text.chars() {
+            if place.utf16 >= utf16 {
+                break;
+            }
+            place = place.after(c);
         }
-        units += c.len_utf16();
+        place
     }
-    text.len()
+
+    /// The place after `c`, which starts at this one.
+    pub fn after(self, c: char) -> Offset {
+        Offset {
+            byte: self.byte + c.len_utf8(),
+            utf16: self.utf16 + c.len_utf16(),
+        }
+    }
+
+    /// The place `byte`, at or after this one.
+    fn advanced_to(self, text: &str, byte: usize) -> Offset {
+        Offset {
+            byte,
+            utf16: self.utf16 + text[self.byte..byte].encode_utf16().count(),
+        }
+    }
 }
 
-/// Finds the first match at or after byte offset `from`.
+/// Finds the first match at or after `from`.
 pub(crate) fn exec<'a>(
     ev: &Evaluator<'_, 'a>,
     re: &Rc<Regex>,
     text: &Rc<str>,
-    from: usize,
+    from: Offset,
 ) -> Result<Value<'a>> {
-    if from > text.len() {
-        return Ok(Value::Undefined);
-    }
-    let Some(m) = ev.find_regex(&re.re, text, from)? else {
+    let Some(m) = ev.find_regex(&re.re, text, from.byte)? else {
         return Ok(Value::Undefined);
     };
     let range = m.range();
+    let start = from.advanced_to(text, range.start);
+    let end = start.advanced_to(text, range.end);
     let groups: Vec<Value<'a>> = m
         .captures
         .iter()
@@ -74,19 +97,16 @@ pub(crate) fn exec<'a>(
         })
         .collect();
     let mut obj = Map::default();
-    obj.insert("match".into(), Value::string(&text[range.clone()]));
-    obj.insert(
-        "start".into(),
-        Value::Number(utf16_offset(text, range.start)),
-    );
-    obj.insert("end".into(), Value::Number(utf16_offset(text, range.end)));
+    obj.insert("match".into(), Value::string(&text[range]));
+    obj.insert("start".into(), Value::Number(start.utf16 as f64));
+    obj.insert("end".into(), Value::Number(end.utf16 as f64));
     obj.insert("groups".into(), Value::array(groups, 0));
     obj.insert(
         "next".into(),
         Value::function(Function::RegexNext {
             re: re.clone(),
             text: text.clone(),
-            last: range.end,
+            last: end,
         }),
     );
     Ok(Value::object(obj))
@@ -98,9 +118,9 @@ pub(crate) fn next<'a>(
     ev: &Evaluator<'_, 'a>,
     re: &Rc<Regex>,
     text: &Rc<str>,
-    last: usize,
+    last: Offset,
 ) -> Result<Value<'a>> {
-    if last >= text.len() {
+    if last.byte >= text.len() {
         return Ok(Value::Undefined);
     }
     let result = exec(ev, re, text, last)?;

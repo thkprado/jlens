@@ -918,6 +918,37 @@ regular expression. Built aligned, the three are between 1.8% faster and 1.6% sl
 modes, and `number formatting`, unaligned 0.2% faster, becomes 3.4% slower: code placement
 again.
 
+#### Over a long text (0.27 #10)
+
+`$match`, `$replace` and `$split` with a regular expression grew with the square of the text:
+each match counted its UTF-16 offsets from the start of the text, and `$replace` and `$split`
+encoded the whole text again for each piece. A match now counts from where the last one ended,
+and keeps that place in both units; the pieces are cut with a place that moves forward with the
+matches. On words in Portuguese, Greek, Japanese and English (`/\w+/` for `$match` and
+`$replace`, `/\s/` for `$split`; the fastest of three runs, and of five in jsonata-js; Node.js
+24), with `evaluate` and the same results as jsonata-js:
+
+| Text | Function | Matches | Before | After | jsonata-js |
+|---:|---|---:|---:|---:|---:|
+| 20 KB | `$match` | 1,558 | 28.4 ms | 2.46 ms | 0.66 ms |
+| 20 KB | `$replace` | 1,558 | 58.2 ms | 2.04 ms | 1.01 ms |
+| 20 KB | `$split` | 2,075 | 78.8 ms | 2.37 ms | 0.71 ms |
+| 80 KB | `$match` | 6,222 | 410 ms | 9.75 ms | 1.22 ms |
+| 80 KB | `$replace` | 6,222 | 922 ms | 8.14 ms | 2.45 ms |
+| 80 KB | `$split` | 8,296 | 1.23 s | 9.31 ms | 1.77 ms |
+| 320 KB | `$match` | 24,886 | 6.47 s | 40.3 ms | 6.47 ms |
+| 320 KB | `$replace` | 24,886 | 14.6 s | 32.4 ms | 10.4 ms |
+| 320 KB | `$split` | 33,182 | 19.2 s | 36.7 ms | 6.79 ms |
+
+The time is now that of the matches, 1.1 to 1.6 µs each at every size, against 0.2 to 0.4 µs in
+jsonata-js: each match starts the backtracker again, with its stacks, and builds an object of
+five fields.
+
+The workload has a case of this now, `regex over a long text`, `$replace` on 20 KB. `cargo xtask
+ab` against the code before, five rounds: 55.1 → 2.07 ms with `evaluate` and 55.2 → 2.05 ms
+against a `Document`; `regex`, a short text per match, −1.1% and −0.2%, and `strings`, which runs
+none of this, +1.1% and +1.0%.
+
 ### What the limits cost
 
 From 0.20 on, every evaluation counts its steps for the step limit

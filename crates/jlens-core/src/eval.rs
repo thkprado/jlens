@@ -1968,9 +1968,9 @@ impl<'a> Evaluator<'_, 'a> {
                 };
                 let from = match args.next() {
                     Some(Value::Number(n)) if n > 0.0 => {
-                        crate::regex::byte_offset(&text, n as usize)
+                        crate::regex::Offset::from_utf16(&text, n as usize)
                     }
-                    _ => 0,
+                    _ => crate::regex::Offset::START,
                 };
                 crate::regex::exec(self, re, &text, from)
             }

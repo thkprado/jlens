@@ -1222,6 +1222,33 @@ fn missing_arguments_behave_as_in_javascript() {
 }
 
 #[test]
+fn match_offsets_count_utf16_units_from_where_the_last_match_ended() {
+    let backwards = "function($s){ {'start': 3, 'match': 'b', 'next': function(){ \
+                     {'start': 2, 'match': 'a', 'next': function(){ () }} }} }";
+    for (source, expected) in [
+        ("$match('𝄞a𝄞b', /[ab]/).index", json!([2, 5])),
+        ("$replace('𝄞a𝄞b𝄞', /[ab]/, 'x')", json!("𝄞x𝄞x𝄞")),
+        ("$split('𝄞a𝄞b𝄞', /[ab]/)", json!(["𝄞", "𝄞", "𝄞"])),
+        // `next` asked twice gives the same match.
+        (
+            "($m := /b/('𝄞b𝄞b'); [$m.next().start, $m.next().start, $m.next().end])",
+            json!([5, 5, 6]),
+        ),
+        // A search from an offset, one inside a pair and one past the text.
+        ("/b/('𝄞b𝄞b', 3).start", json!(5)),
+        ("/b/('𝄞b𝄞b', 1).start", json!(2)),
+        // A matcher of the expression's own may go backwards.
+        (
+            &format!("$replace('𝄞abc', {backwards}, 'x')"),
+            json!("𝄞axabxbc"),
+        ),
+    ] {
+        assert_eq!(eval(source, json!(null)), Some(expected), "{source}");
+    }
+    assert_eq!(eval("/b/('𝄞b𝄞b', 100)", json!(null)), None);
+}
+
+#[test]
 fn a_negative_limit_is_checked_before_a_missing_pattern() {
     // Found by `cargo xtask differential`: jsonata-js checks the limit first.
     for (source, code) in [

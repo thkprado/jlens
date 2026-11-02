@@ -4,11 +4,13 @@
 //! points (`$length`, `$substring`, `$pad`) jlens counts `char`s; positions reported by
 //! matchers (`$match`, regex literals) are UTF-16 offsets, as in jsonata-js.
 
+use std::borrow::Cow;
 use std::rc::Rc;
 
 use super::{Call, arg, num, text};
 use crate::error::{Error, Result};
 use crate::eval::Evaluator;
+use crate::regex::Offset;
 use crate::value::{Map, Value};
 
 type R<'a> = Result<Value<'a>>;
@@ -42,6 +44,49 @@ pub(crate) fn utf16_substring(s: &str, from: usize, to: Option<usize>) -> String
         std::mem::swap(&mut a, &mut b);
     }
     String::from_utf16_lossy(&units[a..b])
+}
+
+/// Slices one string by UTF-16 offsets that mostly move forward, as the matches of a regular
+/// expression do: each offset is looked for from the last one found, so that slicing a text
+/// piece by piece walks it once. An offset behind the last one starts again from the start of
+/// the text, and one inside a surrogate pair goes through [`utf16_substring`].
+struct Utf16Slicer<'s> {
+    text: &'s str,
+    place: Offset,
+}
+
+impl<'s> Utf16Slicer<'s> {
+    fn new(text: &'s str) -> Self {
+        Utf16Slicer {
+            text,
+            place: Offset::START,
+        }
+    }
+
+    /// The byte offset of a UTF-16 offset (the end of the text past it), or `None` inside a
+    /// surrogate pair.
+    fn seek(&mut self, utf16: usize) -> Option<usize> {
+        if utf16 < self.place.utf16 {
+            self.place = Offset::START;
+        }
+        for c in self.text[self.place.byte..].chars() {
+            if self.place.utf16 >= utf16 {
+                break;
+            }
+            self.place = self.place.after(c);
+        }
+        (self.place.utf16 <= utf16).then_some(self.place.byte)
+    }
+
+    /// `String.prototype.substring`: to the end of the text without `to`, and an end before the
+    /// start swaps them.
+    fn slice(&mut self, from: usize, to: Option<usize>) -> Cow<'s, str> {
+        let to = to.unwrap_or(usize::MAX);
+        match (self.seek(from.min(to)), self.seek(from.max(to))) {
+            (Some(a), Some(b)) => Cow::Borrowed(&self.text[a..b]),
+            _ => Cow::Owned(utf16_substring(self.text, from, Some(to))),
+        }
+    }
 }
 
 fn utf16_len(s: &str) -> usize {
@@ -383,10 +428,11 @@ pub(super) fn replace<'a>(
     if matches.is_undefined() {
         return Ok(Value::String(s));
     }
+    let mut slicer = Utf16Slicer::new(&s);
     let mut position = 0; // UTF-16 offset
     while !matches.is_undefined() && limit.is_none_or(|l| count < l) {
         let start = field_usize(&matches, "start");
-        result.push_str(&utf16_substring(&s, position, Some(start)));
+        result.push_str(&slicer.slice(position, Some(start)));
         let replaced = match &replacement {
             Value::String(r) => Value::string(substitute(r, &matches)),
             func => ev.callback(func, vec![matches.clone()], call.env)?,
@@ -406,7 +452,7 @@ pub(super) fn replace<'a>(
         count += 1.0;
         matches = evaluate_matcher(ev, &field(&matches, "next"), Value::Undefined, call)?;
     }
-    result.push_str(&utf16_substring(&s, position, None));
+    result.push_str(&slicer.slice(position, None));
     Ok(Value::string(result))
 }
 
@@ -439,17 +485,18 @@ pub(super) fn split<'a>(
             if matches.is_undefined() {
                 out.push(Value::String(s));
             } else {
+                let mut slicer = Utf16Slicer::new(&s);
                 let mut start = 0;
                 while !matches.is_undefined() && limit.is_none_or(|l| count < l) {
                     let m_start = field_usize(&matches, "start");
-                    out.push(Value::string(utf16_substring(&s, start, Some(m_start))));
+                    out.push(Value::string(slicer.slice(start, Some(m_start))));
                     start = field_usize(&matches, "end");
                     matches =
                         evaluate_matcher(ev, &field(&matches, "next"), Value::Undefined, call)?;
                     count += 1.0;
                 }
                 if limit.is_none_or(|l| count < l) {
-                    out.push(Value::string(utf16_substring(&s, start, None)));
+                    out.push(Value::string(slicer.slice(start, None)));
                 }
             }
         }
@@ -688,5 +735,28 @@ mod tests {
         assert_eq!(js_slice(&chars, -3.0, None), "llo");
         assert_eq!(js_slice(&chars, 1.7, Some(3.0)), "el");
         assert_eq!(utf16_substring("a𝄞b", 1, Some(3)), "𝄞");
+    }
+
+    /// Whatever it looked for before, a slicer gives what `utf16_substring` gives: inside
+    /// surrogate pairs, backwards and past the end of the text included.
+    #[test]
+    fn a_slicer_gives_what_substring_gives() {
+        let text = "a𝄞é𝄞";
+        let offsets = 0..=8;
+        let mut slicer = Utf16Slicer::new(text);
+        for from in offsets.clone() {
+            for to in offsets.clone() {
+                assert_eq!(
+                    slicer.slice(from, Some(to)),
+                    utf16_substring(text, from, Some(to)),
+                    "{from}..{to}"
+                );
+                assert_eq!(
+                    slicer.slice(to, None),
+                    utf16_substring(text, to, None),
+                    "{to}.."
+                );
+            }
+        }
     }
 }

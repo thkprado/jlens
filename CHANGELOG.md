@@ -8,6 +8,10 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- `$match`, `$replace` and `$split` with a regular expression take time linear in the text. They
+  grew with its square, as each match counted its UTF-16 offsets from the start of the text and
+  `$replace` and `$split` encoded the whole text again for each piece: on 320 KB of accented,
+  Greek and Japanese words, 6.5 to 19 s, now 32 to 40 ms.
 - `jlens-regress`: `find_from_utf16` from the low surrogate of a pair starts at the pair's high
   surrogate, as JavaScript engines do, and never matches half of a pair there. A fix ported from
   `regress`, whose commits are reviewed up to `1dd717d`. jlens searches `&str` and does not use
