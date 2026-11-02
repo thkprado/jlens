@@ -134,10 +134,13 @@ run and their median. One run alone can be far off: for 0.25.0, one run gave 1.1
 against a `Document`, where the next two gave 179 and 182 µs, and later one gave 1.99 ms on
 `recursion` where the next two gave 1.03 ms. The median sets such a run aside when the other two
 agree. A case where most runs are more than 2% from the median is marked, and run again with
-`--runs 5`. For 0.26.0, three copies gave `recursion` against a `Document` 785, 882 and 885 µs,
-which the mark does not catch, as two runs agree; the table below is the median of five copies,
-884 to 907 µs. `cargo xtask ab`, which runs one case at a time, gives 800 µs for that build; why
-the benchmark's program takes longer there was not looked for.
+`--runs 5`, and so is a case whose runs fall in two groups, more than 5% apart. For 0.26.0, three
+copies gave `recursion` against a `Document` 785, 882 and 885 µs, where two runs agree, the kind
+of case the second mark is for; the table below is the median of five copies, 884 to 907 µs, and
+`cargo xtask ab` gives 800 µs for that build. The state of the system allocator draws that
+difference, [not the code](#recursion-against-a-document-027-3). When all the runs of a case fall
+in the slow group, no mark can show it: a case that reads slower against a `Document` than with
+`evaluate` is compared with `ab` before it is read.
 
 The copies settle what a median of one file cannot, the file ([above](#comparing-two-revisions)).
 Eight tables of one commit, alternated, on the machine below (0.26 #16), each compared with the
@@ -182,6 +185,9 @@ evaluates against a [`Document`](#reusing-documents) converted beforehand.
 | index into 10,000 items (`items[0].code`) | 1.32 µs | 0.70 µs |
 | index in a variable (`($i := 0; items[$i].code)`) | 1.77 µs | 1.10 µs |
 
+The 899 µs of `recursion` is a draw of the allocator: the same program takes about 790 µs in other
+processes, as much as with `evaluate` ([below](#recursion-against-a-document-027-3)).
+
 | Other measurements | Time |
 |---|---:|
 | Compile `customer.name` | 1.1 µs |
@@ -218,6 +224,52 @@ conversion is not the cause:
 
 An application that calls `evaluate` on whole documents can set a faster global allocator;
 the library leaves that choice to it. The `jlens` command sets one.
+
+#### `recursion` against a `Document` (0.27 #3)
+
+The table shows `recursion` taking 899 µs against a `Document` and 792 µs with `evaluate`, where
+the evaluation does the same work. A `Document` does not cost those 100 µs. In the benchmark's
+program, at 377d5e4 with Windows's allocator, the same bytes take about 790 µs in one process and
+about 890 µs in the next:
+
+- What the benchmark runs before the case does not decide it: run alone, with criterion's filter,
+  the case still gives 785, 896 and 910 µs.
+- The file does not either, nor the name of the program or the size of the environment. The length
+  of `CARGO_TARGET_DIR` changes the odds, as it changes one string that criterion holds. Over 32
+  lengths, three processes each, `evaluate` stays at 780 to 805 µs in 94 of 96 processes, while
+  `evaluate_document` gives about 790 or about 890 µs: never 890 at eight of the nine lengths from
+  4 to 12, most of the time from 13 to 15 and from 22 to 24.
+- Without the `evaluate` case in the process and at one length, it took 806 to 834 µs in 34 runs,
+  a third level.
+
+The allocations of one evaluation, recorded in each process, show what is drawn. A call's frame
+is a block of 112 bytes, 1,975 times per evaluation. Of 42 processes, in the slow ones these
+blocks were 74 addresses up to 2 to 9 MB apart, and in the others 43 or 58 addresses within 8 KB,
+with nothing in between:
+
+| Blocks of 112 bytes | Processes | `recursion` against a `Document` |
+|---|---:|---:|
+| within 8 KB | 31 | 777 to 800 µs |
+| in places 2 to 9 MB apart | 11 | 891 to 942 µs |
+| the same, without the `evaluate` case (73 addresses) | 6 | 806 to 818 µs |
+
+So the blocks of one size, once the heap is as full as it happens to be, can lie in two places, and
+evaluating then costs about 50 ns more per frame, about 10 ns at the third level. That the
+crossing itself takes that time is inferred, as the system heap shows nothing of what it does inside. It is the allocator's in any
+case: with `mimalloc` as the global allocator, 36 processes at the lengths that drew the slow
+level most often all take 718 to 737 µs, in both modes.
+
+The program of `cargo xtask ab`, whose heap is not the benchmark's, did not meet this: 220
+processes at 3d3d80f, in the three modes, with the case alone or with all of them, took 740 to
+779 µs. Should a change bring the draw to it, `recursion` would read 14% slower alone, and
+`--b-allocator mimalloc` would tell. Under Linux it was not looked for; there, nine comparisons in
+`ab` of a revision with itself agree within 2.6%.
+
+The table stays as it is: a Rust application on Windows with the system allocator can draw either
+time, so that it is what such an application gets, and the frame belongs to the evaluator, which
+has no way to choose its place in the heap. The `jlens` command and the Python and Java packages
+use `mimalloc`. What changes is how the table is read: `bench-table` marks two groups of runs, and
+a case with a slow group goes to `ab`.
 
 ### The allocator of the command
 

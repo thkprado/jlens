@@ -10,7 +10,9 @@
 //! benchmark, the time criterion prints (its slope, or its mean when it has none), in each run,
 //! the median and the spread, the slowest run against the fastest. The median stands when most
 //! runs are within 2% of it, so that one run far off does not move it; a case where they are not
-//! is marked: run again, with more runs, before reading it.
+//! is marked: run again, with more runs, before reading it. A case whose runs fall in two groups
+//! is marked too, though two of three agree: on Windows, the system allocator gives `recursion`
+//! against a `Document` about 790 or 890 µs, drawn per process.
 //!
 //! `--reuse` reads the baselines `table-1` to `table-<runs>` already saved, without running.
 //! The target directory is `CARGO_TARGET_DIR`'s, as Cargo's is, so that a run built with other
@@ -27,6 +29,9 @@ use crate::root;
 
 /// How far from the median a run may be to agree with it.
 const AGREE: f64 = 0.02;
+
+/// How far apart two runs next to each other, in order of time, may be and still be one group.
+const GROUP: f64 = 0.05;
 
 pub(crate) fn run(args: &[String]) -> Result<()> {
     let runs = flag(args, "--runs")?.unwrap_or(3);
@@ -81,17 +86,13 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
         times.sort_by(f64::total_cmp);
         let median = median(&times);
         let spread = times[times.len() - 1] / times[0] - 1.0;
-        let agree = times
-            .iter()
-            .filter(|&&t| (t / median - 1.0).abs() <= AGREE)
-            .count();
         let each: Vec<String> = row.times.iter().map(|&t| format_ns(t)).collect();
         println!(
             "{:width$}  median {:>9}  spread {:>5.1}%{}  [{}]",
             row.id(),
             format_ns(median),
             spread * 100.0,
-            if agree * 2 > times.len() { "  " } else { " *" },
+            if doubtful(&times, median) { " *" } else { "  " },
             each.join(", "),
         );
     }
@@ -134,6 +135,16 @@ pub(crate) fn median(sorted: &[f64]) -> f64 {
     } else {
         (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
     }
+}
+
+/// Whether the median of `sorted`, which is not empty, needs a closer look: most runs are not
+/// near it, or the runs fall in two groups.
+fn doubtful(sorted: &[f64], median: f64) -> bool {
+    let agree = sorted
+        .iter()
+        .filter(|&&t| (t / median - 1.0).abs() <= AGREE)
+        .count();
+    agree * 2 <= sorted.len() || sorted.windows(2).any(|w| w[1] / w[0] - 1.0 > GROUP)
 }
 
 /// One benchmark, with its time in each run, in nanoseconds.
@@ -225,6 +236,19 @@ fn format_ns(ns: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_median_is_doubtful_when_runs_disagree_or_fall_in_two_groups() {
+        let check = |times: &[f64]| doubtful(times, median(times));
+        assert!(!check(&[100.0]));
+        assert!(!check(&[100.0, 101.0, 102.0]));
+        // Most runs far from the median.
+        assert!(check(&[96.0, 100.0, 104.0]));
+        // Two of three agree, as `recursion` against a `Document` for 0.26.0.
+        assert!(check(&[785.0, 882.0, 885.0]));
+        // All in the slow group: the runs cannot show it.
+        assert!(!check(&[884.0, 890.0, 899.0, 901.0, 907.0]));
+    }
 
     #[test]
     fn the_program_is_the_benchmark_s_own() {
