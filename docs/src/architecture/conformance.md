@@ -144,8 +144,10 @@ The expressions come from a grammar like that of the property tests, without the
 read the clock or draw random numbers. The grammar also calls the functions that were hardest to
 port with meaningful arguments: regular expression literals for `$match`, `$replace`, `$split`,
 `$contains` and `~>`, valid pictures for `$formatNumber`, `$formatInteger` and `$fromMillis`,
-round trips through `$parseInteger`, `$toMillis` and the decoders. Each case runs against one of a few input documents, or
-none. The command writes the cases to `target/differential/cases.json`.
+round trips through `$parseInteger`, `$toMillis` and the decoders. Names are bound in blocks, in
+the body of a lambda with no block around them, which binds in the frame of the call, and in
+array and object constructors, and read afterwards. Each case runs against one of a few input
+documents, or none. The command writes the cases to `target/differential/cases.json`.
 `benches/compare/differential.mjs` runs them in jsonata-js. The command then compares each
 outcome with that of jlens. Results are compared as JSON, with numbers compared as values and
 the keys of an object in order. Both engines run with a timeout and a depth limit, and a case
@@ -153,10 +155,12 @@ that reaches either limit is skipped. The divergences are printed and written to
 `target/differential/divergences.json`. The command fails when there are any. A seed
 reproduces a run.
 
-Ten kinds of disagreement are known differences of jsonata-js, listed in the
+Twelve kinds of disagreement are known differences of jsonata-js, listed in the
 [compatibility notes](../language/compatibility.md). They are not divergences; the command
 counts them apart:
 
+- **Order of integer keys**: the results differ only in where an object has its keys. JavaScript
+  puts the keys that are integers first, ascending; jlens keeps the order of insertion.
 - **jsonata-js crashed**: it threw a JavaScript exception, which has no error code to compare.
 - **jsonata-js hung**: the case ran for ten times the timeout, or ran out of memory, in a
   synchronous loop that the jsonata-js timeout cannot interrupt (`$match('abc', /b/) ?? 1`).
@@ -178,6 +182,11 @@ counts them apart:
   array constructor with several items or an object constructor. jsonata-js evaluates those
   parts concurrently, so when two of them fail it reports whichever fails first in its
   asynchronous schedule. jlens reports the first in source order.
+- **Name shared by concurrent items**: the outcomes differ, and one item of an array constructor,
+  or one value of an object constructor, binds in their frame a name that another reads or
+  binds. In jsonata-js what the other sees depends on how many asynchronous steps each takes
+  (`($x := 1; [$x := 5, $x])` is `[5, 1]`, and `[5, 5]` with `0 + $x`). jlens evaluates them in
+  order.
 - **jsonata-js changed its input**: the jsonata-js runner saw the input document change during
   the evaluation (a group-by on an empty array adds an item to it), and the outcomes differ.
 - **Wildcard over a sequence**: the expression has a wildcard, and the jsonata-js result is

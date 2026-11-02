@@ -6,14 +6,16 @@
 //! and writes its outcomes next to them; the divergences are written to
 //! `target/differential/divergences.json`.
 //!
-//! Ten kinds of disagreement are not divergences, and are counted apart (see "Differential
+//! Twelve kinds of disagreement are not divergences, and are counted apart (see "Differential
 //! testing" in `docs/src/architecture/conformance.md`): a JavaScript exception inside jsonata-js,
-//! which has no error code to compare; a case jsonata-js never finished; a jsonata-js result
+//! which has no error code to compare; a case jsonata-js never finished; a result whose only
+//! difference is where JavaScript puts the integer keys of an object; a jsonata-js result
 //! with half of a character, which a jlens string cannot hold, or computed from a regular
 //! expression match on such a half; an expression with a
 //! regular expression literal on the left of `??` or `?:`, which the jsonata-js parser mangles;
 //! different error codes from an expression whose array or object constructors jsonata-js
-//! evaluates concurrently; an evaluation in which jsonata-js changed its input document; a
+//! evaluates concurrently; a name that one item of such a constructor binds and another reads or
+//! binds; an evaluation in which jsonata-js changed its input document; a
 //! wildcard that gives jsonata-js's internal flag `sequence` as a `true` item; an expression
 //! that may meet one of the jsonata-js quirks that jlens dropped; a number that overflows to
 //! infinity, where jlens fails and jsonata-js goes on; and a large number whose digits jlens
@@ -109,7 +111,7 @@ pub fn run(args: &[String]) -> Result<()> {
         .max_depth(MAX_DEPTH);
     let (mut agreed, mut limits, mut crashed, mut hung, mut split) = (0, 0, 0, 0, 0);
     let (mut mangled, mut raced, mut mutated, mut flagged, mut dropped) = (0, 0, 0, 0, 0);
-    let (mut overflowed, mut exact, mut timezone) = (0, 0, 0);
+    let (mut overflowed, mut exact, mut timezone, mut shared, mut ordered) = (0, 0, 0, 0, 0);
     let mut divergences = Vec::new();
     for ((expr, input), expected) in cases.iter().zip(&mut reference) {
         let changed_input = expected
@@ -135,12 +137,16 @@ pub fn run(args: &[String]) -> Result<()> {
             crashed += 1;
         } else if same(&actual, expected) {
             agreed += 1;
+        } else if same(&js_key_order(&actual), expected) {
+            ordered += 1;
         } else if splitting_regex(expr, input.map(|i| &inputs[i])) {
             split += 1;
         } else if regex_before_default(expr) {
             mangled += 1;
         } else if actual["error"].is_string() && expected["error"].is_string() && concurrent(expr) {
             raced += 1;
+        } else if concurrent_binding(expr) {
+            shared += 1;
         } else if changed_input {
             mutated += 1;
         } else if sequence_flag(expr, &actual, expected) {
@@ -182,8 +188,9 @@ pub fn run(args: &[String]) -> Result<()> {
     );
     println!(
         "skipped: {limits} (limits), {crashed} (jsonata-js crashed), {hung} (jsonata-js hung), \
+         {ordered} (order of integer keys), \
          {split} (jsonata-js split a character), {mangled} (regex left of ?? or ?:), \
-         {raced} (concurrent errors), \
+         {raced} (concurrent errors), {shared} (name shared by concurrent items), \
          {mutated} (jsonata-js changed its input), {flagged} (wildcard over a sequence), \
          {dropped} (dropped quirk), {overflowed} (number out of range), \
          {exact} (exact digits of a large number), {timezone} (timezone not a number)"
@@ -301,6 +308,60 @@ fn concurrent(expr: &str) -> bool {
         };
     });
     found
+}
+
+/// Whether one item of a constructor that jsonata-js evaluates concurrently binds a name that
+/// another item reads or binds. What the other item sees depends on how many asynchronous steps
+/// each takes (`($x := 1; [$x := 5, $x])` is `[5, 1]`, and `[5, 5]` with `0 + $x`); jlens
+/// evaluates the items in order. The items of an array, and the values of an object, whose keys
+/// jsonata-js evaluates in order first.
+fn concurrent_binding(expr: &str) -> bool {
+    let Ok(compiled) = Expression::compile(expr) else {
+        return false;
+    };
+    let mut found = false;
+    compiled.ast().root.walk(&mut |node: &Node| {
+        let values = |pairs: &'_ [(Node, Node)]| shared_name(pairs.iter().map(|(_, v)| v));
+        found |= match &node.kind {
+            NodeKind::Array { items } => shared_name(items.iter()),
+            NodeKind::Object { pairs } => values(pairs),
+            _ => false,
+        } || node.attrs.group.as_ref().is_some_and(|g| values(&g.pairs));
+    });
+    found
+}
+
+/// Whether one of `items` binds, in the frame they share, a name that another mentions.
+fn shared_name<'a>(items: impl Iterator<Item = &'a Node>) -> bool {
+    let items: Vec<&Node> = items.collect();
+    items.iter().enumerate().any(|(i, item)| {
+        let mut bound = Vec::new();
+        bound_names(item, &mut bound);
+        items.iter().enumerate().any(|(j, other)| {
+            let mut found = false;
+            if i != j {
+                other.walk(&mut |n: &Node| {
+                    found |= matches!(&n.kind, NodeKind::Variable { name } if bound.contains(&name.as_str()));
+                });
+            }
+            found
+        })
+    })
+}
+
+/// The names `node` binds in the frame it is evaluated in: a block that binds has a frame of its
+/// own, and so has a lambda's call.
+fn bound_names<'a>(node: &'a Node, names: &mut Vec<&'a str>) {
+    match &node.kind {
+        NodeKind::Block { .. } | NodeKind::Lambda(_) => return,
+        NodeKind::Bind { lhs, .. } => {
+            if let NodeKind::Variable { name } = &lhs.kind {
+                names.push(name);
+            }
+        }
+        _ => {}
+    }
+    node.for_each_child(|c| bound_names(c, names));
 }
 
 /// Whether jsonata-js's result is jlens's with `true` items added, and `expr` has a wildcard. An
@@ -510,6 +571,30 @@ fn same(a: &JsonValue, b: &JsonValue) -> bool {
     }
 }
 
+/// `value` with the keys of each object where JavaScript puts them: the integer keys first,
+/// ascending, then the others in their order. jlens keeps the order of insertion.
+fn js_key_order(value: &JsonValue) -> JsonValue {
+    match value {
+        JsonValue::Array(items) => items.iter().map(js_key_order).collect(),
+        JsonValue::Object(fields) => {
+            let mut fields: Vec<_> = fields.iter().collect();
+            fields.sort_by_key(|(key, _)| array_index(key).unwrap_or(u64::MAX));
+            fields
+                .into_iter()
+                .map(|(key, value)| (key.clone(), js_key_order(value)))
+                .collect()
+        }
+        _ => value.clone(),
+    }
+}
+
+/// The number `key` writes, if JavaScript takes it for an array index: 0 to 2^32 - 2, written as
+/// JavaScript would write it.
+fn array_index(key: &str) -> Option<u64> {
+    let index: u64 = key.parse().ok()?;
+    (index < u64::from(u32::MAX) && index.to_string() == key).then_some(index)
+}
+
 /// The input documents; a case uses one of them, or none.
 fn inputs() -> Vec<JsonValue> {
     vec![
@@ -533,8 +618,12 @@ fn variables() -> JsonValue {
 const LEAVES: &[&str] = &[
     "a", "b", "items", "price", "s", "n", "$", "$$", "$x", "$n", "1", "0", "3", "-2.5", "0.1",
     "1e3", "'s'", "''", "'12'", "true", "false", "null", "[]", "{}", "items.price", "a.b",
-    "$x[1]", "$[0]", "*", "**",
+    "$x[1]", "$[0]", "*", "**", "$y", "$z", "$w", "$e",
 ];
+
+/// The names an expression binds: a parameter of the lambdas below, a name of no parameter, a
+/// variable of the host.
+const BOUND: &[&str] = &["$y", "$z", "$w", "$x"];
 
 const STEPS: &[&str] = &["a", "b", "items", "price", "s", "n", "$", "*", "$string()"];
 
@@ -644,7 +733,7 @@ fn expression(rng: &mut Rng, depth: u32) -> String {
         0 => rng.pick(STEPS).to_owned(),
         _ => format!("({})", e(rng)),
     };
-    match rng.below(21) {
+    match rng.below(23) {
         0..=2 => {
             let l = e(rng);
             let op = rng.pick(OPERATORS);
@@ -686,7 +775,58 @@ fn expression(rng: &mut Rng, depth: u32) -> String {
         17 => format!("{} ~> |items|{{'p': {}}}|", e(rng), e(rng)),
         18 => regex_call(rng, depth),
         19 => picture_call(rng, depth),
-        _ => codec_call(rng, depth),
+        20 => codec_call(rng, depth),
+        21 => {
+            let params = rng.pick(&["$y", "$y, $z"]);
+            let body = unblocked(rng, depth);
+            format!("($f := function({params}){{ {body} }}; $f({}))", list(rng))
+        }
+        _ => constructed(rng, depth),
+    }
+}
+
+/// A binding, and something that reads its name: the name, an expression that takes more steps
+/// to read it, or any expression. The binding is left without a block, which would be its frame.
+fn binding(rng: &mut Rng, depth: u32) -> (String, String) {
+    let name = rng.pick(BOUND);
+    let bound = format!("{name} := {}", expression(rng, depth - 1));
+    let read = match rng.below(3) {
+        0 => name.to_owned(),
+        1 => format!("$string({name})"),
+        _ => expression(rng, depth - 1),
+    };
+    (bound, read)
+}
+
+/// A lambda's body that binds in the frame of the call: the arguments are named by the function
+/// until a name that is no parameter's arrives (`Vars::Call` in `eval.rs`).
+fn unblocked(rng: &mut Rng, depth: u32) -> String {
+    let (bound, read) = binding(rng, depth);
+    let e = expression(rng, depth - 1);
+    match rng.below(6) {
+        0 => bound,
+        // A function's arguments are evaluated in order in both engines.
+        1 => format!("$append({bound}, {read})"),
+        2 => format!("{e} ? {bound} : {read}"),
+        3 => format!("{e}[{bound}]"),
+        4 => format!("[{bound}, {read}]"),
+        // A closure over the frame.
+        _ => format!("$append($w := function($z){{ {e} }}, $w({read}))"),
+    }
+}
+
+/// An array or object constructor with a binding in its frame, which another of its parts reads.
+/// The keys of an object are evaluated in order, before its values, in both engines.
+fn constructed(rng: &mut Rng, depth: u32) -> String {
+    let (bound, read) = binding(rng, depth);
+    match rng.below(4) {
+        0 => format!("[{bound}, {read}]"),
+        1 => format!("[{read}, {bound}]"),
+        2 => format!("{{'a': {bound}, 'b': {read}}}"),
+        _ => {
+            let name = rng.pick(BOUND);
+            format!("{{{name} := $string({bound}): {read}}}")
+        }
     }
 }
 
@@ -797,5 +937,43 @@ impl Rng {
 
     pub(crate) fn pick(&mut self, items: &[&'static str]) -> &'static str {
         items[self.below(items.len())]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_counts_only_between_concurrent_items_of_one_frame() {
+        for shared in [
+            "[$x := 5, $x]",
+            "[$x, $x := 5]",
+            "[$x := 1, $x := 2]",
+            "[[$x := 5], ($y := 1; $x)]",
+            "[$x := 5, $map([1], function($e){ $x })]",
+            "{'a': $x := 5, 'b': $x}",
+            "a{'a': $x := 5, 'b': $x}",
+        ] {
+            assert!(concurrent_binding(shared), "{shared}");
+        }
+        for apart in [
+            "[$x, $x]",
+            "[($x := 5; $x), $x]",
+            "[function($e){ $x := 5 }, $x]",
+            "{'a': $x := 5}",
+            "{($x := 'k'): $x}",
+            "$append($x := 5, $x)",
+        ] {
+            assert!(!concurrent_binding(apart), "{apart}");
+        }
+    }
+
+    #[test]
+    fn integer_keys_go_first_as_in_javascript() {
+        let value = json!([{"b": 1, "2": {"z": 0, "1": 0}, "01": 2, "1": 3, "4294967295": 4}]);
+        let ordered = json!([{"1": 3, "2": {"1": 0, "z": 0}, "b": 1, "01": 2, "4294967295": 4}]);
+        assert!(same(&js_key_order(&value), &ordered));
+        assert!(!same(&value, &ordered));
     }
 }
