@@ -323,3 +323,45 @@ jlens now applies a group-by written on a call in tail position, as it does outs
 call out, as it leaves out a call with a predicate. A tail call is then the call alone, so the
 analysis evaluates the thunk's body again, as it did before #7, and applies the group-by where
 the evaluator does: `function($y) { $zip(items){1: 1} }` gives one object, and needs `items`.
+
+## Amendment: the evaluation reads its variables by the analysis (0.27)
+
+Until now the analysis served applications: jlens did not act on it, but for the CLI, which parses
+its input cut. An evaluation against a `Document` now does (roadmap 0.27 #5). It cannot read a
+variable lazily, as `evaluate_with` does, since a lazy value borrows the `Bindings` and a
+document's values are `'static`
+([ADR 0019](0019-documents-from-rust-values.md#variables-of-evaluate_document)), so it converted
+each variable whole. It now converts each variable as far as `Reads` says, with what makes that
+safe in the crate rather than in the application:
+
+- The analysis runs once for each expression, on the first evaluation with variables to convert,
+  and is kept with it. An evaluation with none does not run it. It runs without the bindings, so
+  it holds for all of them: a host function marked `without_input` only narrows what `reads_with`
+  says of the input.
+- The rule above that this cannot follow, a binding named after a built-in, is checked at each
+  evaluation. The analysis notes the built-ins the expression names, as a variable or as a field,
+  since `count()` looks up a variable `count`, and `clone` when it holds a transform, which
+  calls it by name. When a variable, a document or a host function takes one of those names, the
+  variables are converted whole, as before.
+- Where the analysis gave up (`$eval`, or a variable bound where it could not follow), they are
+  also converted whole, not only the ones it names.
+- The fields of an object are looked up, not walked, so that a wide object costs what is read
+  of it, and come out in the order of the `Read`. An expression that reads an object in a way that
+  can show its order reads it whole.
+
+What was promised is the result and the error code, and an evaluation promises more: the same
+error text as well. The property test that compares `evaluate_document` with `evaluate_with`
+compares the text, and finds no difference, as a value that reaches an error has been used, and
+so read whole.
+
+Comparing the two in the differential tests found a hole in the analysis itself, which every
+`Reads` had: a variable assigned in a branch counted as assigned from then on, so that in
+`a ? $x := 1 : $x` the second `$x` read nothing of the binding `x`, and the bindings cut by the
+`Reads` gave another result when `a` was false. An assignment now counts as sure only when
+nothing around it in its scope but blocks and assignments can leave it out. Otherwise a later
+read reaches the variable and what is outside it, the binding included. That is an upper bound:
+`$f($x := 1); $x` also reads the binding `x`.
+
+A lazy read still does less where an expression reaches a few items of a long array:
+`$v.items[3].price` converts `price` of every item, since `Read` has no items. That is the question
+of roadmap 0.27 #8.

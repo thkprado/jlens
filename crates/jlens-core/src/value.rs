@@ -22,6 +22,7 @@ use crate::eval::Env;
 use crate::functions::Native;
 use crate::host::HostFunction;
 use crate::output::Builder;
+use crate::reads::Read as Needed;
 use crate::regex::{Offset, Regex};
 
 /// The fields of an object, in insertion order. Keys are shared: the objects of a converted
@@ -951,6 +952,52 @@ impl<'a> Value<'a> {
                 }
                 Value::object(out)
             }
+        }
+    }
+
+    /// Converts what `read` keeps of a variable, as [`Read::cut`](Needed::cut) cuts it, without
+    /// the copy. The fields are looked up, not walked, so a wide object costs what is read of
+    /// it; they come out in the order of `read`, which an expression that does not read an
+    /// object whole cannot see.
+    pub(crate) fn from_json_read(json: &JsonValue, read: &Needed, keys: &mut Keys) -> Value<'a> {
+        Value::from_json_read_at(json, read, keys, 0)
+    }
+
+    fn from_json_read_at(
+        json: &JsonValue,
+        read: &Needed,
+        keys: &mut Keys,
+        depth: usize,
+    ) -> Value<'a> {
+        let Needed::Fields(fields) = read else {
+            return Value::from_json_with(json, keys, depth);
+        };
+        match json {
+            JsonValue::Object(map) => {
+                let mut out =
+                    Map::with_capacity_and_hasher(fields.len().min(map.len()), Default::default());
+                for (name, read) in fields {
+                    if let Some(v) = map.get(name) {
+                        let v = nest(depth + 1, || {
+                            Value::from_json_read_at(v, read, keys, depth + 1)
+                        });
+                        out.insert(keys.get(name), v);
+                    }
+                }
+                Value::object(out)
+            }
+            JsonValue::Array(items) => Value::array(
+                items
+                    .iter()
+                    .map(|v| {
+                        nest(depth + 1, || {
+                            Value::from_json_read_at(v, read, keys, depth + 1)
+                        })
+                    })
+                    .collect(),
+                0,
+            ),
+            scalar => Value::from_json_with(scalar, keys, depth),
         }
     }
 

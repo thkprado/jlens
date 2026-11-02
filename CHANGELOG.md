@@ -6,8 +6,26 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Document::undefined()`, a document that stands for no input, so that an expression over
+  variables alone can run through `evaluate_document_with`.
+
+### Changed
+
+- An evaluation against a `Document` converts what the expression reads of each variable of its
+  `Bindings`, not the whole variable, in Rust and in the Python, Java and WebAssembly packages,
+  which evaluate that way. The analysis of `reads()` runs once for each expression, the first
+  time it is evaluated with variables; an evaluation with none does not pay for it. One field of
+  a variable of 1,000 records takes 0.64 µs, where it took 1,050 µs, and a variable the expression
+  does not read costs nothing. A binding named after a built-in that the expression names keeps
+  the whole conversion.
+
 ### Fixed
 
+- `reads()` left out a binding that an expression may read when the same name is assigned in a
+  branch that does not run: in `a ? $x := 1 : $x`, the second `$x` read nothing of the binding `x`.
+  Bindings cut by it gave another result.
 - `$match`, `$replace` and `$split` with a regular expression take time linear in the text. They
   grew with its square, as each match counted its UTF-16 offsets from the start of the text and
   `$replace` and `$split` encoded the whole text again for each piece: on 320 KB of accented,

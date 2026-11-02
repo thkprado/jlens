@@ -200,15 +200,20 @@ twenty fields, one expression takes 3.7 µs that way, against 19 µs for buildin
 evaluating; by four expressions the two are close, and by ten the document is faster
 ([Performance](../architecture/performance.md#documents-built-from-rust-values)).
 
-A variable of `Bindings` is a `serde_json::Value`, converted whole at each evaluation against a
-document. To bind a value that is already in a document (each record in turn, as `$self`), take
-its part with `Document::pointer`, a JSON Pointer as `serde_json::Value::pointer` reads it, and
-bind it with `Expression::evaluate_document_with`. The part shares the document's values, so
-binding it costs nothing, and the evaluation leaves it as it was, transforms included:
+A variable of `Bindings` is a `serde_json::Value`, and each evaluation against a document converts
+what the expression reads of it ([what an expression reads](#the-fields-an-expression-reads), analysed
+once for each expression): nothing of a variable it does not read, and all of one it uses whole.
+To bind a value that is already in a document (each record in turn, as `$self`), take its part
+with `Document::pointer`, a JSON Pointer as `serde_json::Value::pointer` reads it, and bind it
+with `Expression::evaluate_document_with`. The part shares the document's values, so binding it
+costs nothing, and the evaluation leaves it as it was, transforms included:
 
 ```rust,ignore
 {{#include ../../../crates/jlens-core/tests/guide.rs:document_variables}}
 ```
+
+For an expression that runs on its variables alone, `Document::undefined()` stands for no input,
+as `None` does in `Expression::evaluate`.
 
 ## Other input representations
 

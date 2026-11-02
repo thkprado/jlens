@@ -109,6 +109,10 @@ interns the keys and builds its own maps. Most of that is copying from one tree 
 
 ## Variables of `evaluate_document`
 
+Since 0.27 it converts what the expression reads of each
+([ADR 0016](0016-fields-read.md#amendment-the-evaluation-reads-its-variables-by-the-analysis-027));
+what follows is why it had to, and the decision of 0.21.
+
 `evaluate_document` converts each variable of its `Bindings` whole, at every evaluation
 (`Value::from_json`), where `evaluate_with` and `evaluate_traced` read them lazily
 (`Value::lazy`, ADR 0010). It cannot do the same: a `Document` holds a `Value<'static>`, and

@@ -1176,13 +1176,14 @@ For up to four evaluations per state, a `Source` is the fastest; for ten, a docu
 `from_serialize`.
 
 `host binding` reads one of the ten records through a variable (`$self.score > 50 and
-$self.active`). A variable of `Bindings` is a `serde_json::Value`, converted whole at each
-evaluation; `evaluate_document_with` binds the record's part of the document
+$self.active`). A variable of `Bindings` is a `serde_json::Value`, of which each evaluation
+converts [what the expression reads](#variables-against-a-document-027-5);
+`evaluate_document_with` binds the record's part of the document
 (`Document::pointer("/items/3")`), which is not converted:
 
 | `host binding` | Time |
 |---|---:|
-| `$self` from `Bindings` | 3.39 µs |
+| `$self` from `Bindings` | 0.84 µs (3.48 µs before 0.27 #5, when it was converted whole) |
 | `$self` bound to `doc.pointer("/items/3")` | 0.42 µs |
 | `items[3]` read from the document, for reference | 0.80 µs |
 
@@ -1192,6 +1193,61 @@ items`) and 1.5% slower (`group-by`), except `transform` at 3.1% slower, which w
 over 20 rounds. With `--mode document`, every case is between 1.0% faster and 1.9% slower,
 except `path`, 16% faster (240 ns against 287 ns). That was not looked into: no code on its
 path changed but the order in which variables and functions are bound.
+
+### Variables against a `Document` (0.27 #5)
+
+An evaluation against a `Document` cannot read a variable lazily, as `evaluate_with` does: a lazy
+value borrows the `Bindings`, and a document's values are `'static`
+([ADR 0019](../adr/0019-documents-from-rust-values.md#variables-of-evaluate_document)). So it
+converted each variable whole, and the call meant to be the faster paid more for one. It now
+converts what [`reads()`](../adr/0016-fields-read.md#amendment-the-evaluation-reads-its-variables-by-the-analysis-027)
+says the expression reads, analysed once for each expression.
+
+A variable of 1,000 records of seven fields, about 130 KB, against a document of one field, with
+functions and blocks aligned, in µs, the fastest of 15 rounds of one process:
+
+| Expression | Before | After | `evaluate_with` |
+|---|---:|---:|---:|
+| `$v.total` | 1,050 | 0.64 | 0.57 |
+| `$v.owner.name` | 1,050 | 0.99 | 0.92 |
+| `$v.items[3].price` | 1,050 | 233 | 1.77 |
+| `$sum($v.items.price)` | 1,090 | 260 | 87 |
+| `a + 1`, the variable not read | 1,050 | 0.21 | 0.59 |
+| `$count($keys($v))`, read whole | 1,050 | 1,058 | 2.2 |
+| `$self.hp > 10`, five fields | 1.55 | 0.68 | 0.52 |
+| `a > 10`, five fields not read | 1.51 | 0.21 | 0.49 |
+| `$x + a`, a number | 0.315 | 0.328 | 0.41 |
+| `a + 1`, no variables | 0.199 | 0.202 | 0.30 |
+
+What is still slower than a lazy read is an array read for a few of its items:
+`$v.items[3].price` converts `price` of all 1,000, since a `Read` has no items, the question of
+[0.27 #8](roadmap.md). A variable read whole costs what it did: run alone, as a process that ran
+the cases before it draws another heap, 1,050 against 1,058 µs. A number takes 13 ns more, the
+lookup of what is read of it. With no variables nothing is looked up, and `cargo xtask ab main .`
+over ten rounds finds every case between −5.1 and +1.0% with `--mode document`, −2.8 and +0.7%
+with `evaluate`, and −2.4 and +1.0% with `source`, none past the floor.
+
+The packages evaluate this way, and gain what their own conversion leaves. Java holds its bindings
+as a converted object, Python converts a `dict` at each call, in µs:
+
+| Package | Case | Before | After |
+|---|---|---:|---:|
+| Java, `evaluateJson` | `$v.total` | 630 | 0.83 |
+| | `$sum($v.items.price)` | 659 | 157 |
+| | the variable not read | 630 | 0.46 |
+| | `$self.hp > 10` | 1.35 | 0.80 |
+| | no variables | 0.43 | 0.45 |
+| Python, `evaluate_document` | `$v.total` | 2,000 | 1,325 |
+| | `$sum($v.items.price)` | 2,020 | 1,500 |
+| | the variable not read | 2,000 | 1,325 |
+| | `$self.hp > 10` | 2.52 | 2.06 |
+| | no variables | 0.46 | 0.45 |
+
+The application that asked for this kept a record in its document because a variable cost more:
+its battles took 16 to 25% longer with the record in a variable, at the revision before this one,
+and now take 1 to 7% longer, what is left being its own serialization of the record for the
+variable. With the record in the variable they take 7 to 16% less. Its code that passes no
+variables measures +0.8 to +1.9% aligned, over seven rounds on new copies, within the floor.
 
 ## Where the time goes
 

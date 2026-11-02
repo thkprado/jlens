@@ -43,6 +43,30 @@ pub struct Document {
 }
 
 impl Document {
+    /// No document: an expression evaluated against it has *undefined* as its input, as with
+    /// `None` in [`Expression::evaluate`](crate::Expression::evaluate), and a variable bound to
+    /// it is *undefined*. Its [`to_json`](Document::to_json), which has no *undefined*, is
+    /// `null`.
+    ///
+    /// ```
+    /// use jlens_core::{Bindings, Document, Expression, Options};
+    ///
+    /// let state = Document::parse(r#"{"hp": 40, "max": 50}"#).unwrap();
+    /// let expr = Expression::compile("$unit.hp / $unit.max").unwrap();
+    /// let result = expr.evaluate_document_with(
+    ///     &Document::undefined(),
+    ///     &[("unit", &state)],
+    ///     &Bindings::new(),
+    ///     &Options::default(),
+    /// );
+    /// assert_eq!(result.unwrap(), Some(serde_json::json!(0.8)));
+    /// ```
+    pub fn undefined() -> Self {
+        Document {
+            value: Value::Undefined,
+        }
+    }
+
     /// Converts a `serde_json` value.
     pub fn new(json: &JsonValue) -> Self {
         Document {

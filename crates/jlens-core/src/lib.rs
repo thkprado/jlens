@@ -63,8 +63,8 @@ pub use functions::{Category, FunctionInfo, catalog as function_catalog};
 pub use host::{Callable, HostCall, HostFunction};
 pub use json::format_json;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use indexmap::IndexMap;
@@ -128,25 +128,36 @@ pub fn parse_recover(source: &str) -> Ast {
 /// immutable and can be shared between threads.
 #[derive(Debug, Clone)]
 pub struct Expression {
-    ast: Arc<Ast>,
+    compiled: Arc<Compiled>,
+}
+
+#[derive(Debug)]
+struct Compiled {
+    ast: Ast,
+    /// What an evaluation against a [`Document`] needs of the variables of its bindings, analysed
+    /// by the first one that has any.
+    variables: OnceLock<reads::Variables>,
 }
 
 impl Expression {
     /// Parses and compiles a JSONata expression.
     pub fn compile(source: &str) -> Result<Self> {
         Ok(Expression {
-            ast: Arc::new(parse(source)?),
+            compiled: Arc::new(Compiled {
+                ast: parse(source)?,
+                variables: OnceLock::new(),
+            }),
         })
     }
 
     /// Returns the source text this expression was compiled from.
     pub fn source(&self) -> &str {
-        &self.ast.source
+        &self.compiled.ast.source
     }
 
     /// The syntax tree of the expression.
     pub fn ast(&self) -> &Ast {
-        &self.ast
+        &self.compiled.ast
     }
 
     /// What the expression may read of its input and of its bindings, found without
@@ -158,7 +169,7 @@ impl Expression {
     ///
     /// [ADR 0016]: https://github.com/thkprado/jlens/blob/main/docs/src/adr/0016-fields-read.md
     pub fn reads(&self) -> reads::Reads {
-        reads::analyse(&self.ast, &Bindings::new())
+        reads::analyse(&self.compiled.ast, &Bindings::new())
     }
 
     /// What the expression may read of its input and of each binding, evaluated with
@@ -166,7 +177,7 @@ impl Expression {
     /// marked [`without_input`](HostFunction::without_input) reads only its arguments, and the
     /// context its signature may take.
     pub fn reads_with(&self, bindings: &Bindings) -> reads::Reads {
-        reads::analyse(&self.ast, bindings)
+        reads::analyse(&self.compiled.ast, bindings)
     }
 
     /// Evaluates the expression against `input` with default [`Options`].
@@ -190,7 +201,7 @@ impl Expression {
     ) -> Result<Option<JsonValue>> {
         let shared = value::Shared::new();
         eval::evaluate(
-            &self.ast,
+            &self.compiled.ast,
             input.map_or(value::Value::Undefined, |json| {
                 value::Value::lazy(json, &shared)
             }),
@@ -233,7 +244,7 @@ impl Expression {
     ) -> Result<R> {
         let shared = value::Shared::new();
         eval::evaluate(
-            &self.ast,
+            &self.compiled.ast,
             value::Value::from_source(input, &shared)?,
             bindings
                 .iter()
@@ -274,10 +285,13 @@ impl Expression {
     /// Evaluates the expression against a [`Document`], as
     /// [`evaluate_document`](Expression::evaluate_document) does, with `variables` bound to
     /// documents as well: each name (without the leading `$`) to its document, which is not
-    /// converted. The variables of `bindings` are converted whole at each evaluation; a value
-    /// already in a `Document`, or a part of one ([`Document::pointer`]), binds for nothing.
-    /// A name of `variables` takes the place of a variable or a host function of the same name
-    /// in `bindings`, and a later pair the place of an earlier one.
+    /// converted. Of the variables of `bindings`, each evaluation converts what the expression
+    /// reads ([`reads`](Expression::reads), analysed once for each expression), and all of them
+    /// whole when a binding hides a built-in the expression names; a value already in a
+    /// `Document`, or a part of one ([`Document::pointer`]), binds for nothing. A name of
+    /// `variables` takes the place of a variable or a host function of the same name in
+    /// `bindings`, and a later pair the place of an earlier one. With [`Document::undefined`] as
+    /// `document`, the expression runs on its variables alone.
     ///
     /// The evaluation does not modify the documents, as it does not modify its input.
     ///
@@ -315,17 +329,36 @@ impl Expression {
         options: &Options,
         write: impl FnOnce(output::Output<'_, '_>) -> Result<R>,
     ) -> Result<R> {
+        let ast = &self.compiled.ast;
+        let input = document.value().clone();
+        let documents = variables
+            .iter()
+            .map(|&(name, document)| (name, document.value().clone()));
+        // With nothing to convert, no analysis, and no key table.
+        if bindings.vars.is_empty() {
+            let limits = limits(options);
+            return eval::evaluate(ast, input, documents, bindings, limits, None, None, write);
+        }
+        let reads = self
+            .compiled
+            .variables
+            .get_or_init(|| reads::variables(ast));
+        let mut cut = reads
+            .reads(bindings, variables)
+            .map(|reads| (reads, value::Keys::default()));
         eval::evaluate(
-            &self.ast,
-            document.value().clone(),
+            ast,
+            input,
             bindings
                 .iter()
-                .map(|(name, json)| (name, value::Value::from_json(json)))
-                .chain(
-                    variables
-                        .iter()
-                        .map(|&(name, document)| (name, document.value().clone())),
-                ),
+                .filter_map(move |(name, json)| match &mut cut {
+                    None => Some((name, value::Value::from_json(json))),
+                    Some((reads, keys)) => {
+                        let read = reads.get(name)?;
+                        Some((name, value::Value::from_json_read(json, read, keys)))
+                    }
+                })
+                .chain(documents),
             bindings,
             limits(options),
             None,
@@ -346,7 +379,7 @@ impl Expression {
     ) -> Result<Option<JsonValue>> {
         let shared = value::Shared::new();
         eval::evaluate(
-            &self.ast,
+            &self.compiled.ast,
             input.map_or(value::Value::Undefined, |json| {
                 value::Value::lazy(json, &shared)
             }),

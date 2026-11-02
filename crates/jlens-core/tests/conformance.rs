@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use jlens_core::audit::AuditOptions;
-use jlens_core::{Bindings, Error, Expression, Options};
+use jlens_core::{Bindings, Document, Error, Expression, Options};
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde_json::{Map, Value};
 
@@ -349,6 +349,29 @@ fn check_steps(case: &Case) -> Result<(), Failed> {
     Ok(())
 }
 
+/// Checks that a case with variables gives against a document what it gives elsewhere, as a
+/// document's variables are converted differently.
+fn check_document(case: &Case) -> Result<(), Failed> {
+    let Ok(expr) = Expression::compile(&case.expr) else {
+        return Ok(());
+    };
+    let elsewhere = expr.evaluate_with(case.input.as_ref(), &case.bindings, &case.options);
+    let document = case
+        .input
+        .as_ref()
+        .map_or_else(Document::undefined, Document::new);
+    let against = expr.evaluate_document(&document, &case.bindings, &case.options);
+    let timed_out = |outcome: &Result<_, Error>| matches!(outcome, Err(e) if e.code() == "D1012");
+    if timed_out(&elsewhere) || timed_out(&against) {
+        return Ok(());
+    }
+    match (elsewhere, against) {
+        (Ok(a), Ok(b)) if a == b => Ok(()),
+        (Err(a), Err(b)) if a.code() == b.code() => Ok(()),
+        (a, b) => Err(format!("evaluate_with gives {a:?}, evaluate_document {b:?}").into()),
+    }
+}
+
 fn write_report(path: &Path, cases: &[Case], passed: &BTreeSet<String>) {
     let mut per_group: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
     for case in cases {
@@ -431,6 +454,21 @@ fn main() {
                     let case = case.clone();
                     Trial::test(format!("steps:{}", case.id), move || check_steps(&case))
                         .with_kind("steps")
+                }),
+        );
+        trials.extend(
+            cases
+                .iter()
+                .filter(|case| {
+                    !matches!(case.expect, Expect::Unloadable(_))
+                        && case.bindings.iter().next().is_some()
+                })
+                .map(|case| {
+                    let case = case.clone();
+                    Trial::test(format!("document:{}", case.id), move || {
+                        check_document(&case)
+                    })
+                    .with_kind("document")
                 }),
         );
     }

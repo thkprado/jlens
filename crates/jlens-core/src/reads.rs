@@ -57,10 +57,10 @@ use serde::de::{self, DeserializeSeed, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
-use crate::Bindings;
 use crate::ast::{Ast, FallbackOp, LambdaDef, Node, NodeKind, Stage, TransformDef};
 use crate::functions::{self, Native};
 use crate::signature::Signature;
+use crate::{Bindings, Document};
 
 /// The most field names a [`Read`] nests. The analysis reads a value whole at this depth, and
 /// deserializing a deeper `Read` fails.
@@ -268,6 +268,37 @@ impl Reads {
     }
 }
 
+/// What an evaluation against a [`Document`] needs of the variables of its bindings (ADR 0016,
+/// amendment of 0.27): the analysis of an expression without any bindings, which is an upper
+/// bound for all of them, kept with the expression.
+#[derive(Debug)]
+pub(crate) struct Variables {
+    /// The `Read` of each binding, or `None` when the analysis gave up on some of them.
+    reads: Option<BTreeMap<String, Read>>,
+    /// The built-ins the expression names, sorted, and `clone`, which a transform calls by
+    /// name. The analysis takes each as the built-in, which a binding of that name hides.
+    builtins: Vec<&'static str>,
+}
+
+impl Variables {
+    /// The `Read` of each variable, or `None` when they must all be converted whole: the
+    /// analysis gave up, or `bindings` or `documents` hide a built-in the expression names.
+    pub(crate) fn reads(
+        &self,
+        bindings: &Bindings,
+        documents: &[(&str, &Document)],
+    ) -> Option<&BTreeMap<String, Read>> {
+        let hides = |name: &str| self.builtins.binary_search(&name).is_ok();
+        let hidden = bindings.iter().any(|(name, _)| hides(name))
+            || documents.iter().any(|&(name, _)| hides(name))
+            || self
+                .builtins
+                .iter()
+                .any(|name| bindings.get_function(name).is_some());
+        if hidden { None } else { self.reads.as_ref() }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // The analysis: an abstract evaluation of the processed tree (ADR 0016, decision 3).
 
@@ -307,6 +338,9 @@ struct Var {
     places: Places,
     /// When the variable was first assigned, on the clock of [`Analysis::seq`].
     seq: usize,
+    /// Whether an assignment surely runs. A variable assigned only in a branch may still name
+    /// what an outer scope or a binding holds.
+    sure: bool,
 }
 
 /// A function body analysed once all the code around its definition has been, so that it
@@ -357,10 +391,32 @@ struct Analysis<'n> {
     /// A function that takes its context when an argument is missing (a lambda with `-` in its
     /// signature, or such a built-in) may be called through a variable.
     context_functions: bool,
+    /// See [`Variables::builtins`]. A field counts too: `name()` looks up a variable `name`.
+    builtins: BTreeSet<&'static str>,
+    /// How many nodes around the one being analysed, within its scope, may leave it out: all
+    /// but blocks and assignments, which run what they hold.
+    conditional: usize,
 }
 
 /// Analyses a processed tree, given the bindings it will be evaluated with.
 pub(crate) fn analyse<'n>(ast: &'n Ast, bindings: &'n Bindings) -> Reads {
+    run(ast, bindings).finish()
+}
+
+/// Analyses a processed tree for an evaluation against a [`Document`].
+pub(crate) fn variables(ast: &Ast) -> Variables {
+    let bindings = Bindings::new();
+    let mut analysis = run(ast, &bindings);
+    let builtins = std::mem::take(&mut analysis.builtins);
+    let gave_up = analysis.everything || analysis.every_binding;
+    let reads = analysis.finish();
+    Variables {
+        reads: (!gave_up).then_some(reads.bindings),
+        builtins: builtins.into_iter().collect(),
+    }
+}
+
+fn run<'n>(ast: &'n Ast, bindings: &'n Bindings) -> Analysis<'n> {
     let mut analysis = Analysis {
         marked: bindings
             .functions()
@@ -383,6 +439,8 @@ pub(crate) fn analyse<'n>(ast: &'n Ast, bindings: &'n Bindings) -> Reads {
         calls: Vec::new(),
         escaped: false,
         context_functions: false,
+        builtins: BTreeSet::new(),
+        conditional: 0,
     };
     analysis.survey(&ast.root);
     let input = vec![Place {
@@ -394,12 +452,12 @@ pub(crate) fn analyse<'n>(ast: &'n Ast, bindings: &'n Bindings) -> Reads {
     while let Some(deferred) = analysis.queue.pop_front() {
         analysis.body(deferred);
     }
-    analysis.finish()
+    analysis
 }
 
 impl<'n> Analysis<'n> {
-    /// Notes the variables the expression binds, and gives up on `$eval`, which can read any
-    /// variable of the environment where it is called (decision 7).
+    /// Notes the variables the expression binds and the built-ins it names, and gives up on
+    /// `$eval`, which can read any variable of the environment where it is called (decision 7).
     fn survey(&mut self, root: &'n Node) {
         root.walk(&mut |node| {
             match &node.kind {
@@ -413,7 +471,15 @@ impl<'n> Analysis<'n> {
                     }
                 }
                 NodeKind::Lambda(def) => self.locals.extend(def.params.iter().map(String::as_str)),
+                NodeKind::Transform(_) => {
+                    self.builtins.insert("clone");
+                }
                 _ => {}
+            }
+            if let NodeKind::Variable { name } | NodeKind::Name { name } = &node.kind
+                && let Some(native) = functions::native(name)
+            {
+                self.builtins.insert(native.name);
             }
             let attrs = &node.attrs;
             for name in [&attrs.focus, &attrs.index, &attrs.ancestor_label]
@@ -568,9 +634,14 @@ impl<'n> Analysis<'n> {
     }
 
     fn bind(&mut self, scope: usize, name: &str, places: Places, seq: usize) {
+        self.assign(scope, name, places, seq, true);
+    }
+
+    fn assign(&mut self, scope: usize, name: &str, places: Places, seq: usize, sure: bool) {
         let var = self.scopes[scope].vars.remove(name);
         let var = match var {
             Some(mut var) => {
+                var.sure |= sure;
                 self.join(&mut var.places, places);
                 var
             }
@@ -578,6 +649,7 @@ impl<'n> Analysis<'n> {
                 let mut var = Var {
                     places: Vec::new(),
                     seq,
+                    sure,
                 };
                 self.join(&mut var.places, places);
                 var
@@ -607,7 +679,7 @@ impl<'n> Analysis<'n> {
                         out.push(place.clone());
                     }
                 }
-                if threshold.is_none_or(|t| var.seq < t) {
+                if var.sure && threshold.is_none_or(|t| var.seq < t) {
                     return (out, true, true);
                 }
             }
@@ -630,7 +702,15 @@ impl<'n> Analysis<'n> {
     // Nodes
 
     fn eval(&mut self, node: &'n Node, context: &[Place], scope: usize) -> Places {
-        crate::stack::grow(|| self.node(node, context, scope))
+        let around = self.conditional;
+        self.conditional = match &node.kind {
+            NodeKind::Block { frame: true, .. } => 0,
+            NodeKind::Block { .. } | NodeKind::Bind { .. } => around,
+            _ => around + 1,
+        };
+        let value = crate::stack::grow(|| self.node(node, context, scope));
+        self.conditional = around;
+        value
     }
 
     /// Analyses a node whose value is used.
@@ -715,7 +795,8 @@ impl<'n> Analysis<'n> {
                     seq = self.next_seq();
                 }
                 if let NodeKind::Variable { name } = &lhs.kind {
-                    self.bind(scope, name, value.clone(), seq);
+                    let sure = self.conditional == 0;
+                    self.assign(scope, name, value.clone(), seq, sure);
                 }
                 value
             }
@@ -1361,6 +1442,60 @@ mod tests {
             input("($g := function($h) { $h() }; a.$g($rate))"),
             json!({"a": {}})
         );
+    }
+
+    #[test]
+    fn variables_are_read_as_the_expression_reads_them() {
+        let bindings = Bindings::new().var("x", 1).var("y", 2);
+        let reads_of = |source: &str| {
+            let ast = crate::parse(source).unwrap();
+            let variables = variables(&ast);
+            variables.reads(&bindings, &[]).cloned()
+        };
+        let x = |read: Read| Some(BTreeMap::from([("x".to_owned(), read)]));
+        assert_eq!(reads_of("$x"), x(Read::Whole));
+        let a = BTreeMap::from([("a".to_owned(), Read::Whole)]);
+        assert_eq!(reads_of("$x.a"), x(Read::Fields(a)));
+        assert_eq!(reads_of("$count($x)"), x(Read::needed()));
+        assert_eq!(reads_of("1"), Some(BTreeMap::new()));
+        // The analysis gave up, or a binding hides a built-in the expression names.
+        assert_eq!(reads_of("$eval('$x')"), None);
+        let hiding = Bindings::new().var("x", 1).var("count", 2);
+        let ast = crate::parse("$count($x)").unwrap();
+        assert!(variables(&ast).reads(&hiding, &[]).is_none());
+        let hiding =
+            Bindings::new().function("count", crate::HostFunction::new(1, |_, _| Ok(None)));
+        assert!(variables(&ast).reads(&hiding, &[]).is_none());
+        let document = Document::undefined();
+        assert!(
+            variables(&ast)
+                .reads(&bindings, &[("count", &document)])
+                .is_none()
+        );
+        let ast = crate::parse("$x ~> |a|{}|").unwrap();
+        let hiding = Bindings::new().var("clone", 1);
+        assert!(variables(&ast).reads(&hiding, &[]).is_none());
+        // A field counts: `count()` for `$count()` fails on a variable that is true.
+        let ast = crate::parse("count()").unwrap();
+        let hiding = Bindings::new().var("count", true);
+        assert!(variables(&ast).reads(&hiding, &[]).is_none());
+    }
+
+    #[test]
+    fn a_variable_assigned_in_a_branch_may_be_a_binding() {
+        for source in [
+            "a ? $x := 1 : $x",
+            "(a ? $x := 1 : 0; $x)",
+            "(a ?: $x := 1; $x)",
+            "(a ?? ($x := 1); a ?? $x := 1; $x)",
+            "($f := function(){ a ? $x := 1 : $x }; $f())",
+            "(a[$x := 1]; $x)",
+        ] {
+            assert_eq!(reads(source)["bindings"], json!({"x": true}), "{source}");
+        }
+        for source in ["($x := 1; $x)", "a ? ($x := 1; $x) : 2"] {
+            assert_eq!(reads(source)["bindings"].get("x"), None, "{source}");
+        }
     }
 
     #[test]

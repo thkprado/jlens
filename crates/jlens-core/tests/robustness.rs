@@ -1778,6 +1778,15 @@ fn outcome(result: Result<Option<serde_json::Value>, Error>) -> Option<String> {
     }
 }
 
+/// [`outcome`], with the error's text, which shows the value it is about.
+fn outcome_with_detail(result: Result<Option<serde_json::Value>, Error>) -> Option<String> {
+    match result {
+        Ok(value) => Some(format!("{value:?}")),
+        Err(e) if e.code() == "D1012" => None,
+        Err(e) => Some(format!("{}: {e}", e.code())),
+    }
+}
+
 /// `bindings` with every host function marked as not reading its context.
 fn without_input(bindings: Bindings) -> Bindings {
     let mut marked = Bindings::new();
@@ -1906,6 +1915,18 @@ fn found_reads_keep_what_an_evaluation_needs() {
     let expr =
         Expression::compile("($f := function($y){ $zip(items){1: 1} }; $f(items@$o.'s'))").unwrap();
     agrees_when_cut(&expr, &expr.reads()).unwrap();
+    // A variable assigned in the branch not taken names the binding (the differential tests,
+    // seed 1793604490788770300).
+    for source in [
+        "($f := function($y){ nothing ? $x := 1 : $x }; $f(0))",
+        "(nothing ? $x := 1 : 0; $x)",
+        "(a ? 1 : $x := 2; $x)",
+        "(a ?: $x := 2; $x)",
+        "(a ?? 1; nothing ?? 2; a and nothing ? $x := 1 : 0; $x[0])",
+    ] {
+        let expr = Expression::compile(source).unwrap();
+        agrees_when_cut(&expr, &expr.reads()).unwrap();
+    }
 }
 
 proptest! {
@@ -1927,6 +1948,31 @@ proptest! {
         if let Ok(expr) = Expression::compile(&source) {
             let reads = expr.reads_with(&without_input(bindings()));
             agrees_when_cut_with(&expr, &reads, true)?;
+        }
+    }
+
+    /// Against a document, a variable is converted as far as the expression reads it, which
+    /// gives what `evaluate_with` gives, also with bindings that hide built-ins.
+    #[test]
+    fn variables_against_a_document_give_what_they_give_elsewhere(source in expression()) {
+        if let Ok(expr) = Expression::compile(&source) {
+            let options = Options::new()
+                .timeout(Duration::from_millis(50))
+                .max_depth(300)
+                .now(0)
+                .seed(1);
+            let input = input();
+            let hiding = bindings().var("string", variable_x()).var("count", true);
+            for bindings in [bindings(), hiding] {
+                let elsewhere = expr.evaluate_with(Some(&input), &bindings, &options);
+                let document = Document::new(&input);
+                let against = expr.evaluate_document(&document, &bindings, &options);
+                if let (Some(elsewhere), Some(against)) =
+                    (outcome_with_detail(elsewhere), outcome_with_detail(against))
+                {
+                    prop_assert_eq!(elsewhere, against, "{}", expr.source());
+                }
+            }
         }
     }
 

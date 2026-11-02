@@ -1106,6 +1106,158 @@ fn variables_bind_to_documents() {
     assert_eq!(part("/items/1"), Some(json!({"n": 2})));
 }
 
+/// Against a document, a variable of the bindings is converted as far as the expression reads
+/// it, and an expression cannot tell: what it gives is what `evaluate_with` gives.
+#[test]
+fn variables_against_a_document_give_what_they_give_elsewhere() {
+    use jlens_core::{Document, Error, HostFunction};
+    let unit = json!({
+        "z": 1,
+        "hp": 40,
+        "tags": ["a", "b"],
+        "stats": [{"str": 3, "dex": 1}, [{"str": 5}], 7],
+        "none": {},
+        "deep": {"a": {"b": null, "c": 2}},
+    });
+    let values = Bindings::new()
+        .var("self", unit.clone())
+        .var("other", 5)
+        .var("list", json!([{"a": 1, "b": 2}, {"a": 3}]));
+    let echo = HostFunction::new(1, |args, _| Ok(Some(json!({"host": args}))));
+    let hidden = |name: &str, value: Value| values.clone().var(name, value);
+    let host = |name: &str| values.clone().function(name, echo.clone());
+    let cases = [
+        // Fields, items, and what needs no field.
+        ("$self.hp", values.clone()),
+        ("$self.missing", values.clone()),
+        ("$self.stats.str", values.clone()),
+        ("$self.deep.a.b", values.clone()),
+        ("$list[a = 3].a", values.clone()),
+        ("$list[1]", values.clone()),
+        ("$count($self.stats)", values.clone()),
+        ("$exists($self.none)", values.clone()),
+        ("$type($self.deep)", values.clone()),
+        ("$self.none ? 1 : 2", values.clone()),
+        ("$boolean($self.deep)", values.clone()),
+        ("$self.none ?? 1", values.clone()),
+        // What reads the variable whole, in the order of its fields.
+        ("$self", values.clone()),
+        ("$keys($self)", values.clone()),
+        ("$string($self.deep)", values.clone()),
+        ("$self.*", values.clone()),
+        ("$self.**.b", values.clone()),
+        ("{'a': $self.deep}", values.clone()),
+        ("$merge([$self, {'hp': 1}]).hp", values.clone()),
+        // Functions reach what they close over, however they are called.
+        (
+            "($f := function($k){ $self.hp + $k }; $f($other))",
+            values.clone(),
+        ),
+        (
+            "$map([1, 2], function($v){ $self.deep.a.c + $v })",
+            values.clone(),
+        ),
+        ("($g := $string; $g($self.deep))", values.clone()),
+        // A variable that only some branch reads, and one that an inner block hides.
+        ("$other > 9 ? $self.hp : 0", values.clone()),
+        ("($self := {'hp': 1}; $self.hp)", values.clone()),
+        (
+            "($f := function(){ $other }; $other := 1; $f())",
+            values.clone(),
+        ),
+        ("($other > 9 ? $self := 1 : 0; $self.hp)", values.clone()),
+        (
+            "($f := function(){ $other > 9 ? $self := 1 : $self.hp }; $f())",
+            values.clone(),
+        ),
+        // A transform and the variable it copies.
+        ("$self ~> |deep.a|{'c': 3}|", values.clone()),
+        // Errors, with the value they show.
+        ("$self.tags + 1", values.clone()),
+        ("$self.deep.a.c.d()", values.clone()),
+        ("$sum($self.deep)", values.clone()),
+        // `$eval` can read any variable.
+        ("$eval('$self.hp + $other')", values.clone()),
+        ("($e := $eval; $e('$self.hp'))", values.clone()),
+        // A binding that hides a built-in the expression names.
+        ("$string.a", hidden("string", json!({"a": 1}))),
+        ("$count($self)", host("count")),
+        ("($f := $count; $f($self))", host("count")),
+        ("$self.hp ~> $string", host("string")),
+        ("$count($self)", hidden("count", json!(1))),
+        ("count()", hidden("count", json!(true))),
+        ("$self ~> |deep|{'x': 1}|", hidden("clone", json!(1))),
+    ];
+    let input = json!({"hp": 1, "other": 2});
+    let outcome = |result: Result<Option<Value>, Error>| {
+        result.map_err(|e| (e.code().to_owned(), e.to_string()))
+    };
+    let options = Options::default();
+    for (source, bindings) in &cases {
+        let expr = Expression::compile(source).unwrap();
+        let elsewhere = expr.evaluate_with(Some(&input), bindings, &options);
+        let document = expr.evaluate_document(&Document::new(&input), bindings, &options);
+        assert_eq!(outcome(document), outcome(elsewhere), "{source}");
+        // Twice, as the first evaluation runs the analysis.
+        let none = expr.evaluate_with(None, bindings, &options);
+        for _ in 0..2 {
+            let document = expr.evaluate_document(&Document::undefined(), bindings, &options);
+            assert_eq!(outcome(document), outcome(none.clone()), "{source}");
+        }
+    }
+
+    // A name of `variables` takes the place of a binding that hides nothing, or hides a built-in.
+    let number = Document::new(&json!({"a": 1}));
+    let evaluate = |source: &str, name: &str| {
+        Expression::compile(source)
+            .unwrap()
+            .evaluate_document_with(
+                &Document::undefined(),
+                &[(name, &number)],
+                &values,
+                &options,
+            )
+            .map_err(|e| e.code().to_owned())
+    };
+    assert_eq!(evaluate("$self.a", "self"), Ok(Some(json!(1))));
+    assert_eq!(evaluate("$string.a", "string"), Ok(Some(json!(1))));
+    assert_eq!(
+        evaluate("$string($self.hp)", "string"),
+        Err("T1006".to_owned())
+    );
+}
+
+#[test]
+fn an_undefined_document_stands_for_no_input() {
+    let options = Options::default();
+    let undefined = Document::undefined();
+    let eval = |source: &str| {
+        Expression::compile(source)
+            .unwrap()
+            .evaluate_document(&undefined, &Bindings::new(), &options)
+            .unwrap()
+    };
+    assert_eq!(eval("$"), None);
+    assert_eq!(eval("a"), None);
+    assert_eq!(eval("$exists($$)"), Some(json!(false)));
+    assert_eq!(eval("1 + 2"), Some(json!(3)));
+    assert_eq!(undefined.to_json(), json!(null));
+    assert_eq!(
+        undefined.pointer("").map(|d| d.to_json()),
+        Some(json!(null))
+    );
+    assert!(undefined.pointer("/a").is_none());
+    // As a variable.
+    let expr = Expression::compile("$exists($x)").unwrap();
+    let result = expr.evaluate_document_with(
+        &Document::new(&json!({})),
+        &[("x", &undefined)],
+        &Bindings::new(),
+        &options,
+    );
+    assert_eq!(result.unwrap(), Some(json!(false)));
+}
+
 #[test]
 fn compiled_expressions_can_be_shared_between_threads() {
     fn assert_send_sync<T: Send + Sync>() {}

@@ -27,7 +27,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use jlens_core::ast::Stage;
-use jlens_core::{Bindings, Expression, Node, NodeKind, Options};
+use jlens_core::{Bindings, Document, Expression, Node, NodeKind, Options};
 use serde_json::{Value as JsonValue, json};
 
 use crate::root;
@@ -128,6 +128,17 @@ pub fn run(args: &[String]) -> Result<()> {
             continue;
         }
         let actual = outcome(expr, input.map(|i| &inputs[i]), &bindings, &options);
+        // Against a document, which converts its variables by what the expression reads, the
+        // case gives what it gave.
+        let against = document_outcome(expr, input.map(|i| &inputs[i]), &bindings, &options);
+        if !is_limit(&actual) && !is_limit(&against) && !same(&actual, &against) {
+            divergences.push(json!({
+                "expr": expr,
+                "input": input,
+                "jlens": actual,
+                "jsonata-js": {"againstDocument": against},
+            }));
+        }
         if [&actual, expected].iter().any(|o| is_limit(o)) {
             limits += 1;
         } else if expected["error"]
@@ -228,7 +239,24 @@ fn outcome(
     bindings: &Bindings,
     options: &Options,
 ) -> JsonValue {
-    match Expression::compile(expr).and_then(|e| e.evaluate_with(input, bindings, options)) {
+    written(Expression::compile(expr).and_then(|e| e.evaluate_with(input, bindings, options)))
+}
+
+/// [`outcome`], evaluated against a document.
+fn document_outcome(
+    expr: &str,
+    input: Option<&JsonValue>,
+    bindings: &Bindings,
+    options: &Options,
+) -> JsonValue {
+    let document = input.map_or_else(Document::undefined, Document::new);
+    written(
+        Expression::compile(expr).and_then(|e| e.evaluate_document(&document, bindings, options)),
+    )
+}
+
+fn written(result: jlens_core::Result<Option<JsonValue>>) -> JsonValue {
+    match result {
         Ok(Some(value)) => json!({ "value": value }),
         Ok(None) => json!({ "undefined": true }),
         Err(err) => json!({ "error": err.code() }),
@@ -424,7 +452,9 @@ fn wildcard_first(expr: &str) -> bool {
 /// whose `chars` is not a string literal, which jsonata-js searches as "undefined" when missing;
 /// and an order-by after a step that binds `@`, `#` or an ancestor, filtered or ending a path
 /// with a group-by, where jsonata-js gives the filter or group-by its internal tuples. And a
-/// call with a group-by in tail position of a lambda, whose group-by jsonata-js drops.
+/// call with a group-by in tail position of a lambda, whose group-by jsonata-js drops. And
+/// `$fromMillis` with a computed picture, where a marker with an unknown component and a
+/// presentation gives jsonata-js the text "undefined" and jlens `D3132`.
 fn dropped_quirk(expr: &str) -> bool {
     let Ok(compiled) = Expression::compile(expr) else {
         return false;
@@ -457,6 +487,9 @@ fn dropped_quirk(expr: &str) -> bool {
                         .get(1)
                         .is_some_and(|a| matches!(a.kind, NodeKind::String { .. }))
                 }
+                NodeKind::Variable { name } if name == "fromMillis" => args
+                    .get(1)
+                    .is_some_and(|a| !matches!(a.kind, NodeKind::String { .. })),
                 _ => false,
             },
             NodeKind::Lambda(def) => tail_group(&def.body),

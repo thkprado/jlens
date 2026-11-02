@@ -147,7 +147,9 @@ port with meaningful arguments: regular expression literals for `$match`, `$repl
 round trips through `$parseInteger`, `$toMillis` and the decoders. Names are bound in blocks, in
 the body of a lambda with no block around them, which binds in the frame of the call, and in
 array and object constructors, and read afterwards. Each case runs against one of a few input
-documents, or none. The command writes the cases to `target/differential/cases.json`.
+documents, or none, and in jlens also against a `Document`, which reads its variables another way
+and must give the same outcome. The command writes the cases to
+`target/differential/cases.json`.
 `benches/compare/differential.mjs` runs them in jsonata-js. The command then compares each
 outcome with that of jlens. Results are compared as JSON, with numbers compared as values and
 the keys of an object in order. Both engines run with a timeout and a depth limit, and a case
@@ -201,8 +203,9 @@ counts them apart:
 - **Dropped quirk**: the expression may meet a jsonata-js quirk that jlens does not reproduce:
   a regular expression literal applied with `~>` to anything but a string literal,
   `$formatNumber` with a literal picture whose integer part has irregular grouping
-  (`'#,##,##0'`), or `$substringBefore` / `$substringAfter` whose `chars` is not a string
-  literal.
+  (`'#,##,##0'`), `$substringBefore` / `$substringAfter` whose `chars` is not a string literal,
+  or `$fromMillis` with a computed picture, which may hold a marker with an unknown component and
+  a presentation.
 - **Overflow to infinity**: jlens failed with `D1001`, which it raises only where a number
   overflows to infinity (`1 / 0`). jsonata-js passes the infinity on, to its result or to an
   operator that fails later.
