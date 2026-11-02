@@ -108,7 +108,7 @@ Found by the differential test:
 
 ## Ported from upstream
 
-Last upstream commit reviewed: `4f2bfeb` (2026-10-19, unreleased after 0.12.0). Each port is
+Last upstream commit reviewed: `1dd717d` (2026-11-01, unreleased after 0.12.0). Each port is
 a jlens commit named `jlens-regress: <upstream subject>`, which names the upstream commit.
 
 | Upstream commit | Subject | Ported? |
@@ -135,6 +135,18 @@ a jlens commit named `jlens-regress: <upstream subject>`, which names the upstre
 | `e99bee9` | Simplify re-entering a non-greedy loop | Ported: as `6afa770` |
 | `1acdb5d` | Backtracking: make loops and groups into boxed slices | Ported: as `6afa770`, without its hunk in the budget code |
 | `4f2bfeb` | CI: install cross via cargo instead of taiki-e/install-action | Skipped: upstream's CI |
+| `542243a` | Search UTF-16 input with start predicates | Skipped: 600 lines that speed up `find_from_utf16` and `find_from_ucs2`, which jlens does not run: it searches `&str` |
+| `3e43472` | Stop UTF-16 unit search when the backtrack budget runs out | Skipped: budget code, on `542243a` |
+| `c57833c` | Clarify UTF16 unit-searching roles | Skipped: on `542243a` |
+| `851f87b` | Simplify UTF-16 prefix searching | Skipped: on `542243a` |
+| `9dcb326` | Fold Unicode-set operands before set operations and complements | Tests ported, and they pass: the differential test had already fixed this here, with the complements taken after folding (see below) |
+| `99fc291` | Extend icase Unicode-set operand tests | Ported |
+| `f04f3a8` | Add anchored UTF-16 and UCS-2 matching APIs | Skipped: `match_at_utf16` and `match_at_ucs2`, a feature jlens does not need |
+| `c81c327` | Fix clippy::manual_map in BacktrackExecutor::match_at | Skipped: on `f04f3a8` |
+| `adcfb90` | Start UTF-16 matches at the start of a surrogate pair | Ported, for `find_from_utf16`: without the hunks on `f04f3a8` and `542243a`, and its tests as searches. jlens does not build this code; `cargo test -p jlens-regress --features utf16 --test tests` runs it |
+| `49bd5bf` | Add budgeted UTF-16 and UCS-2 searches | Skipped: budget code |
+| `da5fa13` | Match budgeted searches' start handling to their iterators | Skipped: budget code |
+| `1dd717d` | Check UCS-2 budgeted searches against their iterator | Skipped: budget code |
 
 The upstream README follows.
 

@@ -84,7 +84,9 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    `npm audit` in `editors/vscode` and `benches/compare`; the versions in both `pom.xml` files,
    the Maven Wrapper's and the actions'. Keep an older version only for a stated reason, such as
    the minimum Rust version, or a floor the package supports (`@types/vscode` is
-   `engines.vscode`'s).
+   `engines.vscode`'s). `jlens-regress` is a fork, so that none of these sees `regress`: read
+   the commits after the last one its README's "Ported from upstream" names, and port them or
+   record why not.
 2. Move the `Unreleased` entries of `CHANGELOG.md` under the new version, and open the section
    with a sentence that sums up the release. The section becomes the GitHub release notes;
    preview them with `cargo xtask release-notes X.Y.Z`, which points relative links

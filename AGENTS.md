@@ -27,6 +27,7 @@ Run what your change touches; CI runs all of it:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets            # CI sets RUSTFLAGS=-D warnings
 cargo test --workspace                            # unit, snapshot, guide and property tests, conformance baseline
+cargo test -p jlens-regress --features utf16 --test tests   # after touching jlens-regress's UTF-16 searches, which jlens does not build
 cargo xtask gen-docs --check                      # after changing the function catalog or error messages
 cargo xtask doc-check                             # after touching docs/ or behaviour the book shows
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps   # after touching doc comments

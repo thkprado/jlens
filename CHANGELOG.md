@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `jlens-regress`: `find_from_utf16` from the low surrogate of a pair starts at the pair's high
+  surrogate, as JavaScript engines do, and never matches half of a pair there. A fix ported from
+  `regress`, whose commits are reviewed up to `1dd717d`. jlens searches `&str` and does not use
+  this search.
+
 ## [0.26.0]
 
 Faster where measuring 0.25 left work: a recursion through a lambda takes 21 to 25% less time than
