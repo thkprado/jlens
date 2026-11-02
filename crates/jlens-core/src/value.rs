@@ -152,22 +152,28 @@ impl<'a> Pending<'a> {
     }
 
     /// Reads the level of the member `member` of `sources` into `level`. A source that fails
-    /// leaves the level empty, and its error is recorded for the evaluation (ADR 0010,
-    /// decision 6).
-    fn read_source(&self, sources: &dyn Sources<'a>, member: u32, level: Level<'_, 'a>) {
+    /// leaves the level empty, and hands back its error, which the caller records for the
+    /// evaluation (ADR 0010, decision 6) or drops if nothing needs the level yet.
+    fn try_read_source(
+        &self,
+        sources: &dyn Sources<'a>,
+        member: u32,
+        level: Level<'_, 'a>,
+    ) -> std::result::Result<(), String> {
         let mut sink = Sink {
             level,
             shared: &self.shared,
             key: None,
         };
-        if let Err(message) = sources.read(member, &mut sink) {
-            self.shared.fail(message);
+        let read = sources.read(member, &mut sink);
+        if read.is_err() {
             match sink.level {
                 Level::Items(items) => items.clear(),
                 Level::Fields(map) => map.clear(),
                 Level::Alone(_) => {}
             }
         }
+        read
     }
 
     /// Reads one value from a source with `read`, a field or an item: `None` when the source
@@ -246,27 +252,46 @@ impl<'a> LazyItems<'a> {
     /// values, so that a value read twice is the same value.
     #[inline(never)]
     fn read(&self) -> &Vec<Value<'a>> {
-        let pending = &self.pending;
         self.items.get_or_init(|| {
-            let mut items = match &pending.origin {
-                Origin::Json(JsonValue::Array(items)) => items
-                    .iter()
-                    .map(|v| Value::lazy(v, &pending.shared))
-                    .collect(),
-                Origin::Json(_) => Vec::new(),
-                Origin::Source(sources) => {
-                    let mut items = Vec::new();
-                    pending.read_source(&**sources, self.member, Level::Items(&mut items));
-                    items
-                }
-            };
-            for (index, value) in self.alone.take() {
-                if let Some(slot) = items.get_mut(index) {
-                    *slot = value;
-                }
-            }
-            items
+            self.level().unwrap_or_else(|message| {
+                self.pending.shared.fail(message);
+                Vec::new()
+            })
         })
+    }
+
+    /// The items if they can be read. If not, nothing is recorded and the array stays unread, so
+    /// that only code that needs them fails.
+    #[inline(never)]
+    fn try_read(&self) -> Option<&Vec<Value<'a>>> {
+        if self.items.get().is_none() {
+            let items = self.level().ok()?;
+            return Some(self.items.get_or_init(|| items));
+        }
+        self.items.get()
+    }
+
+    /// The items, read from the input.
+    fn level(&self) -> std::result::Result<Vec<Value<'a>>, String> {
+        let pending = &self.pending;
+        let mut items = match &pending.origin {
+            Origin::Json(JsonValue::Array(items)) => items
+                .iter()
+                .map(|v| Value::lazy(v, &pending.shared))
+                .collect(),
+            Origin::Json(_) => Vec::new(),
+            Origin::Source(sources) => {
+                let mut items = Vec::new();
+                pending.try_read_source(&**sources, self.member, Level::Items(&mut items))?;
+                items
+            }
+        };
+        for (index, value) in self.alone.take() {
+            if let Some(slot) = items.get_mut(index) {
+                *slot = value;
+            }
+        }
+        Ok(items)
     }
 
     /// The number of items, read without the items when the input can tell it.
@@ -346,6 +371,15 @@ impl<'a> Array<'a> {
         }
     }
 
+    /// The items, or `None`, recording nothing, when they cannot be read: for code that has
+    /// another way to its answer, which may not need them.
+    pub fn try_items(&self) -> Option<&Vec<Value<'a>>> {
+        match &self.lazy {
+            None => Some(&self.items),
+            Some(lazy) => lazy.try_read(),
+        }
+    }
+
     /// The item at `index`, which is below [`Array::len`]. An array of the input not read whole
     /// reads that item alone when its input can, and keeps it when it is an array or an object.
     #[inline]
@@ -421,26 +455,36 @@ enum Read {
     Whole,
 }
 
+/// What becomes of a level that a source fails to read.
+#[derive(Clone, Copy)]
+enum Failure {
+    /// The level is left empty, and the error stops the evaluation (ADR 0010, decision 6).
+    Record,
+    /// The level stays as it was, nothing is recorded, and the next read tries again.
+    Leave,
+}
+
 impl<'a> Object<'a> {
     #[inline]
     fn cell(&self) -> &RefCell<Map<'a>> {
         if let Some(pending) = &self.pending
             && self.read.get() != Read::Whole
         {
-            self.read(pending);
+            self.read(pending, Failure::Record);
         }
         &self.map
     }
 
     /// Reads the fields of a lazy object into its map, which nothing borrows yet: every
     /// borrow goes through `cell`. The fields read alone before keep their values, so that a
-    /// value read twice is the same value.
+    /// value read twice is the same value. Returns whether the level could be read; if it could
+    /// not, `failure` says what becomes of it.
     #[cold]
     #[inline(never)]
-    fn read(&self, pending: &Pending<'a>) {
+    fn read(&self, pending: &Pending<'a>, failure: Failure) -> bool {
         let before = self.read.replace(Read::Whole);
         let Ok(mut map) = self.map.try_borrow_mut() else {
-            return;
+            return true;
         };
         let hasher = map.hasher().clone();
         let mut alone = std::mem::replace(&mut *map, Map::with_hasher(hasher.clone()));
@@ -460,7 +504,19 @@ impl<'a> Object<'a> {
             }
             Origin::Json(_) => {}
             Origin::Source(sources) => {
-                pending.read_source(&**sources, self.member, Level::Fields(&mut map))
+                let level = Level::Fields(&mut map);
+                match (
+                    pending.try_read_source(&**sources, self.member, level),
+                    failure,
+                ) {
+                    (Ok(()), _) => {}
+                    (Err(message), Failure::Record) => pending.shared.fail(message),
+                    (Err(_), Failure::Leave) => {
+                        *map = alone;
+                        self.read.set(before);
+                        return false;
+                    }
+                }
             }
         }
         if before == Read::Fields {
@@ -470,6 +526,7 @@ impl<'a> Object<'a> {
                 }
             }
         }
+        true
     }
 
     /// The field `key`, or undefined. A lazy object not read whole reads that field alone
@@ -529,6 +586,18 @@ impl<'a> Object<'a> {
     #[inline]
     pub fn borrow(&self) -> Ref<'_, Map<'a>> {
         self.cell().borrow()
+    }
+
+    /// The fields, or `None`, recording nothing, when they cannot be read: for code that has
+    /// another way to its answer, which may not need them.
+    pub fn try_borrow(&self) -> Option<Ref<'_, Map<'a>>> {
+        if let Some(pending) = &self.pending
+            && self.read.get() != Read::Whole
+            && !self.read(pending, Failure::Leave)
+        {
+            return None;
+        }
+        Some(self.map.borrow())
     }
 
     /// The fields, mutably, read from the input first if the object is lazy.
@@ -1713,8 +1782,9 @@ impl DeepHasher {
         }
     }
 
-    /// The hash of `value`, or `None` when it holds an array or object at [`MAX_NESTING`] levels
-    /// or deeper, where comparing it may fail or not, by what it is compared with.
+    /// The hash of `value`, or `None` when it holds what comparing it may fail on or not, by what
+    /// it is compared with: an array or object at [`MAX_NESTING`] levels or deeper, or a level of
+    /// a source that cannot be read, which stays unread.
     pub(crate) fn hash(&mut self, value: &Value<'_>) -> Option<u64> {
         Some(self.value(value, 0)?.0)
     }
@@ -1739,11 +1809,11 @@ impl DeepHasher {
             }
             Value::Array(a) => {
                 let address = Rc::as_ptr(a).cast::<()>().addr();
-                return self.nested(address, depth, |this| this.array(a.items(), depth));
+                return self.nested(address, depth, |this| this.array(a.try_items()?, depth));
             }
             Value::Object(o) => {
                 let address = Rc::as_ptr(o).cast::<()>().addr();
-                return self.nested(address, depth, |this| this.object(&o.borrow(), depth));
+                return self.nested(address, depth, |this| this.object(&*o.try_borrow()?, depth));
             }
         }
         Some((hasher.finish(), 0))

@@ -957,23 +957,127 @@ fn a_level_that_cannot_be_read_fails_the_evaluation() {
     assert_eq!(result.unwrap(), None);
 }
 
-/// `$distinct` reads the items it compares as far as they differ, and of an array past a few
-/// distinct items, all of each: a table of hashes has to.
+/// Whether comparing `a` with `b`, as `Value::deep_eq` does, reaches a level that fails: an object
+/// with the field `fails`.
+fn comparing_fails(a: &serde_json::Value, b: &serde_json::Value) -> Result<bool, ()> {
+    use serde_json::Value::{Array, Object};
+    let fails = |json: &serde_json::Map<_, _>| json.contains_key("fails");
+    match (a, b) {
+        (Array(a), Array(b)) => {
+            if a.len() != b.len() {
+                return Ok(false);
+            }
+            for (x, y) in a.iter().zip(b) {
+                if !comparing_fails(x, y)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        (Object(a), Object(b)) => {
+            if fails(a) || fails(b) {
+                return Err(());
+            }
+            if a.len() != b.len() {
+                return Ok(false);
+            }
+            for (key, x) in a {
+                match b.get(key) {
+                    Some(y) if comparing_fails(x, y)? => {}
+                    _ => return Ok(false),
+                }
+            }
+            Ok(true)
+        }
+        _ => Ok(a == b),
+    }
+}
+
+proptest! {
+    /// A level that cannot be read fails `$distinct` when comparing items one by one reaches it,
+    /// and only then, however many items there are: the table of hashes reads more of them, but
+    /// a level it cannot read goes back to comparing.
+    #[test]
+    fn distinct_fails_on_a_level_where_comparing_reaches_it(
+        items in prop::collection::vec((0..4096u32, 0..3u8, 0..24u8), 0..48),
+        ids in prop_oneof![Just(24u32), Just(256), Just(4096)],
+        fields in any::<bool>(),
+    ) {
+        let bad = json!({"fails": true});
+        let list: Vec<_> = items
+            .iter()
+            .map(|&(id, tail, first)| {
+                // Mostly distinct and the `id` first, so that comparing stops before `tail`.
+                let id = id % ids;
+                let tail = match tail {
+                    0 => json!({"a": 1}),
+                    1 => bad.clone(),
+                    _ => json!([bad]),
+                };
+                match first {
+                    0 => json!({"tail": tail, "id": id}),
+                    _ => json!({"id": id, "tail": tail}),
+                }
+            })
+            .collect();
+        let mut kept: Vec<&serde_json::Value> = Vec::new();
+        let mut expected = Ok(());
+        'items: for item in &list {
+            let mut seen = false;
+            for earlier in &kept {
+                match comparing_fails(item, earlier) {
+                    Ok(same) => seen = same,
+                    Err(()) => {
+                        expected = Err(());
+                        break 'items;
+                    }
+                }
+                if seen {
+                    break;
+                }
+            }
+            if !seen {
+                kept.push(item);
+            }
+        }
+        let input = json!({ "list": list });
+        let expr = Expression::compile("$count($distinct(list))").unwrap();
+        for input in [JsonSource::root(&input, fields), JsonSource::members(&input)] {
+            let result = expr.evaluate_source(&input, &Bindings::new(), &Options::default());
+            match expected {
+                Ok(()) => prop_assert_eq!(result.unwrap(), Some(json!(kept.len()))),
+                Err(()) => {
+                    let error = result.unwrap_err();
+                    prop_assert_eq!(error.code(), "U1004");
+                }
+            }
+        }
+    }
+}
+
+/// The same input, past the items compared one by one: `bad` differs in `id` before it is reached,
+/// and fails only when two items share an `id`.
 #[test]
-fn distinct_reads_items_whole_past_a_few() {
-    for (n, reads) in [(3, false), (32, true)] {
-        let list: Vec<_> = (0..n)
-            .map(|i| json!({"id": i, "bad": {"fails": true}}))
+fn distinct_fails_only_where_comparing_reaches_a_level() {
+    for (ids, code) in [(32, None), (31, Some("U1004"))] {
+        let list: Vec<_> = (0..32)
+            .map(|i| json!({"id": i % ids, "bad": {"fails": true}}))
             .collect();
         let input = json!({ "list": list });
         let expr = Expression::compile("$count($distinct(list))").unwrap();
         let source = JsonSource::root(&input, false);
         let result = expr.evaluate_source(&source, &Bindings::new(), &Options::default());
-        match reads {
-            false => assert_eq!(result.unwrap(), Some(json!(n))),
-            true => assert_eq!(result.unwrap_err().code(), "U1004"),
+        match code {
+            None => assert_eq!(result.unwrap(), Some(json!(32))),
+            Some(code) => assert_eq!(result.unwrap_err().code(), code),
         }
     }
+    // Returning the items reads them.
+    let input = json!({"list": (0..32).map(|i| json!({"id": i, "bad": {"fails": true}})).collect::<Vec<_>>()});
+    let expr = Expression::compile("$distinct(list)").unwrap();
+    let source = JsonSource::root(&input, false);
+    let result = expr.evaluate_source(&source, &Bindings::new(), &Options::default());
+    assert_eq!(result.unwrap_err().code(), "U1004");
 }
 
 /// A path step reads one field of an object not read yet, when the source can; the object keeps

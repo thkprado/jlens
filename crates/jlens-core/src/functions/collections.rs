@@ -400,8 +400,9 @@ fn keep_by_list<'i, 'a>(
 }
 
 /// What [`keep_by_list`] does with no limit, comparing each item only with those kept that hash
-/// the same. It stops at a value nested too deep to hash, returning the items from there: whether
-/// comparing that one fails depends on what it meets, which only the list tells.
+/// the same. It stops at a value it cannot hash, nested too deep or holding a level of a source
+/// that cannot be read, returning the items from there: whether comparing that one fails depends
+/// on what it meets, which only the list tells.
 fn keep_by_hash<'i, 'a>(
     out: &mut Vec<Value<'a>>,
     items: &'i [Value<'a>],

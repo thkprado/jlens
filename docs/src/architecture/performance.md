@@ -1497,8 +1497,10 @@ variables measures +0.8 to +1.9% aligned, over seven rounds on new copies, withi
   to a value. A value nested past the limit of 1,000 levels is not hashed: whether comparing it
   fails depends on what it meets, so the items from there on go back to comparing, which gives the
   same result and the same error. An array from a `Source` past 16 distinct items has each item
-  read whole, as a hash needs, where comparing could tell two items apart at a first field: a
-  level that cannot be read fails with `U1004` where a shorter array never reached it.
+  read whole, as a hash needs, where comparing could tell two items apart at a first field. A
+  level that cannot be read stays unread and the items from there go back to comparing, so that
+  it fails the evaluation only if comparing reaches it
+  ([ADR 0010](../adr/0010-lazy-input.md#amendment-a-level-read-in-case-it-is-needed-027)).
 
 ## 0.26 against 0.25.0
 

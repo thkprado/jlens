@@ -24,8 +24,8 @@ All notable changes are recorded here. The format follows
   hash of its whole value where it was compared with every item kept. 100,000 numbers take 9.8 ms,
   where they took 17.5 s, and 100,000 objects 89 ms, where they took 392 s; arrays with few distinct
   values and short arrays take what they took. Its result and errors do not change. From a `Source`,
-  an array past 16 distinct items now reads each item whole, so a level that cannot be read fails
-  with `U1004` even if a comparison would have told the items apart before reaching it.
+  an array past 16 distinct items now has each item read whole; a level that cannot be read is
+  left unread, and fails the evaluation only where comparing the items reaches it, as before.
 
 ### Fixed
 

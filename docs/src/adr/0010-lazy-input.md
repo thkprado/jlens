@@ -448,3 +448,25 @@ shorter after its length was read; an item past its new end is undefined. With P
 in, `items[0].code` over 10,000 items takes 1.3 µs instead of 413 µs, and
 `($i := 0; items[$i].code)` 1.7 µs instead of 414 µs; the other cases of `python.py speed` are
 within 2.3% (the median of three alternated runs, both builds aligned).
+
+## Amendment: a level read in case it is needed (0.27)
+
+`$distinct` past 16 distinct items hashes each item whole ([0.27 #6](../architecture/roadmap.md)),
+where comparing stops at the first difference. So it reads levels that comparing would not, and
+with decision 6 alone a level no comparison reaches would stop the evaluation.
+
+1. **`Array::try_items` and `Object::try_borrow` read a level that nothing needs yet.** They give
+   `None` when the source fails, record nothing, and leave the level as it was, with what was
+   read alone of it. Decision 6 stands for every other read: the code that calls these two has
+   another way to its answer.
+2. **The hash goes back to comparing.** At a level it cannot read, the items from there on are
+   compared with those kept, by the plain reads, which fail as decision 6 says if they reach that
+   level. So `$distinct` gives the same result and the same error as comparing alone, with a
+   source too, and what the hash read of the items before cannot fail.
+3. **What does change.** A level that failed is read again when something needs it, the one
+   exception to "a level read whole is read once", and more of each item is read than before, so
+   a source sees more calls, and a getter in JavaScript or Python runs where it did not. The
+   WebAssembly package keeps the first exception a level throws for `evaluate` to rethrow: with
+   two levels that throw, one met by the hash alone and one that comparing reaches, the error is
+   `U1004` as it should be, and the exception rethrown may be the first's. Telling them apart needs
+   a change to `Source`, which the API work can take.
