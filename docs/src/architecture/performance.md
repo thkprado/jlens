@@ -1464,6 +1464,41 @@ variables measures +0.8 to +1.9% aligned, over seven rounds on new copies, withi
   round the numbers it shares. The update spends about 0.2 µs per item on the object it
   builds and the fields it sets, and about as much again when the field is new and the copied
   object grows. Building the result is the conversion every result pays.
+- **`$distinct`.** Until 0.27 each item was compared with every item kept, so the time grew with
+  the square of the distinct items. Now the first 16 distinct items are kept by comparing, as an
+  array with few distinct items never gains from anything else, and past them items are looked up
+  by a hash of their whole value, with `=` settling those that hash the same. The hash adds the
+  fields of an object up, so that their order does not count, and gives `0` and `-0` one number.
+  When 16 are kept and 8 or fewer items are left, those are compared too: hashing the 16 costs
+  more. Against a `Document`, in µs but where marked, the fastest of a process
+  (`$distinct($)`, the result converted; the items half repeated in `nested`, and eight values
+  repeated in `few`):
+
+  | Items | 10, before | after | 1,000, before | after | 100,000, before | after |
+  |---|---:|---:|---:|---:|---:|---:|
+  | numbers | 1.49 | 1.54 | 1,795 | 63.7 | 17.5 s | 9.84 ms |
+  | `i % 8` | 1.30 | 1.34 | 17.1 | 16.1 | 1.59 ms | 1.48 ms |
+  | strings | 2.02 | 2.08 | 3,618 | 96.2 | 35.7 s | 17.7 ms |
+  | objects of three fields | 6.58 | 6.52 | 13,060 | 501 | 392 s | 89.0 ms |
+  | nested objects | 7.19 | 7.25 | 7,027 | 641 | 247 s | 121 ms |
+
+  jsonata-js 2.2.2 is quadratic as well: on the same arrays, 1.7 µs, 156 µs and 1.71 s for numbers,
+  2.1 µs, 2.92 ms and 32.2 s for strings, and 128 ms for 1,000 objects, whose 100,000 did not
+  finish in five minutes. With few distinct values it stays ahead, 229 µs against 1.48 ms on
+  100,000 items, as it did before. Around the switch, from 8 to 64 items, each kind within 2.7%
+  of the list up to 24 items against a `Document`, and within 4.2% with `evaluate`. Strings and
+  objects gain 14 to 16% at 25 items, numbers 17% at 32, and nested objects half repeated from 48
+  items on. `cargo xtask ab main .` runs no `$distinct`: it finds every case within −4.3 and
+  +2.2% in the three modes, none past the floor.
+
+  A value can hold one array many times, at each of many levels, which `=` passes over by
+  comparing pointers. So the hash has a budget of 64 values per item, and past it remembers
+  arrays and objects by address, and the time stays linear in the array, however many paths lead
+  to a value. A value nested past the limit of 1,000 levels is not hashed: whether comparing it
+  fails depends on what it meets, so the items from there on go back to comparing, which gives the
+  same result and the same error. An array from a `Source` past 16 distinct items has each item
+  read whole, as a hash needs, where comparing could tell two items apart at a first field: a
+  level that cannot be read fails with `U1004` where a shorter array never reached it.
 
 ## 0.26 against 0.25.0
 

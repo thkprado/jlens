@@ -8,8 +8,9 @@
 
 use std::cell::{Cell, OnceCell, Ref, RefCell, RefMut};
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
+use std::hash::{BuildHasher, Hasher};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -1678,6 +1679,131 @@ pub(crate) fn too_deep() -> Error {
         "message",
         format!("A value is nested more than {MAX_NESTING} levels deep"),
     )
+}
+
+/// Hashes of values: what [`Value::deep_eq`] finds equal hashes the same, so `0` and `-0` are one
+/// number and the fields of an object count in any order. Values with one hash may still differ.
+///
+/// A value can hold one array many times, at each of many levels, which [`Value::deep_eq`] passes
+/// over by comparing pointers, and a walk would take once per path. So past a budget that follows
+/// the number of items hashed, the hashes of arrays and objects are remembered by address.
+pub(crate) struct DeepHasher {
+    state: foldhash::fast::RandomState,
+    /// What the walk may still visit before it starts remembering.
+    budget: usize,
+    /// The hash and the levels of each array or object, by address, once the budget has run out.
+    known: HashMap<usize, (u64, usize), foldhash::fast::RandomState>,
+}
+
+/// A value's hash, and how many levels of arrays and objects it holds.
+type Hashed = Option<(u64, usize)>;
+
+impl DeepHasher {
+    /// What each item may visit before the walk starts remembering: far more than most items
+    /// hold, and the time it takes is linear in the items.
+    const BUDGET_PER_ITEM: usize = 64;
+
+    /// A hasher for `items` values. The values must not change while it hashes them, and must
+    /// stay alive with it, as it knows them by address.
+    pub(crate) fn new(items: usize) -> DeepHasher {
+        DeepHasher {
+            state: foldhash::fast::RandomState::default(),
+            budget: items.saturating_mul(Self::BUDGET_PER_ITEM),
+            known: HashMap::default(),
+        }
+    }
+
+    /// The hash of `value`, or `None` when it holds an array or object at [`MAX_NESTING`] levels
+    /// or deeper, where comparing it may fail or not, by what it is compared with.
+    pub(crate) fn hash(&mut self, value: &Value<'_>) -> Option<u64> {
+        Some(self.value(value, 0)?.0)
+    }
+
+    fn value(&mut self, value: &Value<'_>, depth: usize) -> Hashed {
+        let mut hasher = self.state.build_hasher();
+        match value {
+            Value::Undefined => hasher.write_u8(0),
+            Value::Null => hasher.write_u8(1),
+            Value::Bool(b) => hasher.write_u8(2 + u8::from(*b)),
+            Value::Number(n) => {
+                hasher.write_u8(4);
+                hasher.write_u64(if *n == 0.0 { 0 } else { n.to_bits() });
+            }
+            Value::String(s) => {
+                hasher.write_u8(5);
+                hasher.write(s.as_bytes());
+            }
+            Value::Function(f) => {
+                hasher.write_u8(6);
+                hasher.write_usize(Rc::as_ptr(f).cast::<()>().addr());
+            }
+            Value::Array(a) => {
+                let address = Rc::as_ptr(a).cast::<()>().addr();
+                return self.nested(address, depth, |this| this.array(a.items(), depth));
+            }
+            Value::Object(o) => {
+                let address = Rc::as_ptr(o).cast::<()>().addr();
+                return self.nested(address, depth, |this| this.object(&o.borrow(), depth));
+            }
+        }
+        Some((hasher.finish(), 0))
+    }
+
+    /// The hash that `walk` gives the array or object at `address`, remembered past the budget.
+    fn nested(
+        &mut self,
+        address: usize,
+        depth: usize,
+        walk: impl FnOnce(&mut DeepHasher) -> Hashed,
+    ) -> Hashed {
+        if depth >= MAX_NESTING {
+            return None;
+        }
+        if self.budget == 0
+            && let Some(&(hash, levels)) = self.known.get(&address)
+        {
+            return (depth + levels <= MAX_NESTING).then_some((hash, levels));
+        }
+        let hashed = walk(self)?;
+        if self.budget == 0 {
+            self.known.insert(address, hashed);
+        }
+        Some(hashed)
+    }
+
+    fn array(&mut self, items: &[Value<'_>], depth: usize) -> Hashed {
+        self.budget = self.budget.saturating_sub(items.len() + 1);
+        let mut hasher = self.state.build_hasher();
+        hasher.write_u8(7);
+        hasher.write_usize(items.len());
+        let mut levels = 0;
+        for item in items {
+            let (hash, below) = nest(depth + 1, || self.value(item, depth + 1))?;
+            hasher.write_u64(hash);
+            levels = levels.max(below);
+        }
+        Some((hasher.finish(), levels + 1))
+    }
+
+    fn object(&mut self, map: &Map<'_>, depth: usize) -> Hashed {
+        self.budget = self.budget.saturating_sub(map.len() + 1);
+        // Fields are added up, which leaves out their order.
+        let mut fields = 0u64;
+        let mut levels = 0;
+        for (key, value) in map {
+            let (hash, below) = nest(depth + 1, || self.value(value, depth + 1))?;
+            let mut hasher = self.state.build_hasher();
+            hasher.write(key.as_bytes());
+            hasher.write_u64(hash);
+            fields = fields.wrapping_add(hasher.finish());
+            levels = levels.max(below);
+        }
+        let mut hasher = self.state.build_hasher();
+        hasher.write_u8(8);
+        hasher.write_usize(map.len());
+        hasher.write_u64(fields);
+        Some((hasher.finish(), levels + 1))
+    }
 }
 
 /// A value whose JSON text would exceed a size limit, or the nesting limit.

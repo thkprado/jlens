@@ -605,7 +605,8 @@ fn same(a: &JsonValue, b: &JsonValue) -> bool {
 }
 
 /// `value` with the keys of each object where JavaScript puts them: the integer keys first,
-/// ascending, then the others in their order. jlens keeps the order of insertion.
+/// ascending, then the others in their order. jlens keeps the order of insertion. It holds for
+/// arrays and objects that `$string` wrote, in a string or a key.
 fn js_key_order(value: &JsonValue) -> JsonValue {
     match value {
         JsonValue::Array(items) => items.iter().map(js_key_order).collect(),
@@ -614,10 +615,20 @@ fn js_key_order(value: &JsonValue) -> JsonValue {
             fields.sort_by_key(|(key, _)| array_index(key).unwrap_or(u64::MAX));
             fields
                 .into_iter()
-                .map(|(key, value)| (key.clone(), js_key_order(value)))
+                .map(|(key, value)| (js_key_order_written(key), js_key_order(value)))
                 .collect()
         }
+        JsonValue::String(text) => JsonValue::String(js_key_order_written(text)),
         _ => value.clone(),
+    }
+}
+
+/// `text` with the keys of the array or object it writes, if it writes one, as [`js_key_order`]
+/// puts them.
+fn js_key_order_written(text: &str) -> String {
+    match serde_json::from_str::<JsonValue>(text) {
+        Ok(value) if value.is_array() || value.is_object() => js_key_order(&value).to_string(),
+        _ => text.to_owned(),
     }
 }
 
@@ -766,7 +777,7 @@ fn expression(rng: &mut Rng, depth: u32) -> String {
         0 => rng.pick(STEPS).to_owned(),
         _ => format!("({})", e(rng)),
     };
-    match rng.below(23) {
+    match rng.below(24) {
         0..=2 => {
             let l = e(rng);
             let op = rng.pick(OPERATORS);
@@ -814,6 +825,7 @@ fn expression(rng: &mut Rng, depth: u32) -> String {
             let body = unblocked(rng, depth);
             format!("($f := function({params}){{ {body} }}; $f({}))", list(rng))
         }
+        22 => distinct_call(rng, depth),
         _ => constructed(rng, depth),
     }
 }
@@ -861,6 +873,22 @@ fn constructed(rng: &mut Rng, depth: u32) -> String {
             format!("{{{name} := $string({bound}): {read}}}")
         }
     }
+}
+
+/// `$distinct` over an array long enough to leave comparing items one by one: past 16 kept and 8
+/// left. The items repeat, and equal ones may differ in the order of their fields or a zero's sign.
+fn distinct_call(rng: &mut Rng, depth: u32) -> String {
+    let n = 25 + rng.below(40);
+    let m = 17 + rng.below(30);
+    let item = match rng.below(6) {
+        0 => format!("$e % {m}"),
+        1 => format!("'k' & ($e % {m})"),
+        2 => format!("{{'a': $e % {m}, 'b': [$e % 3, 's']}}"),
+        3 => format!("($e % 2 = 0 ? {{'a': $e % {m}, 'b': 1}} : {{'b': 1, 'a': $e % {m}}})"),
+        4 => format!("[$e % {m}, {{'c': ($e % 2 - 0.5) * 0}}]"),
+        _ => expression(rng, depth - 1),
+    };
+    format!("$distinct($map([1..{n}], function($e){{ {item} }}))")
 }
 
 /// One of the given strings, or now and then any expression.
@@ -1008,5 +1036,14 @@ mod tests {
         let ordered = json!([{"1": 3, "2": {"1": 0, "z": 0}, "b": 1, "01": 2, "4294967295": 4}]);
         assert!(same(&js_key_order(&value), &ordered));
         assert!(!same(&value, &ordered));
+    }
+
+    #[test]
+    fn integer_keys_written_by_string_go_first_too() {
+        let written = r#"{"b":1,"2":[{"z":0,"1":0}]}"#;
+        let ordered = r#"{"2":[{"1":0,"z":0}],"b":1}"#;
+        let value = json!({ written: written, "s": "{not json" });
+        let expected = json!({ ordered: ordered, "s": "{not json" });
+        assert!(same(&js_key_order(&value), &expected));
     }
 }

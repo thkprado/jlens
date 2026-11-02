@@ -957,6 +957,25 @@ fn a_level_that_cannot_be_read_fails_the_evaluation() {
     assert_eq!(result.unwrap(), None);
 }
 
+/// `$distinct` reads the items it compares as far as they differ, and of an array past a few
+/// distinct items, all of each: a table of hashes has to.
+#[test]
+fn distinct_reads_items_whole_past_a_few() {
+    for (n, reads) in [(3, false), (32, true)] {
+        let list: Vec<_> = (0..n)
+            .map(|i| json!({"id": i, "bad": {"fails": true}}))
+            .collect();
+        let input = json!({ "list": list });
+        let expr = Expression::compile("$count($distinct(list))").unwrap();
+        let source = JsonSource::root(&input, false);
+        let result = expr.evaluate_source(&source, &Bindings::new(), &Options::default());
+        match reads {
+            false => assert_eq!(result.unwrap(), Some(json!(n))),
+            true => assert_eq!(result.unwrap_err().code(), "U1004"),
+        }
+    }
+}
+
 /// A path step reads one field of an object not read yet, when the source can; the object keeps
 /// it, and reads its level once when it is needed whole (ADR 0010, amendment).
 #[test]
@@ -1695,6 +1714,10 @@ fn deep_values_fail_cleanly() {
             ("$string($)", Err("U1001")),
             ("$clone($)", Err("U1001")),
             ("[$, $] ~> $distinct", Err("U1001")),
+            (
+                "$count($distinct($map([1..40], function($i){ [$i, $] })))",
+                Ok(json!(40)),
+            ),
             ("$arg($)", Err("U1001")),
             ("$.$input()", Err("U1001")),
             ("$count(**)", Err("U1001")),

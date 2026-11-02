@@ -1,11 +1,12 @@
 //! Higher-order, array, object and miscellaneous functions.
 
 use super::{Call, arg, boolean, hof_args, merge_sort, text};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::error::{Error, Result};
 use crate::eval::Evaluator;
-use crate::value::{self, Map, SEQUENCE, Value};
+use crate::value::{self, DeepHasher, Map, SEQUENCE, Value};
 
 type R<'a> = Result<Value<'a>>;
 
@@ -351,10 +352,38 @@ pub(super) fn distinct<'a>(
     if items.len() <= 1 {
         return Ok(arr.clone());
     }
-    let mut out: Vec<Value<'a>> = Vec::new();
-    for v in items.items() {
+    Ok(Value::array(
+        distinct_items(items.items())?,
+        if items.is_sequence() { SEQUENCE } else { 0 },
+    ))
+}
+
+/// With this many items kept, comparing each item with all of them starts to cost more than
+/// hashing it. An array with fewer distinct items than this never pays for a table, however long,
+/// and neither does one with half as many items left, as the table hashes those kept as well.
+const DISTINCT_BY_LIST: usize = 16;
+
+/// The first of each group of equal items, in order.
+fn distinct_items<'a>(items: &[Value<'a>]) -> Result<Vec<Value<'a>>> {
+    let mut out = Vec::new();
+    let mut rest = keep_by_list(&mut out, items, DISTINCT_BY_LIST)?;
+    if out.len() == DISTINCT_BY_LIST && rest.len() > DISTINCT_BY_LIST / 2 {
+        rest = keep_by_hash(&mut out, rest, items.len())?;
+    }
+    keep_by_list(&mut out, rest, usize::MAX)?;
+    Ok(out)
+}
+
+/// Keeps each of `items` that equals no item kept, comparing it with each, until `limit` are
+/// kept. Returns the items left.
+fn keep_by_list<'i, 'a>(
+    out: &mut Vec<Value<'a>>,
+    items: &'i [Value<'a>],
+    limit: usize,
+) -> Result<&'i [Value<'a>]> {
+    for (i, v) in items.iter().enumerate() {
         let mut seen = false;
-        for earlier in &out {
+        for earlier in out.iter() {
             if v.deep_eq(earlier)? {
                 seen = true;
                 break;
@@ -362,12 +391,55 @@ pub(super) fn distinct<'a>(
         }
         if !seen {
             out.push(v.clone());
+            if out.len() == limit {
+                return Ok(&items[i + 1..]);
+            }
         }
     }
-    Ok(Value::array(
-        out,
-        if items.is_sequence() { SEQUENCE } else { 0 },
-    ))
+    Ok(&[])
+}
+
+/// What [`keep_by_list`] does with no limit, comparing each item only with those kept that hash
+/// the same. It stops at a value nested too deep to hash, returning the items from there: whether
+/// comparing that one fails depends on what it meets, which only the list tells.
+fn keep_by_hash<'i, 'a>(
+    out: &mut Vec<Value<'a>>,
+    items: &'i [Value<'a>],
+    all: usize,
+) -> Result<&'i [Value<'a>]> {
+    let mut hasher = DeepHasher::new(all);
+    // The last item kept with each hash, and for each item kept the one before it with its hash.
+    let room = out.len() + items.len().min(3 * out.len());
+    let mut last = HashMap::<u64, usize, foldhash::fast::RandomState>::with_capacity_and_hasher(
+        room,
+        Default::default(),
+    );
+    let mut before = Vec::with_capacity(room);
+    for (i, kept) in out.iter().enumerate() {
+        let Some(hash) = hasher.hash(kept) else {
+            return Ok(items);
+        };
+        before.push(last.insert(hash, i));
+    }
+    for (i, v) in items.iter().enumerate() {
+        let Some(hash) = hasher.hash(v) else {
+            return Ok(&items[i..]);
+        };
+        let mut earlier = last.get(&hash).copied();
+        let mut seen = false;
+        while let Some(kept) = earlier {
+            if v.deep_eq(&out[kept])? {
+                seen = true;
+                break;
+            }
+            earlier = before[kept];
+        }
+        if !seen {
+            before.push(last.insert(hash, out.len()));
+            out.push(v.clone());
+        }
+    }
+    Ok(&[])
 }
 
 pub(super) fn error<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
@@ -427,4 +499,198 @@ pub(super) fn eval<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'
             "D1011" | "D1012" | "U1001" | "U1003" | "U1006" => e.unlocated(),
             _ => Error::new("D3121").with("value", e.message()),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::MAX_NESTING;
+    use proptest::prelude::*;
+    use serde_json::{Value as JsonValue, json};
+
+    fn by_list<'a>(items: &[Value<'a>]) -> Result<Vec<Value<'a>>> {
+        let mut out = Vec::new();
+        keep_by_list(&mut out, items, usize::MAX)?;
+        Ok(out)
+    }
+
+    /// The same values, by identity, the sign of a zero included.
+    fn same<'a>(a: &[Value<'a>], b: &[Value<'a>]) -> bool {
+        a.len() == b.len()
+            && a.iter().zip(b).all(|pair| match pair {
+                (Value::Number(x), Value::Number(y)) => x.to_bits() == y.to_bits(),
+                (x, y) => x.strict_eq(y),
+            })
+    }
+
+    /// What the list and the hash give for `items`, which must agree.
+    fn agree(items: &[Value<'_>]) {
+        match (by_list(items), distinct_items(items)) {
+            (Ok(list), Ok(hash)) => assert!(same(&list, &hash), "different items"),
+            (Err(list), Err(hash)) => assert_eq!(list.code(), hash.code()),
+            (list, hash) => panic!("{:?} and {:?}", list.is_ok(), hash.is_ok()),
+        }
+    }
+
+    fn numbers<'a>(n: usize) -> Vec<Value<'a>> {
+        (0..n).map(|i| Value::Number(i as f64)).collect()
+    }
+
+    /// An array of arrays, `levels` of them.
+    fn deep<'a>(levels: usize) -> Value<'a> {
+        (1..levels).fold(Value::array(Vec::new(), 0), |value, _| {
+            Value::array(vec![value], 0)
+        })
+    }
+
+    /// An object that holds itself, twice.
+    fn cycle<'a>() -> Value<'a> {
+        let value = Value::object(Map::default());
+        let Value::Object(object) = &value else {
+            unreachable!();
+        };
+        for key in ["a", "b"] {
+            object.borrow_mut().insert(Rc::from(key), value.clone());
+        }
+        value
+    }
+
+    fn item() -> impl Strategy<Value = JsonValue> {
+        let leaf = prop_oneof![
+            Just(json!(null)),
+            any::<bool>().prop_map(|b| json!(b)),
+            Just(json!(0.0)),
+            Just(json!(-0.0)),
+            (0..24).prop_map(|n| json!(n)),
+            (0..24).prop_map(|n| json!(format!("s{n}"))),
+        ];
+        leaf.prop_recursive(3, 16, 3, |inner| {
+            prop_oneof![
+                prop::collection::vec(inner.clone(), 0..3).prop_map(JsonValue::Array),
+                prop::collection::vec((0..4, inner), 0..3).prop_map(|fields| {
+                    let fields = fields.into_iter().map(|(k, v)| (format!("k{k}"), v));
+                    JsonValue::Object(fields.collect())
+                }),
+            ]
+        })
+    }
+
+    /// `value` with the fields of each object in the other order and each zero of the other sign.
+    fn mirrored(value: &JsonValue) -> JsonValue {
+        match value {
+            JsonValue::Number(n) if n.as_f64() == Some(0.0) => {
+                let negative = n.as_f64().is_some_and(f64::is_sign_negative);
+                json!(if negative { 0.0 } else { -0.0 })
+            }
+            JsonValue::Array(items) => JsonValue::Array(items.iter().map(mirrored).collect()),
+            JsonValue::Object(fields) => {
+                let fields = fields.iter().rev().map(|(k, v)| (k.clone(), mirrored(v)));
+                JsonValue::Object(fields.collect())
+            }
+            other => other.clone(),
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn the_hash_gives_what_the_list_gives(items in prop::collection::vec(item(), 0..64)) {
+            let items: Vec<Value<'_>> = items.iter().map(Value::from_json).collect();
+            agree(&items);
+        }
+
+        #[test]
+        fn equal_values_hash_the_same(value in item()) {
+            let (one, other) = (Value::from_json(&value), Value::from_json(&mirrored(&value)));
+            prop_assert!(one.deep_eq(&other).unwrap());
+            // With a budget, and past it from the first array, where hashes are remembered.
+            for mut hasher in [DeepHasher::new(1), DeepHasher::new(0)] {
+                prop_assert_eq!(hasher.hash(&one), hasher.hash(&other));
+                prop_assert_eq!(hasher.hash(&one), hasher.hash(&other));
+            }
+        }
+    }
+
+    #[test]
+    fn items_keep_their_order_past_the_table() {
+        let mut items = numbers(1_000);
+        items.extend(numbers(1_000).into_iter().rev());
+        let kept = distinct_items(&items).unwrap();
+        assert!(same(&kept, &numbers(1_000)));
+    }
+
+    /// One array, held twice at each of 200 levels: 2^200 paths, which [`Value::deep_eq`] never
+    /// takes, and neither may the hash.
+    #[test]
+    fn an_array_held_many_times_is_hashed_once() {
+        let shared = (0..200).fold(Value::Null, |value, _| {
+            Value::array(vec![value.clone(), value], 0)
+        });
+        let pair = |i: usize| Value::array(vec![Value::Number(i as f64), shared.clone()], 0);
+        let items: Vec<Value<'_>> = (0..40).chain(0..40).map(pair).collect();
+        assert_eq!(distinct_items(&items).unwrap().len(), 40);
+    }
+
+    #[test]
+    fn hashing_stops_at_the_nesting_limit() {
+        let (fits, too_deep, cycle) = (deep(MAX_NESTING), deep(MAX_NESTING + 1), cycle());
+        for budget in [1, 0] {
+            let mut hasher = DeepHasher::new(budget);
+            assert!(hasher.hash(&fits).is_some());
+            assert!(hasher.hash(&too_deep).is_none());
+            assert!(hasher.hash(&cycle).is_none());
+        }
+    }
+
+    /// A hash remembered is good at the level it was walked from, not at any level.
+    #[test]
+    fn a_remembered_array_counts_its_levels() {
+        let inner = deep(MAX_NESTING);
+        let mut hasher = DeepHasher::new(0);
+        assert!(hasher.hash(&inner).is_some());
+        assert!(hasher.hash(&inner).is_some());
+        assert!(hasher.hash(&Value::array(vec![inner], 0)).is_none());
+    }
+
+    /// Whether comparing a value too deep fails depends on what it meets, as in the list.
+    #[test]
+    fn a_value_too_deep_goes_back_to_the_list() {
+        let too_deep = || deep(MAX_NESTING + 2);
+        let with = |extra: Vec<Value<'static>>| {
+            let mut items = numbers(40);
+            items.extend(extra);
+            items.extend(numbers(50));
+            items
+        };
+        // Alone among numbers, it compares with nothing that fails.
+        let once = with(vec![too_deep()]);
+        assert_eq!(distinct_items(&once).unwrap().len(), 51);
+        agree(&once);
+        // Held twice, it is one value.
+        let shared = too_deep();
+        let twice = with(vec![shared.clone(), shared]);
+        assert_eq!(distinct_items(&twice).unwrap().len(), 51);
+        agree(&twice);
+        // Two of them cannot be compared.
+        let two = with(vec![too_deep(), too_deep()]);
+        assert_eq!(distinct_items(&two).unwrap_err().code(), "U1001");
+        agree(&two);
+        // The same among the items kept by the list.
+        let mut first = vec![too_deep()];
+        first.extend(numbers(40));
+        assert_eq!(distinct_items(&first).unwrap().len(), 41);
+        agree(&first);
+    }
+
+    #[test]
+    fn cycles_go_back_to_the_list() {
+        let shared = cycle();
+        let mut items = numbers(40);
+        items.extend([shared.clone(), shared]);
+        assert_eq!(distinct_items(&items).unwrap().len(), 41);
+        agree(&items);
+        let mut items = numbers(40);
+        items.extend([cycle(), cycle()]);
+        assert_eq!(distinct_items(&items).unwrap_err().code(), "U1001");
+        agree(&items);
+    }
 }

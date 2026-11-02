@@ -1417,6 +1417,31 @@ fn a_negative_limit_is_checked_before_a_missing_pattern() {
     assert_eq!(eval("$replace('abc', nothing, 'x', 1)", json!(null)), None);
 }
 
+/// Past the items compared one by one, each kind of value keeps what `=` tells apart: functions
+/// by identity, numbers by value, whatever the order of an object's fields.
+#[test]
+fn distinct_past_a_few_items_compares_as_equality_does() {
+    for (source, expected) in [
+        ("$distinct($append([1..40], [1..40]))[-1]", json!(40)),
+        (
+            "($f := function($x){ $x }; $g := function($x){ $x };
+              $count($distinct([1..40, $f, $g, $f, $g])))",
+            json!(42),
+        ),
+        (
+            "$count($distinct($map([1..40], function($i){
+              $i % 2 = 0 ? {'a': $i % 20, 'b': 1} : {'b': 1, 'a': $i % 20} })))",
+            json!(20),
+        ),
+        (
+            "$count($distinct($map([1..40], function($i){ 0 * ($i % 2 - 0.5) })))",
+            json!(1),
+        ),
+    ] {
+        assert_eq!(eval(source, json!(null)), Some(expected), "{source}");
+    }
+}
+
 #[test]
 fn a_builtin_is_one_value_per_evaluation() {
     assert_eq!(eval("$sum = $sum", json!(null)), Some(json!(true)));
