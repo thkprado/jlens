@@ -941,8 +941,10 @@ matches. On words in Portuguese, Greek, Japanese and English (`/\w+/` for `$matc
 | 320 KB | `$split` | 33,182 | 19.2 s | 36.7 ms | 6.79 ms |
 
 The time is now that of the matches, 1.1 to 1.6 µs each at every size, against 0.2 to 0.4 µs in
-jsonata-js: each match starts the backtracker again, with its stacks, and builds an object of
-five fields.
+jsonata-js. The search is little of it: `find_from` for each match takes 105 ns for `\w+` and
+70 ns for `\s`, where an iterator that keeps its backtracker takes 30 and 35 ns. The rest is
+outside the engine: an object of five fields for each match, with its keys, strings and `next`,
+and the call of that `next`. 0.27 #11 takes that on.
 
 The workload has a case of this now, `regex over a long text`, `$replace` on 20 KB. `cargo xtask
 ab` against the code before, five rounds: 55.1 → 2.07 ms with `evaluate` and 55.2 → 2.05 ms
