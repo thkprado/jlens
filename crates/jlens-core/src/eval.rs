@@ -24,7 +24,7 @@ use crate::regex::Regex;
 use crate::signature::Signature;
 use crate::value::{
     self, CONS, Function, KEEP_SINGLETON, Lambda, Map, OUTER_WRAPPER, Object, SEQUENCE, Shared,
-    TUPLE_STREAM, Value,
+    TUPLE_STREAM, Text, Value,
 };
 
 /// The variables a frame holds in a list; one more moves them to a table.
@@ -1612,11 +1612,21 @@ impl<'a> Evaluator<'_, 'a> {
             }),
             BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => comparison(&lhs, &rhs, op),
             BinaryOp::Concat => {
+                // A string side is taken as it is, so that a long result holds both sides
+                // instead of a copy (`Text::join`).
                 let limit = self.limits.max_string_length;
-                let l = functions::to_string(&lhs, false, limit)?.unwrap_or_default();
-                let r = functions::to_string(&rhs, false, limit)?.unwrap_or_default();
+                let side = |v: Value<'a>| -> Result<Text> {
+                    Ok(match v {
+                        Value::String(s) => s,
+                        v => functions::to_string(&v, false, limit)?
+                            .map(Text::from)
+                            .unwrap_or_default(),
+                    })
+                };
+                let l = side(lhs)?;
+                let r = side(rhs)?;
                 self.check_string(l.len() + r.len())
-                    .map(|()| Value::string(l + &r))
+                    .map(|()| Value::String(Text::join(l, r)))
             }
             BinaryOp::Range => range(&lhs, &rhs).and_then(|v| self.check_size(v)),
             // The items are compared where they are: a copy of the list, for each item of a
@@ -1720,7 +1730,7 @@ impl<'a> Evaluator<'_, 'a> {
                     None => match self.eval(key_expr, &context, &frame)? {
                         Value::Undefined => continue,
                         Value::String(s) => {
-                            evaluated = Some(s);
+                            evaluated = Some(s.into_rc());
                             evaluated.as_deref().unwrap_or_default()
                         }
                         other => return Err(err_at("T1003", expr).with_value("value", &other)),
@@ -1781,7 +1791,7 @@ impl<'a> Evaluator<'_, 'a> {
                 }
                 None => match self.eval(key_expr, &item, env)? {
                     Value::Undefined => continue,
-                    Value::String(s) => s,
+                    Value::String(s) => s.into_rc(),
                     other => return Err(err_at("T1003", expr).with_value("value", &other)),
                 },
             };
@@ -2097,7 +2107,7 @@ impl<'a> Evaluator<'_, 'a> {
                     }
                     _ => crate::regex::Offset::START,
                 };
-                crate::regex::exec(self, re, &text, from)
+                crate::regex::exec(self, re, &text.into_rc(), from)
             }
             Function::RegexNext { re, text, last } => crate::regex::next(self, re, text, *last),
         }

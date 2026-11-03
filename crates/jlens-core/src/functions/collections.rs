@@ -143,7 +143,7 @@ pub(super) fn sift<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'
         let args = hof_args(
             &func,
             value.clone(),
-            Value::String(key.clone()),
+            Value::string(key.clone()),
             obj.clone(),
         );
         if boolean(&call(ev, &func, args, c)?)? == Some(true) {
@@ -268,7 +268,7 @@ pub(super) fn each<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'
     let func = arg(&a, 1);
     let mut out = Vec::new();
     for (key, value) in entries(&obj) {
-        let args = hof_args(&func, value, Value::String(key.clone()), obj.clone());
+        let args = hof_args(&func, value, Value::string(key.clone()), obj.clone());
         let res = call(ev, &func, args, c)?;
         if !res.is_undefined() {
             out.push(res);

@@ -25,6 +25,7 @@ use crate::host::HostFunction;
 use crate::output::Builder;
 use crate::reads::Read as Needed;
 use crate::regex::{Offset, Regex};
+pub(crate) use crate::text::Text;
 
 /// The fields of an object, in insertion order. Keys are shared: the objects of a converted
 /// document that have the same key point to one string (see [`Keys`]).
@@ -208,7 +209,7 @@ pub(crate) enum Value<'a> {
     Null,
     Bool(bool),
     Number(f64),
-    String(Rc<str>),
+    String(Text),
     Array(Rc<Array<'a>>),
     Object(Rc<Object<'a>>),
     Function(Rc<Function<'a>>),
@@ -660,7 +661,23 @@ impl Drop for Array<'_> {
             Some(lazy) => lazy.take(),
             None => Vec::new(),
         };
-        if !self.items.iter().chain(&lazy).any(owned) {
+        // One pass: whether an item holds an array or object that only it holds, and whether
+        // every item is a scalar, which needs no drop.
+        let (mut scalars, mut nested) = (true, false);
+        for item in self.items.iter().chain(&lazy) {
+            match item {
+                Value::Undefined | Value::Null | Value::Bool(_) | Value::Number(_) => {}
+                item if owned(item) => {
+                    nested = true;
+                    break;
+                }
+                _ => scalars = false,
+            }
+        }
+        if !nested {
+            if scalars {
+                forget_scalars(std::mem::take(&mut self.items));
+            }
             return;
         }
         let items = std::mem::take(&mut self.items);
@@ -693,6 +710,18 @@ impl Drop for Object<'_> {
     }
 }
 
+/// Frees a list of scalars without dropping each. The compiler's drop of a `Value` stopped
+/// being inlined into the drop of a list of them when a string could be [`Text::Joined`], so
+/// that each item of a dropped array was a call, numbers included: about 10% of
+/// `$sum(items.quantity)` under Linux (0.27 #16).
+fn forget_scalars(items: Vec<Value<'_>>) {
+    debug_assert!(items.iter().all(|v| matches!(
+        v,
+        Value::Undefined | Value::Null | Value::Bool(_) | Value::Number(_)
+    )));
+    // A scalar holds nothing to drop, so forgetting it frees what dropping it would.
+    items.into_iter().for_each(std::mem::forget);
+}
 /// Whether a value is an array or object that nothing else holds, which dropping it drops.
 fn owned(v: &Value<'_>) -> bool {
     match v {
@@ -834,7 +863,7 @@ impl<'a> Function<'a> {
 }
 
 impl<'a> Value<'a> {
-    pub fn string(s: impl Into<Rc<str>>) -> Value<'a> {
+    pub fn string(s: impl Into<Text>) -> Value<'a> {
         Value::String(s.into())
     }
 
@@ -1905,6 +1934,7 @@ pub(crate) fn write_scalar(hasher: &mut impl Hasher, value: &Value<'_>, string: 
             hasher.write_u64(if *n == 0.0 { 0 } else { n.to_bits() });
         }
         Value::String(s) => {
+            let s: &str = s;
             hasher.write_u8(5);
             if s.len() > string {
                 hasher.write_usize(s.len());

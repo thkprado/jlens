@@ -2343,6 +2343,63 @@ proptest! {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2000))]
+
+    /// A string grown by `&` in a loop, on either side, around itself, and read as it grows or
+    /// only at the end, is the text that a copy at each step gives, lazily and against a
+    /// document, with and without a limit on its length.
+    #[test]
+    fn strings_joined_in_a_loop_are_their_copies(
+        steps in prop::collection::vec(
+            (
+                prop::sample::select(&["", "a", "é", "😀", "abcdefgh", "ü😀x"][..]),
+                0..80usize,
+                0..3u8,
+                any::<bool>(),
+            ),
+            0..60,
+        ),
+        limit in prop::option::of(100..4000usize),
+    ) {
+        let mut model = String::new();
+        let mut pieces = Vec::new();
+        for (piece, times, side, read) in steps {
+            let text = piece.repeat(times);
+            // Around itself doubles the text, so only while it is short.
+            let side = if side == 2 && model.len() > 2_000 { 0 } else { side };
+            model = match side {
+                0 => format!("{model}{text}"),
+                1 => format!("{text}{model}"),
+                _ => format!("{model}{text}{model}"),
+            };
+            pieces.push(json!({ "text": text, "side": side, "read": read }));
+        }
+        let expr = Expression::compile(
+            "$reduce(pieces, function($a, $p){ (
+                $s := $p.side = 0 ? $a & $p.text : $p.side = 1 ? $p.text & $a : $a & $p.text & $a;
+                $p.read ? ($length($s); $s) : $s
+            ) }, '')",
+        )
+        .unwrap();
+        let input = json!({ "pieces": pieces });
+        let mut options = Options::new();
+        if let Some(limit) = limit {
+            options = options.max_string_length(limit);
+        }
+        let lazily = outcome(expr.evaluate_with(Some(&input), &Bindings::new(), &options));
+        let document = Document::new(&input);
+        let against = expr.evaluate_document(&document, &Bindings::new(), &options);
+        let expected = if limit.is_some_and(|limit| model.len() > limit) {
+            Some("U1001".to_owned())
+        } else {
+            outcome(Ok(Some(json!(model))))
+        };
+        prop_assert_eq!(&lazily, &expected);
+        prop_assert_eq!(outcome(against), expected);
+    }
+}
+
 /// A regex literal's searches inside `$match`, `$split`, `$replace` and `$contains` stop on a
 /// timeout, a cancellation token and a step limit, as the matcher called back did.
 #[test]

@@ -410,7 +410,7 @@ pub(super) fn format_number<'a>(
     let Some(value) = num(&a, 0) else {
         return Ok(Value::Undefined);
     };
-    let picture = text(&a, 1).unwrap_or_default();
+    let picture = text(&a, 1).unwrap_or_default().into_rc();
     let mut p = Props::default();
     if let Value::Object(options) = arg(&a, 2) {
         for (key, v) in options.borrow().iter() {

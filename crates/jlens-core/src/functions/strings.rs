@@ -5,13 +5,12 @@
 //! matchers (`$match`, regex literals) are UTF-16 offsets, as in jsonata-js.
 
 use std::borrow::Cow;
-use std::rc::Rc;
 
 use super::{Call, arg, num, text};
 use crate::error::{Error, Result};
 use crate::eval::Evaluator;
 use crate::regex::{self, Matches, Offset};
-use crate::value::{Map, Value};
+use crate::value::{Map, Text, Value};
 
 type R<'a> = Result<Value<'a>>;
 
@@ -248,7 +247,7 @@ pub(super) fn pad<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_,
     };
     let fill = text(&a, 2)
         .filter(|c| !c.is_empty())
-        .unwrap_or_else(|| Rc::from(" "));
+        .unwrap_or_else(|| Text::from(" "));
     let width = num(&a, 1).unwrap_or(0.0).trunc();
     let pad_length = width.abs() - s.chars().count() as f64;
     if pad_length <= 0.0 {

@@ -60,6 +60,12 @@ All notable changes are recorded here. The format follows
   against a `Document`, where it took 745 µs; a call at each place of a text of 64,000 characters
   166 ms in all, where it took 70 s. A negative start or a length that is not a whole number
   still counts the text's characters, without the list.
+- `&` takes time linear in what it builds when a loop grows a string: a result of 256 bytes or
+  more holds its two sides, and is made into one text, once, when something reads it, where each
+  `&` copied both. A short piece added to such a string goes into the short text next to it, so
+  that a string holds a node for each 256 bytes or so, not one for each piece.
+  `$reduce(strs, function($a, $b){ $a & $b }, '')` over 64,000 short strings takes 31 ms, where it
+  took 1,062 ms. A short `&` copies its sides once, where it copied them three times.
 
 ### Fixed
 

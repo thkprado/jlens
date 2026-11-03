@@ -44,3 +44,32 @@ enum Value {
   covered by a dedicated test.
 - Input is converted once from `serde_json::Value` at the start of an evaluation. If profiling
   shows that this conversion dominates, a borrowed view of the input can be introduced later.
+
+## Amendment: a string can be two strings joined (0.27)
+
+A string is a `Text`: a text, `Rc<str>`, or two strings that `&` joined and nothing has read yet,
+`Rc<Joined>`. `&` copied both sides at each call, so a loop that grows a string with it, such as
+`$reduce(strs, function($a, $b){ $a & $b }, '')`, took time growing with the square of the
+string: 64,000 short strings took 1.06 s, where jsonata-js, whose strings are V8's ropes, took
+99 ms. Appending in place was the other candidate. It needs the left side to be the only
+reference to its string, which a loop never has, since the lambda's frame holds `$a` while its
+body reads it.
+
+- A result of `&` of 256 bytes or more holds both sides. Its text is made the first time
+  something reads it, walking the nodes with a stack of its own, and the sides are then
+  dropped, so that a loop that reads each string it grows does not keep every one of them.
+- A side shorter than 256 bytes goes into the short text next to it, `(a & b) & c` being
+  `a & (b & c)`, so that a loop of short pieces holds a node for each 256 bytes or so, not one
+  for each piece. Without that, adding single bytes up to the limit of a string's length would
+  have held about 88 bytes of nodes for each byte.
+- Dropping the nodes keeps a stack of its own too, as a loop makes them as deep as its count.
+- `Text` is two words, like `Rc<str>`: its second kind sits where `Rc<str>`'s pointer cannot be
+  null. `Value` stays three words. What reads a string pays one test of that kind; what takes
+  it as a key of an object or as the text of a regex makes its text.
+
+The compiler's drop of a `Value` grew with the second kind, and stopped being inlined into the
+drop of a list of values, which made each item of a dropped array a call: `$sum(items.quantity)`
+against a `Document` took 10% longer under Linux. An array of scalars is now freed without a
+drop for each item, which took that away. An array of objects or strings still makes the call
+for each item: dropping them by hand cost the index into 10,000 items as much as it gained
+`$distinct`, so it was left (performance page, 0.27 #16).

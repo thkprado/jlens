@@ -53,6 +53,7 @@ pub mod reads;
 mod regex;
 pub mod signature;
 pub mod stack;
+mod text;
 mod value;
 
 pub use annotation::Annotation;

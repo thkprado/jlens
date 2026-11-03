@@ -94,7 +94,7 @@ pub(crate) fn num<'a>(args: &[Value<'a>], i: usize) -> Option<f64> {
     args.get(i).and_then(Value::as_number)
 }
 
-pub(crate) fn text<'a>(args: &[Value<'a>], i: usize) -> Option<std::rc::Rc<str>> {
+pub(crate) fn text<'a>(args: &[Value<'a>], i: usize) -> Option<crate::value::Text> {
     match args.get(i) {
         Some(Value::String(s)) => Some(s.clone()),
         _ => None,

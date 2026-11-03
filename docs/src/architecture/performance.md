@@ -1666,7 +1666,7 @@ Fixed by the sweep, at 64,000 items with `evaluate`:
 Left to rows of their own: `$substring` collected the characters of its whole text at each call,
 0.78 ms on 640 KB, so that a call at each place of a text is quadratic, as it is in jsonata-js
 (0.27 #15, [below](#substring-027-15)); `&` in a `$reduce` copies the string it grows, 1.42 s for 64,000 short strings where
-jsonata-js, whose strings are ropes, takes 110 ms (#16); the URL functions take 5 to 12 times
+jsonata-js, whose strings are ropes, takes 110 ms (#16, [below](#-in-a-loop-027-16)); the URL functions take 5 to 12 times
 jsonata-js's time, linearly (#17).
 
 What stays:
@@ -1720,6 +1720,59 @@ engine, as each walks to its place: at 16,000 items, 19.3 ms against a `Document
 jsonata-js, which reads the whole text at each call, takes 24.2 s. `cargo xtask ab` on the workload, which calls no `$substring`: `strings`
 −0.2%, the rest −1.2 to +2.7% but `recursion` +3.4%, and built aligned +1.3%, the others within
 ±0.3%.
+
+### `&` in a loop (0.27 #16)
+
+`&` copied both of its sides into a new string at each call, so that a loop that grows a string
+with it copied all it had built at each step. Appending in place, the candidate the row named,
+needs the left side to be the only reference to its string, which it never is in such a loop:
+the lambda's frame holds `$a` while its body reads it. So a long result of `&` now holds its two
+sides, and makes its text once, the first time something reads it, as V8's ropes do
+([ADR 0003](../adr/0003-value-model.md#amendment-a-string-can-be-two-strings-joined-027)). A
+short side goes into the short text next to it, so that a loop of short pieces holds a node for
+each 256 bytes or so, not one of about 88 bytes for each piece. That folding costs a little,
+copying up to 256 bytes at a step: `$a & $b` over 64,000 strings takes 31 ms with it, 24 ms
+without.
+
+`cargo xtask growth --case '$reduce with &'`, at 64,000 strings of a few bytes, with `evaluate`
+and against a `Document`:
+
+| Case | Before | After | jsonata-js |
+|---|---:|---:|---:|
+| `$reduce(strs, function($a, $b){ $a & $b }, '')` | 1,062 / 1,419 ms | 31.4 / 28.3 ms | 99.4 ms |
+| the same, `$b & $a` | 1,011 / 1,072 ms | 31.9 / 28.3 ms | 100 ms |
+| `$a & $r.key & $r.val` over records | 9,361 / 9,285 ms | 84.5 / 84.0 ms | 347 ms |
+
+The exponents went from 1.8 to 2.6 to 1.0 to 1.1, and the case lost its mark of shapes quadratic
+in any engine. A loop that reads the string at each step still copies it at each step, as it
+does in jsonata-js. Tests: a property test grows strings on either side, around themselves, read
+at some steps and not others, with and without a limit on their length, lazily and against a
+`Document`, against a copy at each step; walking the parts in the wrong order fails it. Two
+unit tests hold 100,000 nodes, read and dropped with no recursion, which a recursive drop
+overflows, and count a node for each 256 bytes of short pieces.
+
+What it cost elsewhere, found by `ab`. Each read of a string tests which kind it is: `$distinct`
+over objects read +5.4% against a `Document`, as comparing and hashing their fields tested both
+sides each time; equality now takes two texts first, which brought it to +0.3%. The compiler's
+drop of a `Value` grew with the second kind, and stopped being inlined into the drop of a list
+of values, so that each item of a dropped array became a call: `$sum(items.quantity)` against a
+`Document` read +4.6% on Windows and +10.1% under Linux, where `perf` put the call under the
+drop of the array of numbers. An array whose items are all scalars is now freed without a drop
+for each, which brought it to −3.2% and +0.2%. Dropping the items of other arrays by hand, each
+by the drop of what it holds, took `$distinct`'s result back to +3.1% under Linux but cost
+`items[0].code` over 10,000 items +4.0 to +4.6%, and was dropped; so under Linux, against a
+`Document`, `distinct items` stays +5.7% (13.2 → 13.9 µs), the one case past the floor.
+
+`cargo xtask ab` against the code before, ten rounds, the workload's other cases:
+
+| Mode | Windows | Linux |
+|---|---|---|
+| `evaluate` | `strings` −6.0%, `sort + map` −5.0%, `recursion` −2.6%, the rest −1.7 to +0.9% | `strings` −5.4%, `sort + map` −3.0%, the rest −1.1 to +3.1% |
+| `document` | `strings` −7.1%, `sort + map` −4.3%, `names over items` −3.2%, the rest −2.7 to +1.7% | `strings` −9.9%, `distinct items` +5.7%, `path` +4.1% (−1.2 to +4.1% over five runs), the rest −2.2 to +2.8% |
+| `source` | `strings` −4.6%, `sort + map` −4.9%, the rest −2.7 to +0.7% | `sort + map` −1.9%, `strings` −1.6%, the rest −1.3 to +2.9% |
+
+`strings` gains as `&` no longer copies its sides three times, into a `String`, into a longer
+one and into the `Rc<str>`: a short result is made once.
 
 ## 0.26 against 0.25.0
 
