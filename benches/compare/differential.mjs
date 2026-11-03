@@ -55,7 +55,10 @@ if (isMainThread) {
         // would be unhandled and end the runner.
         worker.on("error", () => {});
         worker.terminate();
-        outcomes.push({ hung: true });
+        // A worker can fail, or be slow to exit, after its last outcome: no case is left to hang.
+        if (outcomes.length < cases.length) {
+          outcomes.push({ hung: true });
+        }
         resolve();
       };
       worker.on("message", (outcome) => {

@@ -91,12 +91,12 @@ pub fn run(args: &[String]) -> Result<()> {
         .status()
         .context("running node (Node.js 20+ is needed)")?;
     if !status.success() {
-        bail!("the jsonata-js runner failed: {status}");
+        bail!("the jsonata-js runner failed: {status} (seed {seed})");
     }
     let mut reference: Vec<JsonValue> = serde_json::from_str(&fs::read_to_string(&outcomes_path)?)?;
     if reference.len() != cases.len() {
         bail!(
-            "the jsonata-js runner wrote {} outcomes for {} cases",
+            "the jsonata-js runner wrote {} outcomes for {} cases (seed {seed})",
             reference.len(),
             cases.len()
         );
