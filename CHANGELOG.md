@@ -48,6 +48,12 @@ All notable changes are recorded here. The format follows
   each tuple allocated its own, builds no list for a step's result that is not an array, and makes
   the frame of a tuple at its size. Over 200 items, a third fewer allocations, and 8 to 12% less
   time.
+- `$match`, `$replace`, `$split` and `$contains` with a regular expression literal run its
+  searches themselves, where they built a match object for each match and called its `next()`.
+  Each match of `$replace` with a replacement string and of `$split` takes about 0.22 µs, where it
+  took 1.3 to 1.5 µs, and of `$match` 0.70 µs, where it took 1.8 µs; a function as the replacement
+  is still given the match object, whose keys are now made once, 1.14 µs, where it took 1.48 µs.
+  Results, errors, limits and the steps counted do not change.
 
 ### Fixed
 

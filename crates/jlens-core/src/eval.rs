@@ -1956,6 +1956,19 @@ impl<'a> Evaluator<'_, 'a> {
         result
     }
 
+    /// The checks and the step of a function called back, with no function: for a built-in that
+    /// runs a regex literal's matches itself where it would call the matcher back for each
+    /// (`regex::Matches`), so that the limits and the step count stay what they were.
+    pub(crate) fn callback_step(&mut self) -> Result<()> {
+        if crate::stack::exhausted() {
+            return Err(Error::new("D1011").with("value", self.depth));
+        }
+        self.depth += 1;
+        let result = self.guardrails();
+        self.depth -= 1;
+        result
+    }
+
     /// Applies a function, running tail-call thunks in a loop (the trampoline).
     pub(crate) fn apply(
         &mut self,

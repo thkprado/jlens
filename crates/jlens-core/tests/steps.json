@@ -62,8 +62,18 @@
       ]
     },
     {
-      "note": "A regular expression is a function too, called back for each search: three that find an \"a\" and one that finds none.",
-      "counts": [["$replace(\"banana\", /a/, function($m){ \"o\" })", 15]]
+      "note": "A regular expression is a function too, called back for each search: three that find an \"a\" and one that finds none. A function that runs a regex literal's searches itself counts them the same, with the search past a limit.",
+      "counts": [
+        ["$replace(\"banana\", /a/, function($m){ \"o\" })", 15],
+        ["$replace(\"banana\", /a/, \"[$0]\")", 9],
+        ["$replace(\"banana\", /a/, \"o\", 2)", 9],
+        ["$match(\"banana\", /a(n)?/)", 8],
+        ["$match(\"banana\", /a/, 2)", 8],
+        ["$split(\"b😀n😀n😀\", /😀/)", 8],
+        ["$split(\"banana\", /a/, 1)", 7],
+        ["$contains(\"banana\", /n/)", 5],
+        ["$contains(\"banana\", /x/)", 5]
+      ]
     },
     {
       "note": "The text `$eval` evaluates spends the same budget.",

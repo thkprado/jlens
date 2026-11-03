@@ -10,7 +10,7 @@ use std::rc::Rc;
 use super::{Call, arg, num, text};
 use crate::error::{Error, Result};
 use crate::eval::Evaluator;
-use crate::regex::Offset;
+use crate::regex::{self, Matches, Offset};
 use crate::value::{Map, Value};
 
 type R<'a> = Result<Value<'a>>;
@@ -272,6 +272,9 @@ pub(super) fn contains<'a>(
     let (Some(s), token) = (text(&a, 0), arg(&a, 1)) else {
         return Ok(Value::Undefined);
     };
+    if let Some(re) = regex::literal(&token) {
+        return Ok(Value::Bool(Matches::new(re, &s).next(ev)?.is_some()));
+    }
     Ok(match token {
         Value::Undefined => Value::Undefined,
         Value::String(t) => Value::Bool(s.contains(t.as_ref())),
@@ -298,8 +301,28 @@ pub(super) fn match_<'a>(
     };
     let limit = check_limit(&a, 2, "D3040", 3)?;
     let mut out = Vec::new();
-    if limit.is_none_or(|l| l > 0.0) {
-        let mut matches = evaluate_matcher(ev, &arg(&a, 1), Value::String(s), call)?;
+    let matcher = arg(&a, 1);
+    if let Some(re) = regex::literal(&matcher)
+        && limit.is_none_or(|l| l > 0.0)
+    {
+        // The loop of the general path below, without a match object for each match.
+        let keys = &re.keys;
+        let mut matches = Matches::new(re, &s);
+        let mut found = matches.next(ev)?;
+        let mut count = 0.0;
+        while let Some(f) = found.take()
+            && limit.is_none_or(|l| count < l)
+        {
+            let mut m = Map::with_capacity_and_hasher(3, Default::default());
+            m.insert(keys.match_.clone(), Value::string(f.matched(&s)));
+            m.insert(keys.index.clone(), Value::Number(f.start.utf16 as f64));
+            m.insert(keys.groups.clone(), Value::array(f.group_values(&s), 0));
+            out.push(Value::object(m));
+            found = matches.next(ev)?;
+            count += 1.0;
+        }
+    } else if limit.is_none_or(|l| l > 0.0) {
+        let mut matches = evaluate_matcher(ev, &matcher, Value::String(s), call)?;
         let mut count = 0.0;
         while !matches.is_undefined() && limit.is_none_or(|l| count < l) {
             let mut m = Map::default();
@@ -314,30 +337,33 @@ pub(super) fn match_<'a>(
     Ok(Value::sequence(out))
 }
 
-/// Expands `$0`, `$1`, ... and `$$` in a replacement string (jsonata-js `replace`).
-fn substitute<'a>(replacement: &str, matched: &Value<'a>) -> String {
-    let group_count = match field(matched, "groups") {
-        Value::Array(g) => g.items().len(),
-        _ => 0,
-    };
-    let whole = field(matched, "match");
-    let chars: Vec<char> = replacement.chars().collect();
-    let mut out = String::new();
+/// Expands `$0`, `$1`, ... and `$$` in a replacement string into `out` (jsonata-js `replace`):
+/// `whole` is the text matched, `group_count` the number of groups and `group(i)` group `i`,
+/// counted from 0, when it is a string.
+fn substitute<'g>(
+    out: &mut String,
+    replacement: &str,
+    whole: Option<&str>,
+    group_count: usize,
+    group: impl Fn(usize) -> Option<&'g str>,
+) {
+    // `$` and digits are ASCII, so the text is walked by bytes and cut only beside them.
+    let bytes = replacement.as_bytes();
     let mut position = 0;
-    while position < chars.len() {
-        let Some(offset) = chars[position..].iter().position(|&c| c == '$') else {
+    while position < bytes.len() {
+        let Some(offset) = bytes[position..].iter().position(|&c| c == b'$') else {
             break;
         };
         let index = position + offset;
-        out.extend(&chars[position..index]);
+        out.push_str(&replacement[position..index]);
         position = index + 1;
-        match chars.get(position) {
-            Some('$') => {
+        match bytes.get(position) {
+            Some(b'$') => {
                 out.push('$');
                 position += 1;
             }
-            Some('0') => {
-                if let Value::String(m) = &whole {
+            Some(b'0') => {
+                if let Some(m) = whole {
                     out.push_str(m);
                 }
                 position += 1;
@@ -349,12 +375,12 @@ fn substitute<'a>(replacement: &str, matched: &Value<'a>) -> String {
                     (group_count as f64).log10().floor() as usize + 1
                 };
                 let parse = |n: usize| -> Option<usize> {
-                    let digits: String = chars[position..]
+                    let digits = bytes[position..]
                         .iter()
                         .take(n)
                         .take_while(|c| c.is_ascii_digit())
-                        .collect();
-                    digits.parse().ok()
+                        .count();
+                    replacement[position..position + digits].parse().ok()
                 };
                 let mut idx = parse(max_digits);
                 if max_digits > 1 && idx.is_some_and(|i| i > group_count) {
@@ -364,12 +390,9 @@ fn substitute<'a>(replacement: &str, matched: &Value<'a>) -> String {
                     Some(i) => {
                         if group_count > 0
                             && i >= 1
-                            && let Value::String(sub) = field(matched, "groups")
-                                .as_array()
-                                .and_then(|g| g.items().get(i - 1).cloned())
-                                .unwrap_or_default()
+                            && let Some(sub) = group(i - 1)
                         {
-                            out.push_str(&sub);
+                            out.push_str(sub);
                         }
                         position += i.to_string().len();
                     }
@@ -378,10 +401,22 @@ fn substitute<'a>(replacement: &str, matched: &Value<'a>) -> String {
             }
         }
     }
-    if position < chars.len() {
-        out.extend(&chars[position..]);
+    if position < bytes.len() {
+        out.push_str(&replacement[position..]);
     }
-    out
+}
+
+/// [`substitute`] for a match object.
+fn substitute_object<'a>(out: &mut String, replacement: &str, matched: &Value<'a>) {
+    let groups = field(matched, "groups");
+    let groups: &[Value<'a>] = match &groups {
+        Value::Array(g) => g.items(),
+        _ => &[],
+    };
+    let whole = field(matched, "match");
+    substitute(out, replacement, whole.as_str(), groups.len(), |i| {
+        groups.get(i).and_then(Value::as_str)
+    });
 }
 
 pub(super) fn replace<'a>(
@@ -424,6 +459,30 @@ pub(super) fn replace<'a>(
         return Ok(Value::string(result));
     }
 
+    // A regex literal with a replacement string: the loop below, without a match object for each
+    // match. A function as the replacement is given the match object, so it takes that loop.
+    if let (Some(re), Value::String(r)) = (regex::literal(&pattern), &replacement) {
+        let mut matches = Matches::new(re, &s);
+        let mut found = matches.next(ev)?;
+        if found.is_none() {
+            return Ok(Value::String(s));
+        }
+        let mut position = Offset::START;
+        while let Some(f) = found.take()
+            && limit.is_none_or(|l| count < l)
+        {
+            result.push_str(&s[position.byte..f.start.byte]);
+            substitute(&mut result, r, Some(f.matched(&s)), f.groups.len(), |i| {
+                f.group(&s, i)
+            });
+            position = f.end;
+            count += 1.0;
+            found = matches.next(ev)?;
+        }
+        result.push_str(&s[position.byte..]);
+        return Ok(Value::string(result));
+    }
+
     let mut matches = evaluate_matcher(ev, &pattern, Value::String(s.clone()), call)?;
     if matches.is_undefined() {
         return Ok(Value::String(s));
@@ -433,19 +492,18 @@ pub(super) fn replace<'a>(
     while !matches.is_undefined() && limit.is_none_or(|l| count < l) {
         let start = field_usize(&matches, "start");
         result.push_str(&slicer.slice(position, Some(start)));
-        let replaced = match &replacement {
-            Value::String(r) => Value::string(substitute(r, &matches)),
-            func => ev.callback(func, vec![matches.clone()], call.env)?,
-        };
-        match replaced {
-            Value::String(r) => result.push_str(&r),
-            other => {
-                let mut err = Error::new("D3012");
-                if let Some(v) = other.to_json_detail() {
-                    err = err.with("value", v);
+        match &replacement {
+            Value::String(r) => substitute_object(&mut result, r, &matches),
+            func => match ev.callback(func, vec![matches.clone()], call.env)? {
+                Value::String(r) => result.push_str(&r),
+                other => {
+                    let mut err = Error::new("D3012");
+                    if let Some(v) = other.to_json_detail() {
+                        err = err.with("value", v);
+                    }
+                    return Err(err);
                 }
-                return Err(err);
-            }
+            },
         }
         let matched_len = field(&matches, "match").as_str().map_or(0, utf16_len);
         position = start + matched_len;
@@ -479,6 +537,27 @@ pub(super) fn split<'a>(
             };
             let max = limit.map_or(usize::MAX, |l| l as usize);
             out = parts.into_iter().take(max).collect();
+        } else if let Some(re) = regex::literal(&separator) {
+            // The loop below, without a match object for each match.
+            let mut count = 0.0;
+            let mut matches = Matches::new(re, &s);
+            let mut found = matches.next(ev)?;
+            if found.is_none() {
+                out.push(Value::String(s));
+            } else {
+                let mut start = Offset::START;
+                while let Some(f) = found.take()
+                    && limit.is_none_or(|l| count < l)
+                {
+                    out.push(Value::string(&s[start.byte..f.start.byte]));
+                    start = f.end;
+                    found = matches.next(ev)?;
+                    count += 1.0;
+                }
+                if limit.is_none_or(|l| count < l) {
+                    out.push(Value::string(&s[start.byte..]));
+                }
+            }
         } else {
             let mut count = 0.0;
             let mut matches = evaluate_matcher(ev, &separator, Value::String(s.clone()), call)?;

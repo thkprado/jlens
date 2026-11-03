@@ -2303,6 +2303,77 @@ proptest! {
     }
 }
 
+/// The calls of a function with a regex literal, which runs its searches itself, and with the
+/// same regex behind a function, which goes through match objects and their `next()`.
+fn regex_calls(function: &str, re: &str, replacement: &str, limit: Option<u8>) -> [String; 2] {
+    let limit = limit.map_or(String::new(), |l| format!(", {l}"));
+    [format!("/{re}/"), format!("function($s){{ /{re}/($s) }}")].map(|matcher| match function {
+        "replace" => format!("$replace($t, {matcher}, {replacement:?}{limit})"),
+        "contains" => format!("$contains($t, {matcher})"),
+        f => format!("${f}($t, {matcher}{limit})"),
+    })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(4000))]
+
+    /// `$match`, `$split`, `$replace` and `$contains` give the same results and errors with a
+    /// regex literal as through match objects: empty matches (`D1004`), limits, groups that
+    /// take no part, and `$` in a replacement past nine groups, on texts with surrogate pairs.
+    #[test]
+    fn regex_literals_match_as_match_objects_do(
+        text in prop::collection::vec(
+            prop::sample::select(&["a", "b", "c", "😀", "é", " "][..]),
+            0..14,
+        ),
+        function in prop::sample::select(&["match", "split", "replace", "contains"][..]),
+        re in prop::sample::select(&[
+            "a", "😀", "(a)|(b)", "a(😀)?", "x*", "b*", "a|", "[^a]+", ".",
+            "(a)(b)?(c)?(d)?(e)?(f)?(g)?(h)?(i)?(j)?(k)?",
+        ][..]),
+        replacement in prop::sample::select(&[
+            "", "[$0]", "$1", "$2$1", "$$", "$", "$10", "$12x", "😀$0é", "$x",
+        ][..]),
+        limit in prop::option::of(0..5u8),
+    ) {
+        let bindings = Bindings::new().var("t", json!(text.concat()));
+        let [literal, objects] = regex_calls(function, re, replacement, limit)
+            .map(|source| Expression::compile(&source).unwrap().evaluate(None, &bindings));
+        prop_assert_eq!(outcome(literal), outcome(objects));
+    }
+}
+
+/// A regex literal's searches inside `$match`, `$split`, `$replace` and `$contains` stop on a
+/// timeout, a cancellation token and a step limit, as the matcher called back did.
+#[test]
+fn regex_literals_stop_on_the_limits() {
+    let calls = |re: &str| {
+        ["match", "split", "replace", "contains"]
+            .map(|function| regex_calls(function, re, "o", None)[0].clone())
+    };
+    let catastrophic = Bindings::new().var("t", json!(format!("{}!", "a".repeat(40))));
+    let long = Bindings::new().var("t", json!("a😀".repeat(10_000)));
+    for source in calls("^(a+)+$") {
+        let expr = Expression::compile(&source).unwrap();
+        let options = Options::new().timeout(Duration::from_millis(20));
+        let result = expr.evaluate_with(None, &catastrophic, &options);
+        assert_eq!(result.unwrap_err().code(), "D1012", "{source}");
+        let token = CancelToken::new();
+        token.cancel();
+        let options = Options::new().cancel_token(token);
+        let result = expr.evaluate_with(None, &catastrophic, &options);
+        assert_eq!(result.unwrap_err().code(), "U1003", "{source}");
+    }
+    // `$contains` stops at the first match, so it searches too little for a step limit.
+    for source in &calls("a")[..3] {
+        let expr = Expression::compile(source).unwrap();
+        let options = Options::new().max_steps(1_000);
+        let result = expr.evaluate_with(None, &long, &options);
+        assert_eq!(result.unwrap_err().code(), "U1006", "{source}");
+        assert!(expr.evaluate_with(None, &long, &Options::new()).is_ok());
+    }
+}
+
 /// A disjunction of many terms compiles and runs: its alternations were a chain as deep as its
 /// terms in `regress`, which overflowed the stack at a few thousand.
 #[test]

@@ -1001,12 +1001,61 @@ The time is now that of the matches, 1.1 to 1.6 µs each at every size, against 
 jsonata-js. The search is little of it: `find_from` for each match takes 105 ns for `\w+` and
 70 ns for `\s`, where an iterator that keeps its backtracker takes 30 and 35 ns. The rest is
 outside the engine: an object of five fields for each match, with its keys, strings and `next`,
-and the call of that `next`. 0.27 #11 takes that on.
+and the call of that `next`. 0.27 #11 took that on, [below](#without-an-object-for-each-match-027-11).
 
 The workload has a case of this now, `regex over a long text`, `$replace` on 20 KB. `cargo xtask
 ab` against the code before, five rounds: 55.1 → 2.07 ms with `evaluate` and 55.2 → 2.05 ms
 against a `Document`; `regex`, a short text per match, −1.1% and −0.2%, and `strings`, which runs
 none of this, +1.1% and +1.0%.
+
+#### Without an object for each match (0.27 #11)
+
+A regex literal is a function, and `$match`, `$replace`, `$split` and `$contains` called it back
+for the first match and the `next()` of each match object for the rest, as jsonata-js does. When
+the matcher is a regex literal, they now run its searches themselves (`regex::Matches`) and build
+only what their result holds: `$split` and `$contains` no string at all but the pieces,
+`$replace` with a replacement string the text it returns, and `$match` its objects of three
+fields, whose keys the regex makes once. Each search still costs what the call did, its step and
+its checks included, and is found as `next()` finds it, with the same `D1004` for an empty match
+and the search past a limit; the step counts of `steps.json` are those of the code before. A
+function as the replacement is given the match object, so it goes through the objects, whose
+five keys the regex now also makes once; so does a matcher of the expression's own.
+
+On the text of #10 (`text-20k.json` repeated; the fastest of seven runs, and of nine in
+jsonata-js; Node.js 24):
+
+| Text | Function | Matches | Before | After | jsonata-js |
+|---:|---|---:|---:|---:|---:|
+| 20 KB | `$match` | 1,558 | 2.81 ms | 1.09 ms | 0.48 ms |
+| 20 KB | `$replace` | 1,558 | 2.30 ms | 0.36 ms | 0.58 ms |
+| 20 KB | `$split` | 2,075 | 2.61 ms | 0.45 ms | 0.44 ms |
+| 20 KB | `$replace` with a function | 1,558 | 2.30 ms | 1.78 ms | 1.85 ms |
+| 80 KB | `$match` | 6,232 | 10.8 ms | 4.22 ms | 1.06 ms |
+| 80 KB | `$replace` | 6,232 | 9.12 ms | 1.46 ms | 1.93 ms |
+| 80 KB | `$split` | 8,300 | 10.3 ms | 1.72 ms | 1.74 ms |
+| 80 KB | `$replace` with a function | 6,232 | 9.13 ms | 6.90 ms | 6.66 ms |
+| 320 KB | `$match` | 24,928 | 44.8 ms | 17.3 ms | 5.12 ms |
+| 320 KB | `$replace` | 24,928 | 36.4 ms | 5.72 ms | 8.44 ms |
+| 320 KB | `$split` | 33,200 | 40.7 ms | 6.83 ms | 6.55 ms |
+| 320 KB | `$replace` with a function | 24,928 | 35.7 ms | 27.1 ms | 28.2 ms |
+
+Per match, `$replace` 1.47 → 0.23 µs and `$split` 1.26 → 0.22 µs, of which the search is 105 and
+70 ns, against 0.37 and 0.21 µs in jsonata-js; `$replace` with a function 1.48 → 1.14 µs, as
+jsonata-js. `$match` 1.80 → 0.70 µs, against 0.21 to 0.30 µs: what is left is the object it
+returns for each match, five allocations (the match's string, the object, its map's table and
+entries, and the list of groups), each freed again by `$count`. `cargo xtask growth` agrees on
+its own text (`/o/` and `/ /`, 20 to 320 KB): `$replace` −87%, `$split` −85%, `$match` −68%,
+`$replace` with a function −26%, `$contains` within its noise.
+
+The two candidates of the row were measured apart where they apply alone: the keys made once took
+`$replace` with a function from 1,502 to 1,152 µs on `growth`'s 20 KB, where the loop does not
+reach; the loop alone, before them, took `$replace` 1,625 → 214 µs, `$split` 2,042 → 308 µs and
+`$match` 1,650 → 532 µs, which the keys left unchanged (532 → 535 µs, within its runs).
+
+`cargo xtask ab` against the code before, ten rounds, in the three modes: `regex over a long text`
+2.06 ms → 342 µs with `evaluate`, 2.04 ms → 338 µs against a `Document` and 2.04 ms → 341 µs
+through a `Source`, −83%; `regex`, short texts, −11.2%, −13.1% and −11.4%; every other case −2.0
+to +1.6%, none at the mark of 3.5%.
 
 ### What the limits cost
 

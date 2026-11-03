@@ -3,8 +3,11 @@
 //! A regex literal evaluates to a function. Applied to a string it returns a match object
 //! `{match, start, end, groups, next}` (or undefined), where `start`/`end` are UTF-16 offsets
 //! and `next()` continues the global search, exactly like the closure jsonata-js creates.
+//! `$match`, `$replace`, `$split` and `$contains` run a literal's searches themselves
+//! ([`Matches`]), with no match object where nothing can see one.
 //! Matches run through the evaluator, so its timeout and cancellation token stop them (ADR 0009).
 
+use std::ops::Range;
 use std::rc::Rc;
 
 use crate::error::{Error, Result};
@@ -15,6 +18,19 @@ use crate::value::{Function, Map, Value};
 pub(crate) struct Regex {
     pub re: regress::Regex,
     pub pattern: String,
+    /// The keys of the objects made for its matches, made once for each evaluation.
+    pub keys: Keys,
+}
+
+/// The keys of a match object, `{match, start, end, groups, next}`, and `index`, which `$match`
+/// gives its matches in place of `start`.
+pub(crate) struct Keys {
+    pub match_: Rc<str>,
+    pub start: Rc<str>,
+    pub end: Rc<str>,
+    pub groups: Rc<str>,
+    pub next: Rc<str>,
+    pub index: Rc<str>,
 }
 
 impl Regex {
@@ -31,6 +47,14 @@ impl Regex {
         Ok(Regex {
             re,
             pattern: pattern.to_owned(),
+            keys: Keys {
+                match_: "match".into(),
+                start: "start".into(),
+                end: "end".into(),
+                groups: "groups".into(),
+                next: "next".into(),
+                index: "index".into(),
+            },
         })
     }
 }
@@ -75,59 +99,159 @@ impl Offset {
     }
 }
 
+/// A match: where it starts and ends, in both units, and the byte ranges of its groups.
+pub(crate) struct Found {
+    pub start: Offset,
+    pub end: Offset,
+    pub groups: Vec<Option<Range<usize>>>,
+}
+
+impl Found {
+    /// The text matched.
+    pub fn matched<'t>(&self, text: &'t str) -> &'t str {
+        &text[self.start.byte..self.end.byte]
+    }
+
+    /// Group `i`, counted from 0 (the first parenthesis), when it took part in the match.
+    pub fn group<'t>(&self, text: &'t str, i: usize) -> Option<&'t str> {
+        self.groups.get(i)?.clone().map(|r| &text[r])
+    }
+
+    /// The groups as a match object holds them: a string each, undefined where a group took no
+    /// part.
+    pub fn group_values<'a>(&self, text: &str) -> Vec<Value<'a>> {
+        (0..self.groups.len())
+            .map(|i| self.group(text, i).map_or(Value::Undefined, Value::string))
+            .collect()
+    }
+}
+
 /// Finds the first match at or after `from`.
+pub(crate) fn find(
+    ev: &Evaluator<'_, '_>,
+    re: &Regex,
+    text: &str,
+    from: Offset,
+) -> Result<Option<Found>> {
+    let Some(m) = ev.find_regex(&re.re, text, from.byte)? else {
+        return Ok(None);
+    };
+    let range = m.range();
+    let start = from.advanced_to(text, range.start);
+    let end = start.advanced_to(text, range.end);
+    Ok(Some(Found {
+        start,
+        end,
+        groups: m.captures,
+    }))
+}
+
+/// The match after the one that ended at `last`, as `next()` finds it: none at the end of the
+/// text, and D1004 for an empty match, as a regex that matches the empty string would never
+/// progress.
+fn find_next(
+    ev: &Evaluator<'_, '_>,
+    re: &Regex,
+    text: &str,
+    last: Offset,
+) -> Result<Option<Found>> {
+    if last.byte >= text.len() {
+        return Ok(None);
+    }
+    let found = find(ev, re, text, last)?;
+    if found.as_ref().is_some_and(|f| f.start.byte == f.end.byte) {
+        return Err(Error::new("D1004").with("value", re.pattern.as_str()));
+    }
+    Ok(found)
+}
+
+/// The match object of a match, `{match, start, end, groups, next}`.
+fn object<'a>(re: &Rc<Regex>, text: &Rc<str>, found: Option<Found>) -> Value<'a> {
+    let Some(found) = found else {
+        return Value::Undefined;
+    };
+    let keys = &re.keys;
+    let mut obj = Map::with_capacity_and_hasher(5, Default::default());
+    obj.insert(keys.match_.clone(), Value::string(found.matched(text)));
+    obj.insert(keys.start.clone(), Value::Number(found.start.utf16 as f64));
+    obj.insert(keys.end.clone(), Value::Number(found.end.utf16 as f64));
+    obj.insert(
+        keys.groups.clone(),
+        Value::array(found.group_values(text), 0),
+    );
+    obj.insert(
+        keys.next.clone(),
+        Value::function(Function::RegexNext {
+            re: re.clone(),
+            text: text.clone(),
+            last: found.end,
+        }),
+    );
+    Value::object(obj)
+}
+
+/// A regex literal applied to a text: the match object of the first match at or after `from`.
 pub(crate) fn exec<'a>(
     ev: &Evaluator<'_, 'a>,
     re: &Rc<Regex>,
     text: &Rc<str>,
     from: Offset,
 ) -> Result<Value<'a>> {
-    let Some(m) = ev.find_regex(&re.re, text, from.byte)? else {
-        return Ok(Value::Undefined);
-    };
-    let range = m.range();
-    let start = from.advanced_to(text, range.start);
-    let end = start.advanced_to(text, range.end);
-    let groups: Vec<Value<'a>> = m
-        .captures
-        .iter()
-        .map(|g| match g {
-            Some(r) => Value::string(&text[r.clone()]),
-            None => Value::Undefined,
-        })
-        .collect();
-    let mut obj = Map::default();
-    obj.insert("match".into(), Value::string(&text[range]));
-    obj.insert("start".into(), Value::Number(start.utf16 as f64));
-    obj.insert("end".into(), Value::Number(end.utf16 as f64));
-    obj.insert("groups".into(), Value::array(groups, 0));
-    obj.insert(
-        "next".into(),
-        Value::function(Function::RegexNext {
-            re: re.clone(),
-            text: text.clone(),
-            last: end,
-        }),
-    );
-    Ok(Value::object(obj))
+    Ok(object(re, text, find(ev, re, text, from)?))
 }
 
-/// The `next()` of a match object: the following match, or undefined at the end. A regex that
-/// matches the empty string would never progress, so that raises D1004.
+/// The `next()` of a match object: the following match, or undefined at the end.
 pub(crate) fn next<'a>(
     ev: &Evaluator<'_, 'a>,
     re: &Rc<Regex>,
     text: &Rc<str>,
     last: Offset,
 ) -> Result<Value<'a>> {
-    if last.byte >= text.len() {
-        return Ok(Value::Undefined);
+    Ok(object(re, text, find_next(ev, re, text, last)?))
+}
+
+/// The matches of a regex literal over a text, for `$match`, `$replace`, `$split` and
+/// `$contains` to run without a match object each. Each match costs what the matcher called
+/// back costs, its step and its checks included ([`Evaluator::callback_step`]), and is found as
+/// the regex and the `next()` of its match objects find it, with the same errors; so a function
+/// gives the same results, errors and step count as it does through match objects.
+pub(crate) struct Matches<'r> {
+    re: &'r Regex,
+    text: &'r str,
+    /// Where the last match ended; `None` before the first.
+    last: Option<Offset>,
+}
+
+impl<'r> Matches<'r> {
+    pub fn new(re: &'r Regex, text: &'r str) -> Self {
+        Matches {
+            re,
+            text,
+            last: None,
+        }
     }
-    let result = exec(ev, re, text, last)?;
-    if let Value::Object(o) = &result
-        && o.borrow().get("match").and_then(Value::as_str) == Some("")
-    {
-        return Err(Error::new("D1004").with("value", re.pattern.as_str()));
+
+    /// The next match, or none after the last.
+    pub fn next(&mut self, ev: &mut Evaluator<'_, '_>) -> Result<Option<Found>> {
+        ev.callback_step()?;
+        let found = match self.last {
+            None => find(ev, self.re, self.text, Offset::START)?,
+            Some(last) => find_next(ev, self.re, self.text, last)?,
+        };
+        if let Some(f) = &found {
+            self.last = Some(f.end);
+        }
+        Ok(found)
     }
-    Ok(result)
+}
+
+/// The regex of a regex literal, which `$match` and the others can run themselves.
+pub(crate) fn literal<'v>(v: &'v Value<'_>) -> Option<&'v Regex> {
+    match v {
+        Value::Function(f) => match &**f {
+            Function::Regex(re) => Some(re),
+            _ => None,
+        },
+        _ => None,
+    }
 }
