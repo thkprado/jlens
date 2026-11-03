@@ -10,6 +10,12 @@ All notable changes are recorded here. The format follows
 
 - `Document::undefined()`, a document that stands for no input, so that an expression over
   variables alone can run through `evaluate_document_with`.
+- `jlens.global.js` in the WebAssembly package: the package as one classic script, with the
+  `.wasm` embedded, so that a page opened from disk, a classic worker or a bundler that does not
+  resolve the `.wasm` loads it. It sets the global `jlens`, with the exports of `jlens.js` and
+  `init` for its default export; `init()` and `initSync()` need no argument. A module imports it
+  as `jlens-wasm/global`, with its TypeScript declarations. It is about 1.9 MiB, 770 KiB gzipped;
+  `jlens.js` does not change.
 
 ### Changed
 

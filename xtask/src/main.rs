@@ -26,6 +26,7 @@ mod scoop;
 mod site;
 mod vscode;
 mod wasm;
+mod wasm_global;
 
 const USAGE: &str = "\
 usage: cargo xtask <command>

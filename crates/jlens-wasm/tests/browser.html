@@ -7,8 +7,10 @@
 <body data-status="running">
   <pre id="log"></pre>
   <script type="module">
-    // Runs suite.mjs in the browser; `cargo xtask wasm-test` reads the result from the DOM.
-    import init, * as jlens from "../pkg/jlens.js";
+    // Runs suite.mjs in the browser; `cargo xtask wasm-test` reads the result from the DOM. With
+    // `?global`, against jlens.global.js, the classic script with the .wasm embedded, initialized
+    // synchronously on the page's thread.
+    import init, * as module from "../pkg/jlens.js";
     import { cases } from "./suite.mjs";
 
     const log = document.getElementById("log");
@@ -18,9 +20,23 @@
       if (!response.ok) throw new Error(`${path}: ${response.status}`);
       return response.text();
     };
+    const global = new URLSearchParams(location.search).has("global");
+    let jlens = module;
     let failed = 0;
     try {
-      await init();
+      if (global) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "../pkg/jlens.global.js";
+          script.onload = resolve;
+          script.onerror = () => reject(new Error("jlens.global.js did not load"));
+          document.head.append(script);
+        });
+        jlens = globalThis.jlens;
+        jlens.initSync();
+      } else {
+        await init();
+      }
       for (const [name, run] of cases) {
         // Shown by `cargo xtask wasm-test` when the page hangs.
         console.log(`jlens test: ${name}`);

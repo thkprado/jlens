@@ -5,7 +5,10 @@ evaluates expressions, **explains** how a result was reached, and gives editors 
 diagnostics and hover driven by a JSON Schema inferred from sample documents.
 
 This is an ES module for browsers (`--target web`). It also runs in Node.js 20+ and Deno if you
-pass the `.wasm` bytes to `init`.
+pass the `.wasm` bytes to `init`. `jlens.global.js` is the same package as one classic script,
+with the `.wasm` embedded, for a page opened from disk or a bundler that cannot resolve the
+`.wasm`: it sets the global `jlens` (`<script src="jlens.global.js">`, or
+`import "jlens-wasm/global"`), and `await jlens.init()` needs no argument.
 
 Try it in the [web editor](https://thkprado.github.io/jlens/editor/), which is built on this
 package, and read the [jlens book](https://thkprado.github.io/jlens/) for the language and the API.

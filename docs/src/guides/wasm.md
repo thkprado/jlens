@@ -7,7 +7,9 @@ Rust crates do:
 - schema inference;
 - the language service (completion, diagnostics, hover, signature help) for editors.
 
-It also runs in Node.js 20+ and Deno, provided `init` is given the `.wasm` bytes.
+It also runs in Node.js 20+ and Deno, provided `init` is given the `.wasm` bytes. A
+[classic script with the `.wasm` embedded](#one-file-jlensglobaljs) serves a page opened from
+disk, and anything that cannot resolve the `.wasm` file.
 
 ```js
 import init, { Expression } from "jlens-wasm";
@@ -27,13 +29,14 @@ cargo xtask wasm            # release build into crates/jlens-wasm/pkg
 cargo xtask wasm --dev      # unoptimized, with Rust panics reported on the console
 ```
 
-`cargo xtask wasm` does four things:
+`cargo xtask wasm` does five things:
 1. It compiles the crate with the `wasm-release` profile, which optimizes for size
    and speed (`opt-level = "s"`).
 2. It generates the JavaScript glue and the TypeScript declarations with `wasm-bindgen --target web`.
 3. It runs `wasm-opt -Os` from [binaryen](https://github.com/WebAssembly/binaryen): the installed one, or the
    npm package through `npx`. Without either, the module is about 45% larger.
-4. It writes `package.json`.
+4. It writes [`jlens.global.js`](#one-file-jlensglobaljs), the same package as one classic script.
+5. It writes `package.json`.
 
 The `wasm-bindgen` CLI must be the exact version in `Cargo.lock`, and the task checks this.
 
@@ -41,7 +44,9 @@ The `wasm-bindgen` CLI must be the exact version in `Cargo.lock`, and the task c
 |---|---|
 | `jlens.js` | The ES module |
 | `jlens.d.ts` | TypeScript declarations |
-| `jlens_bg.wasm` | The WebAssembly module: about 1.2 MiB, 460 KiB gzipped |
+| `jlens_bg.wasm` | The WebAssembly module: about 1.4 MiB, 535 KiB gzipped |
+| `jlens.global.js` | The package as one classic script, the module embedded: about 1.9 MiB, 770 KiB gzipped |
+| `jlens.global.d.ts` | TypeScript declarations of its global, `jlens` |
 | `package.json` | npm metadata: `"type": "module"`, `exports`, `types` |
 
 A size budget for the gzipped module is enforced in `xtask/src/wasm.rs`.
@@ -74,6 +79,44 @@ await init({ module_or_path: await readFile(new URL("./pkg/jlens_bg.wasm", impor
 
 `initSync({ module })` instantiates synchronously from bytes or a `WebAssembly.Module`. This is
 useful in workers.
+
+## One file: `jlens.global.js`
+
+A page opened from disk, at a `file://` address, can neither import a module nor fetch, so it
+cannot load `jlens.js`. `jlens.global.js` is the same package as one classic script, with
+`jlens_bg.wasm` embedded in base64. It sets one global, `jlens`, which holds the exports of
+`jlens.js`, with `init` for its default export. With no argument, `init()` and `initSync()`
+instantiate the embedded module:
+
+```html
+<script src="jlens.global.js"></script>
+<script>
+  jlens.init().then(() => {
+    const expr = new jlens.Expression("$sum(items.(price * qty))");
+    console.log(expr.evaluate({ items: [{ price: 2.5, qty: 4 }] })); // 10
+  });
+</script>
+```
+
+It also serves what cannot resolve the `.wasm` file: a classic worker loads it with
+`importScripts("jlens.global.js")`, and a module, a module worker or a bundler with
+`import "jlens-wasm/global"`, which runs the script and sets the global. In TypeScript, that
+import declares it too; a classic script references it with
+`/// <reference types="jlens-wasm/global" />`.
+
+Its cost is size: the `.wasm` in base64 is a third larger, about 1.9 MiB, and 770 KiB gzipped
+against 535 KiB for `jlens_bg.wasm`, as base64 compresses less well. A page that loads it pays
+for the whole module even if it never calls `init`, and the npm package unpacks to 3.5 MB
+where it took 1.5 MB without it. Starting is no slower: in Node.js 22, reading
+the script and `init()` take about 19 ms, and the module with its bytes about 26 ms. `jlens.js`
+does not change, nor what importing it loads. Each loads a module of its own, so a page that
+loads both has two instances, with classes that do not mix.
+
+`cargo xtask wasm` writes it from the module that `wasm-bindgen` generates, putting each of its
+JavaScript snippets in a function of its own. It changes only what it recognises in the output
+of the `wasm-bindgen` version in `Cargo.lock`, and the build fails on anything else. The Node.js
+and browser tests run the whole suite against it, and open a page from `file://` that loads it
+with one `<script>`.
 
 ## Evaluating expressions
 

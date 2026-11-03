@@ -9,7 +9,7 @@ use std::{env, fs, thread};
 
 use anyhow::{Context, Result, bail};
 
-use crate::{root, site};
+use crate::{root, site, wasm_global};
 
 /// Upper bound for the gzipped `.wasm` of a release build, in bytes. Raise it deliberately.
 const SIZE_BUDGET_GZIP: u64 = 600 * 1024;
@@ -22,7 +22,7 @@ pub fn pkg_dir() -> PathBuf {
 
 /// Builds `crates/jlens-wasm/pkg`: compiles the crate, generates the ES module and the
 /// TypeScript declarations with `wasm-bindgen`, optimizes with `wasm-opt` when it is installed,
-/// and writes `package.json`.
+/// writes the classic script with the `.wasm` embedded (`jlens.global.js`) and `package.json`.
 pub fn build(dev: bool) -> Result<()> {
     let profile = if dev { "dev" } else { "wasm-release" };
     let status = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
@@ -65,14 +65,23 @@ pub fn build(dev: bool) -> Result<()> {
     if !dev {
         optimize(&bg)?;
     }
+    let global = wasm_global::write(&out, OUT_NAME, &workspace_version()?)?;
+    fs::copy(
+        root().join("crates/jlens-wasm/src/global.d.ts"),
+        out.join(format!("{OUT_NAME}.global.d.ts")),
+    )?;
     write_package(&out)?;
 
     let raw = fs::metadata(&bg)?.len();
     let gzipped = gzip_len(&fs::read(&bg)?)?;
+    let global_gzipped = gzip_len(&fs::read(out.join(format!("{OUT_NAME}.global.js")))?)?;
     println!(
-        "wrote crates/jlens-wasm/pkg ({} KiB, {} KiB gzipped)",
+        "wrote crates/jlens-wasm/pkg ({} KiB, {} KiB gzipped; {OUT_NAME}.global.js {} KiB, \
+         {} KiB gzipped)",
         raw / 1024,
-        gzipped / 1024
+        gzipped / 1024,
+        global / 1024,
+        global_gzipped / 1024
     );
     if !dev && gzipped > SIZE_BUDGET_GZIP {
         bail!(
@@ -180,6 +189,11 @@ fn write_package(out: &Path) -> Result<()> {
       "types": "./{OUT_NAME}.d.ts",
       "default": "./{OUT_NAME}.js"
     }},
+    "./global": {{
+      "types": "./{OUT_NAME}.global.d.ts",
+      "default": "./{OUT_NAME}.global.js"
+    }},
+    "./{OUT_NAME}.global.js": "./{OUT_NAME}.global.js",
     "./{OUT_NAME}_bg.wasm": "./{OUT_NAME}_bg.wasm"
   }},
   "files": [
@@ -187,11 +201,13 @@ fn write_package(out: &Path) -> Result<()> {
     "{OUT_NAME}.d.ts",
     "{OUT_NAME}_bg.wasm",
     "{OUT_NAME}_bg.wasm.d.ts",
+    "{OUT_NAME}.global.js",
+    "{OUT_NAME}.global.d.ts",
     "snippets/",
     "README.md",
     "LICENSE"
   ],
-  "sideEffects": false,
+  "sideEffects": ["./{OUT_NAME}.global.js"],
   "keywords": ["jsonata", "json", "query", "transform", "wasm"]
 }}
 "#,
@@ -240,17 +256,32 @@ pub fn test(require_browser: bool, example: bool) -> Result<()> {
     };
     let port = serve(root())?;
 
-    let url = format!("http://127.0.0.1:{port}/crates/jlens-wasm/tests/browser.html");
-    let dom = dump_dom(&browser, &url)?;
-    let log = dom
-        .split_once("<pre id=\"log\">")
-        .and_then(|(_, rest)| rest.split_once("</pre>"))
-        .map_or("", |(log, _)| log);
-    print!("{}", unescape(log));
-    if !dom.contains("data-status=\"pass\"") {
-        bail!("the browser tests failed in {} ({url})", browser.display());
+    for (url, what) in [
+        (
+            format!("http://127.0.0.1:{port}/crates/jlens-wasm/tests/browser.html"),
+            "browser tests",
+        ),
+        (
+            format!("http://127.0.0.1:{port}/crates/jlens-wasm/tests/browser.html?global"),
+            "browser tests of jlens.global.js",
+        ),
+        // Neither a module nor a fetch: the package from one classic script.
+        (
+            file_url(&tests.join("file.html")),
+            "jlens.global.js from file://",
+        ),
+    ] {
+        let dom = dump_dom(&browser, &url)?;
+        let log = dom
+            .split_once("<pre id=\"log\">")
+            .and_then(|(_, rest)| rest.split_once("</pre>"))
+            .map_or("", |(log, _)| log);
+        print!("{}", unescape(log));
+        if !dom.contains("data-status=\"pass\"") {
+            bail!("the {what} failed in {} ({url})", browser.display());
+        }
+        println!("{what} passed ({})", browser.display());
     }
-    println!("browser tests passed ({})", browser.display());
 
     if example {
         let status = Command::new("node")
@@ -414,6 +445,19 @@ fn dump_dom_once(browser: &Path, url: &str, timeout: Duration) -> Result<Option<
     }
     let _ = fs::remove_dir_all(&profile);
     Ok(finished.then(|| String::from_utf8_lossy(&out).into_owned()))
+}
+
+/// The `file://` address of `path`.
+fn file_url(path: &Path) -> String {
+    let path = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace(' ', "%20");
+    if path.starts_with('/') {
+        format!("file://{path}")
+    } else {
+        format!("file:///{path}")
+    }
 }
 
 fn unescape(html: &str) -> String {

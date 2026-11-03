@@ -22,6 +22,8 @@ import init, {
   unionReads,
   version,
 } from "../pkg/jlens.js";
+// The classic script with the .wasm embedded, which declares the global `jlens`.
+import "../pkg/jlens.global.js";
 
 export async function check(): Promise<void> {
   await init();
@@ -84,4 +86,19 @@ export async function check(): Promise<void> {
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();
   console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, every, fields, text, failed, start, type, ast.id, d, kinds, hover, help, catalog);
+}
+
+// The global set by jlens.global.js: the module's exports, with `init` for its default export.
+export async function checkGlobal(): Promise<void> {
+  await jlens.init();
+  jlens.initSync();
+  const expr: Expression = new jlens.Expression("$sum(items.price)");
+  const document: Document = new jlens.Document({ items: [] });
+  const v: string = jlens.version();
+  const r: unknown = expr.evaluateDocument(document);
+  // @ts-expect-error: the global has no default export
+  jlens.default;
+  // @ts-expect-error: the global is read-only
+  jlens.version = () => "";
+  console.log(v, r);
 }

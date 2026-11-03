@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>jlens from file://</title>
+</head>
+<body data-status="running">
+  <!-- Opened from file:// by `cargo xtask wasm-test`, where a page can neither import a module
+       nor fetch: the package loads from one classic script, with the .wasm embedded. -->
+  <pre id="log"></pre>
+  <script src="../pkg/jlens.global.js"></script>
+  <script>
+    const log = document.getElementById("log");
+    jlens.init().then(() => {
+      const expr = new jlens.Expression("$sum(items[type = $kind].(price * qty))");
+      const result = expr.evaluate({ items: [{ type: "a", price: 2.5, qty: 4 }] }, { kind: "a" });
+      log.textContent = `${location.protocol} ${jlens.version()} ${result}\n`;
+      document.body.dataset.status = result === 10 ? "pass" : "fail";
+    }).catch((err) => {
+      log.textContent = `FAIL ${err}\n`;
+      document.body.dataset.status = "fail";
+    });
+  </script>
+</body>
+</html>
