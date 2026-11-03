@@ -1666,8 +1666,8 @@ Fixed by the sweep, at 64,000 items with `evaluate`:
 Left to rows of their own: `$substring` collected the characters of its whole text at each call,
 0.78 ms on 640 KB, so that a call at each place of a text is quadratic, as it is in jsonata-js
 (0.27 #15, [below](#substring-027-15)); `&` in a `$reduce` copies the string it grows, 1.42 s for 64,000 short strings where
-jsonata-js, whose strings are ropes, takes 110 ms (#16, [below](#-in-a-loop-027-16)); the URL functions take 5 to 12 times
-jsonata-js's time, linearly (#17).
+jsonata-js, whose strings are ropes, takes 110 ms (#16, [below](#-in-a-loop-027-16)); the URL functions took 5 to 12 times
+jsonata-js's time, linearly (#17, [below](#the-url-functions-027-17)).
 
 What stays:
 
@@ -1773,6 +1773,47 @@ by the drop of what it holds, took `$distinct`'s result back to +3.1% under Linu
 
 `strings` gains as `&` no longer copies its sides three times, into a `String`, into a longer
 one and into the `Rc<str>`: a short result is made once.
+
+### The URL functions (0.27 #17)
+
+`$encodeUrlComponent` and `$encodeUrl` took a character at a time, looked it up in two short
+strings, and formatted each escape with `format!`, a `String` allocated for each byte escaped.
+They now look each byte up in a table of the 128 ASCII bytes, copy the runs of bytes kept as
+they are whole, and write the two digits of an escape from a table, into a result whose length
+is counted first. `$decodeUrlComponent` and `$decodeUrl` copied the text between escapes a
+character at a time, read each escape's digits through `u8::from_str_radix`, and built a `Vec`
+for each character past ASCII; they now copy the text up to the next `%` whole, read the digits
+themselves, and gather a character's bytes in an array.
+
+Reading the digits themselves fixed an error: `u8::from_str_radix` takes a sign, so that `%+1`
+decoded to U+0001 where JavaScript, and jsonata-js, raise `D3140`.
+
+`cargo xtask growth --case Url`, at 64,000 items, 640 KB of accented, Greek and Japanese words,
+1.9 MB once encoded. Each case gives the `$length` of its result, and the two decoding cases
+decode what the encoding one gives, so that their time holds the encoding's:
+
+| Case | Mode | Before | After | jsonata-js |
+|---|---|---:|---:|---:|
+| `$encodeUrlComponent(unicode)` | `evaluate` | 82.5 ms | 2.75 ms | 27.4 ms |
+| | `Document` | 82.1 ms | 2.78 ms | |
+| `$encodeUrl(unicode)` | `evaluate` | 86.9 ms | 2.82 ms | 27.0 ms |
+| | `Document` | 87.1 ms | 2.77 ms | |
+| `$decodeUrlComponent($encodeUrlComponent(unicode))` | `evaluate` | 111.5 ms | 6.43 ms | 12.2 ms |
+| | `Document` | 110.0 ms | 6.20 ms | |
+| `$decodeUrl($encodeUrl(unicode))` | `evaluate` | 117.1 ms | 6.23 ms | 12.0 ms |
+| | `Document` | 115.5 ms | 6.17 ms | |
+
+Encoding takes 30 times less, about 4 ns a byte of its text; decoding alone, the difference of
+the two cases, 29 to 30 ms before and 3.4 to 3.7 ms after, 8 times less. The exponents stay 1.0
+to 1.2. In jsonata-js the encoding cases take longer than the decoding ones that hold them, as
+its `$length` counts code points through an array, so that most of their time is counting the
+1.9 MB encoded. A property test compares the escapes with those of the code before, 20,000
+texts of every ASCII character and characters of two to four bytes, and decodes them back;
+another decodes 20,000 texts of escapes well and badly formed, of reserved characters in either
+case, of lone bytes and of signs, against the code before, but where an escape starts with `+`.
+Dropping the run of kept bytes before an escaped `%`, or decoding `%23` in `$decodeUrl`, fails
+them. The workload calls none of the four, so `cargo xtask ab` was not run for this row; #19
+runs it on the release.
 
 ## 0.26 against 0.25.0
 

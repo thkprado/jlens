@@ -66,9 +66,16 @@ All notable changes are recorded here. The format follows
   that a string holds a node for each 256 bytes or so, not one for each piece.
   `$reduce(strs, function($a, $b){ $a & $b }, '')` over 64,000 short strings takes 31 ms, where it
   took 1,062 ms. A short `&` copies its sides once, where it copied them three times.
+- `$encodeUrlComponent` and `$encodeUrl` look each byte up in a table and copy the runs they keep
+  whole, where they formatted each escape into a new string; `$decodeUrlComponent` and
+  `$decodeUrl` copy the text between escapes whole. On 640 KB of accented, Greek and Japanese
+  words, encoding takes 2.8 ms, where it took 82 to 87 ms, and decoding 3.4 to 3.7 ms, where it
+  took 29 to 30 ms.
 
 ### Fixed
 
+- `$decodeUrlComponent` and `$decodeUrl` raise `D3140` for an escape whose first digit is a `+`,
+  as jsonata-js does: `%+1` decoded to U+0001.
 - `reads()` left out a binding that an expression may read when the same name is assigned in a
   branch that does not run: in `a ? $x := 1 : $x`, the second `$x` read nothing of the binding `x`.
   Bindings cut by it gave another result.

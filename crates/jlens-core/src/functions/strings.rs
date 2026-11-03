@@ -718,43 +718,95 @@ pub(super) fn base64decode<'a>(
 const URI_UNRESERVED: &str = "-_.!~*'()";
 const URI_RESERVED: &str = ";/?:@&=+$,#";
 
-fn encode(s: &str, keep: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if c.is_ascii_alphanumeric() || URI_UNRESERVED.contains(c) || keep.contains(c) {
-            out.push(c);
-        } else {
-            let mut buf = [0u8; 4];
-            for b in c.encode_utf8(&mut buf).bytes() {
-                out.push_str(&format!("%{b:02X}"));
+/// The ASCII bytes that `encodeURIComponent` keeps as they are, or, with `reserved`, those that
+/// `encodeURI` keeps. Every other byte, each byte of a character past ASCII included, is escaped.
+const fn kept(reserved: bool) -> [bool; 128] {
+    const fn holds(set: &str, b: u8) -> bool {
+        let set = set.as_bytes();
+        let mut i = 0;
+        while i < set.len() {
+            if set[i] == b {
+                return true;
             }
+            i += 1;
         }
+        false
+    }
+    let mut table = [false; 128];
+    let mut b = 0;
+    while b < 128 {
+        let c = b as u8;
+        table[b] = c.is_ascii_alphanumeric()
+            || holds(URI_UNRESERVED, c)
+            || (reserved && holds(URI_RESERVED, c));
+        b += 1;
+    }
+    table
+}
+
+const KEPT_IN_COMPONENT: [bool; 128] = kept(false);
+const KEPT_IN_URL: [bool; 128] = kept(true);
+
+/// Escapes each byte of `s` that `keep` does not hold as `%XX`, and copies the runs of those it
+/// holds whole. The result's length is counted first, so that it is allocated once.
+fn encode(s: &str, keep: &[bool; 128]) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let escaped = |b: u8| b >= 0x80 || !keep[usize::from(b)];
+    let bytes = s.as_bytes();
+    let count = bytes.iter().filter(|&&b| escaped(b)).count();
+    let mut out = String::with_capacity(s.len() + 2 * count);
+    // Where the bytes kept as they are, not yet copied, start: always a character's start, as
+    // every byte of a character past ASCII is escaped.
+    let mut run = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        if !escaped(b) {
+            continue;
+        }
+        if run < i {
+            out.push_str(&s[run..i]);
+        }
+        out.push('%');
+        out.push(char::from(HEX[usize::from(b >> 4)]));
+        out.push(char::from(HEX[usize::from(b & 0xF)]));
+        run = i + 1;
+    }
+    if run < bytes.len() {
+        out.push_str(&s[run..]);
     }
     out
 }
 
+/// Decodes the escapes of `s` as `decodeURIComponent` does, or, with `keep_reserved`, as
+/// `decodeURI` does, which leaves those of reserved characters as they are written. `None` for
+/// what JavaScript raises a `URIError` for: an escape whose two digits are not hexadecimal, or
+/// bytes that are not a character in UTF-8 (a lone continuation byte, an overlong form, a
+/// surrogate, a character past U+10FFFF).
 fn decode(s: &str, keep_reserved: bool) -> Option<String> {
     let bytes = s.as_bytes();
+    // Two hexadecimal digits, no more: `u8::from_str_radix` would also take `+1`.
     let hex = |i: usize| -> Option<u8> {
-        let h = std::str::from_utf8(bytes.get(i..i + 2)?).ok()?;
-        u8::from_str_radix(h, 16).ok()
+        let digit = |b: &u8| char::from(*b).to_digit(16);
+        let high = digit(bytes.get(i)?)?;
+        let low = digit(bytes.get(i + 1)?)?;
+        u8::try_from(high * 16 + low).ok()
     };
     let mut out = String::with_capacity(s.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] != b'%' {
-            let c = s[i..].chars().next()?;
-            out.push(c);
-            i += c.len_utf8();
-            continue;
-        }
+        // The text up to the next escape, copied whole: `%` is ASCII, so that it starts and
+        // ends at characters' starts.
+        let Some(skip) = bytes[i..].iter().position(|&b| b == b'%') else {
+            out.push_str(&s[i..]);
+            break;
+        };
+        out.push_str(&s[i..i + skip]);
+        i += skip;
         let first = hex(i + 1)?;
         if first < 0x80 {
-            let c = first as char;
-            if keep_reserved && URI_RESERVED.contains(c) {
+            if keep_reserved && URI_RESERVED.as_bytes().contains(&first) {
                 out.push_str(&s[i..i + 3]);
             } else {
-                out.push(c);
+                out.push(char::from(first));
             }
             i += 3;
             continue;
@@ -765,8 +817,8 @@ fn decode(s: &str, keep_reserved: bool) -> Option<String> {
             0xF0..=0xF7 => 4,
             _ => return None,
         };
-        let mut buf = vec![first];
-        for k in 1..len {
+        let mut buf = [first, 0, 0, 0];
+        for (k, slot) in buf.iter_mut().enumerate().take(len).skip(1) {
             let at = i + 3 * k;
             if bytes.get(at) != Some(&b'%') {
                 return None;
@@ -775,9 +827,9 @@ fn decode(s: &str, keep_reserved: bool) -> Option<String> {
             if b & 0xC0 != 0x80 {
                 return None;
             }
-            buf.push(b);
+            *slot = b;
         }
-        out.push_str(std::str::from_utf8(&buf).ok()?);
+        out.push_str(std::str::from_utf8(&buf[..len]).ok()?);
         i += 3 * len;
     }
     Some(out)
@@ -794,7 +846,9 @@ pub(super) fn encode_url_component<'a>(
     a: Vec<Value<'a>>,
     _: &Call<'_, 'a>,
 ) -> R<'a> {
-    Ok(text(&a, 0).map_or(Value::Undefined, |s| Value::string(encode(&s, ""))))
+    Ok(text(&a, 0).map_or(Value::Undefined, |s| {
+        Value::string(encode(&s, &KEPT_IN_COMPONENT))
+    }))
 }
 
 pub(super) fn encode_url<'a>(
@@ -803,7 +857,7 @@ pub(super) fn encode_url<'a>(
     _: &Call<'_, 'a>,
 ) -> R<'a> {
     Ok(text(&a, 0).map_or(Value::Undefined, |s| {
-        Value::string(encode(&s, URI_RESERVED))
+        Value::string(encode(&s, &KEPT_IN_URL))
     }))
 }
 
@@ -839,11 +893,127 @@ mod tests {
 
     #[test]
     fn url_round_trips() {
-        assert_eq!(encode("a b/ç?x=1", ""), "a%20b%2F%C3%A7%3Fx%3D1");
-        assert_eq!(encode("a b/ç?x=1", URI_RESERVED), "a%20b/%C3%A7?x=1");
+        assert_eq!(
+            encode("a b/ç?x=1", &KEPT_IN_COMPONENT),
+            "a%20b%2F%C3%A7%3Fx%3D1"
+        );
+        assert_eq!(encode("a b/ç?x=1", &KEPT_IN_URL), "a%20b/%C3%A7?x=1");
         assert_eq!(decode("a%20b%2F%C3%A7", false).as_deref(), Some("a b/ç"));
         assert_eq!(decode("a%2Fb", true).as_deref(), Some("a%2Fb"));
         assert_eq!(decode("%E0%A4%A", false), None);
+    }
+
+    /// An escape is two hexadecimal digits, as in JavaScript: before 0.27, `%+1` decoded to
+    /// U+0001, as `u8::from_str_radix` takes a sign.
+    #[test]
+    fn an_escape_is_two_hex_digits() {
+        for s in [
+            "%+1", "%-1", "%+F", "%1", "%", "%G0", "%0G", "%é0", "%C3%+7",
+        ] {
+            assert_eq!(decode(s, false), None, "{s}");
+            assert_eq!(decode(s, true), None, "{s}");
+        }
+        assert_eq!(decode("%c3%a7%2b", false).as_deref(), Some("ç+"));
+        assert_eq!(decode("%c3%a7%2b", true).as_deref(), Some("ç%2b"));
+    }
+
+    /// `encode` as it was before 0.27, a character at a time, each escape formatted.
+    fn encode_by_chars(s: &str, keep: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for c in s.chars() {
+            if c.is_ascii_alphanumeric() || URI_UNRESERVED.contains(c) || keep.contains(c) {
+                out.push(c);
+            } else {
+                let mut buf = [0u8; 4];
+                for b in c.encode_utf8(&mut buf).bytes() {
+                    out.push_str(&format!("%{b:02X}"));
+                }
+            }
+        }
+        out
+    }
+
+    /// `decode` as it was before 0.27, but for the `+` that `u8::from_str_radix` took.
+    fn decode_by_chars(s: &str, keep_reserved: bool) -> Option<String> {
+        let bytes = s.as_bytes();
+        let hex = |i: usize| -> Option<u8> {
+            let h = std::str::from_utf8(bytes.get(i..i + 2)?).ok()?;
+            u8::from_str_radix(h, 16).ok()
+        };
+        let mut out = String::with_capacity(s.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] != b'%' {
+                let c = s[i..].chars().next()?;
+                out.push(c);
+                i += c.len_utf8();
+                continue;
+            }
+            let first = hex(i + 1)?;
+            if first < 0x80 {
+                let c = first as char;
+                if keep_reserved && URI_RESERVED.contains(c) {
+                    out.push_str(&s[i..i + 3]);
+                } else {
+                    out.push(c);
+                }
+                i += 3;
+                continue;
+            }
+            let len = match first {
+                0xC0..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                0xF0..=0xF7 => 4,
+                _ => return None,
+            };
+            let mut buf = vec![first];
+            for k in 1..len {
+                let at = i + 3 * k;
+                if bytes.get(at) != Some(&b'%') {
+                    return None;
+                }
+                let b = hex(at + 1)?;
+                if b & 0xC0 != 0x80 {
+                    return None;
+                }
+                buf.push(b);
+            }
+            out.push_str(std::str::from_utf8(&buf).ok()?);
+            i += 3 * len;
+        }
+        Some(out)
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(20_000))]
+
+        /// Every ASCII character, those of two to four bytes, and lone `%`, around one another:
+        /// the escapes are what the code before 0.27 wrote, and decode back.
+        #[test]
+        fn url_encoding_gives_what_it_gave(s in "([\\x00-\\x7f]|[ç€𝄞]){0,12}") {
+            for (keep, reserved) in [(&KEPT_IN_COMPONENT, ""), (&KEPT_IN_URL, URI_RESERVED)] {
+                let encoded = encode(&s, keep);
+                proptest::prop_assert_eq!(&encoded, &encode_by_chars(&s, reserved));
+                proptest::prop_assert_eq!(decode(&encoded, false), Some(s.clone()));
+            }
+        }
+
+        /// Escapes well and badly formed, of characters of one to four bytes, lone bytes, reserved
+        /// characters in either case, a sign: decoding gives what the code before 0.27 gave, and
+        /// fails where it failed, but where an escape starts with `+`, which it took.
+        #[test]
+        fn url_decoding_gives_what_it_gave(
+            s in "([a%+;/?#ç€𝄞 -]|%[0-9A-Fa-f+]{0,2}|%[2-3][0-9A-Fa-f]|%[C-Fc-f][0-9A-F]%[7-9A-Ca-c][0-9A-F]){0,8}",
+        ) {
+            let signed = s.as_bytes().windows(2).any(|w| w == b"%+");
+            for keep_reserved in [false, true] {
+                let decoded = decode(&s, keep_reserved);
+                if signed && decoded.is_none() {
+                    continue;
+                }
+                proptest::prop_assert_eq!(decoded, decode_by_chars(&s, keep_reserved));
+            }
+        }
     }
 
     #[test]
