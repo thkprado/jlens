@@ -1530,6 +1530,28 @@ fn a_negative_limit_is_checked_before_a_missing_pattern() {
     assert_eq!(eval("$replace('abc', nothing, 'x', 1)", json!(null)), None);
 }
 
+#[test]
+fn a_missing_replacement_removes_what_the_pattern_finds() {
+    // Found by `cargo xtask differential`: jsonata-js writes "undefined" for a string pattern
+    // (`"aundefined"`) and fails with a `TypeError` for a regex; jlens removes the matches of
+    // either (compatibility.md).
+    for (source, expected) in [
+        ("$replace('abab', 'b', nothing)", json!("aa")),
+        ("$replace('abab', 'b', nothing, 1)", json!("aab")),
+        ("$replace('abab', /b/, nothing)", json!("aa")),
+        ("$replace('abab', /b/, nothing, 1)", json!("aab")),
+        (
+            "$replace('abab', function($s){ /b/($s) }, nothing)",
+            json!("aa"),
+        ),
+        ("$replace('abab', 'c', nothing)", json!("abab")),
+        // The input as the string, the pattern and the missing replacement after it.
+        ("$replace('ab', nothing)", json!("")),
+    ] {
+        assert_eq!(eval(source, json!("ab")), Some(expected), "{source}");
+    }
+}
+
 /// Past the items compared one by one, each kind of value keeps what `=` tells apart: functions
 /// by identity, numbers by value, whatever the order of an object's fields.
 #[test]

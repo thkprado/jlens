@@ -204,7 +204,7 @@ counts them apart:
   a regular expression literal applied with `~>` to anything but a string literal,
   `$formatNumber` with a literal picture whose integer part has irregular grouping
   (`'#,##,##0'`), `$substringBefore` / `$substringAfter` whose `chars` is not a string literal,
-  or `$fromMillis` with a computed picture, which may hold a marker with an unknown component and
+  `$replace` whose replacement is neither a string literal nor a lambda, or `$fromMillis` with a computed picture, which may hold a marker with an unknown component and
   a presentation.
 - **Overflow to infinity**: jlens failed with `D1001`, which it raises only where a number
   overflows to infinity (`1 / 0`). jsonata-js passes the infinity on, to its result or to an

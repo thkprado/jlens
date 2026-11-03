@@ -74,6 +74,10 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- `$replace` with a regular expression and an undefined replacement removes the matches, as it
+  did with a string pattern, where it failed with `T1006` (invoke a non-function). jsonata-js
+  writes "undefined" for a string pattern and fails with a JavaScript `TypeError` for a regex;
+  [compatibility](docs/src/language/compatibility.md) says why jlens does neither.
 - `$decodeUrlComponent` and `$decodeUrl` raise `D3140` for an escape whose first digit is a `+`,
   as jsonata-js does: `%+1` decoded to U+0001.
 - `reads()` left out a binding that an expression may read when the same name is assigned in a

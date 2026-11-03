@@ -473,7 +473,13 @@ pub(super) fn replace<'a>(
     if pattern.is_undefined() {
         return Ok(Value::Undefined);
     }
-    let replacement = arg(&a, 2);
+    // A missing replacement removes what the pattern finds, whatever the pattern. jsonata-js
+    // writes "undefined" for a string pattern and fails with a `TypeError` for a regex
+    // (compatibility.md).
+    let replacement = match arg(&a, 2) {
+        Value::Undefined => Value::string(""),
+        r => r,
+    };
     if limit.is_some_and(|l| l <= 0.0) {
         return Ok(Value::String(s));
     }
@@ -481,7 +487,7 @@ pub(super) fn replace<'a>(
     let mut count = 0.0;
 
     if let Value::String(p) = &pattern {
-        let replacement = replacement.as_str().unwrap_or_default().to_owned();
+        let replacement = replacement.as_str().unwrap_or_default();
         let mut position = 0;
         while let Some(found) = s[position..].find(p.as_ref()) {
             if limit.is_some_and(|l| count >= l) {
@@ -489,7 +495,7 @@ pub(super) fn replace<'a>(
             }
             let index = position + found;
             result.push_str(&s[position..index]);
-            result.push_str(&replacement);
+            result.push_str(replacement);
             position = index + p.len();
             count += 1.0;
         }

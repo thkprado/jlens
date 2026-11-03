@@ -233,7 +233,8 @@ A string `replacement` with a regex `pattern` can refer to what was matched:
 - `$$` is a literal `$`.
 
 `replacement` can also be a function. It receives each match, as `$match` describes it, and
-returns the replacement string.
+returns the replacement string. When `replacement` is undefined, the occurrences are removed (see
+[compatibility](../compatibility.md)).
 
 ```jsonata-example
 $replace("John Smith and John Jones", "John", "Mr")

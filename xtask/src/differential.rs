@@ -450,7 +450,8 @@ fn wildcard_first(expr: &str) -> bool {
 /// a literal picture whose integer part has irregular grouping (`'#,##,##0'`), where jsonata-js
 /// places separators with no digit on their left; and `$substringBefore` or `$substringAfter`
 /// whose `chars` is not a string literal, which jsonata-js searches as "undefined" when missing;
-/// and an order-by after a step that binds `@`, `#` or an ancestor, filtered or ending a path
+/// `$replace` whose replacement is neither a string literal nor a lambda, which jsonata-js
+/// writes as "undefined" when missing; and an order-by after a step that binds `@`, `#` or an ancestor, filtered or ending a path
 /// with a group-by, where jsonata-js gives the filter or group-by its internal tuples. And a
 /// call with a group-by in tail position of a lambda, whose group-by jsonata-js drops. And
 /// `$fromMillis` with a computed picture, where a marker with an unknown component and a
@@ -487,6 +488,15 @@ fn dropped_quirk(expr: &str) -> bool {
                         .get(1)
                         .is_some_and(|a| matches!(a.kind, NodeKind::String { .. }))
                 }
+                // The replacement, third or, with the input as the string, second: neither a
+                // string literal nor a lambda may be missing, which jsonata-js writes as
+                // "undefined" (or fails on, given a regex) and jlens as nothing.
+                NodeKind::Variable { name } if name == "replace" => args
+                    .get(2)
+                    .or(args.get(1).filter(|_| args.len() == 2))
+                    .is_some_and(|a| {
+                        !matches!(a.kind, NodeKind::String { .. } | NodeKind::Lambda(_))
+                    }),
                 NodeKind::Variable { name } if name == "fromMillis" => args
                     .get(1)
                     .is_some_and(|a| !matches!(a.kind, NodeKind::String { .. })),
