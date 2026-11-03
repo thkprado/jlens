@@ -1971,3 +1971,51 @@ rest, with or without a call's frame tested first, and with the binding kept out
 neither of those is the cause. A name of 16 bytes, with a long name behind one pointer, leaves the
 frame's variables room and reads +0.4%, and so was kept. At 24, the new variant filled the 48 bytes
 of its type exactly, where its discriminant has to go; that this is the reason was not traced.
+
+### The tuples of a path (0.27 #14)
+
+A step with `@`, `#` or an ancestor label makes a tuple for each item: a map of its own, with the
+fields of the tuple before it and the step's own. Counted with a global allocator that records where
+each allocation comes from, against a `Document` of the workload's 200 items, `items#$n.code` made
+2,637 allocations, about 13 for each item:
+
+| For each item | Allocations | After |
+|---|---:|---:|
+| The keys of the tuples, `@` twice and `n` once | 3 | 0 |
+| A list holding the step's result, when it is not an array | 1 | 0 |
+| The two tuples | 2 | 2 |
+| The copies of the tuples' maps, two allocations each | 4 | 4 |
+| The frame of the second step, and its list | 2 | 2 |
+| The result's string, no part of the tuples | 1 | 1 |
+
+The keys are now made once for each step and shared by each tuple with `Rc::clone`, which counts
+on no line another thread reads, as each evaluation makes its own; a step's result that is not an
+array is its one item, with no list of its own; and the frame that binds a tuple's fields is made
+at their number, where binding them in turn grew its list from two names to four when a tuple has
+three. On Windows, the probe with `mimalloc`, which the packages use, the median of five alternated
+runs, each on a new copy of the program:
+
+| Case, against a `Document` | Before | After | | Allocations |
+|---|---:|---:|---:|---:|
+| A tuple's focus, `items@$i.{'code': $i.code}` | 158.6 µs | 145.0 µs | −8.5% | 4,038 → 3,238 |
+| A tuple's index, `items#$n.code` | 99.2 µs | 87.5 µs | −11.8% | 2,637 → 1,838 |
+| `tuples`: both, a filter and a group-by | 170.6 µs | 149.9 µs | −12.1% | 2,445 → 1,545 |
+| A group-by with no tuple, `items{type: $sum(quantity)}` | 27.2 µs | 27.7 µs | +1.7% | |
+
+`tuples` is a new case of the workload, `items#$n@$i[$n % 2 = 0]{$i.type: $sum($i.(unitPrice *
+quantity))}`, which `ab`, `compare.mjs`, `python.py` and `java-compare` read. `cargo xtask ab
+e8c49af .`, ten rounds, with the system allocator, where an allocation costs more:
+
+| Mode | `tuples` before | After | |
+|---|---:|---:|---:|
+| `evaluate` | 250 µs | 207 µs | −17.2% |
+| `document` | 237 µs | 194 µs | −18.2% |
+| `source` | 263 µs | 220 µs | −16.2% |
+
+The other cases read −3.3 to +1.6%, none at the mark of 3.5%.
+
+The second candidate of the roadmap, a tuple with no `IndexMap`, was not built. It would take at most
+the copies of the maps, four of the nine allocations left for each item, and the frame that copies a
+tuple's fields again. But a tuple stream is an array of objects that filters, sorts, group-by and
+`$` read as objects, so a tuple of its own is a change to each of them, larger than this item's one
+session.

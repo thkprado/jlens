@@ -38,6 +38,10 @@ All notable changes are recorded here. The format follows
   items it takes 19% less with `evaluate`, 42% less over Java maps, 21% less with Python values
   and 5% less in WebAssembly, and more the longer the array. An item it does not pick is no longer
   read, so one that cannot be read fails nothing.
+- A path with `@`, `#` or an ancestor label makes the keys of its tuples once for each step, where
+  each tuple allocated its own, builds no list for a step's result that is not an array, and makes
+  the frame of a tuple at its size. Over 200 items, a third fewer allocations, and 8 to 12% less
+  time.
 
 ### Fixed
 

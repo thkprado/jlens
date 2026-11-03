@@ -611,13 +611,40 @@ impl<'a> Evaluator<'_, 'a> {
         Frame::new(Some(parent))
     }
 
-    /// A frame binding every field of a tuple (`createFrameFromTuple`).
+    /// A frame binding every field of a tuple (`createFrameFromTuple`). Its fields are known, so
+    /// the frame's list is made at their number, where binding them in turn grew it (0.27 #14).
     fn frame_from_tuple(&mut self, env: &Env<'a>, tuple: &Value<'a>) -> Env<'a> {
-        let frame = self.child(env);
-        if let Value::Object(o) = tuple {
-            for (k, v) in o.borrow().iter() {
-                self.bind(&frame, k, v.clone());
+        let Value::Object(o) = tuple else {
+            return self.child(env);
+        };
+        let o = o.borrow();
+        let cyclic = o.values().any(may_hold_frame);
+        let mut fields = o.iter();
+        let vars = match (o.len(), fields.next()) {
+            (1, Some((k, v))) => Vars::One(Name::new(k), v.clone()),
+            (len, Some(first)) if len <= FEW_VARS => {
+                let mut vars = Vec::with_capacity(len);
+                for (k, v) in std::iter::once(first).chain(fields) {
+                    vars.push((Name::new(k), v.clone()));
+                }
+                Vars::Few(vars)
             }
+            (_, Some(first)) => Vars::Many(
+                std::iter::once(first)
+                    .chain(fields)
+                    .map(|(k, v)| (Name::new(k), v.clone()))
+                    .collect(),
+            ),
+            (_, None) => Vars::Empty,
+        };
+        let frame = Rc::new(Frame {
+            vars: RefCell::new(vars),
+            parent: Some(env.clone()),
+            input: Value::Undefined,
+            functions: None,
+        });
+        if cyclic {
+            self.cyclic.push(Rc::downgrade(&frame));
         }
         frame
     }
@@ -1206,10 +1233,10 @@ impl<'a> Evaluator<'_, 'a> {
                 }
                 Stage::Index { var, .. } => {
                     if let Value::Array(a) = &result {
+                        let key: Rc<str> = var.as_str().into();
                         for (ee, tuple) in a.items().iter().enumerate() {
                             if let Value::Object(o) = tuple {
-                                o.borrow_mut()
-                                    .insert(var.as_str().into(), Value::Number(ee as f64));
+                                o.borrow_mut().insert(key.clone(), Value::Number(ee as f64));
                             }
                         }
                     }
@@ -1226,6 +1253,10 @@ impl<'a> Evaluator<'_, 'a> {
         tuple_bindings: Option<&Value<'a>>,
         env: &Env<'a>,
     ) -> Result<Value<'a>> {
+        // The keys a step gives its tuples, made once for the step and shared by each tuple,
+        // where each tuple allocated its own (0.27 #14).
+        let at: Rc<str> = "@".into();
+        let index = step.attrs.index.as_deref().map(Rc::<str>::from);
         if let NodeKind::Sort { terms } = &step.kind {
             let result = match tuple_bindings {
                 Some(bindings) => self.sort(step, terms, bindings, env)?,
@@ -1237,9 +1268,9 @@ impl<'a> Evaluator<'_, 'a> {
                         .enumerate()
                         .map(|(ss, item)| {
                             let mut tuple = Map::default();
-                            tuple.insert("@".into(), item);
-                            if let Some(index) = &step.attrs.index {
-                                tuple.insert(index.as_str().into(), Value::Number(ss as f64));
+                            tuple.insert(at.clone(), item);
+                            if let Some(index) = &index {
+                                tuple.insert(index.clone(), Value::Number(ss as f64));
                             }
                             Value::object(tuple)
                         })
@@ -1249,6 +1280,8 @@ impl<'a> Evaluator<'_, 'a> {
             };
             return self.stages(&step.attrs.stages, result, env);
         }
+        let focus = step.attrs.focus.as_deref().map(Rc::<str>::from);
+        let label = step.attrs.ancestor_label.as_deref().map(Rc::<str>::from);
 
         let bindings: Vec<Value<'a>> = match tuple_bindings {
             Some(b) => b.items_or_self(),
@@ -1259,7 +1292,7 @@ impl<'a> Evaluator<'_, 'a> {
                         .iter()
                         .map(|item| {
                             let mut t = Map::default();
-                            t.insert("@".into(), item.clone());
+                            t.insert(at.clone(), item.clone());
                             Value::object(t)
                         })
                         .collect()
@@ -1275,31 +1308,32 @@ impl<'a> Evaluator<'_, 'a> {
             if res.is_undefined() {
                 continue;
             }
-            let (items, res_is_tuple) = match &res {
-                Value::Array(a) => (a.items().clone(), a.is_tuple_stream()),
-                other => (vec![other.clone()], false),
+            // A value that is not an array is its one item, without a list of its own.
+            let (items, res_is_tuple): (&[Value<'a>], bool) = match &res {
+                Value::Array(a) => (a.items(), a.is_tuple_stream()),
+                other => (std::slice::from_ref(other), false),
             };
             self.check_array(out.len() + items.len())?;
-            for (bb, item) in items.into_iter().enumerate() {
+            for (bb, item) in items.iter().enumerate() {
                 let mut t = tuple_map(tuple);
                 if res_is_tuple {
-                    if let Value::Object(o) = &item {
+                    if let Value::Object(o) = item {
                         for (k, v) in o.borrow().iter() {
                             t.insert(k.clone(), v.clone());
                         }
                     }
                 } else {
-                    if let Some(focus) = &step.attrs.focus {
-                        t.insert(focus.as_str().into(), item);
-                        t.insert("@".into(), context.clone());
+                    if let Some(focus) = &focus {
+                        t.insert(focus.clone(), item.clone());
+                        t.insert(at.clone(), context.clone());
                     } else {
-                        t.insert("@".into(), item);
+                        t.insert(at.clone(), item.clone());
                     }
-                    if let Some(index) = &step.attrs.index {
-                        t.insert(index.as_str().into(), Value::Number(bb as f64));
+                    if let Some(index) = &index {
+                        t.insert(index.clone(), Value::Number(bb as f64));
                     }
-                    if let Some(label) = &step.attrs.ancestor_label {
-                        t.insert(label.as_str().into(), context.clone());
+                    if let Some(label) = &label {
+                        t.insert(label.clone(), context.clone());
                     }
                 }
                 out.push(Value::object(t));

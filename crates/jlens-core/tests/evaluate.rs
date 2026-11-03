@@ -700,6 +700,38 @@ fn group_by_joins_each_group_as_jsonata_js_appends_it() {
 }
 
 #[test]
+fn a_tuple_binds_each_of_its_fields() {
+    // A tuple's frame is made at the number of its fields: one name, a list up to eight, a
+    // table past it. Each step binds one more, as jsonata-js 2.2.2 does.
+    let input = json!({"v": [3, 4]});
+    for k in 1..=10 {
+        let names: Vec<String> = (1..=k).map(|i| format!("$x{i}")).collect();
+        let steps = names
+            .iter()
+            .map(|n| format!("v@{n}"))
+            .collect::<Vec<_>>()
+            .join(".");
+        let last = &names[k - 1];
+        let all = names.join(", ");
+        // Each tuple, in order, the first name the outermost; the filter binds them too.
+        let expected: Vec<i64> = (0..1 << k)
+            .filter(|t| t & 1 == 1)
+            .flat_map(|t| (0..k).rev().map(move |i| 3 + (t >> i & 1)))
+            .collect();
+        let expr = format!("[{steps}[{last} = 4].[{all}]]");
+        assert_eq!(eval(&expr, input.clone()), Some(json!(expected)), "{expr}");
+        // A group's frame binds each field of the tuples it merges.
+        let expr = format!("{steps}{{$string($x1): $count({last})}}");
+        let half = 1 << (k - 1);
+        assert_eq!(
+            eval(&expr, input.clone()),
+            Some(json!({"3": half, "4": half})),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
 fn an_order_by_keeps_the_tuple_stream() {
     // jsonata-js gives a filter or group-by after the sort its internal tuples, unless the
     // stream has a single item (compatibility.md); jlens keeps the tuple stream.
