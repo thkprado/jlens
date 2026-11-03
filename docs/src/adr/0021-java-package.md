@@ -1219,7 +1219,9 @@ within 2.5% between the two, `recursion` aside:
   that Jackson parses from 100 items at each evaluation gives 98,085 evaluations per second on
   16 threads instead of 73,479, and 10,931 on one instead of 9,131.
 - **Number formatting** takes 16% longer: `items[[0..19]]` reads the list of 200 items whole,
-  so each item is written with the two fields the expression reads, and 20 are used.
+  so each item is written with the two fields the expression reads, and 20 are used. Since 0.27 #8
+  the list is not read whole: 57.5 → 33.4 µs
+  ([ADR 0010](0010-lazy-input.md#follow-up-a-predicate-that-picks-many-items-027-8)).
 - **`$`** takes 1.00 instead of 0.75 µs: the input, a map of one field read whole, is written
   with that field, which the result, the input itself, does not need.
 - **`recursion`** reads no input, and takes 3 to 4% longer with a `Document` too: the C API

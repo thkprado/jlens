@@ -1428,10 +1428,6 @@ impl<'a> Evaluator<'_, 'a> {
             Value::Array(a) => (a.len(), Some(a)),
             _ => (1, None),
         };
-        let item = |i: usize| match array {
-            Some(a) => a.item(i),
-            None => input.clone(),
-        };
         if len == 0 {
             return Ok(());
         }
@@ -1452,13 +1448,10 @@ impl<'a> Evaluator<'_, 'a> {
                 .filter_map(|n| item_index(n.as_number().unwrap_or(f64::NAN), len))
                 .collect();
             indexes.sort_unstable();
-            // More items than an array keeps alone are read with its level, at once.
-            if indexes.len() > value::ITEMS_ALONE
-                && let Some(a) = array
-            {
-                a.items();
+            match array {
+                Some(a) => a.pick(&indexes, results),
+                None => results.extend(indexes.iter().map(|_| input.clone())),
             }
-            results.extend(indexes.into_iter().map(item));
         } else if boolean(&res)? == Some(true) {
             match array {
                 Some(a) => results.extend(a.items().iter().cloned()),

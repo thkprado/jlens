@@ -8,7 +8,7 @@
 
 use std::cell::{Cell, OnceCell, Ref, RefCell, RefMut};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::hash::{BuildHasher, Hasher};
 use std::rc::Rc;
@@ -238,14 +238,19 @@ struct LazyItems<'a> {
     items: OnceCell<Vec<Value<'a>>>,
     /// The number of items a source tells, asked once.
     length: OnceCell<Option<usize>>,
-    /// The arrays and objects among the items read alone, with their indexes, until the array is
+    /// The arrays and objects among the items read alone, by their indexes, until the array is
     /// read whole (ADR 0010, amendment).
-    alone: RefCell<Vec<(usize, Value<'a>)>>,
+    alone: RefCell<BTreeMap<usize, Value<'a>>>,
 }
 
-/// Past this many items kept alone, an array is read whole: finding an item among them costs a
-/// comparison with each.
-pub(crate) const ITEMS_ALONE: usize = 16;
+/// Past this many items kept alone, an index reads the array whole: it cannot tell how many
+/// more will follow it, and each cost more than an item read with the level.
+const ITEMS_ALONE: usize = 16;
+
+/// An item read alone costs up to this many read with their level, so that a predicate that
+/// picks more than one item in this many reads the level. It knows how many it picks, so that
+/// it never pays for both.
+const ITEMS_PICKED_SHARE: usize = 10;
 
 impl<'a> LazyItems<'a> {
     /// The items, read from the input on the first call. The items read alone before keep their
@@ -286,7 +291,7 @@ impl<'a> LazyItems<'a> {
                 items
             }
         };
-        for (index, value) in self.alone.take() {
+        for (index, value) in std::mem::take(&mut *self.alone.borrow_mut()) {
             if let Some(slot) = items.get_mut(index) {
                 *slot = value;
             }
@@ -312,17 +317,18 @@ impl<'a> LazyItems<'a> {
     }
 
     /// The item at `index`, below [`LazyItems::len`], of an array not read whole: read alone
-    /// when the input can, and kept when it is an array or an object.
+    /// when the input can, and kept when it is an array or an object. With `most` items kept,
+    /// the array is read whole instead.
     #[cold]
     #[inline(never)]
-    fn read_item(&self, index: usize) -> Value<'a> {
+    fn read_item(&self, index: usize, most: usize) -> Value<'a> {
         let pending = &self.pending;
         {
             let alone = self.alone.borrow();
-            if let Some((_, value)) = alone.iter().find(|(i, _)| *i == index) {
+            if let Some(value) = alone.get(&index) {
                 return value.clone();
             }
-            if alone.len() >= ITEMS_ALONE {
+            if alone.len() >= most {
                 drop(alone);
                 return self.read().get(index).cloned().unwrap_or_default();
             }
@@ -343,7 +349,7 @@ impl<'a> LazyItems<'a> {
         };
         // As for the fields of an object, only arrays and objects are kept.
         if let Value::Array(_) | Value::Object(_) = value {
-            self.alone.borrow_mut().push((index, value.clone()));
+            self.alone.borrow_mut().insert(index, value.clone());
         }
         value
     }
@@ -356,7 +362,7 @@ impl<'a> LazyItems<'a> {
     /// The values the array holds, read whole or alone, taken out of it.
     fn take(&mut self) -> Vec<Value<'a>> {
         let mut items = self.items.take().unwrap_or_default();
-        items.extend(self.alone.get_mut().drain(..).map(|(_, value)| value));
+        items.extend(std::mem::take(self.alone.get_mut()).into_values());
         items
     }
 }
@@ -388,9 +394,31 @@ impl<'a> Array<'a> {
             None => self.items[index].clone(),
             Some(lazy) => match lazy.items.get() {
                 Some(items) => items[index].clone(),
-                None => lazy.read_item(index),
+                None => lazy.read_item(index, ITEMS_ALONE),
             },
         }
+    }
+
+    /// The items at `indexes`, each below [`Array::len`], in their order. Past [`ITEMS_ALONE`] of
+    /// them, an array of the input not read whole reads them alone when they are few for its
+    /// length, and its level otherwise, as reading each and then the level would pay for both.
+    pub fn pick(&self, indexes: &[usize], out: &mut Vec<Value<'a>>) {
+        if let Some(lazy) = &self.lazy
+            && indexes.len() > ITEMS_ALONE
+            && lazy.items.get().is_none()
+        {
+            let kept = {
+                let alone = lazy.alone.borrow();
+                let new = indexes.iter().filter(|i| !alone.contains_key(i)).count();
+                alone.len() + new
+            };
+            if kept <= lazy.len() / ITEMS_PICKED_SHARE {
+                out.extend(indexes.iter().map(|&i| lazy.read_item(i, usize::MAX)));
+                return;
+            }
+            lazy.read();
+        }
+        out.extend(indexes.iter().map(|&i| self.item(i)));
     }
 
     /// The input JSON this array stands for, when nothing of it has been read.

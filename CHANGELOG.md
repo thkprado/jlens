@@ -33,6 +33,11 @@ All notable changes are recorded here. The format follows
   no longer allocate a copy, and a frame with one name no longer allocates a list. A block at the
   top takes 9% less, a block of one name in a lambda 5% less, and threads sharing such an
   expression evaluate 6 to 8% more.
+- A predicate that picks more than 16 items of an array of the input, such as `items[[0..19]]`,
+  reads those items, not the whole array, when they are at most one item in ten of it. Over 200
+  items it takes 19% less with `evaluate`, 42% less over Java maps, 21% less with Python values
+  and 5% less in WebAssembly, and more the longer the array. An item it does not pick is no longer
+  read, so one that cannot be read fails nothing.
 
 ### Fixed
 

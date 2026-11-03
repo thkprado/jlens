@@ -363,5 +363,14 @@ read reaches the variable and what is outside it, the binding included. That is 
 `$f($x := 1); $x` also reads the binding `x`.
 
 A lazy read still does less where an expression reaches a few items of a long array:
-`$v.items[3].price` converts `price` of every item, since `Read` has no items. That is the question
-of roadmap 0.27 #8.
+`$v.items[3].price` converts `price` of every item, since `Read` has no items. Roadmap 0.27 #8
+looked at that, and `Read` stays without them. Inputs read on demand did not need them: the
+evaluation knows what it picks when it picks it
+([ADR 0010](0010-lazy-input.md#follow-up-a-predicate-that-picks-many-items-027-8)). A variable
+would, as it is converted before the evaluation, but items need more than a new field. A position
+holds only where no array lies above the array it picks from, since a path flattens those, and it
+would have to hold for every other use of the place, whichever of the analysis's paths reads it,
+where a wrong answer is silent. The items left out would need a stand-in to keep the positions. A
+`Read` of the public API cannot say any of this without changing its JSON form. An application
+that reads a few items of a long variable has two ways that convert nothing: the variable as a
+`Document` of `evaluate_document_with`, or `evaluate_with`, which reads it lazily.

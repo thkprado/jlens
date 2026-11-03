@@ -733,7 +733,9 @@ jsonata-jvm-compiler, and a `Document` for `evaluate(Document)`:
   ([ADR 0021, amended](../adr/0021-java-package.md#amendment-maps-written-with-what-the-expression-reads-026-4)):
   `names over items` took 45 µs in 0.25.0, the shipping rule 324, the cases that read the items
   5 to 32% less now, and number formatting 30% more
-  ([0.26 against 0.25.0](#026-against-0250)).
+  ([0.26 against 0.25.0](#026-against-0250)), which 0.27 #8 takes back: on Windows it takes 33.4
+  instead of 57.5 µs, against 43 in 0.25.0
+  ([ADR 0010](../adr/0010-lazy-input.md#follow-up-a-predicate-that-picks-many-items-027-8)).
 
 From JSON text, parsed at each evaluation, by its own parser for jsonata-java, by Jackson for
 jsonata-jvm-compiler, and by `evaluateFromJson` for jlens, which skips the fields the expression
@@ -1220,8 +1222,9 @@ functions and blocks aligned, in µs, the fastest of 15 rounds of one process:
 | `a + 1`, no variables | 0.199 | 0.202 | 0.30 |
 
 What is still slower than a lazy read is an array read for a few of its items:
-`$v.items[3].price` converts `price` of all 1,000, since a `Read` has no items, the question of
-[0.27 #8](roadmap.md). A variable read whole costs what it did: run alone, as a process that ran
+`$v.items[3].price` converts `price` of all 1,000, since a `Read` has no items, and
+[0.27 #8](../adr/0016-fields-read.md#amendment-the-evaluation-reads-its-variables-by-the-analysis-027)
+left it so. The variable as a `Document` converts nothing. A variable read whole costs what it did: run alone, as a process that ran
 the cases before it draws another heap, 1,050 against 1,058 µs. A number takes 13 ns more, the
 lookup of what is read of it. With no variables nothing is looked up, and `cargo xtask ab main .`
 over ten rounds finds every case between −5.1 and +1.0% with `--mode document`, −2.8 and +0.7%
@@ -1399,7 +1402,11 @@ variables measures +0.8 to +1.9% aligned, over seven rounds on new copies, withi
   revision before, `items[0].code` over 10,000 items takes 1.31 µs instead of 618 µs with
   `evaluate`, and 1.95 µs instead of 609 µs with `--mode source`, near the 0.67 µs it takes
   against a `Document`; the other cases are within 2%. A predicate that picks more than 16 items
-  reads the array whole at once.
+  reads the array whole at once, unless, since 0.27 #8, they are at most one item in ten of it
+  ([ADR 0010](../adr/0010-lazy-input.md#follow-up-a-predicate-that-picks-many-items-027-8)):
+  `number formatting`, `items[[0..19]]` over 200 items, takes 19.2% less with `evaluate`, 42% less
+  over Java maps, 20.8% less in Python and 5.1% less in WebAssembly. An index, also one held in a
+  variable, still reads the array whole past 16 items, as it cannot tell how many will follow.
 
   An index held in a variable (`items[$i]`) does the same since 0.24 #5: a predicate built from
   literals and variables gives the same value for each item, so it is evaluated once and picks

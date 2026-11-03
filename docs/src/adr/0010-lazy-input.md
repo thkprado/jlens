@@ -5,7 +5,8 @@ borrowed view of the input. Amended in 0.17: a path step reads one field of an o
 not been read ([below](#amendment-one-field-at-a-time-017)). Amended in 0.19: the arrays and
 objects of a level can share one source ([below](#amendment-one-allocation-per-member-019)).
 Amended in 0.24: an index reads the items of an array that it picks
-([below](#amendment-one-item-at-a-time-024)).
+([below](#amendment-one-item-at-a-time-024)), and in 0.27, however many it picks when they are few
+for the array ([below](#follow-up-a-predicate-that-picks-many-items-027-8)).
 
 ## Context
 
@@ -448,6 +449,61 @@ shorter after its length was read; an item past its new end is undefined. With P
 in, `items[0].code` over 10,000 items takes 1.3 µs instead of 413 µs, and
 `($i := 0; items[$i].code)` 1.7 µs instead of 414 µs; the other cases of `python.py speed` are
 within 2.3% (the median of three alternated runs, both builds aligned).
+
+### Follow-up: a predicate that picks many items (0.27 #8)
+
+Decision 3 left a predicate that picks more than 16 items reading the level, for two reasons: more
+items kept than that would be slow to find among them, and an array read alone and then whole pays
+for both. So `items[[0..19]]` over 200 items read all 200, and over Java maps wrote each with the
+fields the expression reads, to use 20: 58 µs, where 0.25.0 took 43.
+
+Neither reason holds for such a predicate. It knows how many it picks before it reads one, so it
+can choose once, and the items kept are now found in a `BTreeMap`. What it chooses by:
+
+- **A predicate that picks more than 16 items reads them alone when, with those kept, they are at
+  most one item in ten of the array,** and its level otherwise. One in ten is what was measured: a
+  number read alone took about 0.58 µs in WebAssembly, the dearest of the inputs, where its level
+  took 0.06 µs a number, so that at one in eight numbers took 8 to 19% longer there, and at one
+  in ten none takes longer in any package.
+- **An index keeps 16.** A number or a variable gives one index at a time and cannot tell how many
+  will follow, so that a loop over `items[$i]` would read one item in ten alone and then the level
+  anyway. Trying the same limit there made such a loop, stopping just past it, 65 to 70% slower in
+  WebAssembly, 20 to 31% in Java and 18 to 22% in Python on arrays of 2,000 items and more. With 16
+  it takes what it took.
+
+Errors follow, as decision 5 says: an item not picked is no longer read, so one that cannot be read
+fails nothing.
+
+`reads()` does not change. The analysis cannot say which items an expression needs: most indexes
+are known only at run time, it knows no types, and an array under another array is flattened, so
+that a position does not name one item. The evaluation can say it, at the moment it picks them.
+
+With `cargo xtask ab`, built as usual, `number formatting` takes 35.5 instead of 44.0 µs with
+`evaluate`, −19.2%, and 39.4 instead of 46.7 µs through the program's source, −15.8%. Against a
+`Document`, which is not lazy, it is unchanged, +0.5%, and every other case is within −1.9 and
++2.5% in the three modes. In the packages, in µs per evaluation:
+
+| Package | `number formatting` | Before | After | Change |
+|---|---|---:|---:|---:|
+| Java | over maps | 57.5 | 33.4 | −42.0% |
+| Java | JSON text read into maps | 161 | 136 | −15.8% |
+| Python | Python values | 37.5 | 29.7 | −20.8% |
+| WebAssembly | `evaluate` | 97.6 | 92.6 | −5.1% |
+
+Over a longer array, the gain grows with what is not read, as picks of a tenth and of a
+thirty-second of it show, in µs for 20,000 items:
+
+| Package | Expression | Before | After |
+|---|---|---:|---:|
+| Java | `$sum(records[[0..1999]].price)` | 2,382 | 839 |
+| | `$sum(numbers[[0..1999]])` | 482 | 389 |
+| | `$sum(numbers[[0..624]])` | 456 | 123 |
+| WebAssembly | `$sum(records[[0..1999]].price)` | 4,118 | 2,887 |
+| | `$sum(numbers[[0..1999]])` | 1,250 | 1,052 |
+| | `$sum(numbers[[0..624]])` | 1,206 | 333 |
+| Python | `$sum(records[[0..1999]].price)` | 1,145 | 521 |
+| | `$sum(numbers[[0..1999]])` | 527 | 125 |
+| | `$sum(numbers[[0..624]])` | 497 | 39.8 |
 
 ## Amendment: a level read in case it is needed (0.27)
 

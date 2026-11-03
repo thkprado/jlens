@@ -1121,7 +1121,8 @@ fn an_index_reads_one_item() {
     let input = json!({
         "a": [{"b": 1}, [2, 3], 4, {"c": {"d": 5}}],
         "bad": [1, "fails", {"e": 6}],
-        "long": (1..=20).collect::<Vec<_>>()
+        "long": (1..=20).collect::<Vec<_>>(),
+        "longer": (0..200).map(|i| json!({"i": i})).collect::<Vec<_>>()
     });
     let reads = |source: &str, fields: bool, members: bool| {
         READS.with(|reads| reads.set((0, 0)));
@@ -1160,10 +1161,29 @@ fn an_index_reads_one_item() {
         // `$` is the item tested, and a variable of `#` is bound for each: the level is read whole.
         assert_eq!(reads("a[$ = 4]"), (Ok(Some(json!(4))), 2, 1));
         assert_eq!(reads("a#$i[$i = 2]"), (Ok(Some(json!(4))), 2, 1));
-        // Up to 16 items are read alone, more with their level; the predicate reads no item.
+        // Up to 16 items are read alone, or one in ten of a long array, and more with their level;
+        // the predicate reads no item.
         let picked = |n: i32| Ok(Some(json!((1..=n).collect::<Vec<_>>())));
         assert_eq!(reads("long[[0..15]]"), (picked(16), 1, 17));
         assert_eq!(reads("long[[0..16]]"), (picked(17), 2, 1));
+        // `i` is a scalar, read each time. Items kept are not picked again, and past what is
+        // kept, here 20, the level is read.
+        let is = |n: i32| Ok(Some(json!((0..n).collect::<Vec<_>>())));
+        assert_eq!(reads("longer[[0..19]].i"), (is(20), 1, 1 + 20 + 20));
+        assert_eq!(reads("longer[[0..20]].i"), (is(21), 2, 1 + 21));
+        assert_eq!(
+            reads("[longer[[0..19]].i, longer[[0..19]].i][19]"),
+            (Ok(Some(json!(19))), 1, 1 + 20 + 2 * 20)
+        );
+        assert_eq!(
+            reads("[longer[[0..15]].i, longer[[10..30]].i][-1]"),
+            (Ok(Some(json!(30))), 2, 1 + 16 + 16 + 21)
+        );
+        // An index does not know that more will follow: past 16 kept, it reads the level.
+        assert_eq!(
+            reads("$map([0..16], function($i) { longer[$i].i })[-1]"),
+            (Ok(Some(json!(16))), 2, 1 + 16 + 16 + 1)
+        );
         // An item read alone is kept, and so is it when the array is read whole later: `a[0]`,
         // `a[3]` and `c` are read alone once, `b` three times, and the array whole once.
         assert_eq!(
@@ -1191,7 +1211,10 @@ fn an_index_reads_one_item() {
     assert_eq!(reads("a[0].b", false, false), (Ok(Some(json!(1))), 4, 0));
     assert_eq!(reads("bad[0]", false, false).0, Err("U1004".into()));
     // Lazy JSON reads its items alone too, with an audit or without, and agrees with a document.
-    let input = json!({"a": [{"b": 1}, [2, 3], 4, {"c": {"d": 5}}]});
+    let input = json!({
+        "a": [{"b": 1}, [2, 3], 4, {"c": {"d": 5}}],
+        "long": (0..200).map(|i| json!({"i": i})).collect::<Vec<_>>()
+    });
     let options = Options::default();
     let audit = jlens_core::audit::AuditOptions::full();
     for source in [
@@ -1205,6 +1228,10 @@ fn an_index_reads_one_item() {
         "$map([0..3], function($i) { a[$i] })",
         "($i := [3, 0]; a[$i])",
         "a#$i[$i = 1]",
+        "long[[0..19]].i",
+        "long[[0..20]].i",
+        "[long[[5..24]], long[[0..30]], $count(long), long[7], long]",
+        "long[[0..19]] ~> |$|{'x': 1}|",
     ] {
         let expr = Expression::compile(source).unwrap();
         let document = expr.evaluate_document(&Document::new(&input), &Bindings::new(), &options);
@@ -2058,6 +2085,54 @@ fn found_reads_keep_what_an_evaluation_needs() {
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(2000))]
+
+    /// Items picked out of a long array give what they give read whole, in order, by value, and
+    /// whatever the array read alone before them. Each input and expression runs lazily, through
+    /// a source and against a document.
+    #[test]
+    fn picked_items_are_the_items(
+        len in 170..400usize,
+        first in prop::collection::vec(-420..420i32, 1..50),
+        second in prop::collection::vec(-420..420i32, 1..50),
+        index in -420..420i32,
+        shape in 0..3usize,
+    ) {
+        let array = |len| -> Vec<serde_json::Value> {
+            (0..len).map(|i| match (shape, i % 3) {
+                (0, _) => json!(i),
+                (1, _) => json!({"i": i}),
+                (_, 0) => json!([i, [i]]),
+                (_, 1) => json!({"i": [i]}),
+                _ => json!(i),
+            }).collect()
+        };
+        let input = json!({"a": array(len)});
+        let list = |indexes: &[i32]| {
+            indexes.iter().map(i32::to_string).collect::<Vec<_>>().join(", ")
+        };
+        let (first, second) = (list(&first), list(&second));
+        for source in [
+            format!("a[[{first}]]"),
+            format!("a[[{first}]].i"),
+            format!("[a[{index}], a[[{first}]], a[[{second}]]]"),
+            format!("($x := a[[{first}]]; [$x, $count(a), a[[{second}]], $x, a])"),
+            format!("[$map([{first}], function($i) {{ a[$i] }}), a[[{second}]]]"),
+        ] {
+            let expr = Expression::compile(&source).unwrap();
+            let bindings = Bindings::new();
+            let options = Options::default();
+            let code = |e: jlens_core::Error| e.code().to_string();
+            let document = expr
+                .evaluate_document(&Document::new(&input), &bindings, &options)
+                .map_err(code);
+            let lazy = expr.evaluate_with(Some(&input), &bindings, &options).map_err(code);
+            prop_assert_eq!(&lazy, &document, "{}", source);
+            for reader in [JsonSource::root(&input, true), JsonSource::members(&input)] {
+                let read = expr.evaluate_source(&reader, &bindings, &options).map_err(code);
+                prop_assert_eq!(&read, &document, "{}", source);
+            }
+        }
+    }
 
     /// ADR 0016: an expression gives the same result, or error code, on its input and
     /// bindings cut by its reads. The analysis never panics, however deep the expression.
