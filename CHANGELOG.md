@@ -54,6 +54,12 @@ All notable changes are recorded here. The format follows
   took 1.3 to 1.5 µs, and of `$match` 0.70 µs, where it took 1.8 µs; a function as the replacement
   is still given the match object, whose keys are now made once, 1.14 µs, where it took 1.48 µs.
   Results, errors, limits and the steps counted do not change.
+- `$substring` reads its text only as far as its start and length need, from the start or back
+  from the end, where it collected every character of it into a list at each call, and returns
+  the text itself when the result is all of it. `$substring(t, 100, 100)` on 640 KB takes 1 µs
+  against a `Document`, where it took 745 µs; a call at each place of a text of 64,000 characters
+  166 ms in all, where it took 70 s. A negative start or a length that is not a whole number
+  still counts the text's characters, without the list.
 
 ### Fixed
 

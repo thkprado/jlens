@@ -15,12 +15,64 @@ use crate::value::{Map, Value};
 
 type R<'a> = Result<Value<'a>>;
 
-/// `String.prototype.slice` over characters, with JavaScript's handling of negative and
-/// fractional positions.
-fn js_slice(chars: &[char], start: f64, end: Option<f64>) -> String {
-    let len = chars.len() as f64;
-    let relative = |v: f64| -> f64 {
-        let v = if v.is_nan() { 0.0 } else { v.trunc() };
+/// The byte offset `chars` characters after the byte offset `at`, or the end of the text when it
+/// has fewer. A count past `usize` saturates, which the end of the text stops anyway.
+fn chars_after(s: &str, at: usize, chars: f64) -> usize {
+    // `Chars::nth` skips by counting the bytes that start a character, faster than decoding them.
+    let mut rest = s[at..].chars();
+    rest.nth(chars as usize)
+        .map_or(s.len(), |c| s.len() - rest.as_str().len() - c.len_utf8())
+}
+
+/// The bytes of `$substring(s, start, length)`, which jsonata-js takes with `Array.slice` over
+/// the text's code points: a negative position counts from the end, a fractional one is cut
+/// towards zero, and a negative start past the start of the text starts it. The text is read up
+/// to where the result ends from the start, or from the end back to where it starts; the number
+/// of characters it holds is counted only for a negative start or length that is not a whole
+/// number, where it enters the arithmetic in floating point.
+fn substring_range(s: &str, start: f64, length: Option<f64>) -> std::ops::Range<usize> {
+    // A length of NaN gives an end of NaN, which `slice` reads as 0.
+    if length.is_some_and(|l| l <= 0.0 || l.is_nan()) {
+        return 0..0;
+    }
+    // A start of NaN is 0 to `slice`, but makes the end NaN.
+    if start.is_nan() {
+        return if length.is_some() { 0..0 } else { 0..s.len() };
+    }
+    // The text has at most as many characters as bytes, so that it has fewer than this start
+    // asks to go back.
+    if start < 0.0 && -start > s.len() as f64 {
+        return substring_range(s, 0.0, length);
+    }
+    if start >= 0.0 {
+        let to = length.map_or(f64::INFINITY, |l| (start + l).trunc());
+        let from = start.trunc();
+        if to <= from {
+            return 0..0;
+        }
+        let a = chars_after(s, 0, from);
+        return a..chars_after(s, a, to - from);
+    }
+    let whole = |v: f64| v.fract() == 0.0 || v.is_infinite();
+    if whole(start) && length.is_none_or(whole) {
+        // `-start` characters back from the end. The start is a whole number no further back
+        // than the text has bytes, so that `len + start` is exact, and a length at least as long
+        // as what is left takes the rest. Fewer characters than that, and the start is 0.
+        let back = -start as usize;
+        let Some((a, _)) = s.char_indices().rev().nth(back - 1) else {
+            return substring_range(s, 0.0, length);
+        };
+        return match length {
+            Some(l) if l < -start => a..chars_after(s, a, l),
+            _ => a..s.len(),
+        };
+    }
+    let len = s.chars().count() as f64;
+    if len + start < 0.0 {
+        return substring_range(s, 0.0, length);
+    }
+    let relative = |v: f64| {
+        let v = v.trunc();
         if v < 0.0 {
             (len + v).max(0.0)
         } else {
@@ -28,11 +80,12 @@ fn js_slice(chars: &[char], start: f64, end: Option<f64>) -> String {
         }
     };
     let from = relative(start);
-    let to = end.map_or(len, relative);
+    let to = length.map_or(len, |l| relative(len + start + l));
     if from >= to {
-        return String::new();
+        return 0..0;
     }
-    chars[from as usize..to as usize].iter().collect()
+    let a = chars_after(s, 0, from);
+    a..chars_after(s, a, to - from)
 }
 
 /// Slices a string by UTF-16 offsets, as `String.prototype.substring` does.
@@ -101,26 +154,12 @@ pub(super) fn substring<'a>(
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
-    let chars: Vec<char> = s.chars().collect();
-    let len = chars.len() as f64;
-    let mut start = num(&a, 1).unwrap_or(f64::NAN);
-    if len + start < 0.0 {
-        start = 0.0;
-    }
-    Ok(Value::string(match num(&a, 2) {
-        Some(length) => {
-            if length <= 0.0 {
-                return Ok(Value::string(""));
-            }
-            let end = if start >= 0.0 {
-                start + length
-            } else {
-                len + start + length
-            };
-            js_slice(&chars, start, Some(end))
-        }
-        None => js_slice(&chars, start, None),
-    }))
+    let range = substring_range(&s, num(&a, 1).unwrap_or(f64::NAN), num(&a, 2));
+    Ok(if range.len() == s.len() {
+        Value::String(s)
+    } else {
+        Value::string(&s[range])
+    })
 }
 
 pub(super) fn substring_before<'a>(
@@ -810,10 +849,90 @@ mod tests {
 
     #[test]
     fn slices_like_javascript() {
-        let chars: Vec<char> = "hello".chars().collect();
-        assert_eq!(js_slice(&chars, -3.0, None), "llo");
-        assert_eq!(js_slice(&chars, 1.7, Some(3.0)), "el");
+        let sub = |s, start, length| &s[substring_range(s, start, length)];
+        assert_eq!(sub("hello", -3.0, None), "llo");
+        assert_eq!(sub("hello", 1.7, Some(1.5)), "el");
+        assert_eq!(sub("hello", -3.5, Some(2.0)), "l");
+        assert_eq!(sub("hello", -5.5, Some(1.0)), "h");
+        assert_eq!(sub("a𝄞b", -2.0, Some(1.0)), "𝄞");
         assert_eq!(utf16_substring("a𝄞b", 1, Some(3)), "𝄞");
+    }
+
+    /// `$substring` as it was before 0.27: every character collected into a list, and sliced as
+    /// `Array.prototype.slice` slices.
+    fn substring_by_list(s: &str, start: f64, length: Option<f64>) -> String {
+        let chars: Vec<char> = s.chars().collect();
+        let len = chars.len() as f64;
+        let slice = |start: f64, end: Option<f64>| -> String {
+            let relative = |v: f64| -> f64 {
+                let v = if v.is_nan() { 0.0 } else { v.trunc() };
+                if v < 0.0 {
+                    (len + v).max(0.0)
+                } else {
+                    v.min(len)
+                }
+            };
+            let from = relative(start);
+            let to = end.map_or(len, relative);
+            if from >= to {
+                return String::new();
+            }
+            chars[from as usize..to as usize].iter().collect()
+        };
+        let mut start = start;
+        if len + start < 0.0 {
+            start = 0.0;
+        }
+        match length {
+            Some(length) if length <= 0.0 => String::new(),
+            Some(length) => {
+                let end = if start >= 0.0 {
+                    start + length
+                } else {
+                    len + start + length
+                };
+                slice(start, Some(end))
+            }
+            None => slice(start, None),
+        }
+    }
+
+    /// A position near the text's characters: whole or not, either sign, past either end, and
+    /// the values that are not numbers JSONata can write but that a host function can return.
+    fn position() -> impl proptest::strategy::Strategy<Value = f64> {
+        use proptest::prelude::*;
+        prop_oneof![
+            4 => (-12i32..12).prop_map(f64::from),
+            3 => (-1200i32..1200).prop_map(|v| f64::from(v) / 100.0),
+            1 => prop::sample::select(vec![
+                f64::NAN,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                -0.0,
+                1e300,
+                -1e300,
+                // Added to a whole number, rounds up to the next one.
+                1.0 - f64::EPSILON / 2.0,
+                -(1.0 - f64::EPSILON / 2.0),
+                9_007_199_254_740_993.0,
+            ]),
+        ]
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(20_000))]
+
+        /// The text is read no further than `$substring` needs, and what it gives is what
+        /// collecting every character gave, around characters of one to four bytes.
+        #[test]
+        fn substring_gives_what_the_list_gave(
+            s in "[aé€𝄞]{0,10}",
+            start in position(),
+            length in proptest::option::of(position()),
+        ) {
+            let range = substring_range(&s, start, length);
+            proptest::prop_assert_eq!(&s[range], substring_by_list(&s, start, length));
+        }
     }
 
     /// Whatever it looked for before, a slicer gives what `utf16_substring` gives: inside

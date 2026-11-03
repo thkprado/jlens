@@ -1663,9 +1663,9 @@ Fixed by the sweep, at 64,000 items with `evaluate`:
   the same order: 1,000 terms take 0.51 ms, and the exponent is 1.05. Shorter disjunctions keep
   upstream's chain, so that a common pattern compiles to what it compiled to.
 
-Left to rows of their own: `$substring` collects the characters of its whole text at each call,
+Left to rows of their own: `$substring` collected the characters of its whole text at each call,
 0.78 ms on 640 KB, so that a call at each place of a text is quadratic, as it is in jsonata-js
-(0.27 #15); `&` in a `$reduce` copies the string it grows, 1.42 s for 64,000 short strings where
+(0.27 #15, [below](#substring-027-15)); `&` in a `$reduce` copies the string it grows, 1.42 s for 64,000 short strings where
 jsonata-js, whose strings are ropes, takes 110 ms (#16); the URL functions take 5 to 12 times
 jsonata-js's time, linearly (#17).
 
@@ -1684,6 +1684,42 @@ What stays:
   `$spread` of an array of objects, `$eval` and compiling a long array, `$map` with the array as
   the third argument, and an index in a loop. Its `$sort` of 64,000 numbers takes 9.9 s, against
   16.1 ms.
+
+### `$substring` (0.27 #15)
+
+`$substring` collected every character of its text into a list at each call, and sliced the list
+as jsonata-js slices its array of code points. It now walks the text only as far as the result
+needs: from the start to the end of the result, or, for a negative start, back from the end to
+where the result starts. `Chars::nth` skips characters by counting the bytes that start one,
+which takes a ninth of the time that decoding them did in the loop below, 1,489 → 166 ms. The result is the
+text itself when it is all of it. One case still counts the characters, with no list: a negative
+start or a length that is not a whole number, where the text's length enters the arithmetic in
+floating point and can round, `1 + (1 - 2^-53)` being 2. A property test compares the bytes taken
+with the list's result, 20,000 cases of texts with characters of one to four bytes, starts and
+lengths whole and fractional, of either sign, past either end, infinite and NaN; reading a
+fractional length as a whole one, or dropping the start's return to 0, fails it.
+
+`cargo xtask growth --case '$substring'`, at 64,000 items, a text of 640 KB:
+
+| Case | Mode | Before | After | jsonata-js |
+|---|---|---:|---:|---:|
+| `$substring(unicode, 100, 100)` | `evaluate` | 725 µs | 15.6 µs | 2,964 µs |
+| | `Document` | 745 µs | 1.0 µs | |
+| `$substring(unicode, -100)` | `evaluate` | 815 µs | 15.6 µs | 2,895 µs |
+| | `Document` | 808 µs | 0.9 µs | |
+| `$substring($$.text, $, 1)` at each place | `evaluate` | 69,492 ms | 1,120 ms | 24,228 ms at 16,000 |
+| | `Document` | 70,415 ms | 166 ms | |
+| the same over `unicode` | `Document` | 55,048 ms | 251 ms | 16,924 ms at 16,000 |
+
+Against a `Document` a single call is the same at every size. With `evaluate`, about 15 µs of
+each call is reading `$$.text` from the `serde_json::Value`, which copies the 640 KB text at each
+read, where a `Document` converted it once: one call alone takes those 15.6 µs, and the loop takes
+15 µs per call more than against a `Document`. That stays: a text read once, or bound to a
+variable that holds it converted, pays it once. A call at each place is still quadratic in either
+engine, as each walks to its place: at 16,000 items, 19.3 ms against a `Document`, where
+jsonata-js, which reads the whole text at each call, takes 24.2 s. `cargo xtask ab` on the workload, which calls no `$substring`: `strings`
+−0.2%, the rest −1.2 to +2.7% but `recursion` +3.4%, and built aligned +1.3%, the others within
+±0.3%.
 
 ## 0.26 against 0.25.0
 
