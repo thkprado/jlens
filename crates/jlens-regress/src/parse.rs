@@ -355,7 +355,17 @@ fn make_cat(nodes: ir::NodeList) -> ir::Node {
     }
 }
 
-fn make_alt(nodes: ir::NodeList) -> ir::Node {
+fn make_alt(mut nodes: ir::NodeList) -> ir::Node {
+    // jlens-regress: a long disjunction becomes a balanced tree of alternations, so that its depth
+    // grows with the logarithm of its terms. A chain as deep as the terms overflowed the stack of
+    // the recursive walks, and of dropping it, at a few thousand terms, and `contains_capture_groups`
+    // at each of its nodes made optimizing it quadratic. Alternation is associative, so that the
+    // terms are tried in the same order; shorter disjunctions keep upstream's chain.
+    const CHAIN: usize = 64;
+    if nodes.len() > CHAIN {
+        let right = nodes.split_off(nodes.len() / 2);
+        return ir::Node::Alt(Box::new(make_alt(nodes)), Box::new(make_alt(right)));
+    }
     let mut mright = None;
     for node in nodes.into_iter().rev() {
         match mright {

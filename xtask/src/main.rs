@@ -14,6 +14,7 @@ mod bench_table;
 mod differential;
 mod docs;
 mod fuzz;
+mod growth;
 mod homebrew;
 mod java;
 mod mdbook;
@@ -90,6 +91,9 @@ commands:
                                     evaluate) N times (3), each on a new copy of its program, and
                                     print each case's median and spread, for the performance page;
                                     --reuse reads the runs saved before
+  growth [--case TEXT]... [--sizes N,N] [--write-inputs]
+                                    how the time of each built-in function and operator grows
+                                    with its input, on benches/growth.json (a release build)
 ";
 
 fn main() -> Result<()> {
@@ -157,6 +161,7 @@ fn main() -> Result<()> {
         Some("java-compare") => java::compare(&args[1..]),
         Some("ab") => ab::run(&args[1..]),
         Some("bench-table") => bench_table::run(&args[1..]),
+        Some("growth") => growth::run(&args[1..]),
         Some("serve") => wasm::serve_forever(args.iter().any(|a| a == "--site")),
         Some("site") => site::build(),
         Some("release-notes") => match args.get(1) {

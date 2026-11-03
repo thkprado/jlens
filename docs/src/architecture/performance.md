@@ -17,6 +17,8 @@ implementations:
 - `benches/items-10000.json` is an array of 10,000 small items, the input of the last two
   cases, `items[0].code` and `($i := 0; items[$i].code)`: they cost little only when an index
   does not touch the other items, which 200 items would hide.
+- `benches/growth.json` lists the cases of `cargo xtask growth`, which times each built-in
+  function and operator at growing sizes ([below](#growth-with-the-input-027-13)).
 - `crates/jlens-core/benches/host_state.rs` builds a document from Rust values again and again,
   as an application that keeps its state in Rust types does
   ([below](#documents-built-from-rust-values)). It is native only.
@@ -31,6 +33,7 @@ python benches/compare/python.py ab A=<python> B=<python>   # two builds of the 
 cargo xtask java-compare                      # against the JVM implementations (benches/compare/README.md)
 cargo xtask java-compare ab <A.jar> <B.jar>   # two builds of the Java package
 cargo bench -p jlens-regress --bench engine   # the regular expression engine alone (below)
+cargo xtask growth                            # how each built-in's time grows with its input
 ```
 
 ### Comparing two revisions
@@ -1571,6 +1574,67 @@ variables measures +0.8 to +1.9% aligned, over seven rounds on new copies, withi
   unread and the items from there go back to comparing, so that it fails the evaluation only if
   comparing reaches it
   ([ADR 0010](../adr/0010-lazy-input.md#amendment-a-level-read-in-case-it-is-needed-027)).
+
+### Growth with the input (0.27 #13)
+
+`$distinct` and the regular expression functions grew with the square of their input until 0.27,
+and were found by chance. `cargo xtask growth` looks for more: it runs each case of
+`benches/growth.json` at 1,000, 4,000, 16,000 and 64,000 items (`--sizes` takes others), texts of
+ten bytes per item, with `evaluate` and against a `Document`, and prints for each step between two
+sizes the exponent of its time, 1 for linear and 2 for quadratic. 131 cases cover every built-in
+function that takes an array, an object or a text, and the operators, path steps, tuples,
+grouping, transforms, calls in depth and compiling long expressions. `node
+benches/compare/growth.mjs` runs the same cases in jsonata-js, on the inputs that `cargo xtask
+growth --write-inputs` leaves in `target/growth`. Each size takes the fastest of at least three
+runs and 40 ms, all in one process: a process can draw a slower heap for all its sizes
+([above](#recursion-against-a-document-027-3)), which moves a case's times and not its exponents.
+
+Fixed by the sweep, at 64,000 items with `evaluate`:
+
+| Case | Before | After | jsonata-js |
+|---|---:|---:|---:|
+| `$keys` of objects with a key each | 5,411 ms | 26.0 ms | 36.3 ms |
+| `$keys` of an object of 64,000 keys | 5,402 ms | 7.48 ms | 8.63 ms |
+| `$sift` over that object, then `$keys` | 5,390 ms | 27.8 ms | 140 ms |
+| `$merge` of objects with a key each, then `$keys` | 5,406 ms | 31.9 ms | 33.3 ms |
+| group-by with a key per item, then `$keys` | 6,389 ms | 47.8 ms | 288 ms |
+| `nums[$ in $$.rev]` | 25,612 ms | 1,032 ms | 995 ms |
+| `-1 in nums`, against a `Document` | 380 µs | 40.8 µs | 21.1 µs |
+| a regex of 64,000 alternatives, compiled | stack overflow | 39.5 ms | 0.90 ms |
+
+- `$keys` looked each key it found up in the list of those found before. The keys of one object
+  are distinct and are no longer looked up; past 16 keys, those of an array of objects are looked
+  up in a set. The five cases above that call it all took about 5.4 s.
+- `in` copied its list into a new vector at each evaluation, which a predicate does for each item.
+- `jlens-regress` made a disjunction a chain of alternations as deep as its terms, which its
+  recursive walks of the tree, and dropping it, followed down until the stack ran out, between
+  1,000 and 4,000 terms on the main thread of Windows, aborting the process. Each walk also asked
+  at each node whether a capture group lay below it, so compiling 800 terms took 1.35 ms, and
+  grew as n^1.7. A disjunction of more than 64 terms is now a balanced tree, its terms tried in
+  the same order: 1,000 terms take 0.51 ms, and the exponent is 1.05. Shorter disjunctions keep
+  upstream's chain, so that a common pattern compiles to what it compiled to.
+
+Left to rows of their own: `$substring` collects the characters of its whole text at each call,
+0.78 ms on 640 KB, so that a call at each place of a text is quadratic, as it is in jsonata-js
+(0.27 #15); `&` in a `$reduce` copies the string it grows, 1.42 s for 64,000 short strings where
+jsonata-js, whose strings are ropes, takes 110 ms (#16); the URL functions take 5 to 12 times
+jsonata-js's time, linearly (#17).
+
+What stays:
+
+- Shapes quadratic in any engine: `$reduce` that builds an array with `$append` (19.9 s at
+  64,000 items, jsonata-js 5.7 s) or an object with `$merge` (7.0 s at 16,000, jsonata-js 22.5 s),
+  since each step copies what it has built, and `in` over a long list for each item, which
+  compares with each item of the list. An expression that does this over large input can use
+  `max_steps` or `max_array_length` to bound it.
+- The step from 16,000 to 64,000 items reads 1.3 to 2.0 in cheap cases over the records (a path,
+  `$lookup`, a predicate, `$keys` of objects of the same key) and in short copies (`$append`,
+  `$reverse`, a range): the input or the result leaves the processor's caches there. From 64,000
+  to 1,024,000 items, the same cases read 0.95 to 1.2, and a sort step 1.1, as n log n.
+- Where jsonata-js grows faster than jlens, as measured: `$sort`, the sort step, `$distinct`,
+  `$spread` of an array of objects, `$eval` and compiling a long array, `$map` with the array as
+  the third argument, and an index in a loop. Its `$sort` of 64,000 numbers takes 9.9 s, against
+  16.1 ms.
 
 ## 0.26 against 0.25.0
 

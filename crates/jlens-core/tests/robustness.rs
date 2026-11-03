@@ -2256,3 +2256,61 @@ fn reads_of_deep_expressions_stay_within_the_stack() {
     let wide = format!("[{}]", vec!["a.b"; 10_000].join(", "));
     assert!(Expression::compile(&wide).is_ok_and(|e| e.reads().input().is_some()));
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2000))]
+
+    /// `$keys` of an array gives each key once, in the order of the objects, nested arrays
+    /// included, also past the keys it compares one by one, against a document and lazily.
+    #[test]
+    fn keys_of_objects_come_once_in_order(
+        items in prop::collection::vec(
+            prop_oneof![
+                prop::collection::vec(0..48u8, 0..6).prop_map(|keys| json!(keys
+                    .iter()
+                    .map(|k| (format!("k{k}"), json!(k)))
+                    .collect::<serde_json::Map<_, _>>())),
+                prop::collection::vec(0..48u8, 0..4).prop_map(|keys| json!([keys
+                    .iter()
+                    .map(|k| (format!("k{k}"), json!(k)))
+                    .collect::<serde_json::Map<_, _>>()])),
+                Just(json!(1)),
+            ],
+            0..40,
+        ),
+    ) {
+        let mut expected: Vec<String> = Vec::new();
+        let mut add = |object: &serde_json::Value| {
+            for key in object.as_object().into_iter().flat_map(|o| o.keys()) {
+                if !expected.contains(key) {
+                    expected.push(key.clone());
+                }
+            }
+        };
+        for item in &items {
+            match item {
+                serde_json::Value::Array(nested) => nested.iter().for_each(&mut add),
+                item => add(item),
+            }
+        }
+        let input = json!({ "list": items });
+        let expr = Expression::compile("[$keys(list)]").unwrap();
+        let lazily = expr.evaluate(Some(&input), &Bindings::new()).unwrap();
+        prop_assert_eq!(&lazily, &Some(json!(expected)));
+        let document = Document::new(&input);
+        let result = expr.evaluate_document(&document, &Bindings::new(), &Options::default());
+        prop_assert_eq!(result.unwrap(), lazily);
+    }
+}
+
+/// A disjunction of many terms compiles and runs: its alternations were a chain as deep as its
+/// terms in `regress`, which overflowed the stack at a few thousand.
+#[test]
+fn a_long_disjunction_compiles() {
+    let terms: Vec<String> = (0..50_000).map(|i| format!("k{i}")).collect();
+    let source = format!("$match('k49999', /{}/).match", terms.join("|"));
+    let result = Expression::compile(&source)
+        .unwrap()
+        .evaluate(None, &Bindings::new());
+    assert_eq!(result.unwrap(), Some(json!("k4")));
+}

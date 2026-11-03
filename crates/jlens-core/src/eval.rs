@@ -1585,10 +1585,14 @@ impl<'a> Evaluator<'_, 'a> {
                     .map(|()| Value::string(l + &r))
             }
             BinaryOp::Range => range(&lhs, &rhs).and_then(|v| self.check_size(v)),
+            // The items are compared where they are: a copy of the list, for each item of a
+            // predicate such as `items[code in $codes]`, took most of the time of a long list.
             BinaryOp::In => Ok(Value::Bool(
                 !lhs.is_undefined()
-                    && !rhs.is_undefined()
-                    && rhs.items_or_self().iter().any(|item| item.strict_eq(&lhs)),
+                    && match &rhs {
+                        Value::Array(a) => a.items().iter().any(|item| item.strict_eq(&lhs)),
+                        rhs => rhs.strict_eq(&lhs),
+                    },
             )),
             BinaryOp::And | BinaryOp::Or => unreachable!("handled above"),
         };

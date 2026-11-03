@@ -2689,3 +2689,27 @@ fn test_find_from_char_boundaries() {
     // An out-of-range ascii start likewise yields no matches, not a panic.
     assert!(re.find_from_ascii("abc", 4).next().is_none());
 }
+
+// jlens-regress: a disjunction of many terms compiles, and keeps trying its terms in order.
+// Its alternations were a chain as deep as its terms, which overflowed the stack at a few
+// thousand.
+#[test]
+fn test_long_disjunction() {
+    let terms: Vec<String> = (0..20_000).map(|i| format!("k{i}")).collect();
+    let mut flags = regress::Flags::default();
+    for no_opt in [false, true] {
+        flags.no_opt = no_opt;
+        let re = Regex::with_flags(&terms.join("|"), flags).expect("Should compile");
+        // `k1` comes first of the terms that match at 0.
+        assert_eq!(re.find("k19999").unwrap().range(), 0..2);
+        let reversed: Vec<&str> = terms.iter().rev().map(String::as_str).collect();
+        let re = Regex::with_flags(&reversed.join("|"), flags).expect("Should compile");
+        assert_eq!(re.find("k19999").unwrap().range(), 0..6);
+    }
+    // Groups keep their numbers across the tree.
+    let groups: Vec<String> = (0..200).map(|i| format!("(x{i}y)")).collect();
+    let re = Regex::new(&groups.join("|")).unwrap();
+    let found = re.find("x150y").unwrap();
+    assert_eq!(found.group(151), Some(0..5));
+    assert_eq!(found.groups().filter(Option::is_some).count(), 2);
+}

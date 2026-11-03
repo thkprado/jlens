@@ -1,7 +1,7 @@
 //! Higher-order, array, object and miscellaneous functions.
 
 use super::{Call, arg, boolean, hof_args, merge_sort, text};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::rc::Rc;
 
@@ -170,21 +170,36 @@ fn entries<'a>(v: &Value<'a>) -> Vec<(Rc<str>, Value<'a>)> {
 
 /// The keys of an object, or of the objects in an array and in the arrays nested in it, each
 /// once, in the order they first appear.
+/// How many keys the objects of an array give before those found are looked up in a set rather
+/// than in the list.
+const KEYS_LISTED: usize = 16;
+
 fn keys_of<'a>(v: &Value<'a>, out: &mut Vec<Rc<str>>) {
-    let mut object_keys = |v: &Value<'a>| {
-        if let Value::Object(o) = v {
-            for k in o.borrow().keys() {
-                if !out.contains(k) {
-                    out.push(k.clone());
+    match v {
+        // The keys of one object are distinct.
+        Value::Object(o) => out.extend(o.borrow().keys().cloned()),
+        Value::Array(a) => {
+            let mut found: Option<HashSet<Rc<str>, foldhash::fast::RandomState>> = None;
+            let Ok(()) = value::for_each_leaf(a.items(), |item| {
+                if let Value::Object(o) = item {
+                    for k in o.borrow().keys() {
+                        let new = match &mut found {
+                            Some(found) => found.insert(k.clone()),
+                            None => !out.contains(k),
+                        };
+                        if new {
+                            out.push(k.clone());
+                            if found.is_none() && out.len() > KEYS_LISTED {
+                                found = Some(out.iter().cloned().collect());
+                            }
+                        }
+                    }
                 }
-            }
+                Ok::<_, std::convert::Infallible>(())
+            });
         }
-        Ok::<_, std::convert::Infallible>(())
-    };
-    let Ok(()) = match v {
-        Value::Array(a) => value::for_each_leaf(a.items(), object_keys),
-        v => object_keys(v),
-    };
+        _ => {}
+    }
 }
 
 pub(super) fn keys<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {

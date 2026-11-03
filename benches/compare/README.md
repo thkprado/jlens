@@ -13,7 +13,8 @@ implementation gives jlens's result, then times it. The tables they print are th
 
 The same directory holds two checks against jsonata-js, which are not benchmarks:
 `differential.mjs`, run by `cargo xtask differential`, and `doc-examples.mjs`, which runs the
-book's examples.
+book's examples. `growth.mjs` times the cases of `cargo xtask growth` in jsonata-js, on the
+inputs that `cargo xtask growth --write-inputs` leaves in `target/growth`.
 
 ## JavaScript
 

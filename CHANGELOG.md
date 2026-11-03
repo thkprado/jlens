@@ -52,6 +52,15 @@ All notable changes are recorded here. The format follows
   surrogate, as JavaScript engines do, and never matches half of a pair there. A fix ported from
   `regress`, whose commits are reviewed up to `1dd717d`. jlens searches `&str` and does not use
   this search.
+- A regular expression with thousands of alternatives, such as `/k0|k1|...|k9999/`, overflowed
+  the stack and aborted the process. `jlens-regress` now makes a disjunction of more than 64
+  terms a balanced tree, which also makes compiling it linear: 64,000 terms compile in 40 ms.
+- `$keys` took time that grew with the square of the keys it found, as each key was looked for
+  in the list of those found; past 16 keys, those of an array of objects are looked up in a set,
+  and those of one object, which are distinct, not at all. The keys of 64,000 objects of a key
+  each take 26 ms, where they took 5.4 s, and those of an object of 64,000 keys 7.5 ms.
+- `in` no longer copies its list of items each time it is evaluated: `items[code in $codes]`
+  with 64,000 codes took 25.6 s, now 1.03 s, as in jsonata-js.
 
 ## [0.26.0]
 

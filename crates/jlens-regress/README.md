@@ -106,6 +106,13 @@ Found by the differential test:
 - `Match::named_group` gives, of groups with the same name, the one that took part in the
   match, as `Match::named_groups` does.
 
+Found by jlens's sweep of its functions at growing sizes (`cargo xtask growth`):
+
+- A disjunction of more than 64 terms is a balanced tree of alternations, not a chain as deep as
+  its terms, which overflowed the stack of the recursive walks of the tree, and of dropping it,
+  at a few thousand terms, and made optimizing it quadratic. The terms are tried in the same
+  order; shorter disjunctions keep upstream's chain.
+
 ## Ported from upstream
 
 Last upstream commit reviewed: `1dd717d` (2026-11-01, unreleased after 0.12.0). Each port is
