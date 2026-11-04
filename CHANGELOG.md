@@ -74,6 +74,10 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- The Java package's native library is built with the release profile's link-time optimization,
+  which Cargo left out of every JAR since 0.25.0, as the C API's crate is also an `rlib`. Against
+  0.26.0, under Linux, reading fields of a `Document` takes 5 to 16% less, `recursion` 5 to 9%
+  less, and threads evaluate 7 to 12% more each second.
 - `$replace` with a regular expression and an undefined replacement removes the matches, as it
   did with a string pattern, where it failed with `T1006` (invoke a non-function). jsonata-js
   writes "undefined" for a string pattern and fails with a JavaScript `TypeError` for a regex;

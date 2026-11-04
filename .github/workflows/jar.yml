@@ -62,7 +62,9 @@ jobs:
               export RUSTFLAGS="-C target-feature=-crt-static -L native=/tmp/unwind"
               cargo test --release --locked -p jlens-capi --test exports
             fi
-            cargo build --release --locked -p jlens-capi
+            # As a cdylib alone: with the rlib among its crate types, Cargo leaves LTO out
+            # (0.27 #20, `cargo xtask java` builds it the same way).
+            cargo rustc --release --locked -p jlens-capi --crate-type cdylib
         run: |
           if [ -n "$IMAGE" ]; then
             docker run --rm -e CARGO_TERM_COLOR -v "$GITHUB_WORKSPACE:/w" -w /w "$IMAGE" sh -c "$BUILD"

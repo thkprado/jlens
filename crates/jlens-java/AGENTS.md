@@ -16,7 +16,9 @@ Guidance for working in the Java package. The repository-wide rules are in the r
 
 ## Testing
 
-`cargo xtask java` builds `jlens-capi` in release mode, copies the library into `java/native/`,
+`cargo xtask java` builds `jlens-capi` in release mode, as a `cdylib` alone (`cargo rustc
+--crate-type cdylib`: with the `rlib` among its types, `cargo build` leaves LTO out, as 0.27 #20
+found; `jar.yml` builds it the same way), copies the library into `java/native/`,
 and runs `mvnw -B verify`; arguments replace `verify` (`cargo xtask java test -Dtest=OptionsTest`).
 It needs a JDK 25 or later on `PATH` or in `JAVA_HOME`. CI runs it on Linux and Windows, on
 Java 25 and on the latest release; on each push to `main`, the JAR workflow (`jar.yml`) runs the

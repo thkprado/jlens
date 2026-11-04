@@ -343,14 +343,26 @@ fn platform() -> String {
 }
 
 /// Builds `jlens-capi` in release mode and copies it into `native/<platform>/`.
+///
+/// The library alone, as a `cdylib`: with the `rlib` its tests link against among the crate's
+/// types, Cargo leaves out the release profile's `lto`, so that `cargo build` gives a library
+/// without it, 15 to 20% slower reading a `Document` from Java and open to the code's layout
+/// (0.27 #20). `jar.yml` builds it the same way.
 fn build_native() -> Result<()> {
     let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
         .current_dir(root())
-        .args(["build", "--release", "-p", "jlens-capi"])
+        .args([
+            "rustc",
+            "--release",
+            "-p",
+            "jlens-capi",
+            "--crate-type",
+            "cdylib",
+        ])
         .status()
-        .context("running cargo build")?;
+        .context("running cargo rustc")?;
     if !status.success() {
-        bail!("cargo build -p jlens-capi failed");
+        bail!("cargo rustc -p jlens-capi failed");
     }
     let name = format!("{DLL_PREFIX}jlens_capi{DLL_SUFFIX}");
     let target =

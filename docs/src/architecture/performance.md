@@ -695,8 +695,9 @@ with `javac` at run time, over Jackson trees.
 says how to run it, and which packages it leaves out and why. It first checks that each gives
 jlens's result for each case, and both do.
 
-Measured for 0.26.0 (at 238de7f with the release's dependencies, whose code is the release's), on
-OpenJDK 25.0.4 under Linux:
+Measured for 0.26.0 (at 238de7f with the release's dependencies, whose code is the release's),
+whose JAR carried a library built without LTO ([0.27 #20](#the-c-apis-library-and-link-time-optimization-027-20)), on OpenJDK 25.0.4
+under Linux:
 Ubuntu 26.04 under WSL 2, on the machine above (16 hardware threads), in one JVM with `-Xmx4g`.
 Each time is the best of five runs of 0.3 s after a second of warm-up. Each engine returns its result as its
 own objects, not serialized: jlens as maps, lists and boxed values. With the input converted
@@ -1815,6 +1816,57 @@ Dropping the run of kept bytes before an escaped `%`, or decoding `%23` in `$dec
 them. The workload calls none of the four, so `cargo xtask ab` was not run for this row; #19
 runs it on the release.
 
+### The C API's library and link-time optimization (0.27 #20)
+
+The release profile asks for `lto = true`, but `jlens-capi`, `jlens-python` and `jlens-wasm` are
+each built as an `rlib` as well as a `cdylib`, for their tests, and with an `rlib` among a crate's
+types `cargo build` leaves LTO out: `cargo build -v` shows no `-C lto`. `cargo rustc
+--crate-type cdylib` builds the library alone, with it. `jar.yml` and `cargo xtask java` built the
+C API with `cargo build`, so every JAR since 0.25.0 carried a library without LTO; both now build
+it with `cargo rustc`. maturin passes `--crate-type cdylib` itself, so the wheels have always had
+LTO. `cargo xtask wasm` builds the module with `cargo build`, which roadmap 0.27 #21 takes.
+
+Without LTO, each crate is compiled apart and linked in an order of its own, and #16 moved that
+layout to a slow one: against a `Document`, `$sum(items.quantity)` from Java took 6.21 to 6.37 µs
+at d8d965c, the code of #19, where #16 with its `Text` cut back to one `Rc<str>` took 5.43 to 5.64
+and `a5548b1`, before #16, 5.50 to 5.64. The work was the same, 3.2% more instructions for each
+evaluation, but at 2.29 instructions a cycle instead of 2.55, with as many L1 misses for each
+instruction and 10% more refills from L2, gathered on `IndexMap::get` and `bcmp`, whose code is
+the same in both. Where the documents sit in the heap does not change it (the same documents
+behind fillers of their size classes: 6.09 to 6.42 µs against 5.38 to 5.70 at each placement),
+and the order of the code does: linked with lld's `--shuffle-sections`, three seeds of each, d8d965c
+takes 5.38 to 5.56 µs and the one-`Rc<str>` build 5.30 to 5.53, every layout fast. Built with LTO,
+d8d965c takes 5.27 to 5.38 µs, 5.27 to 5.45 linked by lld.
+
+`java-compare ab` of 0.26.0's JAR, also built without LTO, against d8d965c's built with it, under
+Linux, five rounds:
+
+| Case | 0.26.0 | d8d965c with LTO | |
+|---|---:|---:|---:|
+| `items[0].name`, against a `Document` | 0.678 µs | 0.601 µs | −11.3% |
+| `$count(items)`, against a `Document` | 0.623 µs | 0.524 µs | −15.9% |
+| `names over items`, against a `Document` | 5.79 µs | 5.51 µs | −4.8% |
+| `$sum(items.price)`, 1,000 items, against a `Document` | 25.6 µs | 25.0 µs | −2.1% |
+| index into 10,000 items, against a `Document` | 0.652 µs | 0.579 µs | −11.3% |
+| `recursion`, against a `Document` | 611 µs | 558 µs | −8.7% |
+| `recursion`, over Java maps | 587 µs | 555 µs | −5.6% |
+| `sort + map`, against a `Document` | 269 µs | 230 µs | −14.6% |
+| `regex`, against a `Document` | 107 µs | 88.8 µs | −16.8% |
+| `$sum(items.price)` from JSON text, 8 threads | 171,518 a second | 191,278 a second | +11.5% |
+
+Against a `Document` and from JSON text into one, all 54 cases are faster, 43 of them marked,
+and the six counts of threads 6.9 to 11.5% higher, five marked. Over Java maps, the small cases
+are 7.5 to 14.9% faster; from JSON text into maps, where Jackson and the conversion in Java take
+most of the time, the spike's cases are −1.4 to +1.8%; none of the 54 over maps is marked slower. The cases #19 found slower against a `Document`, `$sum(items.price)` +16% and `names over
+items` +10 to +14%, are now 2 to 5% faster than 0.26.0, and `recursion` over Java maps, +3.7 to
++5.1% in #19, is 5.6% faster. Not timed on Windows or macOS, whose libraries `jar.yml` builds the
+same way.
+
+Found on the way, in both builds: each item `path` takes from the input stalls about seven times
+on a store that cannot be forwarded to a load, as a `Value` returned is copied as its tag byte
+and 16 bytes at offset 1, then read as 16 bytes at offset 0. It is work for each item, not the
+regression, and is left for a session of its own.
+
 ## 0.27 against 0.26.0
 
 Measured for roadmap 0.27 #19, at d8d965c, before the release brings its dependencies up to date,
@@ -1865,7 +1917,8 @@ built aligned:
   evaluations against 3.58 to 3.63 built as usual, where HEAD takes 3.59 to 3.73 both ways: a
   placement, as 0.26 #17 found for the same case. The index into 10,000 items is marked aligned
   too, +6.4% with Python values and +4.2% against a `Document`; natively under Linux it is +0.5%,
-  +0.0%, and +3.3% aligned. Not settled; #20 looks at it with the Java case below.
+  +0.0%, and +3.3% aligned. The wheels are built with LTO, which the Java case below lacked
+  ([#20](#the-c-apis-library-and-link-time-optimization-027-20)), so this one stays a placement.
 
 **In Java**, under Linux, `java-compare ab`, two comparisons of five rounds and one of the `cases`
 part alone, against a `Document` and over Java maps:
@@ -1885,9 +1938,12 @@ part alone, against a `Document` and over Java maps:
   many. It is neither code alignment (libraries built aligned: +11 to +13%), nor where the
   evaluation starts on the stack (from 0 to 9 Java frames deeper, +11 to +13% at each), nor the
   allocator, nor the core: natively, over the same parsed `Document`, with the system allocator
-  or `mimalloc` as the library uses it, HEAD is 1 to 3% faster. Roadmap 0.27 #20.
+  or `mimalloc` as the library uses it, HEAD is 1 to 3% faster.
+  #20 [found it](#the-c-apis-library-and-link-time-optimization-027-20): the library was built
+  without LTO, and #16 moved the layout of its code to a slow one. Built with LTO, the JAR is 2 to 5% faster
+  than 0.26.0's in these cases.
 - `recursion` over Java maps +3.7 to +5.1% in the three, marked once, close to the 4.8% a JAR
-  shows against itself; #20 checks it at the same commits.
+  shows against itself; built with LTO (#20), 5.6% faster than 0.26.0.
 - Threads, `$sum(items.price)` from JSON text: nothing marked, −1.8 to +5.9%.
 
 WebAssembly has no measured floor, and is compared in the release's table alone.
