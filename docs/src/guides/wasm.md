@@ -31,7 +31,9 @@ cargo xtask wasm --dev      # unoptimized, with Rust panics reported on the cons
 
 `cargo xtask wasm` does five things:
 1. It compiles the crate with the `wasm-release` profile, which optimizes for size
-   and speed (`opt-level = "s"`).
+   and speed (`opt-level = "s"`), with link-time optimization. It builds the `cdylib` alone
+   (`cargo rustc --crate-type cdylib`), since Cargo leaves the profile's `lto` out of a
+   `cargo build` of a crate that is an `rlib` too.
 2. It generates the JavaScript glue and the TypeScript declarations with `wasm-bindgen --target web`.
 3. It runs `wasm-opt -Os` from [binaryen](https://github.com/WebAssembly/binaryen): the installed one, or the
    npm package through `npx`. Without either, the module is about 45% larger.
@@ -512,16 +514,16 @@ How deep an evaluation fits depends on the shape of the recursion and on V8's co
 first runs the module with its baseline compiler (Liftoff), then recompiles the functions an
 evaluation uses often with its optimizing compiler (TurboFan), whose frames for jlens's
 evaluator are about 1.6 times larger. Measured in Node.js 24 once the module is optimized, an
-audited recursion overflows V8's stack near these depths (an unaudited one fits about 10% more):
+audited recursion overflows V8's stack near these depths (an unaudited one fits 25 to 45% more):
 
 | The recursive function's body | Overflows near |
 |---|---|
-| `[$n, $n]^($f($n - 1))` (order-by) | 670 |
-| `{'a': $f($n - 1)}`, `[$n]{'k': $f($n - 1)}` (group) | 710 |
-| `{'a': 1} ~> \|$\|{'b': $f($n - 1)}\|` (transform) | 720 |
-| `[$n][$f($n - 1)]` (filter) | 750 |
-| `$f($n - 1) + 1`, `[$f($n - 1)]` | 840 |
-| `$n = 0 ? 0 : 1 + $f($n - 1)` | 920 |
+| `[$n, $n]^($f($n - 1))` (order-by) | 660 |
+| `{'a': 1} ~> \|$\|{'b': $f($n - 1)}\|` (transform) | 680 |
+| `{'a': $f($n - 1)}`, `[$n]{'k': $f($n - 1)}` (group) | 720 |
+| `[$n][$f($n - 1)]` (filter) | 790 |
+| `$f($n - 1) + 1`, `[$f($n - 1)]` | 850 |
+| `$n = 0 ? 0 : 1 + $f($n - 1)` | 930 |
 
 The default of 500 leaves room for shapes not measured here, and for engines with smaller
 stacks. The [evaluator chapter](../architecture/evaluator.md#guardrails) has the details.

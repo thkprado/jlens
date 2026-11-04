@@ -1824,7 +1824,8 @@ types `cargo build` leaves LTO out: `cargo build -v` shows no `-C lto`. `cargo r
 --crate-type cdylib` builds the library alone, with it. `jar.yml` and `cargo xtask java` built the
 C API with `cargo build`, so every JAR since 0.25.0 carried a library without LTO; both now build
 it with `cargo rustc`. maturin passes `--crate-type cdylib` itself, so the wheels have always had
-LTO. `cargo xtask wasm` builds the module with `cargo build`, which roadmap 0.27 #21 takes.
+LTO. `cargo xtask wasm` built the module with `cargo build` too, until
+[0.27 #21](#the-webassembly-module-and-link-time-optimization-027-21).
 
 Without LTO, each crate is compiled apart and linked in an order of its own, and #16 moved that
 layout to a slow one: against a `Document`, `$sum(items.quantity)` from Java took 6.21 to 6.37 µs
@@ -1866,6 +1867,53 @@ Found on the way, in both builds: each item `path` takes from the input stalls a
 on a store that cannot be forwarded to a load, as a `Value` returned is copied as its tag byte
 and 16 bytes at offset 1, then read as 16 bytes at offset 0. It is work for each item, not the
 regression, and is left for a session of its own.
+
+### The WebAssembly module and link-time optimization (0.27 #21)
+
+`cargo xtask wasm` built the module with `cargo build`, so that, as for the C API's library, the
+`wasm-release` profile's `lto` was left out: every `jlens-wasm` published so far has no LTO. It now
+builds the library alone with `cargo rustc --crate-type cdylib`, and `cargo rustc -v` shows `-C lto`.
+After `wasm-opt -Os`, the module is 1,454,840 → 1,392,032 bytes, 542 → 518 KiB gzipped, against the
+budget of 600 KiB; `jlens.global.js` 781 → 745 KiB gzipped.
+
+`compare.mjs` with each package, one per Node.js process, the processes alternating, four each, on
+Windows; the median of the four, the change from the module without LTO:
+
+| Case | `evaluate` | `evaluateJson` | `evaluateDocument` | jsonata-js, the same in both |
+|---|---:|---:|---:|---:|
+| path | −9.4% | −19.6% | −7.1% | −9.5% |
+| names over items | −7.8% | −15.5% | −23.5% | −0.2% |
+| filter + aggregate | −4.4% | −16.7% | −9.9% | 0.0% |
+| group-by | −5.7% | −15.8% | −11.6% | +1.3% |
+| sort + map | −5.8% | −11.2% | −9.1% | +2.4% |
+| strings | −7.8% | −13.7% | −11.1% | +2.7% |
+| regex | −9.2% | −13.0% | −7.2% | +1.4% |
+| number formatting | −6.2% | −15.2% | −6.1% | −1.9% |
+| object constructor | −12.3% | −16.7% | −20.5% | −0.8% |
+| transform | −17.9% | −16.1% | −18.5% | +0.8% |
+| recursion | −1.6% | −3.9% | −2.7% | −0.1% |
+| shipping rule | −3.7% | −14.2% | −11.3% | −0.6% |
+| index into 10,000 items | −6.7% | −19.2% | −5.3% | −2.2% |
+| index in a variable | −5.6% | −18.6% | −8.7% | −1.5% |
+| regex over a long text | −11.2% | −8.2% | −12.5% | +1.1% |
+| distinct items | −16.6% | −17.2% | −12.0% | +1.3% |
+| tuples | −10.0% | −15.6% | −10.9% | −1.7% |
+
+Every cell of jlens is faster, `recursion` the least. jsonata-js, in the same processes, moves
+between −2.2% and +2.7%, but for `path`, 2.10 → 1.90 µs, which is a rounding of the tenth of a
+microsecond: `evaluate`'s `path` 4.80 → 4.35 µs and `evaluateDocument`'s 1.40 → 1.30 µs are as
+close to it. Parsing is where the gain is largest: `Document.fromJson` of the order 276 → 219 µs
+(−21%), `new Document` from its object 319 → 264 µs (−17%), so `evaluateJson`, which parses at
+each call, gains the most, the index into 10,000 items 4.92 → 3.98 ms. The transform 790 → 648 µs
+with `evaluate`. The table above keeps 0.26.0's numbers until the release measures it again.
+
+The cost is stack. The inlining LTO adds makes the evaluator's frames larger, so that recursion
+overflows V8's stack sooner: an audited recursion, measured as the [WebAssembly
+guide](../guides/wasm.md#limits-and-memory) does, overflows 4 to 9% sooner, order-by 716 → 663 levels, the
+transform 746 → 678; unaudited, 7 to 8%, order-by 899 → 831. The default `maxDepth` of 500 still
+leaves a third of headroom on the shape with the largest frames, and the test that runs it twenty
+times, so that V8 optimizes it, passes; the guide's table now gives the depths of the module with
+LTO.
 
 ## 0.27 against 0.26.0
 

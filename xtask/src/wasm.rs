@@ -23,23 +23,29 @@ pub fn pkg_dir() -> PathBuf {
 /// Builds `crates/jlens-wasm/pkg`: compiles the crate, generates the ES module and the
 /// TypeScript declarations with `wasm-bindgen`, optimizes with `wasm-opt` when it is installed,
 /// writes the classic script with the `.wasm` embedded (`jlens.global.js`) and `package.json`.
+///
+/// The library alone, as a `cdylib`: with the `rlib` its tests link against among the crate's
+/// types, Cargo leaves out the profile's `lto`, so that `cargo build` gives a module without
+/// it (0.27 #21, as `java.rs` does for the C API's library).
 pub fn build(dev: bool) -> Result<()> {
     let profile = if dev { "dev" } else { "wasm-release" };
     let status = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
         .current_dir(root())
         .args([
-            "build",
+            "rustc",
             "-p",
             "jlens-wasm",
             "--target",
             "wasm32-unknown-unknown",
             "--profile",
             profile,
+            "--crate-type",
+            "cdylib",
         ])
         .status()
-        .context("running cargo build")?;
+        .context("running cargo rustc")?;
     if !status.success() {
-        bail!("cargo build failed: {status}");
+        bail!("cargo rustc -p jlens-wasm failed: {status}");
     }
     let wasm = root().join(format!(
         "target/wasm32-unknown-unknown/{}/jlens_wasm.wasm",
