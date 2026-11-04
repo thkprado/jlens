@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.27.0]
+
+Linear where the square of the input showed: `$match`, `$replace` and `$split` on long texts,
+`$distinct`, `$keys`, `$substring`, `&` in a loop and `in` took seconds to minutes on inputs that
+now take milliseconds, found in use and by a new sweep of the built-ins at growing sizes. Variables
+against a `Document` convert only what the expression reads of them, and the Java and WebAssembly
+packages are built with link-time optimization, which Cargo had left out of every release: field
+reads from Java take 5 to 16% less, evaluations in WebAssembly 2 to 24% less.
+
 ### Added
 
 - `Document::undefined()`, a document that stands for no input, so that an expression over
@@ -14,8 +23,13 @@ All notable changes are recorded here. The format follows
   `.wasm` embedded, so that a page opened from disk, a classic worker or a bundler that does not
   resolve the `.wasm` loads it. It sets the global `jlens`, with the exports of `jlens.js` and
   `init` for its default export; `init()` and `initSync()` need no argument. A module imports it
-  as `jlens-wasm/global`, with its TypeScript declarations. It is about 1.9 MiB, 770 KiB gzipped;
+  as `jlens-wasm/global`, with its TypeScript declarations. It is about 1.8 MiB, 745 KiB gzipped;
   `jlens.js` does not change.
+- `cargo xtask growth` times the cases of `benches/growth.json`, 133 uses of the built-ins and
+  operators, at sizes of their input from 1,000 to 64,000, and prints the exponent of how their
+  time grows, so that one that grows with the square of its input shows; `benches/compare/growth.mjs` times the same cases in jsonata-js.
+- The comparisons on the performance page include three engines new to them: jsonata2js and
+  gnata-js in Node.js, and `jsonata2py` in Python.
 
 ### Changed
 
@@ -98,7 +112,7 @@ All notable changes are recorded here. The format follows
   Greek and Japanese words, 6.5 to 19 s, now 32 to 40 ms.
 - `jlens-regress`: `find_from_utf16` from the low surrogate of a pair starts at the pair's high
   surrogate, as JavaScript engines do, and never matches half of a pair there. A fix ported from
-  `regress`, whose commits are reviewed up to `1dd717d`. jlens searches `&str` and does not use
+  `regress`, whose commits are reviewed up to `95c0404`. jlens searches `&str` and does not use
   this search.
 - A regular expression with thousands of alternatives, such as `/k0|k1|...|k9999/`, overflowed
   the stack and aborted the process. `jlens-regress` now makes a disjunction of more than 64
@@ -1208,7 +1222,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/thkprado/jlens/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/thkprado/jlens/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/thkprado/jlens/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/thkprado/jlens/compare/v0.24.0...v0.24.1

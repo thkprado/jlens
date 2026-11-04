@@ -47,7 +47,7 @@ The `wasm-bindgen` CLI must be the exact version in `Cargo.lock`, and the task c
 | `jlens.js` | The ES module |
 | `jlens.d.ts` | TypeScript declarations |
 | `jlens_bg.wasm` | The WebAssembly module: about 1.4 MiB, 535 KiB gzipped |
-| `jlens.global.js` | The package as one classic script, the module embedded: about 1.9 MiB, 770 KiB gzipped |
+| `jlens.global.js` | The package as one classic script, the module embedded: about 1.8 MiB, 745 KiB gzipped |
 | `jlens.global.d.ts` | TypeScript declarations of its global, `jlens` |
 | `package.json` | npm metadata: `"type": "module"`, `exports`, `types` |
 
@@ -106,9 +106,9 @@ It also serves what cannot resolve the `.wasm` file: a classic worker loads it w
 import declares it too; a classic script references it with
 `/// <reference types="jlens-wasm/global" />`.
 
-Its cost is size: the `.wasm` in base64 is a third larger, about 1.9 MiB, and 770 KiB gzipped
-against 535 KiB for `jlens_bg.wasm`, as base64 compresses less well. A page that loads it pays
-for the whole module even if it never calls `init`, and the npm package unpacks to 3.5 MB
+Its cost is size: the `.wasm` in base64 is a third larger, about 1.8 MiB, and 745 KiB gzipped
+against 518 KiB for `jlens_bg.wasm`, as base64 compresses less well. A page that loads it pays
+for the whole module even if it never calls `init`, and the npm package unpacks to 3.4 MB
 where it took 1.5 MB without it. Starting is no slower: in Node.js 22, reading
 the script and `init()` take about 19 ms, and the module with its bytes about 26 ms. `jlens.js`
 does not change, nor what importing it loads. Each loads a module of its own, so a page that
