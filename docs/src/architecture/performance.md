@@ -1815,6 +1815,83 @@ Dropping the run of kept bytes before an escaped `%`, or decoding `%23` in `$dec
 them. The workload calls none of the four, so `cargo xtask ab` was not run for this row; #19
 runs it on the release.
 
+## 0.27 against 0.26.0
+
+Measured for roadmap 0.27 #19, at d8d965c, before the release brings its dependencies up to date,
+each run on a new copy of its build, against builds of 0.26.0 made the same way on the same
+machine. A difference is read against [what a build shows against itself](#comparing-two-revisions).
+
+**Natively**, on Windows, `cargo xtask ab v0.26.0 HEAD`, ten rounds, in each mode, built as an
+application builds it (two comparisons) and aligned (one). The medians of the cases 0.27 changed:
+
+| Case | `evaluate` | `document` | `source` |
+|---|---:|---:|---:|
+| `regex over a long text` (#10, #11) | 56.5 ms → 351 µs, −99.4% | 56.4 ms → 346 µs, −99.4% | 56.7 ms → 347 µs, −99.4% |
+| `distinct items` (#6, #12) | 618 → 127 µs, −79.3 to −79.8% | 494 → 15.9 µs, −96.8% | 629 → 133 µs, −78.4 to −79.0% |
+| `tuples` (#14) | 258 → 207 µs, −19.5 to −20.3% | 245 → 196 µs, −19.9 to −21.5% | 268 → 220 µs, −17.1 to −18.4% |
+| number formatting (#8) | 44.5 → 35.8 µs, −18.4 to −19.6% | +1.3 to +1.9% | 46.8 → 40.3 µs, −13.8 to −14.7% |
+| `regex` (#11) | −9.5 to −11.9% | −10.7 to −11.6% | −10.3 to −11.1% |
+
+`strings` is −4.1 to −8.1% in all nine, `sort + map` −2.9 to −5.3%, the index in a variable −1.9
+to −6.8%. Against a `Document`, number formatting picks 20 items of a list already converted, so
+that #8 has nothing to save there. Of the other 90 numbers, none is more than 2.5% slower but
+two, both against a `Document` and both within what a build shows against itself: the transform
++3.6% and +2.5%, −0.4% aligned, and the object constructor +3.3% once (−0.9%, and −1.1% aligned).
+
+Under Linux (WSL 2), against a `Document`, two comparisons and one aligned: the object constructor
++3.5% and +4.6%, past the 2.6% a build shows there, and +2.2% aligned, which is placement;
+neither Python nor Java shows it (−3.4 to +2.1%). `group-by` +0.8%, +0.4% and +3.0% aligned.
+
+**In Python**, under Linux, `python.py ab`, two comparisons of five rounds, and one of wheels
+built aligned:
+
+- Faster, marked in both: `regex over a long text` −99.6% (57.7 ms → 214 µs), `distinct items`
+  −74.9% and −75.1% with Python values, −96.1% against a `Document` (375 → 14.6 µs); number
+  formatting −18.5% and −20.2% with Python values; `regex` and `tuples` −4.3 to −9.1%, each
+  marked in three of its four numbers.
+- Marked slower once, not in the other comparison: the index into 10,000 items with Python
+  values, +5.3% (1.30 → 1.37 µs; +0.8% in the other); against a `Document`, `filter + aggregate`
+  +6.0% (+1.7%) and `group-by` +4.5% (+4.4%, unmarked). `group-by` against a `Document` is the
+  one the runs agree on, and its work did grow: under `perf stat`, 2.2% more instructions and 4.2%
+  more branches, natively too (the probe of `ab` 70.1 → 71.4 µs, at the same instructions per
+  cycle). The share of samples in dropping values goes from 2.6% to 4.6%, the rest matching function by function: #16 made a `Value`'s
+  drop a call, as [its section](#-in-a-loop-027-16) records, and `group-by` drops
+  arrays of shared items for each group, which 0.26.0's `Array::drop` left to the compiler's drop
+  of the slice. #16 measured dropping shared items by hand, which cost the index cases 4 to 5%, so
+  it stays.
+- Aligned, `recursion` is marked at +7.2% and +8.0%, where the usual builds give +0.2 to +1.7%.
+  The work is the same: 0.4 to 0.6% more instructions, 0.6% more branches, no more branch misses.
+  0.26.0's aligned wheel alone is the fast one, 3.34 to 3.46 billion cycles for 1,500
+  evaluations against 3.58 to 3.63 built as usual, where HEAD takes 3.59 to 3.73 both ways: a
+  placement, as 0.26 #17 found for the same case. The index into 10,000 items is marked aligned
+  too, +6.4% with Python values and +4.2% against a `Document`; natively under Linux it is +0.5%,
+  +0.0%, and +3.3% aligned. Not settled; #20 looks at it with the Java case below.
+
+**In Java**, under Linux, `java-compare ab`, two comparisons of five rounds and one of the `cases`
+part alone, against a `Document` and over Java maps:
+
+- Faster, marked in all: `regex over a long text` −99.5 to −99.6%, `distinct items` −57.1 to
+  −96.3%, `tuples` −4.8 to −11.8% (unmarked once); over Java maps, number formatting −41.0 to −42.1% (56.9 → 32.9
+  µs, #8), and −12.0 to −14.9% from JSON text read into maps; `regex` against a `Document` −8.0 to
+  −9.1%.
+- Slower, marked in all: against a `Document`, `$sum(items.price)` +16.1% and +16.4% on 1,000
+  items (25.6 → 29.8 µs), +8.7% and +7.6% on 100,000, and `names over items`, `$sum(items.quantity)`,
+  +14.1%, +12.6% and +10.0% (5.8 → 6.6 µs). Timed directly, one JVM per run, it is the same: 5.70
+  to 5.79 against 6.30 to 6.43 µs. The C API's library built at each commit of 0.27 and loaded
+  into one JAR places it at #16: 5.50 to 5.71 µs up to `a5548b1`, 6.17 to 6.23 µs from `29630e5`.
+  What #16 changed there is not found. The work is the same, within 2% of instructions for each
+  evaluation, but they run at 2.33 instructions a cycle instead of 2.57, the samples gathering on
+  loads in `path`, in `guardrails` and in the lookup of a field and its `bcmp`, whose calls are as
+  many. It is neither code alignment (libraries built aligned: +11 to +13%), nor where the
+  evaluation starts on the stack (from 0 to 9 Java frames deeper, +11 to +13% at each), nor the
+  allocator, nor the core: natively, over the same parsed `Document`, with the system allocator
+  or `mimalloc` as the library uses it, HEAD is 1 to 3% faster. Roadmap 0.27 #20.
+- `recursion` over Java maps +3.7 to +5.1% in the three, marked once, close to the 4.8% a JAR
+  shows against itself; #20 checks it at the same commits.
+- Threads, `$sum(items.price)` from JSON text: nothing marked, −1.8 to +5.9%.
+
+WebAssembly has no measured floor, and is compared in the release's table alone.
+
 ## 0.26 against 0.25.0
 
 Measured for the release (roadmap 0.26 #22), at 238de7f with the release's dependencies, each run
