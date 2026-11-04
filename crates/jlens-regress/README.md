@@ -115,7 +115,7 @@ Found by jlens's sweep of its functions at growing sizes (`cargo xtask growth`):
 
 ## Ported from upstream
 
-Last upstream commit reviewed: `1dd717d` (2026-11-01, unreleased after 0.12.0). Each port is
+Last upstream commit reviewed: `95c0404` (2026-11-02, unreleased after 0.12.0). Each port is
 a jlens commit named `jlens-regress: <upstream subject>`, which names the upstream commit.
 
 | Upstream commit | Subject | Ported? |
@@ -154,6 +154,8 @@ a jlens commit named `jlens-regress: <upstream subject>`, which names the upstre
 | `49bd5bf` | Add budgeted UTF-16 and UCS-2 searches | Skipped: budget code |
 | `da5fa13` | Match budgeted searches' start handling to their iterators | Skipped: budget code |
 | `1dd717d` | Check UCS-2 budgeted searches against their iterator | Skipped: budget code |
+| `6517285` | Use Unicode mode for the v flag | Tests ported, and they pass: `Regex::from_unicode` here already set `unicode` with `unicode_sets` (see above), and it is the only caller of `try_parse` |
+| `95c0404` | Keep the u and v flags separate in the compiled regex | Skipped: it moves `6517285`'s flag into a check, matching unchanged; jlens reads no flag back from a compiled regex |
 
 The upstream README follows.
 

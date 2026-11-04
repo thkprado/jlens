@@ -7,7 +7,7 @@ implementation gives jlens's result, then times it. The tables they print are th
 
 | Harness | Compares | Needs |
 |---|---|---|
-| `compare.mjs` | the WebAssembly package with jsonata-js, in Node.js | Node.js, `npm install` here, `cargo xtask wasm` |
+| `compare.mjs` | the WebAssembly package with jsonata-js, jsonata2js and gnata-js, in Node.js | Node.js, `npm install` here, `cargo xtask wasm` |
 | `python.py` | the Python package with the other Python packages | a virtual environment per package (the script's docstring) |
 | `java/` | the Java package with the other JVM implementations | a JDK 25 or later |
 
@@ -22,7 +22,21 @@ inputs that `cargo xtask growth --write-inputs` leaves in `target/growth`.
 cargo xtask wasm && cd benches/compare && npm install && node compare.mjs
 ```
 
-The script's header lists what each column times and its options.
+The script's header lists what each column times and its options. The engines, all on npm:
+
+| Name | Package | Its input |
+|---|---|---|
+| `jsonata-js` | `jsonata`, the reference implementation, which every engine is checked against | JavaScript objects, through an asynchronous `evaluate` |
+| `jsonata2js` | `jsonata2js`, which translates an expression to JavaScript source and compiles it, by the author of jsonata-jvm-compiler | JavaScript objects |
+| `gnata-js` | `gnata-js`, the Go engine gnata built for WebAssembly | JSON text, made and parsed at each call as the package does |
+
+gnata-js's own loader needs a browser (it adds a `<script>` to the page), so the script loads
+the package's `wasm_exec.js` and `gnata.wasm` the same way in Node.js, and compiles each
+expression once (`_gnataCompile`, then `_gnataEvalHandle`), where the package's `jsonata(source)`
+looks the compiled expression up by its text at each call. `--engines jsonata-js` leaves the
+other two out, as when comparing two builds of jlens with `--pkg`. Searched on npm on
+2026-11-04; JSONata's wrappers, editors and plugins of other tools, which run jsonata-js, are
+left out.
 
 ## Python
 
@@ -31,6 +45,8 @@ python benches/compare/python.py speed jlens=<python> jsonatapy=<python> ...
 ```
 
 The script's docstring says how to set up the environments, and what `speed` and `limits` print.
+The packages are those of the performance page, and `jsonata2py`, which translates an expression
+to Python source, by the author of jsonata-jvm-compiler too (searched on PyPI on 2026-11-04).
 
 To compare two builds of the package, install each wheel in an environment of its own:
 

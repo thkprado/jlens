@@ -8,8 +8,8 @@ environment of its own; this script runs in each of them:
     python python.py ab [--rounds N] A=<python> B=<python>
 
 where each name is a key of IMPLEMENTATIONS (`jlens`, `jsonatapy`, `jsonata-python`,
-`jsonata-rs`), and <python> the interpreter of the environment that holds that package. Only the
-standard library is needed.
+`jsonata-rs`, `jsonata2py`), and <python> the interpreter of the environment that holds that
+package. Only the standard library is needed.
 
 `speed` prints, for each case, the median time per evaluation over several rounds, with the
 input as Python values; for the packages that can convert an input once and evaluate against it
@@ -165,11 +165,37 @@ class JsonataRs:
         return None
 
 
+class Jsonata2py:
+    """jsonata2py, which translates an expression to Python source and compiles it."""
+
+    def __init__(self):
+        import jsonata2py
+
+        self.jsonata2py = jsonata2py
+        self.version = _version("jsonata2py")
+
+    def compile(self, source):
+        return self.jsonata2py.compile(source)
+
+    def evaluate(self, compiled, input, timeout=None, max_depth=None):
+        if max_depth is not None:
+            raise Unsupported  # it has no option for a depth limit
+        if timeout is not None:
+            compiled.set_timeout(_ms(timeout))
+        return compiled.evaluate(input)
+
+    def error(self, error):
+        if isinstance(error, self.jsonata2py.JsonataError):
+            return f"`{error.error_code}`"
+        return None
+
+
 IMPLEMENTATIONS = {
     "jlens": Jlens,
     "jsonatapy": Jsonatapy,
     "jsonata-python": JsonataPython,
     "jsonata-rs": JsonataRs,
+    "jsonata2py": Jsonata2py,
 }
 
 
