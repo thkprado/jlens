@@ -254,7 +254,7 @@ pub(super) fn pad<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_,
         return Ok(Value::String(s));
     }
     if pad_length > 1e7 {
-        return Err(Error::new("D2016").with("value", pad_length));
+        return Err(Error::new("D2016").with("value", crate::value::json_number(pad_length)));
     }
     let padding: String = fill.chars().cycle().take(pad_length as usize).collect();
     Ok(Value::string(if width > 0.0 {

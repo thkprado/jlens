@@ -36,7 +36,7 @@ an expression valid in both engines keeps its result. The API work below stays d
 
 | # | Item | Done when | Status |
 |---|---|---|---|
-| 1 | Upstream at the plan's start: `regress` after `95c0404`, stacker#155 and #156, jsonata-js on npm | Each `regress` commit worth porting ported one at a time, or none; the watch list updated | |
+| 1 | Upstream at the plan's start: `regress` after `95c0404`, stacker#155 and #156, jsonata-js on npm | Each `regress` commit worth porting ported one at a time, or none; the watch list updated | **done**: no `regress` commit, stacker unchanged, npm still 2.2.2; of jsonata-js's unreleased fixes, `$pad`'s `D2016` now reports an integer |
 | 2 | `$distinct` with first fields that follow into nested values: 25 items of 100 KB that differ under a shared field (`{kind, list}`) or in an array (`[id, ...]`) take 2.65 ms against a `Document`, 17.5 µs by comparing | Those cases near the list's time; the other cases of 0.27's table and `ab` within the floor; conformance and 20,000 differential cases clean | |
 | 3 | `$distinct` with few distinct values: 100,000 items of `i % 8` take 1.48 ms, jsonata-js 229 µs | A fix measured against jsonata-js and with `ab`, or the cause recorded | |
 | 4 | `$match` without five allocations per match (the matched text, the object, its map's table and entries, the groups): 0.70 µs per match, jsonata-js 0.21 to 0.30 | Allocations per match counted before and after; `growth`'s `$match` and `ab`'s `regex over a long text` measured; results unchanged | |

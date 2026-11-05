@@ -891,6 +891,34 @@ fn equality_with_a_string_literal_keeps_the_rules_of_equality() {
     }
 }
 
+/// The detail of `D2016` is the padding's length as an integer, as jsonata-js prints it
+/// (jsonata-js #832, unreleased after 2.2.2); before 0.28 it was `19999999.0`.
+#[test]
+fn a_pad_too_long_reports_its_length_as_an_integer() {
+    let err = Expression::compile(r#"$pad("x", 20000000)"#)
+        .unwrap()
+        .evaluate(None, &Bindings::new())
+        .unwrap_err();
+    assert_eq!(err.code(), "D2016");
+    assert_eq!(err.detail("value"), Some(&json!(19999999)));
+    assert_eq!(
+        eval(r#"$length($pad("x", -10000001))"#, json!(null)),
+        Some(json!(10000001))
+    );
+}
+
+/// A regex bound to a variable gives each call the same matches (jsonata-js #845, unreleased
+/// after 2.2.2: its calls shared one `lastIndex`).
+#[test]
+fn a_regex_in_a_variable_serves_each_call_alike() {
+    let expr = r#"( $input := "a,b,c"; $pattern := /[,-]/;
+        [$replace($input, $pattern, "|"), $replace($input, $pattern, "|"), $replace($input, $pattern, "|")] )"#;
+    assert_eq!(
+        eval(expr, json!(null)),
+        Some(json!(["a|b|c", "a|b|c", "a|b|c"]))
+    );
+}
+
 #[test]
 fn size_caps_stop_huge_values() {
     let code = |source: &str, options: &Options| {
