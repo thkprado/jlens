@@ -50,6 +50,7 @@
 - [Evaluation](architecture/evaluator.md)
 - [Schema and language service](architecture/language-service.md)
 - [Roadmap](architecture/roadmap.md)
+  - [History](architecture/roadmap-history.md)
 - [Conformance testing](architecture/conformance.md)
 - [Performance](architecture/performance.md)
 - [Decision records](adr/README.md)

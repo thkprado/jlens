@@ -7,9 +7,6 @@
 // the median time per evaluation over several rounds:
 // - jsonata-js: `await expression.evaluate(input)` (jsonata 2.x evaluation is asynchronous);
 // - jsonata2js: `compile(source).evaluate(input)`, the expression translated to JavaScript once;
-// - gnata-js: the Go engine gnata built for WebAssembly, an expression compiled once, its input
-//   and result through JSON text, as the package's `jsonata(source).evaluate(input)` does
-//   (its loader needs a browser, so the module is loaded here as that loader does);
 // - jlens-wasm `evaluate`: a JavaScript object in and out (converted through JSON);
 // - jlens-wasm `evaluateJson`: JSON text in and out;
 // - jlens-wasm `evaluateDocument`: a `Document` converted once, outside the measurement.
@@ -18,7 +15,7 @@
 // - `--max-steps N` evaluates jlens-wasm with `maxSteps: N` (ADR 0018);
 // - `--pkg DIR` loads jlens-wasm from DIR instead of `crates/jlens-wasm/pkg`, such as the
 //   package built by another revision;
-// - `--engines LIST` times only the other engines named, of `jsonata-js,jsonata2js,gnata-js`
+// - `--engines LIST` times only the other engines named, of `jsonata-js,jsonata2js`
 //   (all by default; `--engines jsonata-js` when comparing two builds). jsonata-js is the
 //   reference every engine is checked against, timed or not.
 //
@@ -34,7 +31,7 @@ import jsonata2js from "jsonata2js";
 const { values: args } = parseArgs({
   options: { "max-steps": { type: "string" }, pkg: { type: "string" }, engines: { type: "string" } },
 });
-const others = ["jsonata-js", "jsonata2js", "gnata-js"];
+const others = ["jsonata-js", "jsonata2js"];
 const engines = args.engines ? args.engines.split(",") : others;
 for (const e of engines) if (!others.includes(e)) throw new Error(`unknown engine ${e}`);
 const here = (path) => new URL(path, import.meta.url);
@@ -80,28 +77,6 @@ async function measure(run, rounds = 7) {
   return times[Math.floor(times.length / 2)];
 }
 
-// gnata-js, loaded as its browser loader does: `wasm_exec.js` defines `Go`, and running the
-// module registers its functions on the global object.
-const gnata = engines.includes("gnata-js") ? await loadGnata() : null;
-async function loadGnata() {
-  const dir = here("node_modules/gnata-js/wasm/");
-  await import(new URL("wasm_exec.js", dir));
-  const go = new globalThis.Go();
-  const { instance } = await WebAssembly.instantiate(await readFile(new URL("gnata.wasm", dir)), go.importObject);
-  go.run(instance);
-  const ok = (r) => {
-    if (r instanceof Error) throw r;
-    return r;
-  };
-  return (source) => {
-    const handle = ok(globalThis._gnataCompile(source));
-    return (value) => {
-      const raw = ok(globalThis._gnataEvalHandle(handle, value != null ? JSON.stringify(value) : ""));
-      return raw === "" ? undefined : JSON.parse(raw);
-    };
-  };
-}
-
 const fmt = (us) => (us >= 1000 ? `${(us / 1000).toFixed(2)} ms` : `${us.toFixed(1)} µs`);
 
 console.log(`Node.js ${process.version}; input: ${spec.input} (${inputText.length} bytes)`);
@@ -142,12 +117,9 @@ async function timeOther(engine, source, value, expected, js) {
   let run;
   try {
     if (engine === "jsonata-js") run = () => js.evaluate(value);
-    else if (engine === "jsonata2js") {
+    else {
       const e = jsonata2js.compile(source);
       run = () => e.evaluate(value);
-    } else {
-      const evaluate = gnata(source);
-      run = () => evaluate(value);
     }
     if (JSON.stringify(await run()) !== expected) return "differs";
   } catch {

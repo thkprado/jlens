@@ -45,6 +45,11 @@ pub fn check() -> Result<()> {
             others.push(readme);
         }
     }
+    // The notes kept outside the book, which the book links to on GitHub.
+    let mut notes = Vec::new();
+    collect_markdown(&root().join("docs/notes"), &mut notes)?;
+    notes.sort();
+    others.extend(notes);
 
     let mut failures = Vec::new();
     let mut examples = 0;
@@ -336,6 +341,12 @@ fn strip_links(text: &str) -> String {
     out
 }
 
+/// The prefixes of links to the repository's main branch on GitHub.
+const REPO_URLS: [&str; 2] = [
+    "https://github.com/thkprado/jlens/blob/main/",
+    "https://github.com/thkprado/jlens/tree/main/",
+];
+
 fn check_links(
     page: &Path,
     text: &str,
@@ -352,14 +363,21 @@ fn check_links(
             continue;
         }
         for target in link_targets(line) {
-            if target.contains("://") || target.starts_with("mailto:") {
+            // A link to this repository on GitHub is checked against the working tree.
+            let in_repo = REPO_URLS
+                .iter()
+                .find_map(|prefix| target.strip_prefix(prefix));
+            if in_repo.is_none() && (target.contains("://") || target.starts_with("mailto:")) {
                 continue;
             }
-            let (file, anchor) = match target.split_once('#') {
+            let link = in_repo.unwrap_or(&target);
+            let (file, anchor) = match link.split_once('#') {
                 Some((file, anchor)) => (file, Some(anchor)),
-                None => (target.as_str(), None),
+                None => (link, None),
             };
-            let resolved = if file.is_empty() {
+            let resolved = if in_repo.is_some() {
+                root().join(file)
+            } else if file.is_empty() {
                 page.to_owned()
             } else {
                 page.parent().unwrap().join(file)

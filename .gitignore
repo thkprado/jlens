@@ -7,3 +7,4 @@ __pycache__/
 /crates/jlens-java/java/target
 /crates/jlens-java/java/native
 /benches/compare/java/target
+/.vscode/

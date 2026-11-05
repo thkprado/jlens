@@ -101,7 +101,11 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    (`benches/compare/README.md`), together with the text that quotes their numbers. Compare the new
    numbers with the old table, not only one revision with another: a change in the benchmark
    scripts shows only there. The Python and Java packages are compared with the previous release
-   by `python.py ab` and `cargo xtask java-compare ab`.
+   by `python.py ab` and `cargo xtask java-compare ab`. Update the summary at the top of the page,
+   and replace its "X against the previous release" section with the new one, its full
+   comparison in `docs/notes/perf-X.Y.md`. Condense the finished plan of the
+   [roadmap](docs/src/architecture/roadmap.md) into a paragraph of the
+   [roadmap history](docs/src/architecture/roadmap-history.md).
 4. Check that everything passes, including the packages:
 
    ```sh

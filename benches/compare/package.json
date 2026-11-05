@@ -7,7 +7,6 @@
     "compare": "node compare.mjs"
   },
   "dependencies": {
-    "gnata-js": "0.6.2",
     "jsonata": "2.2.2",
     "jsonata2js": "0.1.2"
   }

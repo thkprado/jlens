@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Documentation
+
+- The performance page is shorter, with a summary per platform on top; how each change was
+  measured moved to `docs/notes/`, outside the book. gnata-js and `jsonata-rs` left the
+  comparisons, and the harnesses.
+- The roadmap holds what comes next; finished plans are condensed into a new
+  [roadmap history](docs/src/architecture/roadmap-history.md).
+
 ## [0.27.0]
 
 Linear where the square of the input showed: `$match`, `$replace` and `$split` on long texts,

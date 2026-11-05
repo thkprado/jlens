@@ -1,14 +1,14 @@
 """Compares jlens with the other JSONata implementations for Python, on ../cases.json.
 
-Two of the packages install a module named `jsonata`, so each package lives in a virtual
-environment of its own; this script runs in each of them:
+Several JSONata packages on PyPI install a module named `jsonata`, so each package lives in a
+virtual environment of its own; this script runs in each of them:
 
     python python.py speed  [--max-steps N] jlens=<python> jsonatapy=<python> ...
     python python.py limits jlens=<python> jsonatapy=<python> jsonata-python=<python> ...
     python python.py ab [--rounds N] A=<python> B=<python>
 
 where each name is a key of IMPLEMENTATIONS (`jlens`, `jsonatapy`, `jsonata-python`,
-`jsonata-rs`, `jsonata2py`), and <python> the interpreter of the environment that holds that
+`jsonata2py`), and <python> the interpreter of the environment that holds that
 package. Only the standard library is needed.
 
 `speed` prints, for each case, the median time per evaluation over several rounds, with the
@@ -138,33 +138,6 @@ class JsonataPython:
         return None
 
 
-class JsonataRs:
-    """jsonata-rs, a port of jsonata-java in Rust."""
-
-    def __init__(self):
-        import jsonata
-
-        self.jsonata = jsonata
-        self.version = _version("jsonata-rs")
-
-    def compile(self, source):
-        return self.jsonata.Jsonata(source)
-
-    def evaluate(self, compiled, input, timeout=None, max_depth=None):
-        if timeout is not None or max_depth is not None:
-            # It takes both or neither, as C longs.
-            never = 2**31 - 1
-            compiled.set_runtime_bounds(
-                never if timeout is None else _ms(timeout), never if max_depth is None else max_depth
-            )
-        return compiled.evaluate(input)
-
-    def error(self, error):
-        if isinstance(error, self.jsonata.JsonataError):
-            return f"`{error.code}`"
-        return None
-
-
 class Jsonata2py:
     """jsonata2py, which translates an expression to Python source and compiles it."""
 
@@ -194,7 +167,6 @@ IMPLEMENTATIONS = {
     "jlens": Jlens,
     "jsonatapy": Jsonatapy,
     "jsonata-python": JsonataPython,
-    "jsonata-rs": JsonataRs,
     "jsonata2py": Jsonata2py,
 }
 

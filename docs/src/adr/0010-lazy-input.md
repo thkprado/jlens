@@ -507,7 +507,7 @@ thirty-second of it show, in µs for 20,000 items:
 
 ## Amendment: a level read in case it is needed (0.27)
 
-`$distinct` past 16 distinct items hashes each item whole ([0.27 #6](../architecture/roadmap.md)),
+`$distinct` past 16 distinct items hashes each item whole ([0.27 #6](../architecture/roadmap-history.md#027)),
 where comparing stops at the first difference. So it reads levels that comparing would not, and
 with decision 6 alone a level no comparison reaches would stop the evaluation. Since 0.27 #12 this
 is only for items that the first fields of an object do not settle: those read what comparing

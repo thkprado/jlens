@@ -129,7 +129,7 @@ its hasher, read through a thread-local, an allocation, control bytes to set and
 for one or two names. A frame now holds up to eight variables in a list and moves them to a table
 at the ninth, as the root frame does when a host binds many. `recursion` takes about 21% less
 time under Linux and 4.6% less on Windows, and the difference between two calls that [0.26 #17
-could not explain](../architecture/performance.md#recursion-and-the-frames-026-18) is gone.
+could not explain](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.26.md#recursion-and-the-frames-026-18) is gone.
 
 The cost falls on frames with many names: a block with eight or more takes 4 to 12% longer, 0.1 to
 0.2 µs on twenty lookups, as searching eight names of one length costs more than hashing one,
@@ -144,7 +144,7 @@ one cache line for every thread. A name the body binds in that frame moves it to
 names. Of two parameters of one name the last holds, as when they were bound in turn. A call makes
 two allocations instead of four, and takes no share of the tree: `recursion` takes 18 to 20% less
 time on Windows, 8 to 10% less under Linux, and 44% more evaluations on eight threads
-([performance](../architecture/performance.md#a-lambdas-frame-026-20)).
+([performance notes](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.26.md#a-lambdas-frame-026-20)).
 
 The new reference from a frame to its function makes no new cycle that an evaluation would keep:
 the function reaches the frame's parent, which the frame holds anyway, and its input, made before
@@ -161,4 +161,4 @@ candidate, was not built: it would count on one cache line for every thread at e
 before; the list a one-name frame no longer makes pays it back. The name is 16 bytes, not 24 as a
 `Box<str>` beside 22 bytes would take: at 24, a frame's variables fill their type and `recursion`,
 which binds no name, took 3.5% more with `mimalloc`
-([performance](../architecture/performance.md#names-in-a-frame-027-7)).
+([performance notes](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.27.md#names-in-a-frame-027-7)).

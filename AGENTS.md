@@ -89,6 +89,10 @@ cargo xtask java                                  # after touching jlens-java, j
     included whole or between `ANCHOR` comments.
   - Never edit the generated pages by hand: run `cargo xtask gen-docs`.
   - Significant design decisions get an ADR in `docs/adr/`.
+  - The performance page and the roadmap are for readers: the performance page holds the current
+    tables and what a user needs, and how a change was measured goes to `docs/notes/perf-X.Y.md`;
+    the roadmap holds the open plans, one short row per item, and a finished plan becomes a
+    paragraph of `roadmap-history.md`.
 - **Snapshots** (`insta`): review every changed `.snap` file. Update them with
   `INSTA_UPDATE=always cargo test -p <crate>`, then read the diff.
 - **All project artifacts are in English**: code, comments, docs and commit messages.
