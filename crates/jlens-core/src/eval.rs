@@ -730,14 +730,13 @@ impl<'a> Evaluator<'_, 'a> {
         Ok(())
     }
 
-    /// Finds the first match of `re` at or after byte offset `from`. With a timeout, a
-    /// cancellation token, a step limit or a tracer, the backtracker polls them, each poll
-    /// spending a step (ADR 0018), and the match fails as an evaluation step would (ADR 0009);
-    /// without any, it runs the unchecked code path.
+    /// Finds the first match of a searcher's regex in its text at or after byte offset `from`.
+    /// With a timeout, a cancellation token, a step limit or a tracer, the backtracker polls
+    /// them, each poll spending a step (ADR 0018), and the match fails as an evaluation step
+    /// would (ADR 0009); without any, it runs the unchecked code path.
     pub(crate) fn find_regex(
         &self,
-        re: &regress::Regex,
-        text: &str,
+        searcher: &mut regress::Searcher<'_, '_>,
         from: usize,
     ) -> Result<Option<regress::Match>> {
         // A tracer counts the steps too, for the audit to report what a step limit would charge.
@@ -746,10 +745,12 @@ impl<'a> Evaluator<'_, 'a> {
             && self.limits.max_steps.is_none()
             && self.tracer.is_none()
         {
-            return Ok(re.find_from(text, from).next());
+            return Ok(searcher
+                .find_from(from, regress::NoInterrupt)
+                .unwrap_or(None));
         }
         let mut stopped = None;
-        let found = re.find_from_interruptible(text, from, || {
+        let found = searcher.find_from(from, || {
             // Each poll reads the clock: one stands for 1,024 steps of the backtracker.
             stopped = self
                 .charge(1)

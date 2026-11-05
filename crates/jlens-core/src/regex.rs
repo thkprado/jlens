@@ -126,14 +126,14 @@ impl Found {
     }
 }
 
-/// Finds the first match at or after `from`.
-pub(crate) fn find(
+/// Finds the first match at or after `from` in the searcher's text, `text`.
+fn find(
     ev: &Evaluator<'_, '_>,
-    re: &Regex,
+    searcher: &mut regress::Searcher<'_, '_>,
     text: &str,
     from: Offset,
 ) -> Result<Option<Found>> {
-    let Some(m) = ev.find_regex(&re.re, text, from.byte)? else {
+    let Some(m) = ev.find_regex(searcher, from.byte)? else {
         return Ok(None);
     };
     let range = m.range();
@@ -152,13 +152,14 @@ pub(crate) fn find(
 fn find_next(
     ev: &Evaluator<'_, '_>,
     re: &Regex,
+    searcher: &mut regress::Searcher<'_, '_>,
     text: &str,
     last: Offset,
 ) -> Result<Option<Found>> {
     if last.byte >= text.len() {
         return Ok(None);
     }
-    let found = find(ev, re, text, last)?;
+    let found = find(ev, searcher, text, last)?;
     if found.as_ref().is_some_and(|f| f.start.byte == f.end.byte) {
         return Err(Error::new("D1004").with("value", re.pattern.as_str()));
     }
@@ -197,7 +198,8 @@ pub(crate) fn exec<'a>(
     text: &Rc<str>,
     from: Offset,
 ) -> Result<Value<'a>> {
-    Ok(object(re, text, find(ev, re, text, from)?))
+    let found = find(ev, &mut re.re.searcher(text), text, from)?;
+    Ok(object(re, text, found))
 }
 
 /// The `next()` of a match object: the following match, or undefined at the end.
@@ -207,7 +209,8 @@ pub(crate) fn next<'a>(
     text: &Rc<str>,
     last: Offset,
 ) -> Result<Value<'a>> {
-    Ok(object(re, text, find_next(ev, re, text, last)?))
+    let found = find_next(ev, re, &mut re.re.searcher(text), text, last)?;
+    Ok(object(re, text, found))
 }
 
 /// The matches of a regex literal over a text, for `$match`, `$replace`, `$split` and
@@ -218,6 +221,8 @@ pub(crate) fn next<'a>(
 pub(crate) struct Matches<'r> {
     re: &'r Regex,
     text: &'r str,
+    /// Keeps the backtracker's storage from one search to the next.
+    searcher: regress::Searcher<'r, 'r>,
     /// Where the last match ended; `None` before the first.
     last: Option<Offset>,
 }
@@ -227,6 +232,7 @@ impl<'r> Matches<'r> {
         Matches {
             re,
             text,
+            searcher: re.re.searcher(text),
             last: None,
         }
     }
@@ -235,8 +241,8 @@ impl<'r> Matches<'r> {
     pub fn next(&mut self, ev: &mut Evaluator<'_, '_>) -> Result<Option<Found>> {
         ev.callback_step()?;
         let found = match self.last {
-            None => find(ev, self.re, self.text, Offset::START)?,
-            Some(last) => find_next(ev, self.re, self.text, last)?,
+            None => find(ev, &mut self.searcher, self.text, Offset::START)?,
+            Some(last) => find_next(ev, self.re, &mut self.searcher, self.text, last)?,
         };
         if let Some(f) = &found {
             self.last = Some(f.end);

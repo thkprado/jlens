@@ -2,7 +2,7 @@
 
 **This is a fork of [regress](https://github.com/ridiculousfish/regress) 0.12.0** (upstream
 commit `aae35de`), made for [jlens](https://github.com/thkprado/jlens), a JSONata engine. It adds
-one thing: a match that can be interrupted.
+a match that can be interrupted, and searches that keep their storage.
 
 `Regex::find_from_interruptible(text, start, interrupt)` searches like
 `find_from(text, start).next()`, and calls `interrupt` every `INTERRUPT_INTERVAL` steps of the
@@ -11,6 +11,11 @@ jlens uses it to stop patterns that backtrack catastrophically, such as `/^(a+)+
 evaluation's timeout or when it is cancelled. Without an interrupt, the backtracker compiles to
 the upstream code. The design is in jlens's
 [ADR 0009](https://github.com/thkprado/jlens/blob/main/docs/src/adr/0009-bounded-regex.md).
+
+`Regex::searcher(text)` gives a `Searcher`, whose `find_from(start, interrupt)` searches as
+`find_from_interruptible` does and keeps the backtracker's storage for the next search of the
+same text, where each `find_from_interruptible` allocates its own. jlens runs every match of a
+text through one, as `$match`, `$replace` and `$split` move from one match to the next.
 
 ```rust
 use regress::Regex;

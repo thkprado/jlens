@@ -1141,6 +1141,46 @@ impl<'r, 't, I: Interrupt> BacktrackExecutor<'r, Utf8Input<'t>, I> {
     pub(crate) fn interrupted(&self) -> bool {
         self.matcher.poll.interrupted
     }
+
+    /// jlens-regress: an executor that searches with the storage a completed search of the same
+    /// text left, instead of allocating its own.
+    pub(crate) fn with_storage(
+        re: &'r CompiledRegex,
+        text: &'t str,
+        interrupt: I,
+        storage: Storage<'t>,
+    ) -> Self {
+        Self {
+            input: Utf8Input::new(text, re.flags.unicode),
+            matcher: MatchAttempter {
+                re,
+                bts: storage.bts,
+                s: storage.s,
+                poll: Poll::new(interrupt),
+                lookarounds: storage.lookarounds,
+            },
+        }
+    }
+
+    /// jlens-regress: the storage, for the next search of the text. A completed search leaves
+    /// it as a new executor has it: one `Exhausted` backtrack and no group set; one that was
+    /// interrupted may not, and its storage is not kept.
+    pub(crate) fn into_storage(self) -> Storage<'t> {
+        Storage {
+            bts: self.matcher.bts,
+            s: self.matcher.s,
+            lookarounds: self.matcher.lookarounds,
+        }
+    }
+}
+
+/// jlens-regress: the storage of a backtracker over a `&str`, which a
+/// [`Searcher`](crate::Searcher) keeps between the searches of one text.
+#[derive(Debug)]
+pub(crate) struct Storage<'t> {
+    bts: Vec<BacktrackInsn<Utf8Input<'t>>>,
+    s: State<<Utf8Input<'t> as InputIndexer>::Position>,
+    lookarounds: Option<Box<Lookarounds<Utf8Input<'t>>>>,
 }
 
 #[cfg(feature = "utf16")]

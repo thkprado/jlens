@@ -107,3 +107,58 @@ fn matches_like_find_from() {
         );
     }
 }
+
+#[test]
+fn a_searcher_matches_like_find_from() {
+    // Each search of a searcher reuses the storage the one before left, also when it failed;
+    // the matches must be those of a search of its own.
+    let cases: &[(&str, &str, &str)] = &[
+        (r"\w+", "", "ação coração λόγος 日本語 plain"),
+        (r"(\w)(\w*)", "", "one two three"),
+        (r"(\w)\1", "", "Frankly, Miss Piggy all good"),
+        (r"(?<=x)y", "", "xyxy zy xy"),
+        (r"(?<!a)b", "", "ab cb ab db"),
+        (r"(?=(\w+))\w", "", "ab cd"),
+        (r"(a)|(b)", "", "abba"),
+        (r"(?:(a)|b)+", "", "ab ba b"),
+        (r"^\w", "m", "x\nabc\n\ndef"),
+        (r"é+", "i", "xÉé É"),
+        (
+            r"(?<year>\d{4})-(?<month>\d\d)",
+            "",
+            "on 2026-10 and 1999-01",
+        ),
+        (r"\bfoo\b", "", "a foo b foo"),
+        (r"\p{Lu}\p{Ll}*", "u", "Ωμέγα Ünd Text"),
+    ];
+    for &(pattern, flags, text) in cases {
+        let re = Regex::with_flags(pattern, flags).unwrap();
+        let mut searcher = re.searcher(text);
+        // Every start, so that searches that fail are followed by others.
+        let starts = (0..=text.len() + 1).filter(|&i| i > text.len() || text.is_char_boundary(i));
+        for start in starts {
+            let expected = re.find_from(text, start).next();
+            let found = searcher.find_from(start, || false).unwrap();
+            assert_eq!(
+                found.as_ref().map(|m| (m.range(), m.captures.clone())),
+                expected.as_ref().map(|m| (m.range(), m.captures.clone())),
+                "/{pattern}/{flags} on {text:?} from {start}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_searcher_matches_after_an_interrupt() {
+    let re = Regex::new(r"(a+)+$|(b)").unwrap();
+    let text = format!("{}!b", "a".repeat(30));
+    let mut searcher = re.searcher(&text);
+    assert_eq!(searcher.find_from(0, || true).unwrap_err(), Interrupted);
+    // From the `!`, where the first branch fails at once and the second takes its group.
+    let found = searcher
+        .find_from(30, regress::NoInterrupt)
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.range(), 31..32);
+    assert_eq!(found.captures, [None, Some(31..32)]);
+}

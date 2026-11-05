@@ -12,6 +12,12 @@ All notable changes are recorded here. The format follows
   share a field, or are arrays: 25 records of 100 KB that differ below a shared `kind` take 15 µs
   against a `Document`, where they took 12 ms, and 6 ms with `evaluate`, where they took 51 ms, as
   comparing them one by one does. Records whose first fields differ take what they took.
+- `$distinct` compares numbers and strings without a call, and short strings without `memcmp`:
+  100,000 items of eight distinct values take 312 µs against a `Document`, where they took
+  2.2 ms.
+- The matches of a text keep the regular expression's backtracking storage from one to the next,
+  and the matches of a regex without groups share one empty `groups` array: `$match`,
+  `$split` and `$replace` with a regex take 20 to 36% less on long texts.
 
 ### Fixed
 

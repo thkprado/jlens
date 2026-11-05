@@ -104,3 +104,55 @@ compare through `deep_eq`, 30 ns a comparison, and stay 9 times ahead of jsonata
 +1.4% (`strings` −1.2%, `distinct items` +1.4%); with `evaluate`, from −2.1 to +0.4%. Conformance
 and 20,000 differential cases agree. A unit test compares strings on each side of the 16 bytes,
 differing at the first, the middle and the last byte, and joined texts with flat ones.
+
+## `$match` and the allocations of each match (0.28 #4)
+
+0.27 left `$match` at 0.70 µs a match against 0.21 to 0.30 µs in jsonata-js, and named five
+allocations: the matched string, the object, its map's table and entries, and the groups. A
+counting allocator in a program of its own found 6.5 a match for `/\w+/` on `text-20k.json`, and 2
+a piece for `$split`: the search allocated too. `find_from_interruptible` built a backtracker for
+each search, with its backtrack stack, and the stack grew again each time.
+
+The same program with mimalloc in place of the Windows heap took `$match` from 1,060 to 480 µs:
+on this machine, an allocation and its free cost about 57 ns, more than half the time of a match.
+So the change counts allocations:
+
+- `jlens-regress` has a `Searcher`, which searches one text as `find_from_interruptible` does and
+  keeps the backtracker's storage from one search to the next. A completed search leaves it as a
+  new one has it, one `Exhausted` backtrack and no group set (the upstream iterator relies on
+  this too); after an interrupt it is dropped. `regex::Matches`, which runs the matches of
+  `$match`, `$replace`, `$split` and `$contains`, keeps one for its text.
+- The matches of a regex without groups share one empty `groups` array, made once a call.
+  Nothing changes an array of the result in place; the only flag set on an array that is not
+  fresh, `KEEP_SINGLETON`, is read on sequences alone.
+
+The four allocations left are those of the object: its string, its `Rc`, and the table and
+entries of its `IndexMap`. Fewer needs a representation of small objects without a hash table,
+which every object of the crate shares; tuples meet the same cost.
+
+On `text-20k.json` against a `Document`, in µs, the median of 15 samples, each program a new copy,
+before and after alternated; jsonata-js 2.2.2 on the same machine, the median of 15 samples after
+a warm-up:
+
+| Expression | Allocations, before | after | Before | After | jsonata-js |
+|---|---:|---:|---:|---:|---:|
+| `$count($match(text, /\w+/))`, 1,558 matches | 10,182 | 6,290 | 1,059 | 808 | 356 |
+| `$count($match(text, /(\w)(\w*)/))` | 20,320 | 14,090 | 1,631 | 1,265 | 386 |
+| `$count($split(text, /\s/))`, 2,076 pieces | 4,205 | 2,131 | 445 | 343 | 447 |
+| `$length($replace(text, /\w+/, "x"))` | 2,396 | 61 | 346 | 232 | 476 |
+
+Per match, `$match` 0.68 → 0.52 µs. With mimalloc it takes 377 µs, against 478 before, and
+jsonata-js 356: the gap left is the Windows heap. With groups, each match also allocates the
+capture list regress returns, the list of groups and its array, and a string per group.
+
+`cargo xtask growth` against the code before (`$match`, `$split` and `$replace`, 1,000 to 64,000
+items, in both modes): `$match` −20%, `$split` with a regex −25%, `$replace` with a regex −20%,
+`$replace` with a function −2%, the texts within their noise; every case stays linear.
+
+`cargo xtask ab` against 409bd34, seven rounds: `regex over a long text` 340 → 218 µs against a
+`Document` and 344 → 218 µs with `evaluate`, −36%; `regex`, short texts, +1.5% and +0.1%; every
+other case within the floor, `names over items` with `evaluate` (+5.1%) and `path` against a
+`Document` (+3.4%) at +2.3% and +2.6% when run again alone, ten rounds, where nothing changed.
+A test of `jlens-regress` compares a searcher's matches with searches of their own from every
+start of thirteen patterns (groups, backreferences, lookarounds, `u`, `i`, `m`), and after an
+interrupt.

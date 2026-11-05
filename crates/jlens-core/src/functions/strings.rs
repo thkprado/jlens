@@ -348,13 +348,24 @@ pub(super) fn match_<'a>(
         let mut matches = Matches::new(re, &s);
         let mut found = matches.next(ev)?;
         let mut count = 0.0;
+        // Without groups, the matches share one empty array: nothing changes an array of the
+        // result in place, and the only flag set on an array that is not fresh,
+        // `KEEP_SINGLETON`, is read on sequences alone.
+        let mut no_groups = None;
         while let Some(f) = found.take()
             && limit.is_none_or(|l| count < l)
         {
+            let groups = if f.groups.is_empty() {
+                no_groups
+                    .get_or_insert_with(|| Value::array(Vec::new(), 0))
+                    .clone()
+            } else {
+                Value::array(f.group_values(&s), 0)
+            };
             let mut m = Map::with_capacity_and_hasher(3, Default::default());
             m.insert(keys.match_.clone(), Value::string(f.matched(&s)));
             m.insert(keys.index.clone(), Value::Number(f.start.utf16 as f64));
-            m.insert(keys.groups.clone(), Value::array(f.group_values(&s), 0));
+            m.insert(keys.groups.clone(), groups);
             out.push(Value::object(m));
             found = matches.next(ev)?;
             count += 1.0;

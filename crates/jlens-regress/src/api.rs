@@ -529,6 +529,87 @@ impl Regex {
         }
     }
 
+    /// Returns a [`Searcher`] of `text`, which searches it as
+    /// [`find_from_interruptible`](Regex::find_from_interruptible) does and keeps the
+    /// backtracker's storage from one search to the next.
+    ///
+    /// jlens-regress only; not in regress 0.12.0.
+    pub fn searcher<'r, 't>(&'r self, text: &'t str) -> Searcher<'r, 't> {
+        Searcher {
+            re: self,
+            text,
+            storage: None,
+        }
+    }
+}
+
+/// The searches of one text with one regex, which keep the backtracker's storage from one
+/// search to the next instead of allocating it for each, as an iterator over the matches does,
+/// while each search starts where its caller says and takes an interrupt of its own.
+///
+/// jlens-regress only; not in regress 0.12.0.
+///
+///  ```rust
+///   use regress::{NoInterrupt, Regex};
+///   let re = Regex::new(r"\w+").unwrap();
+///   let mut searcher = re.searcher("one two");
+///   let first = searcher.find_from(0, NoInterrupt).unwrap().unwrap();
+///   assert_eq!(first.range(), 0..3);
+///   let second = searcher.find_from(first.end(), || false).unwrap().unwrap();
+///   assert_eq!(second.range(), 4..7);
+///   ```
+#[derive(Debug)]
+pub struct Searcher<'r, 't> {
+    re: &'r Regex,
+    text: &'t str,
+    storage: Option<classicalbacktrack::Storage<'t>>,
+}
+
+impl Searcher<'_, '_> {
+    /// Searches the text for the first match at or after byte index `start`, like
+    /// [`Regex::find_from_interruptible`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `start` is not on a UTF-8 character boundary of the text, as `find_from` does.
+    pub fn find_from<I: crate::Interrupt>(
+        &mut self,
+        start: usize,
+        interrupt: I,
+    ) -> Result<Option<Match>, crate::Interrupted> {
+        use exec::MatchProducer;
+        assert!(
+            start >= self.text.len() || self.text.is_char_boundary(start),
+            "start index is not on a char boundary"
+        );
+        let interrupt = crate::interrupt::Callback(interrupt);
+        let mut executor = match self.storage.take() {
+            Some(storage) => classicalbacktrack::BacktrackExecutor::with_storage(
+                &self.re.cr,
+                self.text,
+                interrupt,
+                storage,
+            ),
+            None => classicalbacktrack::BacktrackExecutor::with_interrupt(
+                &self.re.cr,
+                self.text,
+                interrupt,
+            ),
+        };
+        let Some(pos) = executor.initial_position(start) else {
+            self.storage = Some(executor.into_storage());
+            return Ok(None);
+        };
+        let found = executor.next_match(pos, &mut None);
+        if executor.interrupted() {
+            return Err(crate::Interrupted);
+        }
+        self.storage = Some(executor.into_storage());
+        Ok(found)
+    }
+}
+
+impl Regex {
     /// Searches `text` to find the first match.
     /// The input text is expected to be ascii-only: only ASCII case-folding is
     /// supported.
