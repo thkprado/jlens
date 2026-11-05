@@ -176,7 +176,7 @@ pub enum NodeKind {
     Regex {
         /// The pattern source.
         pattern: String,
-        /// Flags (`i`, `m`).
+        /// Flags (`i`, `m`, `u`, `v`).
         flags: String,
     },
     /// `*`: all fields of the context object.

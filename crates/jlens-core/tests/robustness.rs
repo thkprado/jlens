@@ -1275,7 +1275,7 @@ fn an_index_reads_one_item() {
 fn catastrophic_regex() -> impl Strategy<Value = String> {
     let body = prop::sample::select(&["a+", "a|a", "aa|a", "a|aa", "a?a", "(a+)+", "a+a+"][..]);
     let outer = prop::sample::select(&["+", "*"][..]);
-    let flags = prop::sample::select(&["", "i", "m"][..]);
+    let flags = prop::sample::select(&["", "i", "m", "u", "v", "iv"][..]);
     let call = prop::sample::select(
         &[
             "$contains($s, R)",
@@ -2333,9 +2333,19 @@ proptest! {
 
 /// The calls of a function with a regex literal, which runs its searches itself, and with the
 /// same regex behind a function, which goes through match objects and their `next()`.
-fn regex_calls(function: &str, re: &str, replacement: &str, limit: Option<u8>) -> [String; 2] {
+fn regex_calls(
+    function: &str,
+    re: &str,
+    flags: &str,
+    replacement: &str,
+    limit: Option<u8>,
+) -> [String; 2] {
     let limit = limit.map_or(String::new(), |l| format!(", {l}"));
-    [format!("/{re}/"), format!("function($s){{ /{re}/($s) }}")].map(|matcher| match function {
+    [
+        format!("/{re}/{flags}"),
+        format!("function($s){{ /{re}/{flags}($s) }}"),
+    ]
+    .map(|matcher| match function {
         "replace" => format!("$replace($t, {matcher}, {replacement:?}{limit})"),
         "contains" => format!("$contains($t, {matcher})"),
         f => format!("${f}($t, {matcher}{limit})"),
@@ -2347,7 +2357,8 @@ proptest! {
 
     /// `$match`, `$split`, `$replace` and `$contains` give the same results and errors with a
     /// regex literal as through match objects: empty matches (`D1004`), limits, groups that
-    /// take no part, and `$` in a replacement past nine groups, on texts with surrogate pairs.
+    /// take no part, and `$` in a replacement past nine groups, on texts with surrogate pairs,
+    /// with the flags `u` and `v` too, and patterns that only some flags take (`S0302`).
     #[test]
     fn regex_literals_match_as_match_objects_do(
         text in prop::collection::vec(
@@ -2357,17 +2368,24 @@ proptest! {
         function in prop::sample::select(&["match", "split", "replace", "contains"][..]),
         re in prop::sample::select(&[
             "a", "😀", "(a)|(b)", "a(😀)?", "x*", "b*", "a|", "[^a]+", ".",
-            "(a)(b)?(c)?(d)?(e)?(f)?(g)?(h)?(i)?(j)?(k)?",
+            "(a)(b)?(c)?(d)?(e)?(f)?(g)?(h)?(i)?(j)?(k)?", r"\p{L}+", r"[\p{L}--a]",
+            r"\p{RGI_Emoji}", r"\P{L}",
         ][..]),
+        flags in prop::sample::select(&["", "i", "u", "v", "iv", "uv", "uu"][..]),
         replacement in prop::sample::select(&[
             "", "[$0]", "$1", "$2$1", "$$", "$", "$10", "$12x", "😀$0é", "$x",
         ][..]),
         limit in prop::option::of(0..5u8),
     ) {
         let bindings = Bindings::new().var("t", json!(text.concat()));
-        let [literal, objects] = regex_calls(function, re, replacement, limit)
+        let [literal, objects] = regex_calls(function, re, flags, replacement, limit)
             .map(|source| Expression::compile(&source).unwrap().evaluate(None, &bindings));
-        prop_assert_eq!(outcome(literal), outcome(objects));
+        let (literal, objects) = (outcome(literal), outcome(objects));
+        // A regex that does not compile fails where it is evaluated: as an argument at once,
+        // behind a function when it is called, which a limit of 0 never does.
+        if literal.as_deref() != Some("S0302") || limit != Some(0) {
+            prop_assert_eq!(literal, objects);
+        }
     }
 }
 
@@ -2434,7 +2452,7 @@ proptest! {
 fn regex_literals_stop_on_the_limits() {
     let calls = |re: &str| {
         ["match", "split", "replace", "contains"]
-            .map(|function| regex_calls(function, re, "o", None)[0].clone())
+            .map(|function| regex_calls(function, re, "", "o", None)[0].clone())
     };
     let catastrophic = Bindings::new().var("t", json!(format!("{}!", "a".repeat(40))));
     let long = Bindings::new().var("t", json!("a😀".repeat(10_000)));

@@ -6,3 +6,4 @@ Price / 2 / Quantity
 $split(Path,
   /\//)
 $contains(Name, /x/) and /y/
+$match(Name, /[\p{L}--\p{Script=Latin}]+/v) or /\p{L}/iu

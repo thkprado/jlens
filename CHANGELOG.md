@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The regex flags `u` and `v`, an extension that jsonata-js rejects: `\p{L}`, `\p{Script=Greek}`
+  and the other escapes of Unicode properties, for text in any script, and with `v` the
+  difference and intersection of classes and the properties of strings such as `\p{RGI_Emoji}`.
+  The [regular expressions page](docs/src/language/regex.md#unicode-text) has a section on
+  Unicode text.
+
 ### Changed
 
 - `$distinct` follows the first fields of its items into the levels below them when the items
@@ -21,6 +29,10 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- A regex flag given twice (`/a/ii`) is a syntax error, `S0302`, as JavaScript makes it; jlens
+  took it as given once.
+- `jlens-regress`: a property of strings outside a class, such as `\p{RGI_Emoji}`, tries its
+  longest strings first, as inside one, and matches `👍🏽` whole, not its `👍` alone.
 - The `D2016` error of `$pad` gives the padding it refused as an integer, `19999999` where it gave
   `19999999.0`, as jsonata-js does.
 

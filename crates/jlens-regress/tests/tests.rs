@@ -2488,6 +2488,20 @@ fn test_v_mode_nested_class_scan() {
     assert!(re.find("a").is_none());
 }
 
+// jlens-regress: a property of strings outside a class tries its strings longest first, as
+// inside one, so it matches a whole emoji sequence, not its first code point (V8 agrees).
+#[test]
+fn test_v_mode_string_property_longest_first() {
+    test_with_configs(|tc| {
+        let text = "🇧🇷 👍🏽 👨‍👩‍👧 1️⃣ ❤";
+        // `❤` without U+FE0F is not an RGI emoji.
+        let all = ["🇧🇷", "👍🏽", "👨‍👩‍👧", "1️⃣"];
+        assert_eq!(tc.compilef(r"\p{RGI_Emoji}", "v").match_all(text), all);
+        assert_eq!(tc.compilef(r"[\p{RGI_Emoji}]", "v").match_all(text), all);
+        assert_eq!(tc.compilef(r"\p{RGI_Emoji}", "iv").match_all(text), all);
+    })
+}
+
 #[test]
 fn test_ascii_unicode_icase_backref() {
     test_with_configs(|tc| {

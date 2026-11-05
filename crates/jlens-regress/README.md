@@ -118,6 +118,13 @@ Found by jlens's sweep of its functions at growing sizes (`cargo xtask growth`):
   at a few thousand terms, and made optimizing it quadratic. The terms are tried in the same
   order; shorter disjunctions keep upstream's chain.
 
+Found by jlens's examples of the flag `v`:
+
+- A property of strings outside a class, such as `\p{RGI_Emoji}`, tries its strings longest
+  first, as it does inside one: it tried them in the order of Unicode's table, so it matched the
+  `👍` of `👍🏽` alone, and the first person of a family. The corpus missed it, because test262
+  anchors these properties (`^\p{RGI_Emoji}+$`) and backtracking finds the longer string.
+
 ## Ported from upstream
 
 Last upstream commit reviewed: `95c0404` (2026-11-02, unreleased after 0.12.0). Each port is

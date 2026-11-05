@@ -1801,10 +1801,12 @@ where
                         }
                     }
                     PropertyEscapeKind::StringSet(_) if negate => error("Invalid character escape"),
-                    PropertyEscapeKind::StringSet(strings) => Ok(ir::Node::StringSet {
-                        alternatives: strings.iter().map(|s| Box::from(*s)).collect(),
-                        icase: self.flags.icase,
-                    }),
+                    // jlens-regress: longest first, as in a class; the table's order matched
+                    // the `👍` of `👍🏽` alone.
+                    PropertyEscapeKind::StringSet(strings) => Ok(ClassSetAlternativeStrings(
+                        strings.iter().map(|s| Box::from(*s)).collect(),
+                    )
+                    .into_node(self.flags.icase)),
                 }
             }
 

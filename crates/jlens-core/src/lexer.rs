@@ -227,7 +227,7 @@ impl<'a> Lexer<'a> {
                     }
                     self.pos += 1;
                     let flags_start = self.pos;
-                    while matches!(self.byte(self.pos), Some(b'i' | b'm')) {
+                    while matches!(self.byte(self.pos), Some(b'i' | b'm' | b'u' | b'v')) {
                         self.pos += 1;
                     }
                     return Ok((

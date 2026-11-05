@@ -919,6 +919,62 @@ fn a_regex_in_a_variable_serves_each_call_alike() {
     );
 }
 
+/// The flags `u` and `v`, an extension (jsonata-js rejects both with `S0202`): Unicode
+/// properties for text in any script, `\w` still ASCII, and with `v` set operations on classes
+/// and emoji sequences. A repeated flag, or `u` with `v`, is `S0302`, as JavaScript rejects them.
+#[test]
+fn the_flags_u_and_v_read_text_in_any_script() {
+    let text = json!("Café Ωμέγα Москва 東京 🇧🇷 👍🏽");
+    let cases = [
+        (
+            r"$match($, /\p{L}+/u).match",
+            json!(["Café", "Ωμέγα", "Москва", "東京"]),
+        ),
+        (
+            r"$match($, /\p{L}+/v).match",
+            json!(["Café", "Ωμέγα", "Москва", "東京"]),
+        ),
+        (r"$match($, /\w+/u).match", json!("Caf")),
+        (r"$match($, /\p{Script=Cyrillic}+/u).match", json!("Москва")),
+        (
+            r"$match($, /[\p{L}--\p{Script=Latin}]+/v).match",
+            json!(["Ωμέγα", "Москва", "東京"]),
+        ),
+        (
+            r"$match($, /[\p{L}&&\p{Script=Greek}]+/v).match",
+            json!("Ωμέγα"),
+        ),
+        (
+            r"$match($, /\p{RGI_Emoji}/v).(match & index)",
+            json!(["🇧🇷21", "👍🏽26"]),
+        ),
+        (r"$match('ΣΊΣΥΦΟΣ', /σίσυφος/iu).match", json!("ΣΊΣΥΦΟΣ")),
+        (
+            r"$replace($, /[\p{L}--[a-z]]/v, '_')",
+            json!("_af_ _____ ______ __ 🇧🇷 👍🏽"),
+        ),
+    ];
+    for (expr, expected) in cases {
+        assert_eq!(eval(expr, text.clone()), Some(expected), "{expr}");
+    }
+    for expr in [
+        "$match('a', /a/ii)",
+        "$match('a', /a/uv)",
+        "$match('a', /a/vmu)",
+        "$match('a', /[a-]/v)",
+        r"$match('a', /\p{RGI_Emoji}/u)",
+    ] {
+        let err = Expression::compile(expr)
+            .and_then(|e| e.evaluate(None, &Bindings::new()))
+            .unwrap_err();
+        assert_eq!(err.code(), "S0302", "{expr}");
+    }
+    assert_eq!(
+        eval("$match('a-', /[a-]+/u).match", json!(null)),
+        Some(json!("a-"))
+    );
+}
+
 #[test]
 fn size_caps_stop_huge_values() {
     let code = |source: &str, options: &Options| {

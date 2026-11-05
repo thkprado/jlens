@@ -128,9 +128,13 @@ functions in the bindings object or `registerFunction` in the WebAssembly packag
 
 ## Extensions
 
-These features exist only in jlens. Expressions that use them remain valid JSONata, because the
-extensions live in comments or in the host API, not in the language syntax.
+These features exist only in jlens. Except for the regex flags, they live in comments or in the
+host API, not in the language syntax, so that expressions that use them remain valid JSONata.
 
+- The regex flags `u` and `v` ([Unicode text](regex.md#unicode-text)), which jsonata-js rejects
+  with `S0202`. An expression without them gives the same result in both engines. They follow
+  JavaScript: `u` with `v` is a syntax error (`S0302`), and so is a flag given twice, which
+  jsonata-js also rejects, with a JavaScript `SyntaxError`.
 - Audit annotations and the warnings `W0101`–`W0103`.
 - `Ast` node ids and spans, and `parse_recover` diagnostics with severities.
 - Static warnings (`W0201`–`W0205`) and the language service.

@@ -86,7 +86,7 @@
       "comment": "A slash starts a regular expression where an operand is expected: at the start of a line, or after an operator, an opening bracket, a comma or a semicolon; elsewhere it is division. The expression must close on the same line. Like the lexer, an unescaped slash inside brackets does not close it.",
       "contentName": "string.regexp.jsonata",
       "begin": "(?:(?<=[\\[({,;:?=<>!+\\-*/%&|^~])|(?<=\\band|\\bor|\\bin)|^)\\s*(/)(?![*/])(?=(?:[^/\\\\\\[]|\\\\.|\\[(?:[^\\]\\\\]|\\\\.)*\\])+/)",
-      "end": "(/)([im]*)",
+      "end": "(/)([imuv]*)",
       "beginCaptures": {
         "1": { "name": "string.regexp.jsonata punctuation.definition.string.begin.jsonata" }
       },

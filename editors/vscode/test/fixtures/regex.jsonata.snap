@@ -86,3 +86,32 @@
 #                         ^ string.regexp.jsonata punctuation.definition.string.begin.jsonata
 #                          ^ string.regexp.jsonata
 #                           ^ string.regexp.jsonata punctuation.definition.string.end.jsonata
+>$match(Name, /[\p{L}--\p{Script=Latin}]+/v) or /\p{L}/iu
+#^^^^^^ support.function.builtin.jsonata
+#      ^ punctuation.section.parens.begin.jsonata
+#       ^^^^ variable.other.member.jsonata
+#           ^ punctuation.separator.comma.jsonata
+#             ^ string.regexp.jsonata punctuation.definition.string.begin.jsonata
+#              ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#               ^^ string.regexp.jsonata meta.group.regexp.jsonata constant.character.escape.regexp.jsonata
+#                 ^ string.regexp.jsonata meta.group.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                  ^ string.regexp.jsonata meta.group.regexp.jsonata meta.group.regexp.jsonata
+#                   ^ string.regexp.jsonata meta.group.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                    ^^ string.regexp.jsonata meta.group.regexp.jsonata
+#                      ^^ string.regexp.jsonata meta.group.regexp.jsonata constant.character.escape.regexp.jsonata
+#                        ^ string.regexp.jsonata meta.group.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                         ^^^^^^^^^^^^ string.regexp.jsonata meta.group.regexp.jsonata meta.group.regexp.jsonata
+#                                     ^ string.regexp.jsonata meta.group.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                                      ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                                       ^ string.regexp.jsonata
+#                                        ^ string.regexp.jsonata punctuation.definition.string.end.jsonata
+#                                         ^ string.regexp.jsonata keyword.other.flag.regexp.jsonata
+#                                          ^ punctuation.section.parens.end.jsonata
+#                                            ^^ keyword.operator.logical.jsonata
+#                                               ^ string.regexp.jsonata punctuation.definition.string.begin.jsonata
+#                                                ^^ string.regexp.jsonata constant.character.escape.regexp.jsonata
+#                                                  ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                                                   ^ string.regexp.jsonata meta.group.regexp.jsonata
+#                                                    ^ string.regexp.jsonata meta.group.regexp.jsonata punctuation.definition.group.regexp.jsonata
+#                                                     ^ string.regexp.jsonata punctuation.definition.string.end.jsonata
+#                                                      ^^ string.regexp.jsonata keyword.other.flag.regexp.jsonata

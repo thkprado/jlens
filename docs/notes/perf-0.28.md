@@ -3,7 +3,7 @@
 How the performance work of roadmap 0.28 was measured: methods, traps and intermediate
 numbers that the [performance page](../src/architecture/performance.md) leaves out. The page holds the
 current tables and what a user needs; the item numbers are those of
-[the roadmap](../src/architecture/roadmap.md#028-what-027-left-in-distinct-and-match-and-the-regex-flag-u).
+[the roadmap](../src/architecture/roadmap.md#028-what-027-left-in-distinct-and-match-and-the-regex-flags-u-and-v).
 
 ## `$distinct` below a shared field (0.28 #2)
 

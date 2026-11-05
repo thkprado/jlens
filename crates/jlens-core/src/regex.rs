@@ -34,9 +34,15 @@ pub(crate) struct Keys {
 }
 
 impl Regex {
-    /// Compiles `/pattern/flags`. Flags are `i` and `m`; matching is always global, as in
-    /// jsonata-js.
+    /// Compiles `/pattern/flags`. Flags are `i`, `m`, and the extensions `u` and `v` (Unicode
+    /// mode, and Unicode mode with set operations on classes); matching is always global, as in
+    /// jsonata-js. A flag given twice, or `u` with `v`, is a syntax error, as in JavaScript.
     pub fn new(pattern: &str, flags: &str) -> Result<Regex> {
+        if let Some(message) = invalid_flags(flags) {
+            return Err(Error::new("S0302")
+                .with("value", pattern)
+                .with("message", message));
+        }
         let re = regress::Regex::with_flags(pattern, flags).map_err(|e| {
             // jsonata-js surfaces the JavaScript SyntaxError; jlens reports it as a regex
             // syntax error.
@@ -57,6 +63,17 @@ impl Regex {
             },
         })
     }
+}
+
+/// Why a regex literal's flags are invalid, if they are. The lexer only takes `i`, `m`, `u` and
+/// `v`; `regress` would take a repeated flag, and `u` with `v`, which JavaScript rejects.
+fn invalid_flags(flags: &str) -> Option<String> {
+    let bytes = flags.as_bytes();
+    if let Some(i) = (1..bytes.len()).find(|&i| bytes[..i].contains(&bytes[i])) {
+        return Some(format!("the flag '{}' is given twice", bytes[i] as char));
+    }
+    (bytes.contains(&b'u') && bytes.contains(&b'v'))
+        .then(|| "the flags 'u' and 'v' cannot be given together".to_owned())
 }
 
 /// A place in a text, in both of its units. Each match counts its UTF-16 offsets from the place
