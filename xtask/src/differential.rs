@@ -18,8 +18,8 @@
 //! binds; an evaluation in which jsonata-js changed its input document; a
 //! wildcard that gives jsonata-js's internal flag `sequence` as a `true` item; an expression
 //! that may meet one of the jsonata-js quirks that jlens dropped; a number that overflows to
-//! infinity, where jlens fails and jsonata-js goes on; and a large number whose digits jlens
-//! writes exactly.
+//! infinity, where jlens fails and jsonata-js goes on, or that `$round` shifts to infinity and
+//! back to NaN, where jlens keeps it; and a large number whose digits jlens writes exactly.
 
 use std::fs;
 use std::process::Command;
@@ -166,12 +166,14 @@ pub fn run(args: &[String]) -> Result<()> {
             dropped += 1;
         } else if exact_digits(expr, &actual, expected) {
             exact += 1;
-        } else if actual["error"] == "D1001" {
+        } else if actual["error"] == "D1001" || rounded_past_infinity(expr, &actual, expected) {
             // jlens raises D1001 where a number overflows to infinity (`1 / 0`), which
             // jsonata-js passes on: to its result, where JSON writes `null`, or to an operator
             // that raises D1001 or another error later. `$fromMillis` raises it for NaN (from
             // `$toMillis` given a date that does not exist) and for a date beyond JavaScript's
-            // range, which jsonata-js writes as "NaN".
+            // range, which jsonata-js writes as "NaN". `$round` to a precision whose shift
+            // overflows (`$round(3, 1e3)`) gives NaN in jsonata-js, `null` in JSON, and the
+            // number unchanged in jlens (compatibility.md).
             overflowed += 1;
         } else if actual["error"] == "D3150" {
             // jlens raises D3150 where `$fromMillis` or `$now` is given a timezone that is not a
@@ -545,6 +547,14 @@ fn exact_digits(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
             .zip(js.bytes())
             .all(|(a, b)| a == b || b == b'0');
     (calls("formatNumber") && exponent) || (calls("formatBase") && zeros)
+}
+
+/// Whether jsonata-js gave `null` where jlens gave a number, from an expression that calls
+/// `$round`.
+fn rounded_past_infinity(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
+    expr.contains("$round(")
+        && expected.get("value").is_some_and(JsonValue::is_null)
+        && actual["value"].is_number()
 }
 
 /// Whether `expr` calls `$formatNumber` on a number literal from 1e18, which `‰` scales to 1e21.
