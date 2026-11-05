@@ -21,10 +21,24 @@ For ad-hoc JSON queries, `jq` remains the usual tool. jlens is for JSONata that 
 somewhere else, such as a rules engine or a jsonata-js service. It checks those expressions,
 tests them and explains their results before they ship.
 
-## Next
+## 0.28: what 0.27 left in `$distinct` and `$match`
 
-0.27.0 is out, and no plan is open. The candidates are the deferred API work below, once
-applications built on jlens have told what to keep, and what use or measurement brings up.
+0.27 made `$distinct` and `$match` linear and measured what they still cost. `$distinct` reads
+an item whole when items differ below a field they share or inside an array, and it trails
+jsonata-js when an array has few distinct values. `$match` makes five allocations for each match.
+0.28 takes those three. Each ends in a fix, measured before and after, or with its cause recorded
+in `docs/notes/perf-0.28.md`; the starting points are in
+[`perf-0.27.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.27.md). The API
+work below stays deferred.
+
+| # | Item | Done when | Status |
+|---|---|---|---|
+| 1 | Upstream at the plan's start: `regress` after `95c0404`, stacker#155 and #156, jsonata-js on npm | Each `regress` commit worth porting ported one at a time, or none; the watch list updated | |
+| 2 | `$distinct` with first fields that follow into nested values: 25 items of 100 KB that differ under a shared field (`{kind, list}`) or in an array (`[id, ...]`) take 2.65 ms against a `Document`, 17.5 µs by comparing | Those cases near the list's time; the other cases of 0.27's table and `ab` within the floor; conformance and 20,000 differential cases clean | |
+| 3 | `$distinct` with few distinct values: 100,000 items of `i % 8` take 1.48 ms, jsonata-js 229 µs | A fix measured against jsonata-js and with `ab`, or the cause recorded | |
+| 4 | `$match` without five allocations per match (the matched text, the object, its map's table and entries, the groups): 0.70 µs per match, jsonata-js 0.21 to 0.30 | Allocations per match counted before and after; `growth`'s `$match` and `ab`'s `regex over a long text` measured; results unchanged | |
+| 5 | The tables measured again, unattended, after the dependencies are brought up to date: jlens and the control columns; other engines only where their version changed | `ab` against 0.27.0 in every mode, Python and Java; the performance page's tables and version header updated; each case within the floor or its cause recorded | |
+| 6 | Release 0.28.0 | The release checklist; the channels checked | |
 
 ## In exploration: a regular expression engine of jlens's own
 
