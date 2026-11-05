@@ -741,7 +741,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jlens-capi"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "foldhash",
  "jlens-core",
@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-cli"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -772,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-core"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "criterion",
  "foldhash",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-lsp"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "glob",
  "jlens-core",
@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-python"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "foldhash",
  "jlens-core",
@@ -821,7 +821,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-regress"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "hashbrown",
  "memchr",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-schema"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "indexmap",
  "jlens-core",
@@ -841,7 +841,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-wasm"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "console_error_panic_hook",
  "foldhash",
@@ -1787,9 +1787,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
+checksum = "8c3b93199df0ab874cdf0c6a94f0a0dc3423fe41f1cafb62b8bd7b1deb277aef"
 dependencies = [
  "memchr",
 ]
