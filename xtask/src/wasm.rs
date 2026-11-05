@@ -368,10 +368,20 @@ fn check_editor(browser: &Path, url: &str) -> Result<()> {
 }
 
 /// Loads `url` in a headless browser and returns the DOM once the page has settled. Headless
-/// browsers occasionally hang, so each attempt is bounded and retried once.
+/// browsers occasionally hang, so each attempt is bounded and retried once. A page whose body
+/// still says `data-status="running"` was dumped before it finished, which virtual time allows
+/// while the page waits on work it does not track (a WebAssembly compile, a worker): that is
+/// retried once too, and returned as it is the second time, for the caller to report.
 fn dump_dom(browser: &Path, url: &str) -> Result<String> {
-    for attempt in 1..=2 {
+    const ATTEMPTS: u32 = 2;
+    for attempt in 1..=ATTEMPTS {
         match dump_dom_once(browser, url, Duration::from_secs(90))? {
+            Some(dom) if dom.contains("data-status=\"running\"") && attempt < ATTEMPTS => {
+                println!(
+                    "{} dumped {url} before the page finished (attempt {attempt})",
+                    browser.display()
+                );
+            }
             Some(dom) => return Ok(dom),
             None => println!(
                 "{} did not finish loading {url} (attempt {attempt})",

@@ -33,3 +33,7 @@ Guidance for working in the Wasm package. The repository-wide rules are in the r
   waits for wall-clock time (a timeout) can hang the page. Keep such checks out of the browser
   runner (`env.virtualTime` in `tests/suite.mjs`). Each run is bounded and retried once, and a
   page that never finishes prints its last console lines (the case that hung).
+- Virtual time does not wait for work off the main thread either, such as the compile in
+  `init()`: with nothing else pending, the page can be dumped first, still `running` (the runner
+  then retries it once). A page that waits on such work keeps a load pending until it settles, as
+  `tests/file.html` does.

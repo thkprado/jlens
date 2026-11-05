@@ -11,6 +11,7 @@
   <script src="../pkg/jlens.global.js"></script>
   <script>
     const log = document.getElementById("log");
+    let settled = false;
     jlens.init().then(() => {
       const expr = new jlens.Expression("$sum(items[type = $kind].(price * qty))");
       const result = expr.evaluate({ items: [{ type: "a", price: 2.5, qty: 4 }] }, { kind: "a" });
@@ -19,7 +20,20 @@
     }).catch((err) => {
       log.textContent = `FAIL ${err}\n`;
       document.body.dataset.status = "fail";
-    });
+    }).finally(() => { settled = true; });
+    // The headless browser's virtual time does not wait for `init()`, which compiles the module
+    // off the main thread: with nothing else pending, it can dump the page first. A pending load
+    // holds virtual time, and a page from file:// cannot fetch, so it loads this page as an image
+    // until `init()` settles.
+    (async () => {
+      for (let n = 0; !settled && n < 100000; n++) {
+        await new Promise((done) => {
+          const image = new Image();
+          image.onload = image.onerror = done;
+          image.src = `file.html?hold=${n}`;
+        });
+      }
+    })();
   </script>
 </body>
 </html>
