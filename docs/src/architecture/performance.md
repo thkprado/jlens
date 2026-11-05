@@ -743,7 +743,8 @@ Java packages evaluate this way too: from Java, `$v.total` takes 0.83 µs where 
   give, where jsonata-js writes and parses the text. On the benchmark's transform the copy takes
   about 85 of 447 µs; most of the rest is building the result.
 - **Long inputs.** `$distinct` keeps its first 16 distinct items by comparing, and looks the rest
-  up by a hash, of an object's first fields when they tell the items apart: 100,000 strings take
+  up by a hash, of the first values comparing reads when they tell the items apart, following
+  them into the level below a field the items share: 100,000 strings take
   15 ms, where jsonata-js, quadratic, takes 32 s. `&` in a loop holds its two sides and makes its
   text once, as V8's ropes do. `$substring` walks the text only as far as its result. What `cargo
   xtask growth` still finds quadratic is so in any engine, as each step copies what it has built:

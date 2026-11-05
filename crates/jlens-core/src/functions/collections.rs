@@ -422,8 +422,8 @@ fn keep_by_list<'i, 'a>(
 /// What [`keep_by_list`] does with no limit, comparing each item only with those kept that hold
 /// the same values in the first fields of the first item kept ([`FirstFields`]). Those comparisons
 /// are some of the list's, in its order, and the rest are false with nothing below those fields
-/// read, so the result and the errors are the list's. It reads no more of an item than comparing
-/// does, where [`keep_by_hash`] reads it whole.
+/// read, so the result and the errors are the list's. It reads of an item the levels comparing
+/// reads when it meets an item that starts the same way, where [`keep_by_hash`] reads it whole.
 ///
 /// It stops at an item that does not start with those fields, and when the fields leave
 /// [`DISTINCT_BY_LIST`] items to compare one with, returning the items from there.
@@ -431,16 +431,9 @@ fn keep_by_first_fields<'i, 'a>(
     out: &mut Vec<Value<'a>>,
     items: &'i [Value<'a>],
 ) -> Result<&'i [Value<'a>]> {
-    let Some(fields) = FirstFields::of(&out[0]) else {
+    let Some((fields, mut table)) = FirstFields::of(out, items.len()) else {
         return Ok(items);
     };
-    let mut table = Kept::new(out.len(), items.len());
-    for kept in out.iter() {
-        let Some(hash) = fields.of_kept(kept) else {
-            return Ok(items);
-        };
-        table.add(hash);
-    }
     keep_by_table(out, items, &mut table, DISTINCT_BY_LIST, |v| {
         fields.of_item(v)
     })
@@ -529,6 +522,17 @@ impl Kept {
         }
     }
 
+    /// Takes out every item, keeping the room.
+    fn clear(&mut self) {
+        self.ends.clear();
+        self.next.clear();
+    }
+
+    /// How many hashes the items kept have.
+    fn hashes(&self) -> usize {
+        self.ends.len()
+    }
+
     /// The first item kept with `hash`.
     fn first(&self, hash: u64) -> Option<u32> {
         self.ends.get(&hash).map(|&(first, _)| first)
@@ -552,75 +556,261 @@ impl Kept {
     }
 }
 
-/// The fields an object of the array starts with, when they are not arrays or objects. Comparing
-/// an item that starts with them with another goes through those fields first: if the other holds
-/// something else in one of them, the comparison is false, with neither item read below them.
+/// The first values that comparing an item of the array reads, found in the first item kept: the
+/// scalars an array or an object starts with, and when an array or an object follows them, the
+/// same within it, one level below the other. Comparing an item that starts the same way with
+/// another reads those first, the size of each level before its values: if the other holds
+/// something else in one of them, the comparison is false, with nothing else of either item read.
 /// Looked up by key in the items kept, so that the order of their fields does not count.
+///
+/// A level below the first is taken only when the items kept, told apart by the levels above it,
+/// fall in half as many groups or fewer: an item then shares those levels with some of them, and
+/// comparing it with those reads the level below too. Items whose first fields differ, the common
+/// shape of a record, are hashed by their first level alone, which reads what comparing reads.
 struct FirstFields {
-    keys: Vec<Rc<str>>,
+    /// The first level, apart, so that one level takes no list.
+    first: Level,
+    below: Vec<Level>,
     state: foldhash::fast::RandomState,
 }
 
+/// A level of [`FirstFields`]: the scalars an array or an object starts with, and the array or
+/// object after them, which the next level reads if there is one.
+struct Level {
+    /// The keys of an object's fields, that of the array or object after the scalars last; `None`
+    /// for an array.
+    keys: Option<Vec<Rc<str>>>,
+    /// How many of its first values are scalars.
+    scalars: usize,
+}
+
+/// Why an item kept has no hash of its first fields.
+enum Unfit {
+    /// It differs from every item that starts with them.
+    Apart,
+    /// A level of it cannot be read.
+    Unread,
+}
+
 impl FirstFields {
-    /// How many fields it looks at.
+    /// How many scalars it looks at.
     const MOST: usize = 8;
+    /// How many levels it reads.
+    const LEVELS: usize = 8;
     /// How much of a string it hashes: a long one is told from another by its length, or when the
     /// items with one hash are compared.
     const STRING: usize = 64;
 
-    /// The first fields of `item`, if it is an object that can be read and has some.
-    fn of(item: &Value<'_>) -> Option<FirstFields> {
-        let Value::Object(object) = item else {
-            return None;
-        };
-        let keys: Vec<_> = object
-            .try_borrow()?
-            .iter()
-            .take(Self::MOST)
-            .take_while(|(_, value)| !is_nested(value))
-            .map(|(key, _)| key.clone())
-            .collect();
-        (!keys.is_empty()).then(|| FirstFields {
-            keys,
+    /// The first fields of `kept[0]`, with as many levels as tell `kept` apart, and a table of
+    /// `kept` by them, with room for some of the `left` to come; `None` when `kept[0]` is not an
+    /// array or an object or holds no scalar where they start, or when a level of `kept` cannot be
+    /// read.
+    fn of(kept: &[Value<'_>], left: usize) -> Option<(FirstFields, Kept)> {
+        let mut scalars = 0;
+        let (first, mut next) = Level::of(&kept[0], &mut scalars)?;
+        let mut fields = FirstFields {
+            first,
+            below: Vec::new(),
             state: Default::default(),
-        })
+        };
+        let mut table = Kept::new(kept.len(), left);
+        loop {
+            table.clear();
+            // Those that differ from every item that starts the same way count as a group each.
+            let mut apart = 0;
+            for item in kept {
+                let hash = fields.of_kept(item)?;
+                apart += usize::from(hash.is_none());
+                table.add(hash);
+            }
+            let few_groups = 2 * (table.hashes() + apart) <= kept.len();
+            let deeper = match next.take() {
+                Some(below) if few_groups && 1 + fields.below.len() < Self::LEVELS => {
+                    // When the level below cannot be read, the levels above it do.
+                    Level::of(&below, &mut scalars).map(|(level, next)| {
+                        fields.below.push(level);
+                        next
+                    })
+                }
+                _ => None,
+            };
+            match deeper {
+                Some(below) => next = below,
+                None => return (scalars > 0).then_some((fields, table)),
+            }
+        }
     }
 
-    /// The hash of an item, or `None` when it does not start with the fields or cannot be read.
+    /// The hash of an item, or `None` when it does not start the same way, in its own order, or
+    /// cannot be read. It runs for each item, in the table's loop: one level of an object, the
+    /// common case, has a loop of its own, as the loop over the levels costs records of three
+    /// fields 2 ns per item, 4%.
+    #[inline(always)]
     fn of_item(&self, item: &Value<'_>) -> Option<u64> {
-        let Value::Object(object) = item else {
-            return None;
-        };
-        let map = object.try_borrow()?;
-        let mut fields = map.iter();
-        let mut hasher = self.state.build_hasher();
-        for key in &self.keys {
-            let (field, value) = fields.next()?;
-            if field != key || is_nested(value) {
-                return None;
+        if self.below.is_empty()
+            && let (Value::Object(object), Some(keys)) = (item, &self.first.keys)
+        {
+            let map = object.try_borrow()?;
+            let mut fields = map.iter();
+            let mut hasher = self.state.build_hasher();
+            for key in &keys[..self.first.scalars] {
+                let (field, value) = fields.next()?;
+                if field != key || is_nested(value) {
+                    return None;
+                }
+                write_scalar(&mut hasher, value, Self::STRING);
             }
-            write_scalar(&mut hasher, value, Self::STRING);
+            return Some(hasher.finish());
+        }
+        let mut hasher = self.state.build_hasher();
+        let mut held: Value<'_>;
+        let mut value = item;
+        for i in 0..=self.below.len() {
+            let level = if i == 0 {
+                &self.first
+            } else {
+                &self.below[i - 1]
+            };
+            let deeper = i < self.below.len();
+            let below = match (value, &level.keys) {
+                (Value::Array(array), None) => {
+                    let items = array.try_items()?;
+                    let (scalars, rest) = items.split_at_checked(level.scalars)?;
+                    for item in scalars {
+                        if is_nested(item) {
+                            return None;
+                        }
+                        write_scalar(&mut hasher, item, Self::STRING);
+                    }
+                    if !deeper {
+                        break;
+                    }
+                    rest.first()?.clone()
+                }
+                (Value::Object(object), Some(keys)) => {
+                    let map = object.try_borrow()?;
+                    let mut fields = map.iter();
+                    for key in &keys[..level.scalars] {
+                        let (field, value) = fields.next()?;
+                        if field != key || is_nested(value) {
+                            return None;
+                        }
+                        write_scalar(&mut hasher, value, Self::STRING);
+                    }
+                    if !deeper {
+                        break;
+                    }
+                    let (field, value) = fields.next()?;
+                    if *field != keys[level.scalars] {
+                        return None;
+                    }
+                    value.clone()
+                }
+                _ => return None,
+            };
+            held = below;
+            value = &held;
         }
         Some(hasher.finish())
     }
 
-    /// The hash of an item kept, by key, or `Some(None)` when no item that starts with the fields
-    /// can equal it; `None` when it cannot be read.
+    /// The hash of an item kept, by key, or `Some(None)` when no item that starts the same way can
+    /// equal it; `None` when it cannot be read.
     fn of_kept(&self, item: &Value<'_>) -> Option<Option<u64>> {
-        let Value::Object(object) = item else {
-            return Some(None);
-        };
-        let map = object.try_borrow()?;
         let mut hasher = self.state.build_hasher();
-        for key in &self.keys {
-            match map.get(key) {
-                Some(value) if !is_nested(value) => {
-                    write_scalar(&mut hasher, value, Self::STRING);
-                }
-                _ => return Some(None),
-            }
+        match Self::kept_level(&self.first, &self.below, item, &mut hasher) {
+            Ok(()) => Some(Some(hasher.finish())),
+            Err(Unfit::Apart) => Some(None),
+            Err(Unfit::Unread) => None,
         }
-        Some(Some(hasher.finish()))
+    }
+
+    /// Hashes `value` by `level` and the `levels` below it, looking its fields up by key.
+    fn kept_level(
+        level: &Level,
+        levels: &[Level],
+        value: &Value<'_>,
+        hasher: &mut impl Hasher,
+    ) -> Result<(), Unfit> {
+        let scalar = |hasher: &mut _, value: Option<&Value<'_>>| match value {
+            Some(value) if !is_nested(value) => {
+                write_scalar(hasher, value, Self::STRING);
+                Ok(())
+            }
+            _ => Err(Unfit::Apart),
+        };
+        let deeper = |hasher: &mut _, below: Option<&Value<'_>>| match (levels, below) {
+            ([level, levels @ ..], Some(below)) => Self::kept_level(level, levels, below, hasher),
+            _ => Err(Unfit::Apart),
+        };
+        match (value, &level.keys) {
+            (Value::Array(array), None) => {
+                let items = array.try_items().ok_or(Unfit::Unread)?;
+                for i in 0..level.scalars {
+                    scalar(hasher, items.get(i))?;
+                }
+                match levels {
+                    [] => Ok(()),
+                    _ => deeper(hasher, items.get(level.scalars)),
+                }
+            }
+            (Value::Object(object), Some(keys)) => {
+                let map = object.try_borrow().ok_or(Unfit::Unread)?;
+                for key in &keys[..level.scalars] {
+                    scalar(hasher, map.get(key))?;
+                }
+                match levels {
+                    [] => Ok(()),
+                    _ => deeper(hasher, map.get(&keys[level.scalars])),
+                }
+            }
+            _ => Err(Unfit::Apart),
+        }
+    }
+}
+
+impl Level {
+    /// The level of `value`, counting its scalars in `scalars`, and the array or object that
+    /// follows them; `None` when `value` is neither or cannot be read.
+    fn of<'a>(value: &Value<'a>, scalars: &mut usize) -> Option<(Level, Option<Value<'a>>)> {
+        let mut level = Level {
+            keys: None,
+            scalars: 0,
+        };
+        let mut below = None;
+        match value {
+            Value::Array(array) => {
+                for item in array.try_items()? {
+                    if *scalars == FirstFields::MOST {
+                        break;
+                    }
+                    if is_nested(item) {
+                        below = Some(item.clone());
+                        break;
+                    }
+                    level.scalars += 1;
+                    *scalars += 1;
+                }
+            }
+            Value::Object(object) => {
+                let mut keys = Vec::new();
+                for (key, value) in object.try_borrow()?.iter() {
+                    if *scalars == FirstFields::MOST {
+                        break;
+                    }
+                    keys.push(key.clone());
+                    if is_nested(value) {
+                        below = Some(value.clone());
+                        break;
+                    }
+                    level.scalars += 1;
+                    *scalars += 1;
+                }
+                level.keys = Some(keys);
+            }
+            _ => return None,
+        }
+        Some((level, below))
     }
 }
 
@@ -804,6 +994,32 @@ mod tests {
         })
     }
 
+    /// A value that mostly starts with a field few values share, and differs in a level below it:
+    /// in an array or an object, its fields in either order, a level left out or a scalar in its
+    /// place, so that the first fields follow into levels that some items do not have.
+    fn nested_record() -> impl Strategy<Value = JsonValue> {
+        let id = prop_oneof![
+            6 => (0..40).prop_map(|n| json!(n)),
+            1 => Just(json!(0.0)),
+            1 => Just(json!(-0.0)),
+            1 => (0..4).prop_map(|n| json!(format!("{}{n}", "x".repeat(70)))),
+            1 => (0..3).prop_map(|n| json!([n])),
+        ];
+        (0..2, id, 0..2, 0..14u8).prop_map(|(kind, id, n, shape)| match shape {
+            0 => json!({"kind": kind, "list": [{"a": id, "b": n}, {"a": n}]}),
+            1 => json!({"kind": kind, "list": [{"b": n, "a": id}]}),
+            2 => json!({"list": [{"a": id, "b": n}], "kind": kind}),
+            3 => json!([kind, [id, n]]),
+            4 => json!([kind, [id]]),
+            5 => json!({"kind": kind, "meta": {"v": n, "list": [id]}}),
+            6 => json!({"kind": kind, "list": []}),
+            7 => json!({"kind": kind, "list": id}),
+            8 => json!({"kind": kind}),
+            9 => json!({"kind": kind, "list": [[id], n]}),
+            _ => json!({"kind": kind, "list": [{"a": id, "b": n}]}),
+        })
+    }
+
     /// Items that start with `id`, and hold a value below it that comparing them may not reach.
     fn with_below<'a>(
         ids: impl Iterator<Item = usize>,
@@ -835,6 +1051,14 @@ mod tests {
         #[test]
         fn the_first_fields_give_what_the_list_gives(
             items in prop::collection::vec(record(), 0..96),
+        ) {
+            let items: Vec<Value<'_>> = items.iter().map(Value::from_json).collect();
+            agree(&items);
+        }
+
+        #[test]
+        fn the_levels_below_give_what_the_list_gives(
+            items in prop::collection::vec(nested_record(), 0..96),
         ) {
             let items: Vec<Value<'_>> = items.iter().map(Value::from_json).collect();
             agree(&items);
@@ -951,16 +1175,58 @@ mod tests {
         agree(&items);
     }
 
+    /// One `id` and an array below it that starts with `first` and ends with `i`.
+    fn shared_id<'a>(i: usize, first: &[f64]) -> Value<'a> {
+        let below = || {
+            let mut items: Vec<_> = first.iter().map(|&n| Value::Number(n)).collect();
+            items.push(Value::Number(i as f64));
+            Value::array(items, 0)
+        };
+        with_below(0..1, below).remove(0)
+    }
+
+    #[test]
+    fn the_first_fields_follow_into_a_level_that_tells_the_items_apart() {
+        let items: Vec<Value<'_>> = (0..40).map(|i| shared_id(i, &[])).collect();
+        assert_eq!(left_by_first_fields(&items, 16), 0);
+        assert_eq!(distinct_items(&items).unwrap().len(), 40);
+    }
+
     #[test]
     fn the_first_fields_give_up_when_they_tell_too_few_apart() {
-        // One `id` and a nested value that differs in each: 16 kept, all with that `id`.
-        let item = |i: usize| {
-            let below = || Value::array(vec![Value::Number(i as f64)], 0);
-            with_below(0..1, below).remove(0)
-        };
-        let items: Vec<Value<'_>> = (0..40).map(item).collect();
+        // The `id` and the next seven scalars are the same in all, and 16 are kept with them.
+        let first = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+        let items: Vec<Value<'_>> = (0..40).map(|i| shared_id(i, &first)).collect();
         assert_eq!(left_by_first_fields(&items, 16), 24);
         assert_eq!(distinct_items(&items).unwrap().len(), 40);
+    }
+
+    #[test]
+    fn the_first_fields_stay_on_a_level_that_tells_the_items_apart() {
+        let items = with_below(0..40, || Value::array(numbers(3), 0));
+        let mut out = Vec::new();
+        keep_by_list(&mut out, &items, 16).unwrap();
+        assert_eq!(FirstFields::of(&out, 24).unwrap().0.below.len() + 1, 1);
+        let items: Vec<Value<'_>> = (0..40).map(|i| shared_id(i, &[])).collect();
+        let mut out = Vec::new();
+        keep_by_list(&mut out, &items, 16).unwrap();
+        assert_eq!(FirstFields::of(&out, 24).unwrap().0.below.len() + 1, 2);
+    }
+
+    /// Below a field all the items share, comparing fails only for the items that hold the same
+    /// in the level below it.
+    #[test]
+    fn a_value_too_deep_below_a_shared_field_is_reached_as_in_the_list() {
+        let item = |i: usize| {
+            let below = || Value::array(vec![Value::Number(i as f64), deep(MAX_NESTING + 2)], 0);
+            with_below(0..1, below).remove(0)
+        };
+        let apart: Vec<Value<'_>> = (0..40).map(item).collect();
+        assert_eq!(distinct_items(&apart).unwrap().len(), 40);
+        agree(&apart);
+        let two_alike: Vec<Value<'_>> = (0..40).chain([7]).map(item).collect();
+        assert_eq!(distinct_items(&two_alike).unwrap_err().code(), "U1001");
+        agree(&two_alike);
     }
 
     #[test]
@@ -972,9 +1238,9 @@ mod tests {
         object
             .borrow_mut()
             .shift_insert(0, Rc::from("list"), Value::array(Vec::new(), 0));
-        assert!(FirstFields::of(&nested).is_none());
-        assert!(FirstFields::of(&Value::Number(1.0)).is_none());
-        assert!(FirstFields::of(&Value::object(Map::default())).is_none());
+        assert!(FirstFields::of(&[nested], 0).is_none());
+        assert!(FirstFields::of(&[Value::Number(1.0)], 0).is_none());
+        assert!(FirstFields::of(&[Value::object(Map::default())], 0).is_none());
     }
 
     #[test]

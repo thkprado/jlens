@@ -1002,6 +1002,7 @@ proptest! {
         items in prop::collection::vec((0..4096u32, 0..3u8, 0..24u8), 0..48),
         ids in prop_oneof![Just(24u32), Just(256), Just(4096)],
         fields in any::<bool>(),
+        shape in 0..3u8,
     ) {
         let bad = json!({"fails": true});
         let list: Vec<_> = items
@@ -1009,13 +1010,26 @@ proptest! {
             .map(|&(id, tail, first)| {
                 // Mostly distinct and the `id` first, so that comparing stops before `tail`.
                 let id = id % ids;
+                // An object that the first fields read when they follow into it.
+                let head = match first {
+                    23 => json!({"id": id, "fails": true}),
+                    _ => json!({"id": id}),
+                };
                 let tail = match tail {
                     0 => json!({"a": 1}),
                     1 => bad.clone(),
                     _ => json!([bad]),
                 };
-                match first {
-                    0 => json!({"tail": tail, "id": id}),
+                // Or, by `shape`, below a field all share, so that comparing reads the level
+                // below it, which the first fields then follow into.
+                match (first, shape) {
+                    (0, _) => json!({"tail": tail, "id": id}),
+                    (1, _) => json!({"kind": 0, "list": tail}),
+                    // Lists of two lengths: comparing one with the other reads neither `head`.
+                    (_, 1) if first % 2 == 0 => json!({"kind": 0, "list": [head]}),
+                    (_, 1) => json!({"kind": 0, "list": [head, tail]}),
+                    (_, 2) if first % 2 == 0 => json!([0, head]),
+                    (_, 2) => json!([0, head, tail]),
                     _ => json!({"id": id, "tail": tail}),
                 }
             })
@@ -1071,6 +1085,20 @@ fn distinct_fails_only_where_comparing_reaches_a_level() {
             None => assert_eq!(result.unwrap(), Some(json!(32))),
             Some(code) => assert_eq!(result.unwrap_err().code(), code),
         }
+    }
+    // Below a field all share: the 16th item kept is the first list of two, and no comparison has
+    // read its `head`; the next lists of two reach it.
+    let item = |i: usize| match i {
+        0..15 => json!({"kind": 0, "list": [{"id": i}]}),
+        15 => json!({"kind": 0, "list": [{"id": i, "fails": true}, 0]}),
+        _ => json!({"kind": 0, "list": [{"id": i}, 0]}),
+    };
+    let input = json!({"list": (0..32).map(item).collect::<Vec<_>>()});
+    let expr = Expression::compile("$count($distinct(list))").unwrap();
+    for fields in [false, true] {
+        let source = JsonSource::root(&input, fields);
+        let result = expr.evaluate_source(&source, &Bindings::new(), &Options::default());
+        assert_eq!(result.unwrap_err().code(), "U1004");
     }
     // Returning the items reads them.
     let input = json!({"list": (0..32).map(|i| json!({"id": i, "bad": {"fails": true}})).collect::<Vec<_>>()});

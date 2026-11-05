@@ -6,6 +6,18 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `$distinct` follows the first fields of its items into the levels below them when the items
+  share a field, or are arrays: 25 records of 100 KB that differ below a shared `kind` take 15 µs
+  against a `Document`, where they took 12 ms, and 6 ms with `evaluate`, where they took 51 ms, as
+  comparing them one by one does. Records whose first fields differ take what they took.
+
+### Fixed
+
+- The `D2016` error of `$pad` gives the padding it refused as an integer, `19999999` where it gave
+  `19999999.0`, as jsonata-js does.
+
 ### Documentation
 
 - The performance page is shorter, with a summary per platform on top; how each change was
