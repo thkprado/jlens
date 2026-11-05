@@ -65,3 +65,42 @@ read and cannot (the 16th item kept the first of its length, so that no comparis
 which must go back to comparing and fail as comparing does. Its mutation, such a level taken as
 "differs from all", passes the property over random items, which rarely build that order, and
 fails the named test.
+
+## `$distinct` with few distinct values (0.28 #3)
+
+An array with fewer than 16 distinct values never leaves the list, so each item is compared with
+each value kept until one equals it: 4.5 comparisons an item on `i % 8`. 0.27 measured 1.48 ms
+on 100,000 of them against a `Document`, and jsonata-js 229 µs. The cause was the cost of each
+comparison, not their number. Each went through `deep_eq`, a call that returns a `Result` and
+that does not inline, as it recurses, at about 5 ns. A number or a string equals only a value of
+its own kind, compared as `===` compares it, with nothing read and no error. So the list compares
+a number or a string in a loop of its own, inline, and only arrays and objects through
+`deep_eq`. Strings still took 26 ns an item: `==` on two `str` calls `memcmp`, which costs more
+than the comparison on a few bytes. `Text`'s equality now compares strings of up to 16 bytes
+itself, byte by byte, everywhere strings are compared. It is `#[inline(always)]`: with
+`#[inline]` it stayed a call, and 100,000 strings took 1.75 ms against 0.81 ms.
+
+`$count($distinct($))`, in µs, the faster of two processes, each on a new copy of the program,
+before and after, alternated. `few` is 0.27's `i % 8`; `few strings` holds `"s" & (i % 8)`, and
+`few objects` `{"a": i % 8, "b": "x"}`. jsonata-js 2.2.2 ran on the
+same machine, the median of 15 samples in one process after a warm-up:
+
+| Items | `Document`, before | after | `evaluate`, before | after | jsonata-js |
+|---|---:|---:|---:|---:|---:|
+| 25 `few` | 1.94 | 1.54 | 2.46 | 2.00 | |
+| 1,000 `few` | 23.1 | 4.66 | 33.8 | 15.3 | |
+| 100,000 `few` | 2,185 | 312 | 3,556 | 1,685 | 355 |
+| 25 `few strings` | 2.40 | 1.65 | 4.06 | 3.32 | |
+| 1,000 `few strings` | 42.2 | 9.40 | 84.4 | 51.5 | |
+| 100,000 `few strings` | 4,161 | 803 | 10,042 | 6,663 | 3,473 |
+| 1,000 `few objects` | 134 | 133 | 414 | 414 | 1,172 |
+
+This machine gives jsonata-js 355 µs where 0.27's table gave 229. Distinct numbers, strings and
+objects of three fields, from 25 to 100,000 items, stay within the spread of copies of one
+program. With `evaluate`, the time left is converting the input. Objects with few values
+compare through `deep_eq`, 30 ns a comparison, and stay 9 times ahead of jsonata-js.
+
+`cargo xtask ab` against 8cfacf5, seven rounds: against a `Document`, every case from −1.9 to
++1.4% (`strings` −1.2%, `distinct items` +1.4%); with `evaluate`, from −2.1 to +0.4%. Conformance
+and 20,000 differential cases agree. A unit test compares strings on each side of the 16 bytes,
+differing at the first, the middle and the last byte, and joined texts with flat ones.
