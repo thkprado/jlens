@@ -21,6 +21,72 @@ For ad-hoc JSON queries, `jq` remains the usual tool. jlens is for JSONata that 
 somewhere else, such as a rules engine or a jsonata-js service. It checks those expressions,
 tests them and explains their results before they ship.
 
+## 0.29: completing values, and domains the application provides
+
+The language service completes fields, variables, functions and operators, but never a value, and
+an application cannot tell it where a field's values come from. 0.29 completes the values of an
+`enum` or `const` and warns about a value outside one, lets the application provide the values of
+an open domain, and gives the web editor schema overrides that show both. It also makes public the
+conversion between byte and UTF-16 offsets that the Wasm package keeps to itself. The API work
+below stays deferred.
+
+| # | Item | Done when | Status |
+|---|---|---|---|
+| 1 | Upstream at the plan's start: `regress` after `95c0404`, stacker#155 and #156, jsonata-js's commits after `c5be116` and its version on npm | Each `regress` commit worth porting ported one at a time, or none; each jsonata-js fix checked against jlens; the watch list updated | |
+| 2 | The language service completes the values of an `enum` or `const`, below | Tests for each position below in `jlens-schema` and the language server; the web editor opens the list after `=` and `"`; a robustness case; the book's completion text updated | |
+| 3 | A warning for a value outside a declared `enum` or `const`, below; after #2 | `W0206` in the message catalog, with a suggestion; tests in `jlens-schema` for `=`, `!=` and `in`, for a declared and an inferred enumeration, and for a value that is not a literal; a robustness case; `gen-docs --check` and the book's warnings text updated | |
+| 4 | Open domains: values the application provides, below; after #2 | `x-jlens-domain` read and written by `jlens-schema`, and `domain` in the schema overrides; tests for the value request in `jlens-schema` and the Wasm suite; the web editor completes from an asynchronous source; the book's completion and Wasm guides updated | |
+| 5 | The web editor's schema overrides: a panel, and an example that uses them, below | The "Free shipping" example shows labels, descriptions, a hidden field, a closed and (after #4) an open domain; shared addresses carry the overrides, and older ones still open; `share.test.mjs` covers both | |
+| 6 | A public conversion between byte and UTF-16 offsets, below | The type public in `jlens-core`, documented, with tests for ASCII text, text outside ASCII, a surrogate pair and the offset past the end; the Wasm package using it, its suite unchanged; the crate guide shows it | |
+| 7 | The tables measured again, unattended, after the dependencies are brought up to date: jlens and the control columns; other engines only where their version changed | `ab` against 0.28.0 in every mode, Python and Java; the performance page's tables and version header updated; each case within the floor or its cause recorded | |
+| 8 | Release 0.29.0 | The release checklist; the channels checked | |
+
+**#2, completing values.** The language service suggests fields, variables, functions and
+operators, but never a value: a field's `enum` shows only in its documentation, and inside quotes
+nothing is completed. A new completion kind, `value`, offers the values of the left-hand side's
+enumeration (a schema's `enum` or `const`, or one inferred from samples) on the right of `=`, `!=`
+and `in`: `type = |`, `type in [|]`, `type in ["apparel", |]`, and inside quotes, `type = "ap|"`,
+where the whole literal is replaced. The value is inserted as a JSONata literal (strings quoted and
+escaped). `examples` are not offered, as they are not every value. The walker reports comparisons
+with the left-hand side's type; evaluation does not change. The kind reaches the Wasm API's
+`types.d.ts`, the language server (`ENUM_MEMBER`) and the web editor's CodeMirror mapping.
+
+**#3, a value outside the enumeration.** A misspelt value, `type = "aparel"`, is accepted in
+silence: the comparison is always false, and nothing says why. With #2's comparisons, the language
+service warns, as `W0206`, when the right-hand side is a literal outside the left-hand side's
+`enum` or `const`, and suggests the nearest value, as `W0201` does for fields. Only declared
+enumerations count: a schema's `enum` or `const`, or one set in the overrides. One inferred from
+samples is a guess, so the `Shape` records where its enumeration comes from, and an inferred one
+is never warned about; neither is an open domain (#4) nor a value that is not a literal.
+
+**#4, open domains.** An `enum` is a closed list, known when the schema is written. Some fields
+take values from a list only the application can fetch, often large, and filtered by what the
+user types. Such a field carries `x-jlens-domain` in its JSON Schema, or `domain` in the
+overrides of an inferred schema, an identifier only the application understands, kept in the
+`Shape` as `domain`. At #2's positions, when the left-hand side has a domain, completion returns,
+beside its items, a value request: the domain, the field's path, the prefix typed and the range to
+replace. The service stays synchronous; the application fetches and caches the values, and the
+Wasm package gives a helper that writes a value as a JSONata literal. A value outside an open
+domain is never warned about; hover names the domain. The language server is left out until an
+editor needs it.
+
+**#5, the web editor's overrides.** The web editor infers its schema from the input document, so
+none of its examples shows a label, a description or a hidden field, and a schema edited by hand
+would be overwritten, or go stale, at the input's next change. Overrides avoid both: a panel
+beside the bindings holds a JSON object of overrides by path (`"items[].type": {"label": ...}`),
+and the schema becomes `inferSchema([input], overrides)`, so the structure still follows the
+document and the overrides add what it means. A malformed override is shown as the panel's
+error. The "Free shipping" example gets overrides; after #4, one of its fields has an open
+domain, which a stand-in asynchronous source answers after a short delay.
+
+**#6, converting offsets.** The Rust crates count offsets in bytes; a browser editor, and an
+error's `position`, count UTF-16 code units. The Wasm package converts between them, but with a
+type of its own, so an application that builds the language service of `jlens-schema` into its
+own WebAssembly module, rather than using the package, writes the conversion again. The type moves
+to `jlens-core` and becomes public: built once per text, it converts both ways, and an offset
+inside a surrogate pair maps to the start of its character. The Wasm package uses it; behaviour
+does not change.
+
 ## In exploration: a regular expression engine of jlens's own
 
 `jlens-regress` is a backtracker. A catastrophic pattern runs within the evaluation's limits
