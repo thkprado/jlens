@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The language service completes values: on the right of `=`, `!=` and `in`, a new completion
+  kind, `value`, offers the values of the left-hand side's `enum` or `const` (declared, set in the
+  overrides or inferred), inserted as JSONata literals. Inside quotes, `type = "ap`, the whole
+  literal is replaced. The language server reports them as enum members and completes on a
+  quote; the Wasm API's `CompletionKind` gains `"value"`, and the web editor opens the list after
+  `=` and on a quote.
+
 ## [0.28.0]
 
 What 0.27 left in `$distinct` and `$match`, and Unicode in regular expressions. `$distinct`

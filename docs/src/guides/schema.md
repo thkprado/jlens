@@ -146,6 +146,8 @@ looked up in. It follows the evaluator's rules:
 | `` items.`ty `` | Field names that need backquotes |
 | `$su` | Variables in scope, then declared host functions, then built-in functions |
 | `customer.login ` (after a space) | Operators: `and`, `or`, `in` |
+| `type = `, `type != `, `type in [`, `type in ["toy", ` | The values of `type`'s enumeration first, then fields, variables and functions |
+| `type = "ap` | The string values of `type`'s enumeration that start with `ap` |
 
 Each field suggestion carries:
 - its type (`string`, `array<object>`, `integer | null`, …);
@@ -155,6 +157,13 @@ Each field suggestion carries:
 
 Field names that are not plain identifiers are inserted with backquotes, and hidden fields are
 never suggested.
+
+Values (kind `value`) come from the enumeration of the left-hand side of `=`, `!=` or `in`: a
+schema's `enum` or `const`, one set in the overrides, or one inferred from samples. `examples`
+are not offered, as they are not every value. A value is inserted as a JSONata literal, a string
+quoted and escaped. Inside quotes the whole literal is replaced, and the string keeps single
+quotes when it can (JSONata has no `\'` escape). In an array after `in`, the values already
+listed are left out.
 
 Completion works on incomplete expressions too, such as `$count(items[` or
 `items[type = 'x' and `. That is the normal state of an expression while someone types it.

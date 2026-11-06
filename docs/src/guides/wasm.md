@@ -422,8 +422,11 @@ Create a new service when the schema, the variables or the functions change. Con
 cheap.
 
 Completion items are ranked best first, and `insertText` replaces `range`. Field names that are
-not plain identifiers come quoted with backquotes. `documentation` and hover `contents` are
-Markdown.
+not plain identifiers come quoted with backquotes. `kind` is `field`, `variable`, `function`,
+`keyword`, `operator` or `value`: a value of the enumeration of the left-hand side of `=`, `!=` or
+`in`, inserted as a JSONata literal. Inside a string literal, `range` covers the whole literal,
+quotes included, and only values are suggested; open the list after `=` and on a quote to
+offer them while typing. `documentation` and hover `contents` are Markdown.
 
 #### CodeMirror 6
 
@@ -455,7 +458,7 @@ Monaco works with line and column positions; convert with the model:
 
 ```js
 monaco.languages.registerCompletionItemProvider("jsonata", {
-  triggerCharacters: [".", "[", "$"],
+  triggerCharacters: [".", "[", "$", "=", '"', "'"],
   provideCompletionItems(model, position) {
     const { range, items } = service.complete(model.getValue(), model.getOffsetAt(position));
     const start = model.getPositionAt(range.start);

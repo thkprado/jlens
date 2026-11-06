@@ -303,7 +303,8 @@ export interface SchemaOverride {
   examples?: unknown[];
 }
 
-export type CompletionKind = "field" | "variable" | "function" | "keyword" | "operator";
+/** `value`: a value of the `enum` or `const` of the left-hand side of `=`, `!=` or `in`. */
+export type CompletionKind = "field" | "variable" | "function" | "keyword" | "operator" | "value";
 
 export interface CompletionItem {
   label: string;
@@ -317,7 +318,7 @@ export interface CompletionItem {
 }
 
 export interface Completions {
-  /** The range the chosen item replaces (the word under the cursor). */
+  /** The range the chosen item replaces (the word under the cursor, or the whole string literal). */
   range: Span;
   /** Best first. */
   items: CompletionItem[];

@@ -245,6 +245,13 @@ pub(crate) enum Event<'a, 's> {
     },
     /// A variable bound by `:=`, a function parameter, `@$name` or `#$name`.
     Bind { name: &'a str },
+    /// A comparison, `=`, `!=` or `in`, reported after both sides are walked.
+    Compare {
+        op: BinaryOp,
+        /// The type of the left-hand side.
+        lhs: &'a Ty<'s>,
+        rhs: &'a Node,
+    },
 }
 
 /// Functions whose result has the type of their first argument.
@@ -355,8 +362,15 @@ impl<'s> Walker<'s, '_> {
                 ty
             }
             NodeKind::Binary { op, lhs, rhs } => {
-                self.walk(lhs, ctx, scope);
+                let left = self.walk(lhs, ctx, scope);
                 self.walk(rhs, ctx, scope);
+                if matches!(op, BinaryOp::Eq | BinaryOp::Ne | BinaryOp::In) {
+                    (self.visit)(Event::Compare {
+                        op: *op,
+                        lhs: &left,
+                        rhs,
+                    });
+                }
                 match op {
                     BinaryOp::Add
                     | BinaryOp::Sub

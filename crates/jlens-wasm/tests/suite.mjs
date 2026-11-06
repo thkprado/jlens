@@ -752,6 +752,14 @@ export const cases = [
     equal(c.range, { start: text.length - 2, end: text.length }, "range");
     text = "$mi";
     equal(service.complete(text, 3).items[0].label, "$minimum", "variables");
+    // Values of an enumeration; inside quotes the whole literal is replaced, in UTF-16 units.
+    const typed = new j.LanguageService(
+      j.inferSchema([order], { "items[].type": { enum: ["apparel", "electronic"] } }),
+    );
+    text = "'𝄞' & items[type = \"el\"]";
+    c = typed.complete(text, text.length - 2);
+    equal(c.items.map((i) => [i.label, i.kind, i.insertText]), [['"electronic"', "value", '"electronic"']], "values");
+    equal(c.range, { start: text.length - 5, end: text.length - 1 }, "literal range");
   }],
 
   ["diagnostics, hover and signature help", (j) => {

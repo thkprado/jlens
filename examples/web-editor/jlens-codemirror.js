@@ -69,6 +69,7 @@ const completionTypes = {
   function: "function",
   keyword: "keyword",
   operator: "keyword",
+  value: "enum",
 };
 
 /** Renders the Markdown subset the language service produces (bold, code, paragraphs). */
@@ -101,8 +102,9 @@ function complete(getService) {
     const text = context.state.doc.toString();
     const before = text.slice(0, context.pos);
     const { range, items } = getService().complete(text, context.pos);
-    // While typing, only open the list on a word or right after a step, filter or call.
-    const triggered = range.start < range.end || /[.[({$,]\s*$/.test(before);
+    // While typing, only open the list on a word or a string literal (whose values the range
+    // covers), or right after a step, filter, call or comparison.
+    const triggered = range.start < range.end || /[.[({$,=]\s*$/.test(before);
     if (!items.length || (!context.explicit && !triggered)) return null;
     return {
       from: range.start,

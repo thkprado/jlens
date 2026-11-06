@@ -253,6 +253,28 @@ fn diagnostics_follow_the_document() {
 }
 
 #[test]
+fn completion_of_enumerated_values() {
+    let folder = Folder::new("values");
+    folder.write(
+        "status.json",
+        r#"{"type": "object", "properties": {"status": {"enum": ["open", "closed"]}}}"#,
+    );
+    folder.write("jlens.json", r#"{"*.jsonata": {"schema": "status.json"}}"#);
+    let (mut client, _) = Client::start(Some(&folder.0), json!({}), Value::Null);
+    let rule = folder.uri("rule.jsonata");
+    client.open(&rule, "'𝄞' & (status = \"cl\")");
+    client.diagnostics(&rule);
+
+    let completion = client.at("textDocument/completion", &rule, 0, 20);
+    assert_eq!(labels(&completion), ["\"closed\""]);
+    let item = &completion[0];
+    assert_eq!(item["kind"], 20, "an enum member");
+    // The whole literal is replaced, in UTF-16 units.
+    assert_eq!(item["textEdit"]["range"], range((0, 17), (0, 21)));
+    assert_eq!(item["textEdit"]["newText"], "\"closed\"");
+}
+
+#[test]
 fn completion_hover_and_signature_help() {
     let folder = Folder::new("completion");
     folder.write("order.json", &order_schema());

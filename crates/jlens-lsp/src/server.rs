@@ -179,7 +179,8 @@ fn capabilities(encoding: Encoding) -> ServerCapabilities {
             TextDocumentSyncKind::INCREMENTAL,
         )),
         completion_provider: Some(CompletionOptions {
-            trigger_characters: Some([".", "$", "[", "`"].map(String::from).to_vec()),
+            // A quote opens a string literal, where the values of an enumeration are completed.
+            trigger_characters: Some([".", "$", "[", "`", "\"", "'"].map(String::from).to_vec()),
             ..Default::default()
         }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -518,6 +519,7 @@ impl Server<'_> {
                     CompletionKind::Function => CompletionItemKind::FUNCTION,
                     CompletionKind::Keyword => CompletionItemKind::KEYWORD,
                     CompletionKind::Operator => CompletionItemKind::OPERATOR,
+                    CompletionKind::Value => CompletionItemKind::ENUM_MEMBER,
                 }),
                 detail: item.detail,
                 documentation: item

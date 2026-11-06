@@ -4,10 +4,11 @@
 //! Offsets and spans are byte offsets into the expression text. Editors that count in UTF-16
 //! (browsers) convert at the boundary; the Wasm package does that.
 
-use jlens_core::ast::{Node, Span};
+use jlens_core::ast::{BinaryOp, Node, NodeKind, Span};
 use jlens_core::signature::Signature;
 use jlens_core::{Diagnostic, Severity, parse_recover};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use crate::shape::{Field, Schema, Shape};
 use crate::typing::{Event, Scope, Symbols, Ty, Walker};
@@ -32,6 +33,9 @@ pub enum CompletionKind {
     Keyword,
     /// An operator (`and`, `or`, `in`, ...).
     Operator,
+    /// A value of the enumeration (`enum` or `const`) of the left-hand side of `=`, `!=` or
+    /// `in`, inserted as a JSONata literal.
+    Value,
 }
 
 /// One completion suggestion.
@@ -171,8 +175,11 @@ pub struct LanguageService {
 #[derive(Debug, PartialEq)]
 enum Lexical {
     Code,
-    /// Inside a string literal or a comment.
-    Literal,
+    /// Inside a comment.
+    Comment,
+    /// Inside a string literal: where it starts (its opening quote) and where it ends (past its
+    /// closing quote, or `None` when it is not closed).
+    String(usize, Option<usize>),
     /// Inside a backquoted name that starts at this offset.
     Backquote(usize),
 }
@@ -183,6 +190,7 @@ fn lexical_state(text: &str, offset: usize) -> Lexical {
     while i < offset.min(bytes.len()) {
         match bytes[i] {
             q @ (b'"' | b'\'') => {
+                let start = i;
                 i += 1;
                 while i < bytes.len() && bytes[i] != q {
                     if bytes[i] == b'\\' {
@@ -191,7 +199,7 @@ fn lexical_state(text: &str, offset: usize) -> Lexical {
                     i += 1;
                 }
                 if i >= offset {
-                    return Lexical::Literal;
+                    return Lexical::String(start, (i < bytes.len()).then_some(i + 1));
                 }
             }
             b'`' => {
@@ -206,7 +214,7 @@ fn lexical_state(text: &str, offset: usize) -> Lexical {
             }
             b'/' if bytes.get(i + 1) == Some(&b'*') => match text[i + 2..].find("*/") {
                 Some(end) if i + 2 + end + 2 <= offset => i += 2 + end + 1,
-                _ => return Lexical::Literal,
+                _ => return Lexical::Comment,
             },
             _ => {}
         }
@@ -269,6 +277,89 @@ struct Probe<'s> {
     ctx: Option<Ty<'s>>,
     scope: Scope<'s>,
     found_variable: bool,
+    /// The enumeration of the left-hand side of the comparison whose right-hand side is the
+    /// cursor, or that of `in` whose array holds it.
+    values: Vec<&'s JsonValue>,
+    /// The literals already in that array.
+    listed: Vec<JsonValue>,
+}
+
+/// Whether `node` is the placeholder, as a name or a path of one step.
+fn is_placeholder(node: &Node) -> bool {
+    match &node.kind {
+        NodeKind::Name { name } => name == PLACEHOLDER,
+        NodeKind::Path { steps, .. } => matches!(steps.as_slice(), [step] if is_placeholder(step)),
+        _ => false,
+    }
+}
+
+/// The value of a literal node.
+fn literal_value(node: &Node) -> Option<JsonValue> {
+    match &node.kind {
+        NodeKind::String { value } => Some(JsonValue::String(value.clone())),
+        NodeKind::Number { value } => serde_json::Number::from_f64(*value).map(JsonValue::Number),
+        NodeKind::Bool { value } => Some(JsonValue::Bool(*value)),
+        NodeKind::Null => Some(JsonValue::Null),
+        _ => None,
+    }
+}
+
+/// The values of a type's enumerations, and of its arrays' items, in order and without repeats.
+/// A shape that declares no type (a bare `const`) counts too.
+fn enumeration<'s>(ty: &Ty<'s>) -> Vec<&'s JsonValue> {
+    let mut out: Vec<&'s JsonValue> = Vec::new();
+    for shape in ty.shapes.iter().copied().chain(ty.elements().shapes) {
+        for value in shape.enumeration.iter().flatten() {
+            if !out.contains(&value) {
+                out.push(value);
+            }
+        }
+    }
+    out
+}
+
+/// A value as a JSONata literal; strings in `quote` when they can be.
+fn value_literal(value: &JsonValue, quote: char) -> String {
+    let json = value.to_string();
+    match value {
+        // JSONata has no `\'` escape: a string with `'` keeps the double quotes.
+        JsonValue::String(s) if quote == '\'' && !s.contains('\'') => {
+            format!("'{}'", &json[1..json.len() - 1])
+        }
+        _ => json,
+    }
+}
+
+/// Completion items for `values`, but those already `listed`, that start with `prefix` (ignoring
+/// case; a string is matched without its quotes).
+fn value_items(
+    values: &[&JsonValue],
+    listed: &[JsonValue],
+    prefix: &str,
+    quote: char,
+) -> Vec<CompletionItem> {
+    let lower = prefix.to_lowercase();
+    values
+        .iter()
+        .filter(|v| !listed.contains(v))
+        .filter(|v| {
+            let text = match v {
+                JsonValue::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            text.to_lowercase().starts_with(&lower)
+        })
+        .map(|v| {
+            let literal = value_literal(v, quote);
+            CompletionItem {
+                label: literal.clone(),
+                kind: CompletionKind::Value,
+                detail: None,
+                documentation: None,
+                insert_text: literal,
+            }
+        })
+        .collect()
 }
 
 impl LanguageService {
@@ -365,7 +456,26 @@ impl LanguageService {
             items: Vec::new(),
         };
         match lexical_state(text, offset) {
-            Lexical::Literal => return empty(Span::new(offset, offset)),
+            Lexical::Comment => return empty(Span::new(offset, offset)),
+            Lexical::String(start, closed) => {
+                // Complete a value of the comparison the literal is the right-hand side of; the
+                // whole literal is replaced. The rest of an unclosed literal stays as it is.
+                let end = closed.unwrap_or(offset);
+                let modified = format!("{}{PLACEHOLDER} {}", &text[..start], &text[end..]);
+                let probe = self.probe(&modified, false);
+                let quote = if text[start..].starts_with('\'') {
+                    '\''
+                } else {
+                    '"'
+                };
+                let prefix = &text[start + 1..offset];
+                let strings: Vec<&serde_json::Value> =
+                    probe.values.into_iter().filter(|v| v.is_string()).collect();
+                return Completions {
+                    range: Span::new(start, end),
+                    items: value_items(&strings, &probe.listed, prefix, quote),
+                };
+            }
             Lexical::Backquote(start) => {
                 // Complete a quoted field name; the closing quote is replaced too.
                 let end = if text[offset..].starts_with('`') {
@@ -451,6 +561,9 @@ impl LanguageService {
         let probe = self.probe(&modified, variable_mode);
 
         let mut items = Vec::new();
+        if !variable_mode && !after_dot {
+            items.extend(value_items(&probe.values, &probe.listed, prefix, '"'));
+        }
         if variable_mode {
             items.extend(self.variable_items(&probe.scope, &prefix[1..]));
             items.extend(self.function_items(&prefix[1..]));
@@ -489,6 +602,21 @@ impl LanguageService {
             Event::Variable { name, scope, .. } if variable && name == PLACEHOLDER => {
                 probe.scope = scope.clone();
                 probe.found_variable = true;
+            }
+            Event::Compare { op, lhs, rhs } if !variable => {
+                let listed = match &rhs.kind {
+                    NodeKind::Array { items }
+                        if op == BinaryOp::In && items.iter().any(is_placeholder) =>
+                    {
+                        Some(items.iter().filter_map(literal_value).collect())
+                    }
+                    _ if is_placeholder(rhs) => Some(Vec::new()),
+                    _ => None,
+                };
+                if let Some(listed) = listed {
+                    probe.values = enumeration(lhs);
+                    probe.listed = listed;
+                }
             }
             _ => {}
         };
@@ -624,7 +752,7 @@ impl LanguageService {
             }),
             Event::Variable { node, name, .. } => variables.push((node.span, name.to_owned())),
             Event::Bind { name } => bound.push(name.to_owned()),
-            Event::Field { .. } => {}
+            Event::Field { .. } | Event::Compare { .. } => {}
         };
         self.walk(&ast.root, &mut visit);
         out.extend(self.call_diagnostics(&calls, &bound));
@@ -795,7 +923,7 @@ impl LanguageService {
                 };
                 consider(node.span, contents);
             }
-            Event::Call { .. } | Event::Bind { .. } => {}
+            Event::Call { .. } | Event::Bind { .. } | Event::Compare { .. } => {}
         };
         self.walk(&ast.root, &mut visit);
         best.map(|(range, contents)| Hover { range, contents })

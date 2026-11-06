@@ -108,9 +108,85 @@ fn variables_functions_and_operators() {
     assert_eq!(ops, ["and"]);
     let ops = labels(&svc, "customer.login |", None);
     assert_eq!(ops, ["and", "or", "in"]);
-    // No suggestions inside strings or comments.
-    assert!(labels(&svc, "items[type = 'ele|']", None).is_empty());
+    // No suggestions inside comments, or strings that are not compared with an enumeration.
+    assert!(labels(&svc, "$uppercase('ele|')", None).is_empty());
+    assert!(labels(&svc, "items[code = 'ele|']", None).is_empty());
     assert!(labels(&svc, "/* it| */ items", None).is_empty());
+}
+
+#[test]
+fn value_completion_offers_the_left_hand_sides_enumeration() {
+    let svc = service();
+    let all: &[&str] = &[r#""apparel""#, r#""electronic""#, r#""toy""#];
+    let cases: &[(&str, &[&str])] = &[
+        ("items[type = |]", all),
+        ("items[type != |]", all),
+        ("items[type = e|]", &[r#""electronic""#]),
+        ("items[type = E|]", &[r#""electronic""#]),
+        ("items[type in |]", all),
+        ("items[type in [|]]", all),
+        // Values already in the array are left out.
+        (
+            r#"items[type in ["apparel", |]]"#,
+            &[r#""electronic""#, r#""toy""#],
+        ),
+        // Inside quotes: the quote is kept, and only strings are offered.
+        (r#"items[type = "ap|"]"#, &[r#""apparel""#]),
+        ("items[type = 'ap|']", &["'apparel'"]),
+        (
+            r#"items[type in ["toy", "|"]]"#,
+            &[r#""apparel""#, r#""electronic""#],
+        ),
+        (r#"items[type = "|"#, all),
+        // Not on the left-hand side, after `<`, nor for a field without an enumeration.
+        ("items[| = type]", &[]),
+        ("items[type < |]", &[]),
+        ("items[code = |]", &[]),
+        ("items.type = |", all),
+    ];
+    for (marked, expected) in cases {
+        let got = labels(&svc, marked, Some(CompletionKind::Value));
+        assert_eq!(got, *expected, "{marked}");
+    }
+    // Values come first; fields, variables and functions follow.
+    let (text, offset) = cursor("items[type = |]");
+    let items = svc.complete(&text, offset).items;
+    assert_eq!(items[0].kind, CompletionKind::Value);
+    assert!(items.iter().any(|i| i.kind == CompletionKind::Field));
+
+    // Inside quotes the whole literal is replaced; an unclosed one up to the cursor.
+    let (text, offset) = cursor(r#"items[type = "ap|p"]"#);
+    let completions = svc.complete(&text, offset);
+    assert_eq!((completions.range.start, completions.range.end), (13, 18));
+    assert_eq!(completions.items[0].insert_text, r#""apparel""#);
+    let (text, offset) = cursor(r#"items[type = "ap|"#);
+    let completions = svc.complete(&text, offset);
+    assert_eq!((completions.range.start, completions.range.end), (13, 16));
+
+    // A `const`, non-string values, and strings that need escaping or keep double quotes.
+    let schema = Schema::from_json_schema(&json!({
+        "type": "object",
+        "properties": {
+            "kind": {"const": "order"},
+            "level": {"enum": [1, 2.5, true, null]},
+            "label": {"enum": ["say \"hi\"", "it's"]}
+        }
+    }))
+    .unwrap();
+    let svc = LanguageService::new(Some(schema));
+    assert_eq!(
+        labels(&svc, "kind = |", Some(CompletionKind::Value)),
+        [r#""order""#]
+    );
+    assert_eq!(
+        labels(&svc, "level = |", Some(CompletionKind::Value)),
+        ["1", "2.5", "true", "null"]
+    );
+    assert!(labels(&svc, "level = '|'", Some(CompletionKind::Value)).is_empty());
+    assert_eq!(
+        labels(&svc, "label = '|'", Some(CompletionKind::Value)),
+        [r#"'say \"hi\"'"#, r#""it's""#]
+    );
 }
 
 #[test]
