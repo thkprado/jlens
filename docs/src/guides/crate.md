@@ -312,6 +312,15 @@ documentation:
 {{#include ../../../crates/jlens-core/tests/guide.rs:functions}}
 ```
 
+Spans, here and in `jlens_schema`, are byte offsets into the expression text. A browser editor
+counts UTF-16 code units, as does an error's `position`. Built once per text,
+[`Offsets`](https://docs.rs/jlens-core/latest/jlens_core/struct.Offsets.html) converts both
+ways; an offset inside a character maps to the start of that character:
+
+```rust,ignore
+{{#include ../../../crates/jlens-core/tests/guide.rs:offsets}}
+```
+
 For completion, diagnostics and hover against a schema, use `jlens_schema::LanguageService`;
 see the [schema guide](schema.md#in-rust).
 

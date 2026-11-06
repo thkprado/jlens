@@ -30,6 +30,10 @@ All notable changes are recorded here. The format follows
   input document, so that labels, descriptions, hidden fields and domains survive changes to the
   document. The "Free shipping" example uses each, with an open domain of customer logins that a
   stand-in source answers. Shared addresses carry the overrides; older ones open with none.
+- `jlens_core::Offsets` converts offsets into a text between UTF-8 bytes, the unit of the Rust
+  crates' spans, and UTF-16 code units, the unit of browser editors, in both directions. An
+  application that builds the language service into its own WebAssembly module no longer needs
+  to write it; the Wasm package now uses it.
 
 ### Changed
 

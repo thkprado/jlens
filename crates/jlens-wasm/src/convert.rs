@@ -1,6 +1,6 @@
 //! Conversions at the JavaScript boundary: values, offsets and errors.
 
-use jlens_core::{Bindings, Options, format_json};
+use jlens_core::{Bindings, Offsets, Options, format_json};
 use serde::Serialize;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
@@ -8,113 +8,55 @@ use wasm_bindgen::prelude::*;
 
 use crate::host::Scope;
 
-/// Converts between UTF-8 byte offsets (used by the Rust crates) and UTF-16 code unit offsets
-/// (used by JavaScript strings).
-pub struct Offsets {
-    /// For non-ASCII text: the UTF-16 offset of every byte offset (`len + 1` entries). Bytes
-    /// inside a character map to the offset of the character.
-    table: Option<Vec<u32>>,
-    len: usize,
+/// Rewrites, recursively, every `span` and `range` object (`{start, end}`) from byte offsets to
+/// UTF-16 offsets.
+pub fn convert_spans(offsets: &Offsets, value: &mut Value) {
+    if offsets.is_ascii() {
+        return;
+    }
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(|v| convert_spans(offsets, v)),
+        Value::Object(map) => {
+            for (key, v) in map.iter_mut() {
+                if (key == "span" || key == "range")
+                    && let Value::Object(span) = v
+                    && span.len() == 2
+                {
+                    convert_bounds(offsets, span);
+                } else {
+                    convert_spans(offsets, v);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
-impl Offsets {
-    pub fn new(text: &str) -> Self {
-        let table = (!text.is_ascii()).then(|| {
-            let mut table = Vec::with_capacity(text.len() + 1);
-            let mut units = 0u32;
-            for c in text.chars() {
-                table.extend(std::iter::repeat_n(units, c.len_utf8()));
-                units += c.len_utf16() as u32;
+/// Rewrites the spans of the nodes of `tree`, an audit tree, from byte offsets to UTF-16
+/// offsets. Only the nodes are walked: a captured value may have a field named `span` too.
+pub fn convert_audit_spans(offsets: &Offsets, tree: &mut Value) {
+    fn walk(offsets: &Offsets, node: &mut Value) {
+        jlens_core::stack::grow(|| {
+            if let Some(Value::Object(span)) = node.get_mut("span") {
+                convert_bounds(offsets, span);
             }
-            table.push(units);
-            table
-        });
-        Offsets {
-            table,
-            len: text.len(),
-        }
-    }
-
-    /// The UTF-16 offset of a byte offset.
-    pub fn to_utf16(&self, byte: usize) -> usize {
-        let byte = byte.min(self.len);
-        match &self.table {
-            Some(table) => table[byte] as usize,
-            None => byte,
-        }
-    }
-
-    /// The byte offset of a UTF-16 offset. An offset inside a surrogate pair maps to the start
-    /// of the character.
-    pub fn to_byte(&self, unit: usize) -> usize {
-        match &self.table {
-            Some(table) => {
-                // The first byte whose UTF-16 offset reaches `unit`.
-                let mut byte = table
-                    .partition_point(|&u| (u as usize) < unit)
-                    .min(self.len);
-                if table[byte] as usize > unit {
-                    // `unit` falls inside a surrogate pair: go back to the character's start.
-                    byte -= 1;
-                    while byte > 0 && table[byte - 1] == table[byte] {
-                        byte -= 1;
-                    }
-                }
-                byte
+            if let Some(Value::Array(children)) = node.get_mut("children") {
+                children.iter_mut().for_each(|child| walk(offsets, child));
             }
-            None => unit.min(self.len),
-        }
+        })
     }
-
-    /// Rewrites, recursively, every `span` and `range` object (`{start, end}`) from byte
-    /// offsets to UTF-16 offsets.
-    pub fn convert_spans(&self, value: &mut Value) {
-        if self.table.is_none() {
-            return;
-        }
-        match value {
-            Value::Array(items) => items.iter_mut().for_each(|v| self.convert_spans(v)),
-            Value::Object(map) => {
-                for (key, v) in map.iter_mut() {
-                    if (key == "span" || key == "range")
-                        && let Value::Object(span) = v
-                        && span.len() == 2
-                    {
-                        for bound in ["start", "end"] {
-                            if let Some(n) = span.get(bound).and_then(Value::as_u64) {
-                                span.insert(bound.into(), self.to_utf16(n as usize).into());
-                            }
-                        }
-                    } else {
-                        self.convert_spans(v);
-                    }
-                }
-            }
-            _ => {}
-        }
+    if !offsets.is_ascii()
+        && let Some(root) = tree.get_mut("root")
+    {
+        walk(offsets, root);
     }
+}
 
-    /// Rewrites the spans of the nodes of `tree`, an audit tree, from byte offsets to UTF-16
-    /// offsets. Only the nodes are walked: a captured value may have a field named `span` too.
-    pub fn convert_audit_spans(&self, tree: &mut Value) {
-        fn walk(offsets: &Offsets, node: &mut Value) {
-            jlens_core::stack::grow(|| {
-                if let Some(Value::Object(span)) = node.get_mut("span") {
-                    for bound in ["start", "end"] {
-                        if let Some(n) = span.get(bound).and_then(Value::as_u64) {
-                            span.insert(bound.into(), offsets.to_utf16(n as usize).into());
-                        }
-                    }
-                }
-                if let Some(Value::Array(children)) = node.get_mut("children") {
-                    children.iter_mut().for_each(|child| walk(offsets, child));
-                }
-            })
-        }
-        if self.table.is_some()
-            && let Some(root) = tree.get_mut("root")
-        {
-            walk(self, root);
+/// Rewrites the `start` and `end` of a span from byte offsets to UTF-16 offsets.
+fn convert_bounds(offsets: &Offsets, span: &mut serde_json::Map<String, Value>) {
+    for bound in ["start", "end"] {
+        if let Some(n) = span.get(bound).and_then(Value::as_u64) {
+            span.insert(bound.into(), offsets.to_utf16(n as usize).into());
         }
     }
 }
@@ -415,23 +357,4 @@ pub fn install_hooks() {
 /// A JS `TypeError` for invalid arguments.
 pub fn type_error(message: &str) -> JsValue {
     js_sys::TypeError::new(message).into()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Offsets;
-
-    #[test]
-    fn offsets_round_trip() {
-        let text = "aé𝄞b";
-        let o = Offsets::new(text);
-        // bytes: a=0, é=1..3, 𝄞=3..7, b=7, end=8; UTF-16: a=0, é=1, 𝄞=2..4, b=4, end=5.
-        assert_eq!([0, 1, 3, 7, 8].map(|b| o.to_utf16(b)), [0, 1, 2, 4, 5]);
-        assert_eq!([0, 1, 2, 4, 5].map(|u| o.to_byte(u)), [0, 1, 3, 7, 8]);
-        // Inside the surrogate pair: the start of the character.
-        assert_eq!(o.to_byte(3), 3);
-        assert_eq!(o.to_byte(99), 8);
-        let ascii = Offsets::new("abc");
-        assert_eq!((ascii.to_utf16(2), ascii.to_byte(9)), (2, 3));
-    }
 }

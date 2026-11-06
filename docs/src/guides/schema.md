@@ -125,7 +125,9 @@ summary. A declared function replaces a built-in function of the same name, as i
 evaluation.
 
 All offsets and spans in the Rust API are **byte** offsets into the expression text. The
-WebAssembly package converts them to and from the UTF-16 offsets that browsers and editors use.
+WebAssembly package converts them to and from the UTF-16 offsets that browsers and editors use;
+an application that builds the service into a module of its own converts them with
+[`jlens_core::Offsets`](crate.md#tools-for-editors).
 
 ### In the browser
 

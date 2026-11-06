@@ -32,11 +32,14 @@ pub use service::{LanguageService, functions, infer_schema};
 
 use jlens_core::audit::{self, AuditOptions, CaptureLimits};
 use jlens_core::reads::Read;
-use jlens_core::{Bindings, Options};
+use jlens_core::{Bindings, Offsets, Options};
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
-use convert::{Offsets, Registered, error_json, from_js, js_error, ser_to_js, to_js, type_error};
+use convert::{
+    Registered, convert_audit_spans, convert_spans, error_json, from_js, js_error, ser_to_js,
+    to_js, type_error,
+};
 use host::Scope;
 use output::{JsBuilder, NoInput};
 
@@ -233,7 +236,7 @@ impl Expression {
             }
         }
         let mut tree = serde_json::to_value(&tree).expect("serializable");
-        self.offsets.convert_audit_spans(&mut tree);
+        convert_audit_spans(&self.offsets, &mut tree);
         out.insert("audit".into(), tree);
         out.insert("explanationText".into(), explanation.to_string().into());
         out.insert(
@@ -270,7 +273,7 @@ impl Expression {
     #[wasm_bindgen(skip_typescript)]
     pub fn ast(&self) -> JsValue {
         let mut tree = serde_json::to_value(&self.inner.ast().root).expect("serializable");
-        self.offsets.convert_spans(&mut tree);
+        convert_spans(&self.offsets, &mut tree);
         to_js(&tree)
     }
 }
@@ -437,6 +440,6 @@ pub fn parse_recover(source: &str) -> JsValue {
         "ast": ast.root,
         "diagnostics": ast.diagnostics,
     });
-    offsets.convert_spans(&mut out);
+    convert_spans(&offsets, &mut out);
     to_js(&out)
 }

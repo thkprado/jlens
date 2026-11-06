@@ -650,6 +650,30 @@ proptest! {
             }
         }
     }
+
+    /// `Offsets` never panics on any offset, agrees with counting UTF-16 units, and maps an
+    /// offset inside a character, or past the end, to the start of the character, or the end.
+    #[test]
+    fn offsets_agree_with_utf16_counts(text in "[a\u{e9}\u{20ac}\u{1d11e}]{0,12}", n in 0usize..60) {
+        let offsets = jlens_core::Offsets::new(&text);
+        let mut byte = n.min(text.len());
+        while !text.is_char_boundary(byte) {
+            byte -= 1;
+        }
+        let unit = text[..byte].encode_utf16().count();
+        prop_assert_eq!(offsets.to_utf16(n), unit);
+        prop_assert_eq!(offsets.to_byte(unit), byte);
+        let mut start = text.len();
+        let mut units = 0;
+        for (b, c) in text.char_indices() {
+            units += c.len_utf16();
+            if units > n {
+                start = b;
+                break;
+            }
+        }
+        prop_assert_eq!(offsets.to_byte(n), start);
+    }
 }
 
 /// Paths of field names take a fast path that falls back on the general one where an array is

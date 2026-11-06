@@ -21,7 +21,8 @@ use serde_json::Value;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 
-use crate::convert::{Offsets, from_js, js_error, to_js};
+use crate::convert::{from_js, js_error, to_js};
+use jlens_core::Offsets;
 
 /// The detail of an error that refers to an exception kept in the frame.
 const EXCEPTION: &str = "hostException";

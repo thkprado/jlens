@@ -472,6 +472,25 @@ fn tooling() -> Result<()> {
 }
 
 #[test]
+fn offsets() {
+    // ANCHOR: offsets
+    use jlens_core::Offsets;
+
+    // Spans are byte offsets; a browser editor counts UTF-16 code units.
+    let text = "nome = 'José' and 🎉";
+    let offsets = Offsets::new(text);
+    let byte = text.find("and").unwrap();
+    assert_eq!((byte, offsets.to_utf16(byte)), (15, 14));
+    assert_eq!(offsets.to_byte(14), 15);
+    // An emoji is two UTF-16 units: the end of the text is unit 20, byte 23.
+    assert_eq!(
+        (offsets.to_utf16(text.len()), offsets.to_byte(20)),
+        (20, 23)
+    );
+    // ANCHOR_END: offsets
+}
+
+#[test]
 fn functions() {
     // ANCHOR: functions
     let catalog = jlens_core::function_catalog();

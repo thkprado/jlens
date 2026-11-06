@@ -46,6 +46,7 @@ mod host;
 pub mod input;
 mod json;
 mod lexer;
+mod offsets;
 pub mod output;
 mod parser;
 mod process;
@@ -63,6 +64,7 @@ pub use error::{Diagnostic, Error, Result, Severity};
 pub use functions::{Category, FunctionInfo, catalog as function_catalog};
 pub use host::{Callable, HostCall, HostFunction};
 pub use json::format_json;
+pub use offsets::Offsets;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};

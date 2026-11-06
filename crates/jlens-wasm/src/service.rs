@@ -6,7 +6,8 @@ use jlens_schema::{FunctionDecl, Override, Schema};
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
-use crate::convert::{Offsets, from_js, ser_to_js, to_js, type_error};
+use crate::convert::{convert_spans, from_js, ser_to_js, to_js, type_error};
+use jlens_core::Offsets;
 
 /// Infers a JSON Schema (2020-12, with `x-jlens-*` annotations) from sample documents.
 /// `overrides` adds descriptions, labels, allowed values and hidden fields by path, such as
@@ -130,7 +131,7 @@ impl LanguageService {
         let offsets = Offsets::new(text);
         let mut out = serde_json::to_value(self.inner.complete(text, offsets.to_byte(offset)))
             .expect("serializable");
-        offsets.convert_spans(&mut out);
+        convert_spans(&offsets, &mut out);
         to_js(&out)
     }
 
@@ -139,7 +140,7 @@ impl LanguageService {
     pub fn diagnostics(&self, text: &str) -> JsValue {
         let offsets = Offsets::new(text);
         let mut out = serde_json::to_value(self.inner.diagnostics(text)).expect("serializable");
-        offsets.convert_spans(&mut out);
+        convert_spans(&offsets, &mut out);
         to_js(&out)
     }
 
@@ -150,7 +151,7 @@ impl LanguageService {
         match self.inner.hover(text, offsets.to_byte(offset)) {
             Some(hover) => {
                 let mut out = serde_json::to_value(hover).expect("serializable");
-                offsets.convert_spans(&mut out);
+                convert_spans(&offsets, &mut out);
                 to_js(&out)
             }
             None => JsValue::UNDEFINED,
