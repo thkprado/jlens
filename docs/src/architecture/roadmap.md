@@ -29,6 +29,7 @@ The plan is still open; its items are added as they come.
 |---|---|---|---|
 | 1 | A schema override's `type` takes one type name, as JSON Schema and the inferred schema write it, besides a list | `"type": "integer"` read like `["integer"]` and written back as one name; tests in `jlens-schema` and the Wasm suite; `SchemaOverride` in `types.d.ts` and the schema guide updated | **done**: `Override::types` read and written as `Schema::to_json_schema` writes `type` |
 | 2 | A web editor example about open domains, whose expression shows where values are completed | Several fields with a domain, compared with literals; `domains.js` answers for each; the editor's README and the Wasm guide name it | **done**: "Open domains", with customers, countries and products |
+| 3 | A value request carries its context, for domains whose values depend on another value (group → subgroup, country → state), and says whether the value is an element of `in [ ... ]` | Beside the prefix, `ValueRequest` names the literals compared with the other fields of the same predicate (`categories[group = 'X' and subgroup = '\|` gives `group: "X"`), read from incomplete expressions by the recovering parser, and whether several values may be inserted; tests in `jlens-schema`, `types.d.ts`, the Wasm suite and the schema guide updated | |
 
 ## In exploration: a regular expression engine of jlens's own
 
