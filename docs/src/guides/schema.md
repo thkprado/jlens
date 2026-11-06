@@ -40,6 +40,19 @@ complete, or set the values in the overrides (below). You can commit the file, r
 and edit it like any JSON Schema. jlens also reads JSON Schemas written by hand or by other
 tools: it supports `$ref` to local definitions, and it merges `anyOf`, `oneOf` and `allOf`.
 
+What JSON Schema has no keyword for travels in jlens's own `x-jlens-*` keywords, which other
+tools ignore. jlens writes them and reads them back, so they can also be written by hand:
+
+| Keyword | Meaning |
+|---|---|
+| `x-jlens-presence` | On a field that is not required: the fraction of objects that had it, from 0 to 1 |
+| `x-jlens-enum-inferred` | The `enum` lists the values seen in the samples, not every value allowed: completion offers them, but a value outside them is not warned about |
+| `x-jlens-domain` | An [open domain](#open-domains): an identifier naming a list of values only the application can fetch |
+| `x-jlens-hidden` | `true` hides the field from completion, like `hidden` in the overrides (below); it is still known, so it is not reported as unknown, and hover shows it |
+| `x-jlens-samples` | At the root: the number of sample documents the schema was inferred from. For information only: nothing depends on it |
+
+A field's `label` is written as the standard `title`, and its `description` as `description`.
+
 ## 2. Describe the fields
 
 Samples tell jlens what fields exist, but not what they mean. Overrides add that information.

@@ -140,7 +140,9 @@ pub struct Field {
 pub struct Schema {
     /// The shape of the documents themselves.
     pub root: Shape,
-    /// Number of sample documents the schema was inferred from (0 when imported).
+    /// Number of sample documents the schema was inferred from: written to JSON Schema as
+    /// `x-jlens-samples` and read back from it (0 for a schema imported without it). For
+    /// information only: nothing depends on it.
     pub samples: u64,
 }
 
