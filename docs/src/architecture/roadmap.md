@@ -21,31 +21,6 @@ For ad-hoc JSON queries, `jq` remains the usual tool. jlens is for JSONata that 
 somewhere else, such as a rules engine or a jsonata-js service. It checks those expressions,
 tests them and explains their results before they ship.
 
-## 0.28: what 0.27 left in `$distinct` and `$match`, and the regex flags `u` and `v`
-
-0.27 made `$distinct` and `$match` linear and measured what they still cost. `$distinct` reads
-an item whole when items differ below a field they share or inside an array, and it trails
-jsonata-js when an array has few distinct values. `$match` makes five allocations for each match.
-0.28 takes those three. Each ends in a fix, measured before and after, or with its cause recorded
-in [`perf-0.28.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.28.md); the starting points are in
-[`perf-0.27.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.27.md).
-
-0.28 also accepts the regex flags `u` and `v`. Without them, no pattern can name a letter outside
-ASCII: `\w` is ASCII in JavaScript, and `\p{…}` needs the Unicode mode; `v` adds the difference
-and intersection of classes (`[\p{L}--\p{Script=Latin}]`) and emoji sequences. jsonata-js
-rejects both flags, so an expression valid in both engines keeps its result. The API work below
-stays deferred.
-
-| # | Item | Done when | Status |
-|---|---|---|---|
-| 1 | Upstream at the plan's start: `regress` after `95c0404`, stacker#155 and #156, jsonata-js on npm | Each `regress` commit worth porting ported one at a time, or none; the watch list updated | **done**: no `regress` commit, stacker unchanged, npm still 2.2.2; of jsonata-js's unreleased fixes, `$pad`'s `D2016` now reports an integer |
-| 2 | `$distinct` with first fields that follow into nested values: 25 items of 100 KB that differ under a shared field (`{kind, list}`) or in an array (`[id, ...]`) take 2.65 ms against a `Document`, 17.5 µs by comparing | Those cases near the list's time; the other cases of 0.27's table and `ab` within the floor; conformance and 20,000 differential cases clean | **done**: they follow into the level below a shared field; 25 of `{kind, list}` 15 µs against a `Document`, 6.5 ms with `evaluate` (list 25.6 µs, 5.8 ms); flat records within the floor |
-| 3 | `$distinct` with few distinct values: 100,000 items of `i % 8` take 1.48 ms, jsonata-js 229 µs | A fix measured against jsonata-js and with `ab`, or the cause recorded | **done**: each comparison was a `deep_eq` call and strings a `memcmp`; scalars now compare inline, short strings byte by byte; 100,000 of `i % 8` 312 µs against a `Document`, jsonata-js 355 µs on the same machine; `ab` within the floor |
-| 4 | `$match` without five allocations per match (the matched text, the object, its map's table and entries, the groups): 0.70 µs per match, jsonata-js 0.21 to 0.30 | Allocations per match counted before and after; `growth`'s `$match` and `ab`'s `regex over a long text` measured; results unchanged | **done**: the search allocated too; the searches of a text now keep the backtracker's storage, and matches without groups share one empty array: 6.5 → 4 allocations a match, `$match` −24%, `regex over a long text` −36%; the object's four left |
-| 5 | The regex flags `u` and `v`, an extension: `\p{L}`, `\p{Script=…}` and the other Unicode escapes, for text in any script, and with `v` set operations on classes; `\w` stays ASCII, as in JavaScript | The lexer, the VS Code grammar and the property tests take `u` and `v`, and reject them together or a flag twice, as JavaScript does; `compatibility.md` records them; `regex.md` gains a section on Unicode text, its examples in several scripts | **done**: `regex.md`'s "Unicode text" in Latin, Greek, Cyrillic and Japanese; its emoji example found a `jlens-regress` bug, fixed: `\p{RGI_Emoji}` outside a class matched `👍` of `👍🏽` alone |
-| 6 | The tables measured again, unattended, after the dependencies are brought up to date: jlens and the control columns; other engines only where their version changed | `ab` against 0.27.0 in every mode, Python and Java; the performance page's tables and version header updated; each case within the floor or its cause recorded | **done**: every competitor at its 0.27.0 version, so jlens and the controls alone; `regex over a long text` −36% natively, −18% in Python and Java, −24 to −29% in WebAssembly; the rest within the floor, but `path` under Linux, +3.5%, which the commits move up and down: layout |
-| 7 | Release 0.28.0 | The release checklist; the channels checked | **prepared**, not yet tagged: the changelog's 0.28.0 section and summary, the release notes, the [roadmap history](roadmap-history.md#028); `cargo xtask differential`, 20,000 cases at seed 1793935508009447700: nothing differs; `cargo package`, `wasm-test --require-browser --example`, `npm pack --dry-run`, `cargo fmt`, `cargo clippy` with warnings as errors, `cargo test --workspace`, `gen-docs --check`, `doc-check` (251 examples) and `cargo deny` pass. To do after the tag: the release's channels |
-
 ## In exploration: a regular expression engine of jlens's own
 
 `jlens-regress` is a backtracker. A catastrophic pattern runs within the evaluation's limits
