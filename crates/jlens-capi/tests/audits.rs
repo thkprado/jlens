@@ -207,14 +207,17 @@ fn audit_options_not_in_their_form_fail_with_u2005() {
             "{options}"
         );
     }
-    // An unknown handle comes first.
+    // An unknown handle comes first. The handles are freed ones: a slot comes back with a new
+    // generation, so they stay unknown, where the next handle of a table may be another test's.
     let expression = compiled("1");
     let audit = buffers::insert(b"not JSON".to_vec());
-    let reply = buffers::take(jlens_evaluate_audited(expression, 0, 0, 0, audit + 1)).unwrap();
+    assert_eq!(jlens_buffer_free(audit), 1);
+    let reply = buffers::take(jlens_evaluate_audited(expression, 0, 0, 0, audit)).unwrap();
     let error: Value = serde_json::from_slice(&reply[1..]).unwrap();
     assert_eq!(error["code"], "U2002");
-    assert_eq!(jlens_buffer_free(audit), 1);
-    let reply = buffers::take(jlens_evaluate_audited(expression + 1, 0, 0, 0, 0)).unwrap();
+    let freed = compiled("1");
+    assert_eq!(jlens_expression_free(freed), 1);
+    let reply = buffers::take(jlens_evaluate_audited(freed, 0, 0, 0, 0)).unwrap();
     let error: Value = serde_json::from_slice(&reply[1..]).unwrap();
     assert_eq!(error["code"], "U2002");
     // Input that is not values.
