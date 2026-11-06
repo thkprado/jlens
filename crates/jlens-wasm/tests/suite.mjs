@@ -762,6 +762,38 @@ export const cases = [
     equal(c.range, { start: text.length - 5, end: text.length - 1 }, "literal range");
   }],
 
+  ["open domains: the value request and valueLiteral", (j) => {
+    const service = new j.LanguageService(
+      j.inferSchema([order], { "customer.country": { domain: "countries" } }),
+    );
+    // The request's range is in UTF-16 units, as every range is.
+    let text = "'𝄞' = 'x' or customer.country = 'Br";
+    let c = service.complete(text, text.length);
+    equal(
+      c.valueRequest,
+      { domain: "countries", path: "customer.country", prefix: "Br", range: { start: text.length - 3, end: text.length }, quote: "'" },
+      "request",
+    );
+    equal(c.valueRequest.range, c.range, "same range");
+    text = "customer.country = ";
+    equal(service.complete(text, text.length).valueRequest.quote, '"', "quote outside a literal");
+    equal(service.complete("customer.", 9).valueRequest, undefined, "no request after a dot");
+    // A value outside an open domain is not warned about; hover names the domain.
+    equal(service.diagnostics("customer.country = 'Atlantis'"), [], "no warning");
+    ok(service.hover("customer.country", 12).contents.includes("Domain: `countries`"), "hover");
+    // The values the application fetches are written with the request's quote.
+    equal(j.valueLiteral("Brazil", "'"), "'Brazil'");
+    equal(j.valueLiteral("it's", "'"), '"it\'s"');
+    equal(j.valueLiteral("say \"hi\""), '"say \\"hi\\""');
+    equal(j.valueLiteral(2.5), "2.5");
+    equal(j.valueLiteral(null), "null");
+    throws(() => j.valueLiteral("a", "`"), (e) => ok(e instanceof TypeError, "bad quote"));
+    throws(() => j.valueLiteral(undefined), (e) => ok(e instanceof TypeError, "no JSON form"));
+    // The domain survives the JSON Schema the editor keeps.
+    const schema = j.inferSchema([order], { "customer.country": { domain: "countries" } });
+    equal(schema.properties.customer.properties.country["x-jlens-domain"], "countries", "x-jlens-domain");
+  }],
+
   ["diagnostics, hover and signature help", (j) => {
     const service = new j.LanguageService(j.inferSchema([order]));
     const diagnostics = service.diagnostics("'é' & customer.Login");

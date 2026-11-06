@@ -89,6 +89,11 @@ pub struct Shape {
     /// a guess, so a value outside it is not warned about.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub enumeration_inferred: bool,
+    /// An open domain: the values come from a list only the application can fetch, which this
+    /// identifier names. Completion asks the application for them (see
+    /// [`crate::ValueRequest`]), and a value outside the enumeration is not warned about.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub domain: Option<String>,
     /// A few example values.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub examples: Vec<JsonValue>,
@@ -243,6 +248,9 @@ impl Schema {
                 shape.enumeration = Some(e.clone());
                 shape.enumeration_inferred = false;
             }
+            if let Some(d) = &o.domain {
+                shape.domain = Some(d.clone());
+            }
             if let Some(f) = &o.format {
                 shape.format = Some(f.clone());
             }
@@ -299,6 +307,9 @@ pub struct Override {
     /// The allowed values.
     #[serde(rename = "enum")]
     pub enumeration: Option<Vec<JsonValue>>,
+    /// An open domain, named by an identifier the application understands (see
+    /// [`Shape::domain`]).
+    pub domain: Option<String>,
     /// The string format.
     pub format: Option<String>,
     /// The types, replacing the inferred ones.

@@ -10,6 +10,7 @@
 //! | `x-jlens-presence` | Fraction of objects that have an optional field |
 //! | `x-jlens-hidden` | Hide from completion |
 //! | `x-jlens-enum-inferred` | The `enum` was inferred from samples, so it is not warned about |
+//! | `x-jlens-domain` | An open domain: an identifier the application fetches the values of |
 //! | `x-jlens-samples` | (root) Number of sample documents inferred from |
 
 use serde_json::{Map, Value as JsonValue, json};
@@ -87,6 +88,9 @@ fn export(shape: &Shape) -> JsonValue {
         if shape.enumeration_inferred {
             out.insert("x-jlens-enum-inferred".into(), true.into());
         }
+    }
+    if let Some(d) = &shape.domain {
+        out.insert("x-jlens-domain".into(), d.clone().into());
     }
     if let Some(m) = shape.minimum {
         out.insert("minimum".into(), json_number(m));
@@ -240,6 +244,9 @@ fn import(node: &JsonValue, root: &JsonValue, depth: usize) -> Result<Shape, Str
     if let Some(JsonValue::Array(examples)) = map.get("examples") {
         shape.examples = examples.clone();
     }
+    if let Some(d) = map.get("x-jlens-domain").and_then(JsonValue::as_str) {
+        shape.domain = Some(d.to_owned());
+    }
     if map.get("x-jlens-hidden").and_then(JsonValue::as_bool) == Some(true) {
         shape.hidden = true;
     }
@@ -283,6 +290,7 @@ fn merge(shape: &mut Shape, other: Shape) {
         shape.enumeration = other.enumeration;
         shape.enumeration_inferred = other.enumeration_inferred;
     }
+    shape.domain = shape.domain.take().or(other.domain);
     shape.format = shape.format.take().or(other.format);
     shape.description = shape.description.take().or(other.description);
     shape.label = shape.label.take().or(other.label);
@@ -300,6 +308,7 @@ impl Shape {
             format: self.format.clone(),
             enumeration: self.enumeration.clone(),
             enumeration_inferred: self.enumeration_inferred,
+            domain: self.domain.clone(),
             examples: self.examples.clone(),
             description: self.description.clone(),
             label: self.label.clone(),
@@ -332,6 +341,9 @@ mod tests {
             json!({"id": 3, "kind": "b", "tags": ["y", "y"], "owner": null, "at": "2024-03-01"}),
         ]);
         schema.root.fields["kind"].shape.description = Some("Kind of thing".into());
+        schema.root.fields["owner"].shape.fields["name"]
+            .shape
+            .domain = Some("people".into());
         let doc = schema.to_json_schema();
         assert_eq!(doc["$schema"], DIALECT);
         assert_eq!(doc["required"], json!(["id", "kind", "tags", "at"]));
@@ -341,6 +353,10 @@ mod tests {
         );
         // `kind` was seen as `a` and `b`: its enumeration is a guess, and stays one.
         assert_eq!(doc["properties"]["kind"]["x-jlens-enum-inferred"], true);
+        assert_eq!(
+            doc["properties"]["owner"]["properties"]["name"]["x-jlens-domain"],
+            "people"
+        );
         let back = Schema::from_json_schema(&doc).unwrap();
         assert_eq!(back.root, schema.root.without_state());
         assert!(back.root.fields["kind"].shape.enumeration_inferred);

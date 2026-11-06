@@ -62,6 +62,7 @@ An overrides file maps paths to settings; `[]` steps into array items:
 | `description` | Shown in completion and hover |
 | `label` | A display name, shown in bold |
 | `enum` | The allowed values |
+| `domain` | An open domain: values the application provides (see [Open domains](#open-domains)) |
 | `examples` | Example values |
 | `format` | A format name |
 | `type` | Replaces the inferred types, e.g. `["string", "null"]` |
@@ -168,6 +169,26 @@ quoted and escaped. Inside quotes the whole literal is replaced, and the string 
 quotes when it can (JSONata has no `\'` escape). In an array after `in`, the values already
 listed are left out.
 
+### Open domains
+
+An `enum` is a closed list, written with the schema. Some fields take their values from a list
+only the application can fetch, often a large one, such as customers or products. Such a field
+names its *domain*, an identifier only the application understands: `x-jlens-domain` in the
+JSON Schema, or `domain` in the overrides:
+
+```json
+{ "customer.login": { "domain": "customers" } }
+```
+
+At the positions where values are completed, the completions then carry, beside their items, a
+value request (`Completions::value_request`): the domain, the field's path in the schema
+(`customer.login`; none for a variable), the prefix typed so far, the range a value replaces and
+the quote it is written with. The service stays synchronous: the application fetches the values
+that match the prefix, caches them as it sees fit, and writes each as a JSONata literal with
+`ValueRequest::literal` (`valueLiteral` in the Wasm package). Values the field also declares in an
+`enum` are still completed as items. A value outside an open domain is never warned about, and
+hover names the domain.
+
 Completion works on incomplete expressions too, such as `$count(items[` or
 `items[type = 'x' and `. That is the normal state of an expression while someone types it.
 
@@ -194,8 +215,9 @@ Completion works on incomplete expressions too, such as `$count(items[` or
   the field's declared values, such as `items[type = "aparel"]`: the comparison is always false.
   A string gets the nearest value as a suggestion (`did you mean "apparel"?`). Only an `enum` or
   `const` of the JSON Schema, or an `enum` set in the overrides, counts: one inferred from samples
-  (`x-jlens-enum-inferred`) is a guess, and is never warned about. Values that are not literals,
-  such as `type = color`, are not checked.
+  (`x-jlens-enum-inferred`) is a guess, and is never warned about, and neither is a field with an
+  [open domain](#open-domains). Values that are not literals, such as `type = color`, are not
+  checked.
 
 Missing fields are reported only where the context is fully known. Nothing is reported after a
 user-defined function, an object constructor or `$lookup`, so the warnings do not produce false

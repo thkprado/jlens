@@ -38,6 +38,21 @@ pub fn infer_schema(samples: JsValue, overrides: Option<JsValue>) -> Result<JsVa
     Ok(to_js(&schema.to_json_schema()))
 }
 
+/// `value` as a JSONata literal, to insert in place of a value request's `range`: a string in
+/// `quote` (`"` by default, or `'`) when it can be, other values as JSON. Throws a `TypeError`
+/// for another quote, or a value JSON cannot hold.
+#[wasm_bindgen(js_name = valueLiteral, skip_typescript)]
+pub fn value_literal(value: JsValue, quote: Option<String>) -> Result<String, JsValue> {
+    crate::convert::install_hooks();
+    let quote = match quote.as_deref() {
+        None | Some("\"") => '"',
+        Some("'") => '\'',
+        Some(_) => return Err(type_error("quote must be \" or '")),
+    };
+    let value = from_js(&value, "value")?.ok_or_else(|| type_error("value has no JSON form"))?;
+    Ok(jlens_schema::value_literal(&value, quote))
+}
+
 /// The built-in functions: name, signature, parameters, category and summary.
 #[wasm_bindgen(unchecked_return_type = "FunctionInfo[]")]
 pub fn functions() -> JsValue {

@@ -43,6 +43,6 @@ mod typing;
 
 pub use service::{
     CompletionItem, CompletionKind, Completions, FunctionDecl, Hover, LanguageService,
-    SignatureHelp,
+    SignatureHelp, ValueRequest, value_literal,
 };
 pub use shape::{Field, JsonType, Override, Schema, Shape};

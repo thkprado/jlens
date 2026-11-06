@@ -298,6 +298,11 @@ export interface SchemaOverride {
   /** Hide from completion. */
   hidden?: boolean;
   enum?: unknown[];
+  /**
+   * An open domain: an identifier the application fetches the values of (in JSON Schema,
+   * `x-jlens-domain`). Completion returns a `valueRequest` for it.
+   */
+  domain?: string;
   format?: string;
   type?: JsonType[];
   examples?: unknown[];
@@ -322,6 +327,25 @@ export interface Completions {
   range: Span;
   /** Best first. */
   items: CompletionItem[];
+  /**
+   * Present where a value of an open domain (`x-jlens-domain`) completes the expression: the
+   * application fetches the domain's values and offers them beside `items`.
+   */
+  valueRequest?: ValueRequest;
+}
+
+/** A request for the values of an open domain, at the right of `=`, `!=` or `in`. */
+export interface ValueRequest {
+  /** The domain's identifier, as the schema declares it. */
+  domain: string;
+  /** The left-hand side's path in the schema, such as `items[].type`; absent for a variable. */
+  path?: string;
+  /** What is typed so far: the word, or a string literal's text up to the cursor (as written). */
+  prefix: string;
+  /** The range a value replaces: the same as `Completions.range`. */
+  range: Span;
+  /** The quote to write a string value with (pass it to `valueLiteral`). */
+  quote: '"' | "'";
 }
 
 export interface Hover {
@@ -492,3 +516,10 @@ export function inferSchema(
   samples: unknown[],
   overrides?: Record<string, SchemaOverride>,
 ): JsonSchema;
+
+/**
+ * `value` as a JSONata literal, to insert in place of a `ValueRequest`'s range: a string in
+ * `quote` when it can be, other values as JSON. Throws a `TypeError` for another quote, or a value
+ * without a JSON form (`undefined`, a function).
+ */
+export function valueLiteral(value: unknown, quote?: '"' | "'"): string;

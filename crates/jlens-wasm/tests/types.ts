@@ -14,6 +14,7 @@ import init, {
   type JsonSchema,
   type Read,
   type Reads,
+  type ValueRequest,
   Document,
   Expression,
   LanguageService,
@@ -21,6 +22,7 @@ import init, {
   inferSchema,
   parseRecover,
   unionReads,
+  valueLiteral,
   version,
 } from "../pkg/jlens.js";
 // The classic script with the .wasm embedded, which declares the global `jlens`.
@@ -84,10 +86,13 @@ export async function check(): Promise<void> {
   const completions: Completions = service.complete("a", 1);
   const kinds = completions.items.map((i) => i.kind);
   const value: CompletionKind = "value";
+  const request: ValueRequest | undefined = completions.valueRequest;
+  const literal: string = valueLiteral("x", request?.quote ?? "'");
+  const domain: JsonSchema = inferSchema([{ a: "x" }], { a: { domain: "codes" } });
   const hover = service.hover("a", 0)?.contents;
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();
-  console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, every, fields, text, failed, start, type, ast.id, d, kinds, value, hover, help, catalog);
+  console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, every, fields, text, failed, start, type, ast.id, d, kinds, value, request, literal, domain, hover, help, catalog);
 }
 
 // The global set by jlens.global.js: the module's exports, with `init` for its default export.

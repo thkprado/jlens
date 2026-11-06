@@ -3,7 +3,8 @@
 A JSONata editor for the browser, built on the jlens WebAssembly package and CodeMirror 6.
 It needs no build step, and runs online at <https://thkprado.github.io/jlens/editor/>. It shows:
 - completion of fields, variables and functions, with the fields taken from a schema inferred
-  from the input document;
+  from the input document, and of values: those of an enumeration, and those of an open domain,
+  which `domains.js` answers after a short delay, as a server would;
 - diagnostics: syntax errors, and fields that are not in the schema (with "did you mean");
 - hover and signature help;
 - live evaluation, with the explanation and the audit tree of every result (click a node to

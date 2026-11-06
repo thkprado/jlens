@@ -15,6 +15,7 @@ import { EditorView, highlightActiveLine, keymap, lineNumbers } from "@codemirro
 
 import init, { LanguageService, inferSchema, version } from "jlens-wasm";
 import { renderAudit, renderExplanation, spansOf } from "./audit-view.js";
+import { domainValues } from "./domains.js";
 import { hostDeclarations } from "./host-functions.js";
 import { jlensExtensions } from "./jlens-codemirror.js";
 import { samples } from "./samples.js";
@@ -179,7 +180,7 @@ const editor = new EditorView({
     editorTheme,
     colorScheme.of(schemeFlag(darkScheme.matches)),
     EditorView.lineWrapping,
-    jlensExtensions(() => service, $("signature")),
+    jlensExtensions(() => service, $("signature"), { values: domainValues }),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) schedule();
     }),

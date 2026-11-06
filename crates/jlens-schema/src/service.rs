@@ -58,11 +58,64 @@ pub struct CompletionItem {
 
 /// Completion results.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Completions {
     /// The byte range the chosen item replaces (the word under the cursor).
     pub range: Span,
     /// The suggestions, best first.
     pub items: Vec<CompletionItem>,
+    /// Where the values of an open domain ([`Shape::domain`]) would complete the expression:
+    /// the application fetches them and offers them beside `items`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_request: Option<ValueRequest>,
+}
+
+/// A request for the values of an open domain, at a position where [`CompletionKind::Value`]
+/// items are completed: the right of `=`, `!=` or `in` whose left-hand side has a
+/// [`Shape::domain`]. The service stays synchronous; the application fetches the values
+/// (filtered by `prefix`, cached as it sees fit) and writes each with [`ValueRequest::literal`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValueRequest {
+    /// The domain's identifier, as the schema declares it.
+    pub domain: String,
+    /// The path of the left-hand side in the schema (as [`Schema::shape_at`] reads it, such as
+    /// `items[].type`), or `None` when it is not a field of the schema (a variable's shape).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// What is typed so far: the word under the cursor, or, inside a string literal, its text
+    /// between the opening quote and the cursor (as written, escapes included).
+    pub prefix: String,
+    /// The byte range a value replaces: the same as [`Completions::range`].
+    pub range: Span,
+    /// The quote a string value is written with: that of the literal being edited, or `"`.
+    pub quote: char,
+}
+
+impl ValueRequest {
+    /// `value` as a JSONata literal, to insert in place of `range`: a string in `quote` when it
+    /// can be (JSONata has no `\'` escape, so a string holding `'` keeps double quotes), other
+    /// values as JSON.
+    ///
+    /// ```
+    /// use jlens_schema::{LanguageService, Schema};
+    /// use serde_json::json;
+    ///
+    /// let schema = Schema::from_json_schema(&json!({
+    ///     "type": "object",
+    ///     "properties": {"country": {"type": "string", "x-jlens-domain": "countries"}}
+    /// }))
+    /// .unwrap();
+    /// let service = LanguageService::new(Some(schema));
+    /// let request = service.complete("country = 'Br", 13).value_request.unwrap();
+    /// assert_eq!(request.domain, "countries");
+    /// assert_eq!(request.path.as_deref(), Some("country"));
+    /// assert_eq!(request.prefix, "Br");
+    /// assert_eq!(request.literal(&json!("Brazil")), "'Brazil'");
+    /// ```
+    pub fn literal(&self, value: &JsonValue) -> String {
+        value_literal(value, self.quote)
+    }
 }
 
 /// Hover information.
@@ -260,6 +313,9 @@ fn shape_docs(shape: &Shape, field: Option<&Field>) -> Option<String> {
     if let Some(format) = &shape.format {
         parts.push(format!("Format: `{format}`"));
     }
+    if let Some(domain) = &shape.domain {
+        parts.push(format!("Domain: `{domain}`"));
+    }
     if let Some(values) = &shape.enumeration {
         let v: Vec<String> = values.iter().map(|v| format!("`{v}`")).collect();
         parts.push(format!("Values: {}", v.join(", ")));
@@ -282,6 +338,8 @@ struct Probe<'s> {
     values: Vec<&'s JsonValue>,
     /// The literals already in that array.
     listed: Vec<JsonValue>,
+    /// The shape of that left-hand side that has an open domain.
+    domain: Option<&'s Shape>,
 }
 
 /// Whether `node` is the placeholder, as a name or a path of one step.
@@ -318,6 +376,38 @@ fn enumeration<'s>(ty: &Ty<'s>) -> Vec<&'s JsonValue> {
     out
 }
 
+/// The first shape of a type, or of its arrays' items, with an open domain.
+fn domain_shape<'s>(ty: &Ty<'s>) -> Option<&'s Shape> {
+    ty.shapes
+        .iter()
+        .copied()
+        .chain(ty.elements().shapes)
+        .find(|shape| shape.domain.is_some())
+}
+
+/// The path of `target`, found by identity, in the tree of shapes under `root`: `a.b[].c`.
+fn shape_path(root: &Shape, target: &Shape) -> Option<String> {
+    // Iterative, so that a deep schema cannot overflow the stack.
+    let mut pending = vec![(root, String::new())];
+    while let Some((shape, path)) = pending.pop() {
+        if std::ptr::eq(shape, target) {
+            return Some(path);
+        }
+        if let Some(items) = &shape.items {
+            pending.push((items, format!("{path}[]")));
+        }
+        for (name, field) in shape.fields.iter().rev() {
+            let path = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{path}.{name}")
+            };
+            pending.push((&field.shape, path));
+        }
+    }
+    None
+}
+
 /// Whether two JSON values are equal as JSONata compares them: numbers by value, so that `2`
 /// and `2.0` are the same.
 fn same_value(a: &JsonValue, b: &JsonValue) -> bool {
@@ -330,9 +420,12 @@ fn same_value(a: &JsonValue, b: &JsonValue) -> bool {
 /// The values a type is declared to take: every shape it may have declares an enumeration
 /// (directly, or through the items of its arrays), none of them inferred from samples. `None`
 /// when any value is possible, or when an enumeration holds an array or an object, which a
-/// literal is not compared with here.
+/// literal is not compared with here. An open domain takes values no list holds: `None` too.
 fn declared_values<'s>(ty: &Ty<'s>) -> Option<Vec<&'s JsonValue>> {
     fn collect<'s>(shape: &'s Shape, out: &mut Vec<&'s JsonValue>, depth: usize) -> Option<()> {
+        if shape.domain.is_some() {
+            return None;
+        }
         match &shape.enumeration {
             Some(values) if !shape.enumeration_inferred => {
                 for value in values {
@@ -416,8 +509,18 @@ fn value_diagnostics(
     }
 }
 
-/// A value as a JSONata literal; strings in `quote` when they can be.
-fn value_literal(value: &JsonValue, quote: char) -> String {
+/// `value` as a JSONata literal: a string in `quote` (`'` or `"`) when it can be (JSONata has no
+/// `\'` escape, so a string holding `'` keeps double quotes), other values as JSON. What
+/// [`ValueRequest::literal`] writes.
+///
+/// ```
+/// use serde_json::json;
+///
+/// assert_eq!(jlens_schema::value_literal(&json!("a\"b"), '\''), r#"'a\"b'"#);
+/// assert_eq!(jlens_schema::value_literal(&json!("it's"), '\''), r#""it's""#);
+/// assert_eq!(jlens_schema::value_literal(&json!([1, null]), '"'), "[1,null]");
+/// ```
+pub fn value_literal(value: &JsonValue, quote: char) -> String {
     let json = value.to_string();
     match value {
         // JSONata has no `\'` escape: a string with `'` keeps the double quotes.
@@ -552,6 +655,7 @@ impl LanguageService {
         let empty = |range| Completions {
             range,
             items: Vec::new(),
+            value_request: None,
         };
         match lexical_state(text, offset) {
             Lexical::Comment => return empty(Span::new(offset, offset)),
@@ -567,11 +671,17 @@ impl LanguageService {
                     '"'
                 };
                 let prefix = &text[start + 1..offset];
-                let strings: Vec<&serde_json::Value> =
-                    probe.values.into_iter().filter(|v| v.is_string()).collect();
+                let strings: Vec<&serde_json::Value> = probe
+                    .values
+                    .iter()
+                    .copied()
+                    .filter(|v| v.is_string())
+                    .collect();
+                let range = Span::new(start, end);
                 return Completions {
-                    range: Span::new(start, end),
+                    range,
                     items: value_items(&strings, &probe.listed, prefix, quote),
+                    value_request: self.value_request(&probe, prefix, range, quote),
                 };
             }
             Lexical::Backquote(start) => {
@@ -591,6 +701,7 @@ impl LanguageService {
                 return Completions {
                     range: Span::new(start, end),
                     items,
+                    value_request: None,
                 };
             }
             Lexical::Code => {}
@@ -646,7 +757,11 @@ impl LanguageService {
                     insert_text: (*op).into(),
                 })
                 .collect();
-            return Completions { range, items };
+            return Completions {
+                range,
+                items,
+                value_request: None,
+            };
         }
 
         let variable_mode = prefix.starts_with('$');
@@ -659,8 +774,10 @@ impl LanguageService {
         let probe = self.probe(&modified, variable_mode);
 
         let mut items = Vec::new();
+        let mut value_request = None;
         if !variable_mode && !after_dot {
             items.extend(value_items(&probe.values, &probe.listed, prefix, '"'));
+            value_request = self.value_request(&probe, prefix, range, '"');
         }
         if variable_mode {
             items.extend(self.variable_items(&probe.scope, &prefix[1..]));
@@ -683,7 +800,32 @@ impl LanguageService {
                 }
             }
         }
-        Completions { range, items }
+        Completions {
+            range,
+            items,
+            value_request,
+        }
+    }
+
+    /// The request for the values of the open domain the probe found, if any.
+    fn value_request(
+        &self,
+        probe: &Probe<'_>,
+        prefix: &str,
+        range: Span,
+        quote: char,
+    ) -> Option<ValueRequest> {
+        let shape = probe.domain?;
+        Some(ValueRequest {
+            domain: shape.domain.clone()?,
+            path: self
+                .schema
+                .as_ref()
+                .and_then(|schema| shape_path(&schema.root, shape)),
+            prefix: prefix.to_owned(),
+            range,
+            quote,
+        })
     }
 
     /// Parses `modified` (which contains the placeholder) and finds the placeholder's context.
@@ -714,6 +856,7 @@ impl LanguageService {
                 if let Some(listed) = listed {
                     probe.values = enumeration(lhs);
                     probe.listed = listed;
+                    probe.domain = domain_shape(lhs);
                 }
             }
             _ => {}

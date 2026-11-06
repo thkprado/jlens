@@ -9,7 +9,7 @@ const TOKENS: &[&str] = &[
     "customer", "login", "items", "type", "unitPrice", "`odd name`", "$", "$$", "$x", "$limit",
     "1", "'s'", "\"t\"", ".", "[", "]", "(", ")", "{", "}", ":", ",", ";", "=", "!=", "and", "in", "?",
     ":=", "~>", "&", "**", "^(", "@$v", "#$i", "function($v){", "$sum(", "$substring(",
-    "$map(", "$rate(", "login =", "$summ(", "$bad(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
+    "$map(", "$rate(", "login =", "name in", "$summ(", "$bad(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
 ];
 
 fn text() -> impl Strategy<Value = String> {
@@ -28,12 +28,13 @@ proptest! {
             "customer": {"login": "1", "name": "X"},
             "items": [{"type": "a", "unitPrice": 1.5, "odd name": true}]
         })]);
-        // An enumeration with values that need escaping, or cannot take single quotes, and one
-        // of scalars, whose values outside it are warned about.
+        // An enumeration with values that need escaping, or cannot take single quotes, one of
+        // scalars, whose values outside it are warned about, and an open domain.
         let overrides: std::collections::BTreeMap<String, Override> = serde_json::from_value(
             json!({
                 "items[].type": {"enum": ["a", "it's", "say \"é\"", 1, null, {"k": [1]}]},
-                "login": {"enum": ["s", "é𝄞", 1, true]}
+                "login": {"enum": ["s", "é𝄞", 1, true]},
+                "customer.name": {"domain": "people"}
             }),
         )
         .unwrap();
@@ -65,6 +66,20 @@ proptest! {
             for item in completions.items.iter().filter(|i| i.kind == CompletionKind::Value) {
                 // A value is inserted as a literal that parses.
                 prop_assert!(jlens_core::parse(&item.insert_text).is_ok(), "{item:?}");
+            }
+            if let Some(request) = &completions.value_request {
+                // The request replaces what completion replaces, its prefix ends at the cursor,
+                // and the values it writes are literals that parse.
+                prop_assert_eq!(request.range, completions.range);
+                let mut cursor = offset.min(text.len());
+                while !text.is_char_boundary(cursor) {
+                    cursor -= 1;
+                }
+                prop_assert!(text[..cursor].ends_with(&request.prefix), "{request:?}");
+                for value in [json!("it's"), json!("say \"é𝄞\""), json!(1.5), json!(null)] {
+                    let literal = request.literal(&value);
+                    prop_assert!(jlens_core::parse(&literal).is_ok(), "{literal}");
+                }
             }
             if let Some(hover) = service.hover(&text, offset) {
                 prop_assert!(hover.range.end <= text.len());

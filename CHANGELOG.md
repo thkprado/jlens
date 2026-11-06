@@ -19,6 +19,13 @@ All notable changes are recorded here. The format follows
   nearest string value as a suggestion. `Shape::enumeration_inferred`, written to JSON Schema as
   `x-jlens-enum-inferred`, marks an enumeration inferred from samples, which is never warned
   about.
+- Open domains: a field whose values only the application can fetch names its domain, with
+  `x-jlens-domain` in JSON Schema or `domain` in the overrides (`Shape::domain`). Where values are
+  completed, `Completions::value_request` (Wasm: `valueRequest`) gives the domain, the field's
+  path, the prefix typed, the range to replace and the quote; the application fetches the values
+  and writes them with `ValueRequest::literal` or `jlens_schema::value_literal` (Wasm:
+  `valueLiteral`). Such a field is never warned about by `W0206`, and hover names its domain. The
+  web editor's CodeMirror module takes an asynchronous source for them.
 
 ### Changed
 

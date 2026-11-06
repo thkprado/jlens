@@ -106,7 +106,12 @@ machinery as `$map(items, function($i){ $i.`.
   enumeration inferred from samples (in JSON Schema, `x-jlens-enum-inferred`), which never warns,
   and so does a type that may come from something unknown, or an enumeration that holds an array
   or an object. A literal with a predicate, `"a"[false]`, is not checked. The nearest string
-  value, by the same Levenshtein distance, is suggested for a string.
+  value, by the same Levenshtein distance, is suggested for a string. A shape with an open domain
+  (`Shape::domain`, `x-jlens-domain`) never warns either.
+- **Value requests**: where values are completed, the first shape of the left-hand side (or of
+  its arrays' items) with a domain becomes a `ValueRequest` beside the items. Its path is found
+  by identity in the schema's tree of shapes, iteratively; a variable's shape has none. The
+  service never fetches anything: the request is all it returns.
 - **Hover** keeps the innermost field or variable event whose span contains the offset, and
   renders its type and documentation as Markdown.
 - **Signature help** scans backwards from the cursor for the unmatched `(` of a call, ignoring

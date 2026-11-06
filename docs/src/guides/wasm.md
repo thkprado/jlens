@@ -428,12 +428,31 @@ not plain identifiers come quoted with backquotes. `kind` is `field`, `variable`
 quotes included, and only values are suggested; open the list after `=` and on a quote to
 offer them while typing. `documentation` and hover `contents` are Markdown.
 
+A field with an [open domain](schema.md#open-domains) (`x-jlens-domain`, or `domain` in the
+overrides) takes values only the application can fetch. Where its values are completed,
+`complete` also returns a `valueRequest`; fetch the values, then write each with `valueLiteral`:
+
+```js
+const schema = inferSchema([order], { "customer.login": { domain: "customers" } });
+const service = new LanguageService(schema);
+const text = "customer.login = 'al";
+const { range, items, valueRequest } = service.complete(text, text.length);
+// valueRequest: { domain: "customers", path: "customer.login", prefix: "al",
+//                 range: {start: 17, end: 20}, quote: "'" }
+const logins = await fetchCustomers(valueRequest.prefix);   // the application's own source
+const options = logins.map((login) => valueLiteral(login, valueRequest.quote)); // "'alice'"
+```
+
+`range` is the same as the completions' range, in UTF-16 units. `valueLiteral(value, quote?)`
+writes a string in `quote` (`"` by default) when it can, and other values as JSON.
+
 #### CodeMirror 6
 
 CodeMirror positions are UTF-16 offsets, like jlens offsets, so no conversion is needed.
 `examples/web-editor/jlens-codemirror.js` in the repository
 is a self-contained module to copy. It provides highlighting, completion, linting, hover and
-signature help. The core of it is:
+signature help, and takes an asynchronous source for the values of open domains
+(`jlensExtensions(getService, signatureElement, { values })`). The core of it is:
 
 ```js
 autocompletion({
@@ -538,8 +557,8 @@ promptly in loops.
 ## TypeScript
 
 The package ships `jlens.d.ts`. Every argument and result is typed: `AuditResult`, `AuditTree`,
-`AuditNode`, `Explanation`, `Diagnostic`, `Completions`, `CompletionItem`, `Hover`,
-`SignatureHelp`, `FunctionInfo`, `JsonSchema`, `SchemaOverride`, `EvaluateOptions`,
+`AuditNode`, `Explanation`, `Diagnostic`, `Completions`, `CompletionItem`, `ValueRequest`,
+`Hover`, `SignatureHelp`, `FunctionInfo`, `JsonSchema`, `SchemaOverride`, `EvaluateOptions`,
 `AuditOptions` and `JlensError`. Results of `evaluate` are `unknown`; narrow them as usual.
 
 ## The web editor example
@@ -556,7 +575,9 @@ complete page with no build step, published with this book as the
 - ready-made examples, including the samples of [try.jsonata.org](https://try.jsonata.org);
 - a host function, `$try` (`host-functions.js`), that calls the function it receives, with an
   example that uses it: the worker registers it on each expression, and the page declares it to
-  the language service.
+  the language service;
+- a stand-in asynchronous source for open domains (`domains.js`), which answers after a short
+  delay, as a server would.
 
 ```sh
 cargo xtask wasm

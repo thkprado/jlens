@@ -8,6 +8,7 @@ import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/
 import { linter } from "@codemirror/lint";
 import { EditorView, hoverTooltip } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { valueLiteral } from "jlens-wasm";
 
 /** A small tokenizer for highlighting JSONata (the language service does the real parsing). */
 export const jsonata = StreamLanguage.define({
@@ -97,28 +98,46 @@ export function markdown(text) {
   return div;
 }
 
-function complete(getService) {
+function complete(getService, values) {
   return (context) => {
     const text = context.state.doc.toString();
     const before = text.slice(0, context.pos);
-    const { range, items } = getService().complete(text, context.pos);
+    const { range, items, valueRequest } = getService().complete(text, context.pos);
     // While typing, only open the list on a word or a string literal (whose values the range
     // covers), or right after a step, filter, call or comparison.
     const triggered = range.start < range.end || /[.[({$,=]\s*$/.test(before);
-    if (!items.length || (!context.explicit && !triggered)) return null;
-    return {
-      from: range.start,
-      to: range.end,
-      filter: false,
-      options: items.map((item, rank) => ({
-        label: item.label,
-        type: completionTypes[item.kind],
-        detail: item.detail,
-        info: item.documentation ? () => markdown(item.documentation) : undefined,
-        apply: item.insertText,
-        boost: -rank,
-      })),
+    if (!context.explicit && !triggered) return null;
+    const options = items.map((item) => ({
+      label: item.label,
+      type: completionTypes[item.kind],
+      detail: item.detail,
+      info: item.documentation ? () => markdown(item.documentation) : undefined,
+      apply: item.insertText,
+    }));
+    const result = () => {
+      if (!options.length) return null;
+      options.forEach((option, rank) => (option.boost = -rank));
+      return { from: range.start, to: range.end, filter: false, options };
     };
+    if (!valueRequest || !values) return result();
+    // An open domain: the application fetches its values; they come first, as the declared
+    // values do, and a value both offer is listed once.
+    return Promise.resolve()
+      .then(() => values(valueRequest))
+      .catch(() => [])
+      .then((fetched) => {
+        if (context.aborted) return null;
+        const listed = new Set(options.map((option) => option.apply));
+        const domain = [];
+        for (const value of fetched ?? []) {
+          const literal = valueLiteral(value, valueRequest.quote);
+          if (listed.has(literal)) continue;
+          listed.add(literal);
+          domain.push({ label: literal, type: "enum", detail: valueRequest.domain, apply: literal });
+        }
+        options.unshift(...domain);
+        return result();
+      });
   };
 }
 
@@ -172,13 +191,15 @@ function signatureHelp(getService, element) {
 /**
  * The editor extensions for JSONata. `getService` returns the current jlens `LanguageService`
  * (it can change, for example when the input schema changes); `signatureElement` receives the
- * signature help.
+ * signature help. `options.values(request)` fetches the values of an open domain (a field with
+ * `x-jlens-domain`): it receives the language service's `ValueRequest` and returns, or resolves
+ * to, the values that match its `prefix`; they are written as literals with `valueLiteral`.
  */
-export function jlensExtensions(getService, signatureElement) {
+export function jlensExtensions(getService, signatureElement, options = {}) {
   return [
     jsonata,
     syntaxHighlighting(highlightStyle),
-    autocompletion({ override: [complete(getService)], icons: true }),
+    autocompletion({ override: [complete(getService, options.values)], icons: true }),
     linter(diagnostics(getService), { delay: 150 }),
     hover(getService),
     signatureHelp(getService, signatureElement),

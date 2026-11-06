@@ -440,6 +440,149 @@ fn diagnostics_report_values_outside_a_declared_enumeration() {
 }
 
 #[test]
+fn open_domains_request_their_values_from_the_application() {
+    let schema = Schema::from_json_schema(&json!({
+        "type": "object",
+        "properties": {
+            "customer": {"type": "object", "properties": {
+                "country": {"type": "string", "x-jlens-domain": "countries", "enum": ["BR"]}
+            }},
+            "orders": {"type": "array", "items": {"type": "object", "properties": {
+                "sku": {"type": "string", "x-jlens-domain": "products"}
+            }}},
+            "tags": {"type": "array", "items": {"type": "string", "x-jlens-domain": "tags"}},
+            "kind": {"type": "string"}
+        }
+    }))
+    .unwrap();
+    let home = schema.shape_at("customer.country").unwrap().clone();
+    let svc = LanguageService::new(Some(schema)).with_variable("home", Some(home));
+    // (expression, domain, path, prefix, replaced range, quote)
+    type Case<'a> = (
+        &'a str,
+        &'a str,
+        Option<&'a str>,
+        &'a str,
+        (usize, usize),
+        char,
+    );
+    let cases: &[Case] = &[
+        (
+            "customer.country = |",
+            "countries",
+            Some("customer.country"),
+            "",
+            (19, 19),
+            '"',
+        ),
+        (
+            "customer.country != Bra|zil",
+            "countries",
+            Some("customer.country"),
+            "Bra",
+            (20, 26),
+            '"',
+        ),
+        (
+            r#"orders[sku = "ab|"]"#,
+            "products",
+            Some("orders[].sku"),
+            "ab",
+            (13, 17),
+            '"',
+        ),
+        (
+            "orders[sku in ['x', 'y|",
+            "products",
+            Some("orders[].sku"),
+            "y",
+            (20, 22),
+            '\'',
+        ),
+        (
+            "orders[sku in [|]]",
+            "products",
+            Some("orders[].sku"),
+            "",
+            (15, 15),
+            '"',
+        ),
+        ("tags = |", "tags", Some("tags[]"), "", (7, 7), '"'),
+        // A variable's shape is not a field of the schema: no path.
+        ("$home = |", "countries", None, "", (8, 8), '"'),
+    ];
+    for &(marked, domain, path, prefix, (start, end), quote) in cases {
+        let (text, offset) = cursor(marked);
+        let completions = svc.complete(&text, offset);
+        let request = completions
+            .value_request
+            .unwrap_or_else(|| panic!("no value request for {marked}"));
+        assert_eq!(request.domain, domain, "{marked}");
+        assert_eq!(request.path.as_deref(), path, "{marked}");
+        assert_eq!(request.prefix, prefix, "{marked}");
+        assert_eq!(
+            (request.range.start, request.range.end),
+            (start, end),
+            "{marked}"
+        );
+        assert_eq!(request.range, completions.range, "{marked}");
+        assert_eq!(request.quote, quote, "{marked}");
+    }
+    // The declared values are still offered beside the request.
+    assert_eq!(
+        labels(&svc, "customer.country = |", Some(CompletionKind::Value)),
+        [r#""BR""#]
+    );
+    // Not where a value is not expected, nor for a field without a domain.
+    for marked in [
+        "customer.|",
+        "customer = |",
+        "kind = |",
+        "customer.country & |",
+        "$|",
+        "customer.country = 'BR' and |",
+    ] {
+        let (text, offset) = cursor(marked);
+        assert!(
+            svc.complete(&text, offset).value_request.is_none(),
+            "{marked}"
+        );
+    }
+    // A value outside an open domain is never warned about, even with an `enum`.
+    assert_diagnostics(
+        &svc,
+        &[("customer.country = 'XX'", &[]), ("'z' in tags", &[])],
+    );
+    // Hover names the domain.
+    let hover = svc.hover("customer.country", 12).unwrap();
+    assert!(
+        hover.contents.contains("Domain: `countries`"),
+        "{}",
+        hover.contents
+    );
+
+    // An override declares a domain on an inferred schema, and literals keep the request's quote.
+    let mut schema = Schema::infer(&[json!({"status": "open"}), json!({"status": "closed"})]);
+    let overrides: std::collections::BTreeMap<String, Override> =
+        serde_json::from_value(json!({"status": {"domain": "statuses"}})).unwrap();
+    assert!(schema.apply_overrides(&overrides).is_empty());
+    let svc = LanguageService::new(Some(schema));
+    let request = svc.complete("status = 'op", 12).value_request.unwrap();
+    assert_eq!(
+        (request.domain.as_str(), request.path.as_deref()),
+        ("statuses", Some("status"))
+    );
+    assert_eq!(request.literal(&json!("open")), "'open'");
+    assert_eq!(request.literal(&json!("it's")), r#""it's""#);
+    assert_eq!(request.literal(&json!(2)), "2");
+    let json = serde_json::to_value(svc.complete("status = ", 9)).unwrap();
+    assert_eq!(
+        json["valueRequest"],
+        json!({"domain": "statuses", "path": "status", "prefix": "", "range": {"start": 9, "end": 9}, "quote": "\""})
+    );
+}
+
+#[test]
 fn diagnostics_report_undeclared_variables_when_variables_are_declared() {
     use jlens_schema::FunctionDecl;
     let svc = LanguageService::new(None)
