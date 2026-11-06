@@ -32,7 +32,7 @@ below stays deferred.
 
 | # | Item | Done when | Status |
 |---|---|---|---|
-| 1 | Upstream at the plan's start: `regress` after `95c0404`, stacker#155 and #156, jsonata-js's commits after `c5be116` and its version on npm | Each `regress` commit worth porting ported one at a time, or none; each jsonata-js fix checked against jlens; the watch list updated | |
+| 1 | Upstream at the plan's start: `regress` after `95c0404`, stacker#155 and #156, jsonata-js's commits after `c5be116` and its version on npm | Each `regress` commit worth porting ported one at a time, or none; each jsonata-js fix checked against jlens; the watch list updated | **done**: no `regress` commit after `95c0404`, on `master` or its other branches; stacker#155 and #156 unchanged; no jsonata-js commit after `c5be116`, npm still 2.2.2 |
 | 2 | The language service completes the values of an `enum` or `const`, below | Tests for each position below in `jlens-schema` and the language server; the web editor opens the list after `=` and `"`; a robustness case; the book's completion text updated | |
 | 3 | A warning for a value outside a declared `enum` or `const`, below; after #2 | `W0206` in the message catalog, with a suggestion; tests in `jlens-schema` for `=`, `!=` and `in`, for a declared and an inferred enumeration, and for a value that is not a literal; a robustness case; `gen-docs --check` and the book's warnings text updated | |
 | 4 | Open domains: values the application provides, below; after #2 | `x-jlens-domain` read and written by `jlens-schema`, and `domain` in the schema overrides; tests for the value request in `jlens-schema` and the Wasm suite; the web editor completes from an asynchronous source; the book's completion and Wasm guides updated | |
