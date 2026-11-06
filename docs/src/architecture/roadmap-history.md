@@ -252,3 +252,17 @@ WebAssembly package as one classic script, `jlens.global.js`; three new engines 
 comparisons. How it was measured is in
 [`docs/notes/perf-0.27.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.27.md).
 ([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0270))
+
+## 0.28
+
+*What 0.27 left in `$distinct` and `$match`, and the regex flags `u` and `v`.* `$distinct`
+follows the first fields of its items into the levels below them when the items share a field or
+are arrays, 25 records of 100 KB that differ there 15 µs against a `Document` where they took
+12 ms, and compares numbers and short strings inline, 100,000 items of eight values 312 µs where
+they took 2.2 ms; the searches of a text keep the backtracker's storage, and matches without
+groups share one empty array, `$match` 6.5 → 4 allocations a match and `regex over a long text`
+36% faster. The regex flags `u` and `v`, an extension that jsonata-js rejects, bring the Unicode
+properties and the set operations on classes; their emoji example found a bug in
+`jlens-regress`, fixed. How it was measured is in
+[`docs/notes/perf-0.28.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.28.md).
+([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0280))

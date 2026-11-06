@@ -6,6 +6,16 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.28.0]
+
+What 0.27 left in `$distinct` and `$match`, and Unicode in regular expressions. `$distinct`
+follows the fields its items share into the levels below them, 800 times faster on records that
+differ there, and compares numbers and short strings inline, seven times faster on many items of
+few values; the searches of a text keep their storage, so `$match` and the other regex functions
+take 20 to 36% less on long texts. The regex flags `u` and `v`, an extension, give patterns the
+Unicode properties, such as `\p{L}` and `\p{Script=Greek}`, and with `v` the set operations on
+classes.
+
 ### Added
 
 - The regex flags `u` and `v`, an extension that jsonata-js rejects: `\p{L}`, `\p{Script=Greek}`
@@ -1260,7 +1270,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/thkprado/jlens/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/thkprado/jlens/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/thkprado/jlens/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/thkprado/jlens/compare/v0.24.1...v0.25.0
