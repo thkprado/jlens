@@ -14,6 +14,18 @@ All notable changes are recorded here. The format follows
   literal is replaced. The language server reports them as enum members and completes on a
   quote; the Wasm API's `CompletionKind` gains `"value"`, and the web editor opens the list after
   `=` and on a quote.
+- `W0206`: the language service, `jlens check` and the editors warn about a literal compared
+  with `=`, `!=` or `in` that is outside the left-hand side's declared `enum` or `const`, with the
+  nearest string value as a suggestion. `Shape::enumeration_inferred`, written to JSON Schema as
+  `x-jlens-enum-inferred`, marks an enumeration inferred from samples, which is never warned
+  about.
+
+### Changed
+
+- `jlens schema infer` and `Schema::to_json_schema` add `x-jlens-enum-inferred` to inferred
+  enumerations. A schema inferred by an earlier version lacks it, so its enumerations count as
+  declared: infer it again, or add the keyword, if `W0206` warns about values the samples did not
+  contain.
 
 ## [0.28.0]
 

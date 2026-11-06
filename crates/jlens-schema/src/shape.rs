@@ -85,6 +85,10 @@ pub struct Shape {
     /// set of repeated values).
     #[serde(rename = "enum", skip_serializing_if = "Option::is_none", default)]
     pub enumeration: Option<Vec<JsonValue>>,
+    /// The enumeration was inferred from samples, not declared by a JSON Schema or an override:
+    /// a guess, so a value outside it is not warned about.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub enumeration_inferred: bool,
     /// A few example values.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub examples: Vec<JsonValue>,
@@ -237,6 +241,7 @@ impl Schema {
             }
             if let Some(e) = &o.enumeration {
                 shape.enumeration = Some(e.clone());
+                shape.enumeration_inferred = false;
             }
             if let Some(f) = &o.format {
                 shape.format = Some(f.clone());
@@ -401,6 +406,7 @@ impl Shape {
             .as_ref()
             .filter(|d| d.len() >= 2 && (d.len() as u64) < self.count)
             .cloned();
+        self.enumeration_inferred = self.enumeration.is_some();
     }
 
     fn add_type(&mut self, ty: JsonType) {
@@ -550,7 +556,9 @@ mod tests {
             field("kind").enumeration,
             Some(vec![json!("x"), json!("y")])
         );
+        assert!(field("kind").enumeration_inferred);
         assert_eq!(field("mail").enumeration, None);
+        assert!(!field("mail").enumeration_inferred);
     }
 
     #[test]

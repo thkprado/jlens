@@ -183,6 +183,11 @@ fn value_completion_offers_the_left_hand_sides_enumeration() {
         ["1", "2.5", "true", "null"]
     );
     assert!(labels(&svc, "level = '|'", Some(CompletionKind::Value)).is_empty());
+    // Numbers are compared by value: `1.0` is `1`.
+    assert_eq!(
+        labels(&svc, "level in [1.0, |]", Some(CompletionKind::Value)),
+        ["2.5", "true", "null"]
+    );
     assert_eq!(
         labels(&svc, "label = '|'", Some(CompletionKind::Value)),
         [r#"'say \"hi\"'"#, r#""it's""#]
@@ -372,6 +377,66 @@ fn assert_diagnostics(svc: &LanguageService, cases: &[(&str, &[(&str, &str)])]) 
             .collect();
         assert_eq!(got, expected, "{text}");
     }
+}
+
+#[test]
+fn diagnostics_report_values_outside_a_declared_enumeration() {
+    let svc = service();
+    let outside = |value: &str, hint: &str| {
+        format!("The value {value} is not one of the allowed values{hint}")
+    };
+    let aparel = outside("'aparel'", "; did you mean `'apparel'`?");
+    let aparel_dq = outside(r#""aparel""#, r#"; did you mean `"apparel"`?"#);
+    let food = outside("'food'", "");
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("items[type = 'apparel']", &[]),
+        ("items[type = 'aparel']", &[("W0206", &aparel)]),
+        (r#"items[type != "aparel"]"#, &[("W0206", &aparel_dq)]),
+        ("items[type in ['toy', 'food']]", &[("W0206", &food)]),
+        ("items[type in 'food']", &[("W0206", &food)]),
+        ("items.type = 'food'", &[("W0206", &food)]),
+        // A number outside a string enumeration has no suggestion.
+        ("items[type = 1]", &[("W0206", &outside("1", ""))]),
+        // An enumeration inferred from samples is a guess: `quantity` was only seen as 1 and 2.
+        ("items[quantity = 3]", &[]),
+        // Values that are not literals, and literals on the left-hand side, are not checked.
+        ("items[type = color]", &[]),
+        ("items[type = 'f' & 'ood']", &[]),
+        ("items['food' = type]", &[]),
+        ("items[type = 'food'[false]]", &[]),
+        ("items[type in ['toy', 'food'][0]]", &[]),
+        // Nor fields without an enumeration, nor unknown values.
+        ("items[code = 'x']", &[]),
+        ("$lookup(items, 'type') = 'food'", &[]),
+    ];
+    assert_diagnostics(&svc, cases);
+    let d = &svc.diagnostics("items[type in ['toy', 'food']]")[0];
+    assert_eq!((d.span.start, d.span.end), (22, 28));
+
+    // `const`, numbers compared by value, and enumerations of array items.
+    let schema = Schema::from_json_schema(&json!({
+        "type": "object",
+        "properties": {
+            "kind": {"const": "order"},
+            "level": {"type": "integer", "enum": [1, 2]},
+            "tags": {"type": "array", "items": {"enum": ["new", "sale"]}},
+            "guess": {"type": "integer", "enum": [1, 2], "x-jlens-enum-inferred": true}
+        }
+    }))
+    .unwrap();
+    let svc = LanguageService::new(Some(schema));
+    let ordr = outside("'ordr'", "; did you mean `'order'`?");
+    // A number has no nearest value.
+    let level = outside("3", "");
+    let sael = outside(r#""sael""#, r#"; did you mean `"sale"`?"#);
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("kind = 'ordr'", &[("W0206", &ordr)]),
+        ("level = 2.0", &[]),
+        ("level in [1, 3]", &[("W0206", &level)]),
+        (r#""new" in tags or tags = "sael""#, &[("W0206", &sael)]),
+        ("guess = 3", &[]),
+    ];
+    assert_diagnostics(&svc, cases);
 }
 
 #[test]

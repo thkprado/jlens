@@ -9,6 +9,7 @@
 //! | `title` | The shape's label |
 //! | `x-jlens-presence` | Fraction of objects that have an optional field |
 //! | `x-jlens-hidden` | Hide from completion |
+//! | `x-jlens-enum-inferred` | The `enum` was inferred from samples, so it is not warned about |
 //! | `x-jlens-samples` | (root) Number of sample documents inferred from |
 
 use serde_json::{Map, Value as JsonValue, json};
@@ -83,6 +84,9 @@ fn export(shape: &Shape) -> JsonValue {
     }
     if let Some(e) = &shape.enumeration {
         out.insert("enum".into(), e.clone().into());
+        if shape.enumeration_inferred {
+            out.insert("x-jlens-enum-inferred".into(), true.into());
+        }
     }
     if let Some(m) = shape.minimum {
         out.insert("minimum".into(), json_number(m));
@@ -207,9 +211,14 @@ fn import(node: &JsonValue, root: &JsonValue, depth: usize) -> Result<Shape, Str
     }
     if let Some(JsonValue::Array(values)) = map.get("enum") {
         shape.enumeration = Some(values.clone());
+        shape.enumeration_inferred = map
+            .get("x-jlens-enum-inferred")
+            .and_then(JsonValue::as_bool)
+            == Some(true);
     }
     if let Some(value) = map.get("const") {
         shape.enumeration = Some(vec![value.clone()]);
+        shape.enumeration_inferred = false;
     }
     if let Some(f) = map.get("format").and_then(JsonValue::as_str) {
         shape.format = Some(f.to_owned());
@@ -270,7 +279,10 @@ fn merge(shape: &mut Shape, other: Shape) {
         (slot @ None, Some(b)) => *slot = Some(b),
         _ => {}
     }
-    shape.enumeration = shape.enumeration.take().or(other.enumeration);
+    if shape.enumeration.is_none() {
+        shape.enumeration = other.enumeration;
+        shape.enumeration_inferred = other.enumeration_inferred;
+    }
     shape.format = shape.format.take().or(other.format);
     shape.description = shape.description.take().or(other.description);
     shape.label = shape.label.take().or(other.label);
@@ -287,6 +299,7 @@ impl Shape {
             maximum: self.maximum,
             format: self.format.clone(),
             enumeration: self.enumeration.clone(),
+            enumeration_inferred: self.enumeration_inferred,
             examples: self.examples.clone(),
             description: self.description.clone(),
             label: self.label.clone(),
@@ -326,8 +339,11 @@ mod tests {
             doc["properties"]["owner"]["x-jlens-presence"],
             json!(2.0 / 3.0)
         );
+        // `kind` was seen as `a` and `b`: its enumeration is a guess, and stays one.
+        assert_eq!(doc["properties"]["kind"]["x-jlens-enum-inferred"], true);
         let back = Schema::from_json_schema(&doc).unwrap();
         assert_eq!(back.root, schema.root.without_state());
+        assert!(back.root.fields["kind"].shape.enumeration_inferred);
         assert_eq!(back.samples, 3);
     }
 
@@ -348,5 +364,6 @@ mod tests {
             schema.shape_at("status").unwrap().enumeration,
             Some(vec![json!("open")])
         );
+        assert!(!schema.shape_at("status").unwrap().enumeration_inferred);
     }
 }

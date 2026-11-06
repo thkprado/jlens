@@ -24,6 +24,7 @@ exit: 0
         "open",
         "closed"
       ],
+      "x-jlens-enum-inferred": true,
       "examples": [
         "open",
         "closed"

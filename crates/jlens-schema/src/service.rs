@@ -10,7 +10,7 @@ use jlens_core::{Diagnostic, Severity, parse_recover};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-use crate::shape::{Field, Schema, Shape};
+use crate::shape::{Field, JsonType, Schema, Shape};
 use crate::typing::{Event, Scope, Symbols, Ty, Walker};
 
 /// The identifier substituted for the word under the cursor before parsing.
@@ -318,6 +318,104 @@ fn enumeration<'s>(ty: &Ty<'s>) -> Vec<&'s JsonValue> {
     out
 }
 
+/// Whether two JSON values are equal as JSONata compares them: numbers by value, so that `2`
+/// and `2.0` are the same.
+fn same_value(a: &JsonValue, b: &JsonValue) -> bool {
+    match (a, b) {
+        (JsonValue::Number(x), JsonValue::Number(y)) => x.as_f64() == y.as_f64(),
+        _ => a == b,
+    }
+}
+
+/// The values a type is declared to take: every shape it may have declares an enumeration
+/// (directly, or through the items of its arrays), none of them inferred from samples. `None`
+/// when any value is possible, or when an enumeration holds an array or an object, which a
+/// literal is not compared with here.
+fn declared_values<'s>(ty: &Ty<'s>) -> Option<Vec<&'s JsonValue>> {
+    fn collect<'s>(shape: &'s Shape, out: &mut Vec<&'s JsonValue>, depth: usize) -> Option<()> {
+        match &shape.enumeration {
+            Some(values) if !shape.enumeration_inferred => {
+                for value in values {
+                    if value.is_array() || value.is_object() {
+                        return None;
+                    }
+                    if !out.iter().any(|v| same_value(v, value)) {
+                        out.push(value);
+                    }
+                }
+                Some(())
+            }
+            Some(_) => None,
+            None if depth < 32 && shape.types == [JsonType::Array] => {
+                collect(shape.items.as_deref()?, out, depth + 1)
+            }
+            None => None,
+        }
+    }
+    // A shape without a type (a bare `const`) makes the type partial, as does anything unknown;
+    // only the former is accepted.
+    if ty.shapes.is_empty() || (ty.partial && ty.shapes.iter().any(|s| !s.types.is_empty())) {
+        return None;
+    }
+    let mut out = Vec::new();
+    for shape in &ty.shapes {
+        collect(shape, &mut out, 0)?;
+    }
+    Some(out)
+}
+
+/// `W0206` for each literal on the right of `op` that `values` does not hold: the right-hand
+/// side itself, or the items of the array on the right of `in`. A string gets the nearest string
+/// value as a suggestion, written with the literal's quotes.
+fn value_diagnostics(
+    text: &str,
+    op: BinaryOp,
+    values: &[&JsonValue],
+    rhs: &Node,
+    out: &mut Vec<Diagnostic>,
+) {
+    // A literal with a predicate or a group, `"a"[false]`, is not that value, nor is an array
+    // with one, `["a", "b"][0]`, those items.
+    let plain = |node: &Node| {
+        let attrs = &node.attrs;
+        attrs.stages.is_empty() && attrs.predicate.is_empty() && attrs.group.is_none()
+    };
+    let literals: Vec<&Node> = match &rhs.kind {
+        NodeKind::Array { items } if op == BinaryOp::In && plain(rhs) => items.iter().collect(),
+        NodeKind::Array { .. } => Vec::new(),
+        _ => vec![rhs],
+    };
+    for node in literals {
+        if !plain(node) {
+            continue;
+        }
+        let Some(value) = literal_value(node) else {
+            continue;
+        };
+        if values.iter().any(|v| same_value(v, &value)) {
+            continue;
+        }
+        let source = text.get(node.span.start..node.span.end).unwrap_or_default();
+        let quote = if source.starts_with('\'') { '\'' } else { '"' };
+        // Only a string has a nearest value: a misspelling; numbers are not near by their digits.
+        let strings: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
+        let hint = value
+            .as_str()
+            .and_then(|s| closest(s, &strings))
+            .map(|c| {
+                let literal = value_literal(&JsonValue::String(c.to_owned()), quote);
+                format!("; did you mean `{literal}`?")
+            })
+            .unwrap_or_default();
+        out.push(Diagnostic::new(
+            Severity::Warning,
+            "W0206",
+            node.span,
+            &[("value", source), ("hint", &hint)],
+        ));
+    }
+}
+
 /// A value as a JSONata literal; strings in `quote` when they can be.
 fn value_literal(value: &JsonValue, quote: char) -> String {
     let json = value.to_string();
@@ -341,7 +439,7 @@ fn value_items(
     let lower = prefix.to_lowercase();
     values
         .iter()
-        .filter(|v| !listed.contains(v))
+        .filter(|v| !listed.iter().any(|l| same_value(l, v)))
         .filter(|v| {
             let text = match v {
                 JsonValue::String(s) => s.clone(),
@@ -710,9 +808,9 @@ impl LanguageService {
     }
 
     /// Syntax errors, annotation warnings, references to fields the schema does not have,
-    /// calls of unknown functions, with the wrong number of arguments or with arguments of
-    /// types the signature does not accept, and, when variables are declared, references to
-    /// variables that are not.
+    /// literals compared with a field outside its declared `enum` or `const`, calls of unknown
+    /// functions, with the wrong number of arguments or with arguments of types the signature
+    /// does not accept, and, when variables are declared, references to variables that are not.
     pub fn diagnostics(&self, text: &str) -> Vec<Diagnostic> {
         let ast = parse_recover(text);
         let mut out = ast.diagnostics.clone();
@@ -752,7 +850,12 @@ impl LanguageService {
             }),
             Event::Variable { node, name, .. } => variables.push((node.span, name.to_owned())),
             Event::Bind { name } => bound.push(name.to_owned()),
-            Event::Field { .. } | Event::Compare { .. } => {}
+            Event::Compare { op, lhs, rhs } => {
+                if let Some(values) = declared_values(lhs) {
+                    value_diagnostics(text, op, &values, rhs, &mut out);
+                }
+            }
+            Event::Field { .. } => {}
         };
         self.walk(&ast.root, &mut visit);
         out.extend(self.call_diagnostics(&calls, &bound));

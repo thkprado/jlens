@@ -5,6 +5,11 @@ expression: "jlens(&[\"check\", \"--schema\", \"fixtures/cli/order.schema.json\"
 exit: 0
 --- stdout
 --- stderr
+warning[W0206]: The value 'x' is not one of the allowed values
+ --> <expr>:1:14
+  |
+1 | items[type = 'x'].unitprice + customer.nick
+  |              ^^^
 warning[W0201]: Field "unitprice" is not in the schema; did you mean `unitPrice`?
  --> <expr>:1:19
   |
@@ -15,4 +20,4 @@ warning[W0201]: Field "nick" is not in the schema
   |
 1 | items[type = 'x'].unitprice + customer.nick
   |                                        ^^^^
-<expr>: 0 error(s), 2 warning(s)
+<expr>: 0 error(s), 3 warning(s)

@@ -9,7 +9,7 @@ const TOKENS: &[&str] = &[
     "customer", "login", "items", "type", "unitPrice", "`odd name`", "$", "$$", "$x", "$limit",
     "1", "'s'", "\"t\"", ".", "[", "]", "(", ")", "{", "}", ":", ",", ";", "=", "!=", "and", "in", "?",
     ":=", "~>", "&", "**", "^(", "@$v", "#$i", "function($v){", "$sum(", "$substring(",
-    "$map(", "$rate(", "$summ(", "$bad(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
+    "$map(", "$rate(", "login =", "$summ(", "$bad(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
 ];
 
 fn text() -> impl Strategy<Value = String> {
@@ -28,9 +28,13 @@ proptest! {
             "customer": {"login": "1", "name": "X"},
             "items": [{"type": "a", "unitPrice": 1.5, "odd name": true}]
         })]);
-        // An enumeration with values that need escaping, or cannot take single quotes.
+        // An enumeration with values that need escaping, or cannot take single quotes, and one
+        // of scalars, whose values outside it are warned about.
         let overrides: std::collections::BTreeMap<String, Override> = serde_json::from_value(
-            json!({"items[].type": {"enum": ["a", "it's", "say \"é\"", 1, null, {"k": [1]}]}}),
+            json!({
+                "items[].type": {"enum": ["a", "it's", "say \"é\"", 1, null, {"k": [1]}]},
+                "login": {"enum": ["s", "é𝄞", 1, true]}
+            }),
         )
         .unwrap();
         prop_assert!(schema.apply_overrides(&overrides).is_empty());
@@ -46,6 +50,10 @@ proptest! {
         let diagnostics = service.diagnostics(&text);
         for d in &diagnostics {
             prop_assert!(d.span.start <= d.span.end && d.span.end <= text.len(), "{d:?}");
+            if d.code == "W0206" {
+                // The warning points at a literal.
+                prop_assert!(jlens_core::parse(&text[d.span.start..d.span.end]).is_ok(), "{d:?}");
+            }
         }
         // Every byte offset, including those inside characters and past the end.
         for offset in 0..=text.len() + 1 {

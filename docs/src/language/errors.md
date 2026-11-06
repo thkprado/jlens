@@ -170,3 +170,4 @@ jlens-specific. Warnings are reported as diagnostics by `jlens check` and `parse
 | `W0203` | `Function ${{{token}}} takes {{{expected}}} but is given {{{count}}}` |
 | `W0204` | `Variable ${{{token}}} is not declared{{{hint}}}` |
 | `W0205` | `Argument {{{index}}} of ${{{token}}} is {{{type}}}, which does not match the signature {{{signature}}}` |
+| `W0206` | `The value {{{value}}} is not one of the allowed values{{{hint}}}` |

@@ -33,7 +33,10 @@ Inference records, for every place in the documents:
 | Examples | Up to three distinct values |
 
 The result is a standard **JSON Schema 2020-12** document. Fields that are not required carry
-`x-jlens-presence`, the fraction of objects that had them. You can commit the file, review it,
+`x-jlens-presence`, the fraction of objects that had them, and an inferred `enum` carries
+`x-jlens-enum-inferred`: it lists the values seen, not every value allowed, so the language
+service completes them but never warns about another one. Remove the keyword once the list is
+complete, or set the values in the overrides (below). You can commit the file, review it,
 and edit it like any JSON Schema. jlens also reads JSON Schemas written by hand or by other
 tools: it supports `$ref` to local definitions, and it merges `anyOf`, `oneOf` and `allOf`.
 
@@ -186,7 +189,13 @@ Completion works on incomplete expressions too, such as `$count(items[` or
   the warning means that the call fails whenever the field is present;
 - `W0204` warnings for variables that are not declared, with a suggestion, when at least one
   variable is declared with `with_variable` (or in `jlens.json`): the declarations are then
-  taken to be complete. Names bound in the expression, and functions, are known.
+  taken to be complete. Names bound in the expression, and functions, are known;
+- `W0206` warnings for a literal compared with a field, by `=`, `!=` or `in`, that is not one of
+  the field's declared values, such as `items[type = "aparel"]`: the comparison is always false.
+  A string gets the nearest value as a suggestion (`did you mean "apparel"?`). Only an `enum` or
+  `const` of the JSON Schema, or an `enum` set in the overrides, counts: one inferred from samples
+  (`x-jlens-enum-inferred`) is a guess, and is never warned about. Values that are not literals,
+  such as `type = color`, are not checked.
 
 Missing fields are reported only where the context is fully known. Nothing is reported after a
 user-defined function, an object constructor or `$lookup`, so the warnings do not produce false

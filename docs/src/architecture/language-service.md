@@ -99,6 +99,14 @@ machinery as `$map(items, function($i){ $i.`.
   absent passes any signature, but one that is present cannot.
 - When variables are declared, the declarations are taken to be complete, and references to
   names that are neither declared, bound anywhere in the expression, nor functions get `W0204`.
+- The comparison events (`=`, `!=`, `in`) carry the left-hand side's type and the right-hand
+  side's node, as for value completion. When every shape of that type declares an enumeration,
+  directly or through its arrays' items, a literal on the right outside it gets `W0206`; values
+  are compared as JSONata compares them, so `2.0` is `2`. `Shape::enumeration_inferred` marks an
+  enumeration inferred from samples (in JSON Schema, `x-jlens-enum-inferred`), which never warns,
+  and so does a type that may come from something unknown, or an enumeration that holds an array
+  or an object. A literal with a predicate, `"a"[false]`, is not checked. The nearest string
+  value, by the same Levenshtein distance, is suggested for a string.
 - **Hover** keeps the innermost field or variable event whose span contains the offset, and
   renders its type and documentation as Markdown.
 - **Signature help** scans backwards from the cursor for the unmatched `(` of a call, ignoring
