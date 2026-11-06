@@ -26,7 +26,8 @@ tests them and explains their results before they ship.
 The language service completes fields, variables, functions and operators, but never a value, and
 an application cannot tell it where a field's values come from. 0.29 completes the values of an
 `enum` or `const` and warns about a value outside one, lets the application provide the values of
-an open domain, and gives the web editor schema overrides that show both. It also makes public the
+an open domain, and gives the web editor schema overrides that show both, with a warning for an
+override whose path the samples do not have. It also makes public the
 conversion between byte and UTF-16 offsets that the Wasm package keeps to itself. The API work
 below stays deferred.
 
@@ -38,8 +39,9 @@ below stays deferred.
 | 4 | Open domains: values the application provides, below; after #2 | `x-jlens-domain` read and written by `jlens-schema`, and `domain` in the schema overrides; tests for the value request in `jlens-schema` and the Wasm suite; the web editor completes from an asynchronous source; the book's completion and Wasm guides updated | **done**: `Shape::domain`, `Completions::value_request`, `value_literal` (Wasm: `valueLiteral`); the editor's CodeMirror module takes a `values` source, `domains.js` stands in for one, and #5's example gives it a field |
 | 5 | The web editor's schema overrides: a panel, and an example that uses them, below | The "Free shipping" example shows labels, descriptions, a hidden field, a closed and (after #4) an open domain; shared addresses carry the overrides, and older ones still open; `share.test.mjs` covers both | **done**: the panel beside the bindings, its error that of `inferSchema`; `overrides` left out of an address when empty; the editor check opens a shared address with overrides |
 | 6 | A public conversion between byte and UTF-16 offsets, below | The type public in `jlens-core`, documented, with tests for ASCII text, text outside ASCII, a surrogate pair and the offset past the end; the Wasm package using it, its suite unchanged; the crate guide shows it | |
-| 7 | The tables measured again, unattended, after the dependencies are brought up to date: jlens and the control columns; other engines only where their version changed | `ab` against 0.28.0 in every mode, Python and Java; the performance page's tables and version header updated; each case within the floor or its cause recorded | |
-| 8 | Release 0.29.0 | The release checklist; the channels checked | |
+| 7 | Overrides whose path is not in the samples, below | A function in `jlens-schema` and the Wasm API (additive: `apply_overrides` and `inferSchema` keep their results) that lists them, with the nearest path the samples have as a suggestion; `jlens schema infer` and the web editor's panel warn about them; tests in `jlens-schema`, the Wasm suite and the CLI; the schema guide updated | |
+| 8 | The tables measured again, unattended, after the dependencies are brought up to date: jlens and the control columns; other engines only where their version changed | `ab` against 0.28.0 in every mode, Python and Java; the performance page's tables and version header updated; each case within the floor or its cause recorded | |
+| 9 | Release 0.29.0 | The release checklist; the channels checked | |
 
 **#2, completing values.** The language service suggests fields, variables, functions and
 operators, but never a value: a field's `enum` shows only in its documentation, and inside quotes
@@ -86,6 +88,15 @@ own WebAssembly module, rather than using the package, writes the conversion aga
 to `jlens-core` and becomes public: built once per text, it converts both ways, and an offset
 inside a surrogate pair maps to the start of its character. The Wasm package uses it; behaviour
 does not change.
+
+**#7, an override's path missing from the samples.** An override whose path the samples do not
+have declares that path: this is how an optional field the samples lack gets a label or a domain.
+A misspelt path is declared the same way, `"custmer.login": {"domain": "customers"}`: the
+override never reaches `customer.login`, completion offers the phantom `custmer` beside
+`customer`, and nothing says why the domain does not work. The path is still declared, as an
+optional field may be meant, but a new function lists such paths, each with the nearest path the
+samples have when there is one (``did you mean `customer.login`?``). `jlens schema infer` prints
+them as warnings, and the web editor shows them in the overrides panel, apart from its errors.
 
 ## In exploration: a regular expression engine of jlens's own
 
