@@ -517,6 +517,25 @@ export function inferSchema(
   overrides?: Record<string, SchemaOverride>,
 ): JsonSchema;
 
+/** An override path the samples lack (see `missingOverridePaths`). */
+export interface MissingOverridePath {
+  /** The path, as the overrides wrote it. */
+  path: string;
+  /** An existing path it most likely meant, such as `items[].type` for `items.type`. */
+  suggestion?: string;
+}
+
+/**
+ * The paths of `overrides` that the samples lack, in path order: the fields `inferSchema`
+ * declares for them. A field may be declared on purpose, but a misspelt path does the same, so
+ * show them as warnings. Throws as `inferSchema` does for invalid samples or overrides; malformed
+ * paths are left out.
+ */
+export function missingOverridePaths(
+  samples: unknown[],
+  overrides: Record<string, SchemaOverride>,
+): MissingOverridePath[];
+
 /**
  * `value` as a JSONata literal, to insert in place of a `ValueRequest`'s range: a string in
  * `quote` when it can be, other values as JSON. Throws a `TypeError` for another quote, or a value

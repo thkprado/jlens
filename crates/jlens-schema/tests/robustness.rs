@@ -87,4 +87,42 @@ proptest! {
             let _ = service.signature_help(&text, offset);
         }
     }
+
+    #[test]
+    fn missing_override_paths_are_the_ones_created(
+        paths in prop::collection::vec(override_path(), 0..6),
+    ) {
+        let mut schema = Schema::infer(&[json!({
+            "customer": {"login": "1", "odd name": "X"},
+            "items": [{"type": "a", "tags": [["t"]]}]
+        })]);
+        let overrides: std::collections::BTreeMap<String, Override> =
+            paths.into_iter().map(|p| (p, Override::default())).collect();
+        let missing = schema.missing_override_paths(&overrides);
+        for m in &missing {
+            prop_assert!(schema.shape_at(&m.path).is_none(), "{m:?}");
+            if let Some(s) = &m.suggestion {
+                prop_assert!(schema.shape_at(s).is_some(), "{m:?}");
+            }
+        }
+        let failed = schema.apply_overrides(&overrides);
+        for path in overrides.keys() {
+            // Each path either existed, was listed (and then created), or was malformed.
+            let listed = missing.iter().any(|m| &m.path == path);
+            prop_assert!(!(listed && failed.contains(path)), "{path}");
+        }
+    }
+}
+
+#[rustfmt::skip]
+const PATH_TOKENS: &[&str] = &[
+    "customer", "custmer", "login", "logn", "items", "type", "tags", "`odd name`", "odd name",
+    "[]", ".", "$", "`", "é", " ",
+];
+
+fn override_path() -> impl Strategy<Value = String> {
+    prop_oneof![
+        4 => prop::collection::vec(prop::sample::select(PATH_TOKENS), 0..8).prop_map(|t| t.join("")),
+        1 => any::<String>(),
+    ]
 }

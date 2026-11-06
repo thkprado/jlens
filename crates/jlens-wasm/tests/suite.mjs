@@ -736,6 +736,24 @@ export const cases = [
     throws(() => j.inferSchema(order), (e) => ok(e instanceof TypeError, "not an array"));
   }],
 
+  ["missingOverridePaths", (j) => {
+    const missing = j.missingOverridePaths([order], {
+      "custmer.login": { domain: "customers" },
+      "customer.country": { type: ["string"] },
+      "items.type": { enum: ["apparel"] },
+      "items[].code": { label: "Code" },
+    });
+    equal(missing, [
+      { path: "custmer.login", suggestion: "customer.login" },
+      { path: "customer.country" },
+      { path: "items.type", suggestion: "items[].type" },
+    ]);
+    equal(j.missingOverridePaths([order], {}), [], "none");
+    throws(() => j.missingOverridePaths([order], { a: { colour: "x" } }), (e) => {
+      ok(e instanceof TypeError, "TypeError");
+    });
+  }],
+
   ["completion", (j) => {
     const service = new j.LanguageService(j.inferSchema([order]), { minimum: { type: "number" } });
     let text = "items[type = 'electronic'].";

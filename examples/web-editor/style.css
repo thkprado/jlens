@@ -127,6 +127,8 @@ textarea.short { min-height: 70px; }
 #signature strong { color: var(--accent); }
 .error { color: var(--fail); }
 #input-error:empty { display: none; }
+.warning { color: var(--warn); margin: 0.25rem 0; padding-left: 1.25rem; }
+#overrides-warnings:empty { display: none; }
 
 .tabs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
 .tabs button {

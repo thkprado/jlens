@@ -16,18 +16,8 @@ use jlens_core::Offsets;
 #[wasm_bindgen(js_name = inferSchema, skip_typescript)]
 pub fn infer_schema(samples: JsValue, overrides: Option<JsValue>) -> Result<JsValue, JsValue> {
     crate::convert::install_hooks();
-    let samples = match from_js(&samples, "samples")? {
-        Some(Value::Array(samples)) => samples,
-        _ => return Err(type_error("samples must be an array of documents")),
-    };
-    let mut schema = Schema::infer(&samples);
-    let overrides = match &overrides {
-        Some(overrides) => from_js(overrides, "overrides")?,
-        None => None,
-    };
+    let (mut schema, overrides) = read_samples(&samples, overrides.as_ref())?;
     if let Some(overrides) = overrides {
-        let overrides: BTreeMap<String, Override> = serde_json::from_value(overrides)
-            .map_err(|e| type_error(&format!("invalid overrides: {e}")))?;
         let failed = schema.apply_overrides(&overrides);
         if !failed.is_empty() {
             return Err(type_error(&format!(
@@ -37,6 +27,38 @@ pub fn infer_schema(samples: JsValue, overrides: Option<JsValue>) -> Result<JsVa
         }
     }
     Ok(to_js(&schema.to_json_schema()))
+}
+
+/// The paths of `overrides` that the samples lack, which `inferSchema` declares: each as
+/// `{path, suggestion?}`, the suggestion being an existing path it most likely meant. Throws as
+/// `inferSchema` does for invalid samples or overrides; malformed paths are left out.
+#[wasm_bindgen(js_name = missingOverridePaths, skip_typescript)]
+pub fn missing_override_paths(samples: JsValue, overrides: JsValue) -> Result<JsValue, JsValue> {
+    crate::convert::install_hooks();
+    let (schema, overrides) = read_samples(&samples, Some(&overrides))?;
+    let missing = overrides.map_or_else(Vec::new, |o| schema.missing_override_paths(&o));
+    Ok(ser_to_js(&missing))
+}
+
+/// The schema inferred from `samples`, and the overrides, not applied yet.
+fn read_samples(
+    samples: &JsValue,
+    overrides: Option<&JsValue>,
+) -> Result<(Schema, Option<BTreeMap<String, Override>>), JsValue> {
+    let samples = match from_js(samples, "samples")? {
+        Some(Value::Array(samples)) => samples,
+        _ => return Err(type_error("samples must be an array of documents")),
+    };
+    let overrides = match overrides {
+        Some(overrides) => from_js(overrides, "overrides")?,
+        None => None,
+    };
+    let overrides = overrides
+        .map(|o| {
+            serde_json::from_value(o).map_err(|e| type_error(&format!("invalid overrides: {e}")))
+        })
+        .transpose()?;
+    Ok((Schema::infer(&samples), overrides))
 }
 
 /// `value` as a JSONata literal, to insert in place of a value request's `range`: a string in

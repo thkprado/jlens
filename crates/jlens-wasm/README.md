@@ -35,6 +35,7 @@ expr.evaluate({ items: [{ type: "a", price: 2.5, qty: 4 }] }, { kind: "a" }); //
 | `expr.ast()` | The processed syntax tree |
 | `parseRecover(source)` | Partial syntax tree and every diagnostic, without throwing |
 | `inferSchema(samples, overrides?)` | A JSON Schema (2020-12) inferred from sample documents |
+| `missingOverridePaths(samples, overrides)` | The override paths the samples lack, with the path each most likely meant |
 | `new LanguageService(schema?, variables?)` | `complete`, `diagnostics`, `hover` and `signatureHelp` for an editor |
 | `functions()` | The built-in function catalog |
 | `version()` | The jlens version |

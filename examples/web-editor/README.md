@@ -41,7 +41,9 @@ would be overwritten, or go stale. The Schema overrides panel holds a JSON objec
 path instead, and the schema is `inferSchema([input], overrides)`: the structure follows the
 document, and the overrides add what it means. The paths and settings are those of the
 [schema guide](../../docs/src/guides/schema.md); a malformed override is shown as the panel's
-error, and the schema is then inferred without overrides.
+error, and the schema is then inferred without overrides. A path the document lacks declares a
+new field, as a misspelt path also does: `missingOverridePaths` lists them, and the panel shows
+each as a warning, with the path it most likely meant.
 
 The "Free shipping" example uses each kind:
 - `label` and `description`, shown by hover and completion;

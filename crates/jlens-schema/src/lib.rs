@@ -45,4 +45,4 @@ pub use service::{
     CompletionItem, CompletionKind, Completions, FunctionDecl, Hover, LanguageService,
     SignatureHelp, ValueRequest, value_literal,
 };
-pub use shape::{Field, JsonType, Override, Schema, Shape};
+pub use shape::{Field, JsonType, MissingPath, Override, Schema, Shape};

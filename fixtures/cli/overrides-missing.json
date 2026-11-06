@@ -1,0 +1,5 @@
+{
+  "custmer.login": { "label": "Login" },
+  "items.type": { "enum": ["apparel", "electronic", "toy"] },
+  "customer.vip": { "description": "Declared on purpose" }
+}

@@ -13,7 +13,7 @@ import { lintKeymap } from "@codemirror/lint";
 import { Compartment } from "@codemirror/state";
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from "@codemirror/view";
 
-import init, { LanguageService, inferSchema, version } from "jlens-wasm";
+import init, { LanguageService, inferSchema, missingOverridePaths, version } from "jlens-wasm";
 import { renderAudit, renderExplanation, spansOf } from "./audit-view.js";
 import { domainValues } from "./domains.js";
 import { hostDeclarations } from "./host-functions.js";
@@ -52,7 +52,9 @@ function updateService() {
   try {
     schema = inferSchema([input], overrides);
     $("input-error").textContent = "";
+    showMissingPaths(missingOverridePaths([input], overrides));
   } catch (err) {
+    showMissingPaths([]);
     $("input-error").textContent = err.message; // "invalid overrides: ..."
     schema = inferSchema([input]);
   }
@@ -62,6 +64,22 @@ function updateService() {
   service.free();
   service = new LanguageService(schema, variables, hostDeclarations);
   $("schema").textContent = JSON.stringify(schema, null, 2);
+}
+
+/**
+ * Warns about the override paths the input lacks: they are declared as new fields, which is also
+ * what a misspelt path does. Warnings do not stop sharing.
+ */
+function showMissingPaths(missing) {
+  $("overrides-warnings").replaceChildren(
+    ...missing.map(({ path, suggestion }) => {
+      const item = document.createElement("li");
+      item.textContent = suggestion
+        ? `${path} is not in the input; did you mean ${suggestion}?`
+        : `${path} is not in the input; declared as a new field.`;
+      return item;
+    }),
+  );
 }
 
 function select(span) {

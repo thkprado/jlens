@@ -1366,7 +1366,7 @@ fn did_you_mean(name: &str, candidates: &[&str], prefix: &str) -> String {
 }
 
 /// The candidate within edit distance 2 of `name`, if any.
-fn closest<'a>(name: &str, candidates: &[&'a str]) -> Option<&'a str> {
+pub(crate) fn closest<'a>(name: &str, candidates: &[&'a str]) -> Option<&'a str> {
     fn distance(a: &str, b: &str) -> usize {
         let a: Vec<char> = a.to_lowercase().chars().collect();
         let b: Vec<char> = b.to_lowercase().chars().collect();

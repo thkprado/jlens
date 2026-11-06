@@ -34,6 +34,11 @@ All notable changes are recorded here. The format follows
   crates' spans, and UTF-16 code units, the unit of browser editors, in both directions. An
   application that builds the language service into its own WebAssembly module no longer needs
   to write it; the Wasm package now uses it.
+- Override paths the samples lack, which declare new fields as a misspelt path also does:
+  `Schema::missing_override_paths` (Wasm: `missingOverridePaths`) lists them before they are
+  applied, each with the existing path it most likely meant (`items[].type` for `items.type`,
+  `customer.login` for `custmer.login`). `jlens schema infer` warns about them, and the web
+  editor's overrides panel shows them as warnings.
 
 ### Changed
 

@@ -73,7 +73,15 @@ $ jlens schema infer samples/*.json --overrides overrides.json -o order.schema.j
 ```
 
 A path that does not exist yet is created, so overrides can also declare fields that are absent
-from the samples.
+from the samples. A misspelt path does the same, so `jlens schema infer` warns about each such
+path, naming the existing path it most likely meant:
+
+```text
+warning: override path items.type is not in the samples; declared (did you mean items[].type?)
+```
+
+In Rust, `Schema::missing_override_paths` lists them before `apply_overrides` creates them
+(`missingOverridePaths` in the Wasm package).
 
 ## 3. Use it
 

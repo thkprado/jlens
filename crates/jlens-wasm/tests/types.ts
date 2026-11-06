@@ -12,6 +12,7 @@ import init, {
   type HostFunction,
   type JlensError,
   type JsonSchema,
+  type MissingOverridePath,
   type Read,
   type Reads,
   type ValueRequest,
@@ -20,6 +21,7 @@ import init, {
   LanguageService,
   functions,
   inferSchema,
+  missingOverridePaths,
   parseRecover,
   unionReads,
   valueLiteral,
@@ -89,6 +91,8 @@ export async function check(): Promise<void> {
   const request: ValueRequest | undefined = completions.valueRequest;
   const literal: string = valueLiteral("x", request?.quote ?? "'");
   const domain: JsonSchema = inferSchema([{ a: "x" }], { a: { domain: "codes" } });
+  const missing: MissingOverridePath[] = missingOverridePaths([{ a: 1 }], { b: { label: "B" } });
+  const meant: string | undefined = missing[0]?.suggestion;
   const hover = service.hover("a", 0)?.contents;
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();

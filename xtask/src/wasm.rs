@@ -238,7 +238,7 @@ fn gzip_len(bytes: &[u8]) -> Result<u64> {
 /// browser (Chrome, Chromium or Edge; set `JLENS_BROWSER` to choose the executable). With
 /// `example`, also tests the shared addresses of `examples/web-editor` in Node.js, and checks
 /// that the editor loads, evaluates its sample and restores a shared address with its schema
-/// overrides, both from the repository and as `cargo xtask site` assembles it (this loads
+/// overrides (warning about a path the input lacks), both from the repository and as `cargo xtask site` assembles it (this loads
 /// CodeMirror from esm.sh, so it needs network access).
 pub fn test(require_browser: bool, example: bool) -> Result<()> {
     build(false)?;
@@ -334,6 +334,7 @@ const EDITOR_CHECK: &str = r#"<!doctype html>
 <pre id="result"></pre>
 <pre id="shared-result"></pre>
 <pre id="shared-schema"></pre>
+<pre id="shared-warnings"></pre>
 <script type="module">
   const editor = new URLSearchParams(location.search).get("editor");
   async function pageOf(frame, src) {
@@ -353,11 +354,12 @@ const EDITOR_CHECK: &str = r#"<!doctype html>
     expression: '($n := name; $try(function() { $error("x") }, function($e) { $tag & ": " & $n }))',
     input: { name: "jlens" },
     bindings: { tag: "shared-ok" },
-    overrides: { name: { label: "overrides-ok" } },
+    overrides: { name: { label: "overrides-ok" }, nme: { label: "A misspelt path" } },
   });
   const shared = await pageOf($("shared"), editor + fragment);
   $("shared-result").textContent = text(shared, "result");
   $("shared-schema").textContent = text(shared, "schema");
+  $("shared-warnings").textContent = text(shared, "overrides-warnings");
   document.body.dataset.ready = "true";
 </script>
 "#;
@@ -372,6 +374,9 @@ fn check_editor(browser: &Path, url: &str) -> Result<()> {
     }
     if !dom.contains("overrides-ok") {
         bail!("the web editor did not apply the schema overrides of a shared address ({url})");
+    }
+    if !dom.contains("did you mean name?") {
+        bail!("the web editor did not warn about an override path the input lacks ({url})");
     }
     Ok(())
 }

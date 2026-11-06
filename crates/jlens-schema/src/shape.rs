@@ -208,7 +208,8 @@ impl Schema {
     }
 
     /// Applies overrides: a map from paths (see [`Schema::shape_at`]) to settings. Unknown
-    /// paths are created, so overrides can also declare fields the samples did not contain.
+    /// paths are created, so overrides can also declare fields the samples did not contain
+    /// ([`Schema::missing_override_paths`] lists them first, to catch misspelt paths).
     /// Returns the paths that could not be applied.
     ///
     /// ```
@@ -264,6 +265,92 @@ impl Schema {
         failed
     }
 
+    /// The override paths the schema does not contain yet, in path order: the ones
+    /// [`Schema::apply_overrides`] would create. Call it before applying them. Declaring a field the
+    /// samples lack is allowed, but it is also what a misspelt path does, so each comes with the
+    /// existing path it most likely meant, if any. Malformed paths are left out (`apply_overrides`
+    /// returns them).
+    ///
+    /// ```
+    /// use jlens_schema::{Override, Schema};
+    /// use serde_json::json;
+    ///
+    /// let schema = Schema::infer(&[json!({"customer": {"login": "ann"}, "items": [{"type": "a"}]})]);
+    /// let overrides: std::collections::BTreeMap<String, Override> = serde_json::from_value(json!({
+    ///     "custmer.login": {"domain": "customers"},
+    ///     "items.type": {"enum": ["a", "b"]},
+    ///     "customer.vip": {"description": "Declared on purpose"}
+    /// })).unwrap();
+    /// let missing = schema.missing_override_paths(&overrides);
+    /// assert_eq!(missing.len(), 3);
+    /// assert_eq!(missing[0].path, "custmer.login");
+    /// assert_eq!(missing[0].suggestion.as_deref(), Some("customer.login"));
+    /// assert_eq!(missing[1].path, "customer.vip");
+    /// assert_eq!(missing[1].suggestion, None);
+    /// assert_eq!(missing[2].suggestion.as_deref(), Some("items[].type"));
+    /// ```
+    pub fn missing_override_paths(
+        &self,
+        overrides: &BTreeMap<String, Override>,
+    ) -> Vec<MissingPath> {
+        overrides
+            .keys()
+            .filter(|path| parse_path(path).is_some() && self.shape_at(path).is_none())
+            .map(|path| MissingPath {
+                path: path.clone(),
+                suggestion: self.suggest_path(path),
+            })
+            .collect()
+    }
+
+    /// An existing path that `path` most likely meant: the first step that is not found is
+    /// either a field of array items (`items.type` for `items[].type`) or a misspelt field name.
+    fn suggest_path(&self, path: &str) -> Option<String> {
+        let trimmed = path.trim();
+        let trimmed = trimmed.strip_prefix('$').unwrap_or(trimmed);
+        let trimmed = trimmed.strip_prefix('.').unwrap_or(trimmed);
+        let segments: Vec<&str> = trimmed.split('.').collect();
+        let steps = parse_path(path)?;
+        let mut shape = &self.root;
+        for (i, (name, arrays)) in steps.iter().enumerate() {
+            if let Some(name) = name {
+                let Some(field) = shape.fields.get(name) else {
+                    let mut candidates = Vec::new();
+                    // A field of the array items, reached without `[]`.
+                    if shape.items.is_some() {
+                        let mut fixed: Vec<String> =
+                            segments.iter().map(|s| (*s).to_owned()).collect();
+                        match i.checked_sub(1) {
+                            Some(prev) => fixed[prev].push_str("[]"),
+                            None => fixed.insert(0, "[]".to_owned()),
+                        }
+                        candidates.push(fixed.join("."));
+                    }
+                    // A misspelt field name.
+                    let names: Vec<&str> = shape.fields.keys().map(String::as_str).collect();
+                    if let Some(near) = crate::service::closest(name, &names) {
+                        let quoted = segments[i].starts_with('`');
+                        let near = if quoted {
+                            format!("`{near}`")
+                        } else {
+                            near.to_owned()
+                        };
+                        let mut fixed: Vec<String> =
+                            segments.iter().map(|s| (*s).to_owned()).collect();
+                        fixed[i] = format!("{near}{}", "[]".repeat(*arrays));
+                        candidates.push(fixed.join("."));
+                    }
+                    return candidates.into_iter().find(|c| self.shape_at(c).is_some());
+                };
+                shape = &field.shape;
+            }
+            for _ in 0..*arrays {
+                shape = shape.items.as_deref()?;
+            }
+        }
+        None
+    }
+
     fn create_path(&mut self, path: &str) -> bool {
         let Some(steps) = parse_path(path) else {
             return false;
@@ -292,6 +379,17 @@ impl Schema {
         }
         true
     }
+}
+
+/// An override path the schema does not contain (see [`Schema::missing_override_paths`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingPath {
+    /// The path, as the overrides wrote it.
+    pub path: String,
+    /// An existing path it most likely meant.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
 }
 
 /// Settings applied to the shape at one path (see [`Schema::apply_overrides`]).

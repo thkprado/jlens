@@ -96,6 +96,18 @@ fn infer(args: InferArgs) -> Result<ExitCode> {
     if let Some(path) = &args.overrides {
         let overrides: BTreeMap<String, Override> = serde_json::from_value(read_json(path)?)
             .with_context(|| format!("reading overrides from {}", path.display()))?;
+        for missing in schema.missing_override_paths(&overrides) {
+            match &missing.suggestion {
+                Some(s) => eprintln!(
+                    "warning: override path {} is not in the samples; declared (did you mean {s}?)",
+                    missing.path
+                ),
+                None => eprintln!(
+                    "warning: override path {} is not in the samples; declared",
+                    missing.path
+                ),
+            }
+        }
         for failed in schema.apply_overrides(&overrides) {
             eprintln!("warning: override path {failed} could not be applied");
         }

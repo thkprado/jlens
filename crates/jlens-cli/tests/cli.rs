@@ -531,6 +531,17 @@ fn schema() {
             "fixtures/cli/overrides.json"
         ]
     );
+    // Paths the samples lack are declared, with a warning that suggests the path meant.
+    snapshot!(
+        "schema_infer_missing_paths",
+        &[
+            "schema",
+            "infer",
+            ORDER,
+            "--overrides",
+            "fixtures/cli/overrides-missing.json"
+        ]
+    );
     snapshot!(
         "schema_infer_each",
         &["schema", "infer", "--each", "fixtures/cli/samples.json"]

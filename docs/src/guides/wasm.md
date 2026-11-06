@@ -385,6 +385,15 @@ const schema = inferSchema([doc1, doc2], {
 The result is an ordinary JSON Schema object. Store it, edit it by hand, or pass it to
 `LanguageService`.
 
+An override path the samples lack declares a new field, which is what a misspelt path does too.
+`missingOverridePaths(samples, overrides)` lists those paths, each with the existing path it most
+likely meant, so that an editor can warn about them:
+
+```js
+missingOverridePaths([order], { "items.type": { enum: ["apparel"] }, "customer.vip": {} });
+// [{ path: "customer.vip" }, { path: "items.type", suggestion: "items[].type" }]
+```
+
 ### The language service
 
 ```js
