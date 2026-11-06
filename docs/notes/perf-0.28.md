@@ -5,6 +5,79 @@ numbers that the [performance page](../src/architecture/performance.md) leaves o
 current tables and what a user needs; the item numbers are those of
 [the roadmap](../src/architecture/roadmap.md#028-what-027-left-in-distinct-and-match-and-the-regex-flags-u-and-v).
 
+## 0.28 against 0.27.0
+
+Measured for roadmap 0.28 #6, at cc79b24, after the dependencies were brought up to date, each run
+on a new copy of its build, against builds of 0.27.0 made the same way on the same machine. A
+difference is read against [what a build shows against itself](../src/architecture/performance.md#comparing-two-revisions).
+Of the workload's seventeen cases, 0.28 changed `regex over a long text` alone: #4 keeps the
+backtracker's storage between the searches of a text. `$distinct` (#2, #3) and the regex flags
+(#5) have no case of their own; their sections below hold their numbers.
+
+**Natively**, on Windows, `cargo xtask ab v0.27.0 HEAD`, ten rounds, in each mode, built as an
+application builds it (two comparisons) and aligned (one):
+
+| Case | `evaluate` | `document` | `source` |
+|---|---:|---:|---:|
+| `regex over a long text` | 342 → 220 µs, −35.7 to −37.5% | 345 → 220 µs, −36.1 to −37.2% | 347 → 221 µs, −36.2 to −37.6% |
+
+Of the other 144 numbers, none is more than 2.2% slower but those of `regex` (200 searches of
+`/^1[0-9]$/` in short strings) +2.6% and +2.1% with `evaluate`, +1.8% and +3.4% against a
+`Document`, +2.1% and +1.5% with `source`, but −1.0% with `evaluate` and +0.2% against a
+`Document` aligned: placement. A `Searcher` allocates nothing until its first
+search, so `$contains` does the work it did. 0.27.0's aligned program happened to be slow with
+`source`, so that HEAD reads 2 to 25% faster there; the run says nothing about that mode.
+
+Under Linux (WSL 2), against a `Document`, two comparisons and one aligned: `regex over a long
+text` 235 → 158 µs, −32.4 to −32.7%. `path` is +2.9%, +3.5% and +3.5% aligned (173 → 179 ns),
+past the 2.6% a build shows there, and `distinct items` +2.1 to +2.6%. `ab` between each commit
+of 0.28 and the one before, `path`, `names over items`, `distinct items` and `tuples` alone:
+
+| From | To | `path` | `distinct items` |
+|---|---|---:|---:|
+| v0.27.0 | #1, 9d2aa35 | +0.6% | +1.0% |
+| #1 | #2, 8cfacf5 | +2.3% | +2.9% |
+| #2 | #3, 409bd34 | +0.0% | −1.5% |
+| #3 | #4, 51ba7f8 | −1.7% | −2.4% |
+| #4 | #5, 83709ca | +2.4% | +0.7% |
+
+`path` reads two fields of a `Document`, which none of these commits touches, and it moves by
+2.4% at #5, which changed the lexer and the regex flags alone: the layout of the code, not its
+work. Windows has `path` at −0.8%, −0.8% and −1.2% aligned. `distinct items` grows at #2, which
+checks whether the first fields of the kept items fall into few groups (0.28 #2), and gives it
+back at #3 and #4; within the floor in the end.
+
+**In Python**, under Linux, `python.py ab`, two comparisons of five rounds: `regex over a long
+text` −17.1 to −19.3% (212 → 171 µs), marked in all four numbers, less than natively as the wheel
+allocates with `mimalloc`, whose allocations cost less than glibc's. Nothing else is marked:
+`distinct items` +2.0 to +2.5% in all four, `names over items` with Python values +1.9% and +2.8%,
+`path` −1.4 to +1.2%.
+
+**In Java**, under Linux, `java-compare ab`, two comparisons of five rounds, every part, against a
+`Document` and over Java maps: `regex over a long text` −16.3 to −19.1%, marked in all eight
+numbers (204 → 165 µs against a `Document`). Marked once each: `$sum(items.price)` over Java
+maps on 1,000 virtual threads, 5.2% fewer evaluations a second (−1.8% in the other comparison,
+where the 0.27.0 release saw −1.8 to +5.9% unmarked), and, faster, `$count(items)` over maps and
+the index into 10,000 items against a `Document`, −5.4% and −5.6%. `path` against a `Document`
+is +4.8% and +4.7% (0.350 → 0.368 µs) and from JSON text +3.9% and +4.0%, unmarked, the same
+placement as natively under Linux; number formatting against a `Document` +3.6% and +3.0%.
+
+WebAssembly has no measured floor, and is compared in the release's table alone, the median of
+three runs against 0.27.0's table: `regex over a long text` 356 → 271 µs with `evaluate` (−24%)
+and 331 → 234 µs against a `Document` (−29%); of the other cells, the largest moves are
+`filter + aggregate` against a `Document` (43 → 45 µs) and the shipping rule with `evaluate` (284
+→ 294 µs), +4.7% and +3.5%. jsonata-js, the control, moved by 5% at most.
+
+The release's other tables, in the page: natively, `cargo xtask bench-table`, three copies,
+within 2% of 0.27.0's but for `regex over a long text`, `path` against a `Document` (0.25 → 0.23
+µs, the fast draw of the allocator in all three copies) and the transform against a `Document`,
+436 → 446 µs, which `ab` built aligned puts at −0.8%. Python, `python.py speed`, three runs of jlens and
+one of jsonata-python, the control, within 3% of its 0.27.0 numbers. Java, `cargo xtask
+java-compare` with jlens and jsonata-java, the control, within 10% but for its index in a
+variable (962 µs → 1.13 ms) and from JSON text `path` (178 → 158 µs): one best of five runs each.
+jsonatapy, jsonata2py, jsonata2js and jsonata-jvm-compiler have the versions they had for 0.27.0,
+so their columns stay.
+
 ## `$distinct` below a shared field (0.28 #2)
 
 0.27 looked items past the first 16 up by the first fields of an object, as far as they were
