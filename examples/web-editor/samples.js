@@ -67,12 +67,20 @@ export const samples = [
       customer: { login: "carla.mendes", country: "BR" },
       shipTo: { city: "Lisboa", country: "PT" },
       items: [
-        { sku: "TV-55-OLED", quantity: 1 },
-        { sku: "HDMI-2M", quantity: 2 },
+        {
+          sku: "TV-55-OLED",
+          quantity: 1,
+          categories: [
+            { group: "Electronics", subgroup: "TVs" },
+            { group: "Home", subgroup: "Living room" },
+          ],
+        },
+        { sku: "HDMI-2M", quantity: 2, categories: [{ group: "Electronics", subgroup: "Cables" }] },
       ],
     },
     bindings: {},
-    // Three open domains: values only the application can fetch, which domains.js stands in for.
+    // Five open domains: values only the application can fetch, which domains.js stands in for.
+    // The subgroups depend on the group.
     overrides: {
       "customer.login": { label: "Customer login", domain: "customers" },
       "shipTo.country": {
@@ -81,6 +89,12 @@ export const samples = [
         domain: "countries",
       },
       "items[].sku": { label: "Product", domain: "products" },
+      "items[].categories[].group": { label: "Category group", domain: "groups" },
+      "items[].categories[].subgroup": {
+        label: "Category subgroup",
+        description: "One of the subgroups of the category's group.",
+        domain: "subgroups",
+      },
     },
     expression: `/* customer.login, shipTo.country and items[].sku have an open domain (see the Schema
    overrides panel): a list of values only the application can fetch, such as from a server.
@@ -88,15 +102,27 @@ export const samples = [
    domains.js stands in for a server. Try it: type a quote after = or inside [ ] below, as in
    shipTo.country = '   or   items[sku = 'TV
    Unlike an enum, a value outside an open domain is not warned about: the list is never
-   known in full. */
+   known in full.
+
+   One domain can depend on another: the subgroups of items[].categories[] depend on their
+   group, as the states of a country would. The value request then carries its conditions:
+   the fields compared with literals (by = or in) and joined to the value by "and" in the same
+   predicate, read from the expression as it is typed. In $insured below, the request for a
+   subgroup carries group = 'Electronics', and domains.js answers with that group's subgroups
+   only. Try it: type a quote inside the subgroups' [ ] and only Electronics' subgroups come;
+   change the group to 'Home' and they change; in   items[categories[subgroup = '   with no
+   group beside it, every subgroup comes. A group on one side of "or", or compared with !=,
+   is not a condition. */
 (
   $vip     := customer.login in ['alice.walker99', 'kenji.tanaka'];
   $europe  := shipTo.country in ['PT', 'ES', 'FR', 'DE', 'IT'];
   $fragile := items[sku in ['TV-55-OLED', 'MONITOR-27']];
+  $insured := items[categories[group = 'Electronics' and subgroup in ['TVs', 'Phones']]];
   {
     'warehouse': $europe ? 'Lisbon' : 'São Paulo',
     'priority': $vip ? 'high' : 'normal',
-    'packaging': $exists($fragile) ? 'fragile' : 'standard'
+    'packaging': $exists($fragile) ? 'fragile' : 'standard',
+    'insurance': $exists($insured) ? 'included' : 'none'
   }
 )`,
   },

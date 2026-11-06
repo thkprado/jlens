@@ -56,7 +56,10 @@ The "Free shipping" example uses each kind:
 The "Open domains" example is about open domains alone: three fields (`customer.login`,
 `shipTo.country`, `items[].sku`) name the domains `customers`, `countries` and `products`, and its
 expression compares each with literals, so that typing a quote after `=` or inside `in [...]`
-shows the values `domains.js` returns for what is typed.
+shows the values `domains.js` returns for what is typed. Two more fields show a domain that
+depends on another: `items[].categories[].subgroup` (domain `subgroups`) lists the subgroups of
+the group compared beside it, as in `group = 'Electronics' and subgroup in ['`, which
+`domains.js` reads from the value request's `conditions`.
 
 ## Shared addresses
 
