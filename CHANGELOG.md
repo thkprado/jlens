@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.29.0]
+
+Values in the language service. It completes the values of an `enum` or `const` on the right of
+`=`, `!=` and `in`, warns about a literal outside a declared one (`W0206`), and lets the
+application provide the values of an open domain that only it can fetch. The web editor gains a
+schema overrides panel, which warns about override paths the samples lack, and
+`jlens_core::Offsets` makes public the conversion between byte and UTF-16 offsets.
+
 ### Added
 
 - The language service completes values: on the right of `=`, `!=` and `in`, a new completion
@@ -1311,7 +1319,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/thkprado/jlens/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/thkprado/jlens/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/thkprado/jlens/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/thkprado/jlens/compare/v0.25.0...v0.26.0

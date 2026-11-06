@@ -266,3 +266,20 @@ properties and the set operations on classes; their emoji example found a bug in
 `jlens-regress`, fixed. How it was measured is in
 [`docs/notes/perf-0.28.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.28.md).
 ([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0280))
+
+## 0.29
+
+*Completing values, and domains the application provides.* The language service, which completed
+fields, variables, functions and operators but never a value, completes the values of an `enum`
+or `const` on the right of `=`, `!=` and `in`, inside quotes too, and warns as `W0206` about a
+literal outside a declared one; an enumeration inferred from samples is marked
+`x-jlens-enum-inferred` and never warned about. A field whose values only the application can
+fetch names an open domain (`x-jlens-domain`, or `domain` in the overrides), and completion
+returns a value request for the application to answer. The web editor gained a schema overrides
+panel and a "Free shipping" example that uses labels, a hidden field and an open domain; an
+override whose path the samples lack, often a misspelt one, is listed with the path it most
+likely meant. `jlens_core::Offsets` made public the conversion between byte and UTF-16 offsets
+that the Wasm package kept to itself. No evaluation code changed, and the tables moved within the
+floor. How it was measured is in
+[`docs/notes/perf-0.29.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.29.md).
+([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0290))
