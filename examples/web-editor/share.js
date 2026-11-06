@@ -1,5 +1,5 @@
-// Shared addresses: the expression, the input document and the bindings, in the address after
-// `#s=`, so that no server stores them. The state is JSON text, compressed with `deflate-raw`
+// Shared addresses: the expression, the input document, the bindings and the schema overrides, in
+// the address after `#s=`, so that no server stores them. The state is JSON text, compressed with `deflate-raw`
 // (CompressionStream) and written in base64url. Nothing else depends on the browser, so the
 // round trip is also tested in Node.js (share.test.mjs).
 
@@ -15,9 +15,15 @@ export const MAX_ADDRESS = 8000;
 /** The largest state a shared address may expand to, so that a crafted address cannot. */
 const MAX_STATE = 8 << 20;
 
-/** Encodes `{ expression, input, bindings }` as the fragment of a shared address, with `#s=`. */
-export async function encodeShare({ expression, input, bindings }) {
-  const json = JSON.stringify({ expression, input, bindings });
+/**
+ * Encodes `{ expression, input, bindings, overrides }` as the fragment of a shared address, with
+ * `#s=`. Empty overrides are left out, so a state without them encodes as it did before they
+ * existed.
+ */
+export async function encodeShare({ expression, input, bindings, overrides }) {
+  const state = { expression, input, bindings };
+  if (overrides && Object.keys(overrides).length > 0) state.overrides = overrides;
+  const json = JSON.stringify(state);
   const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("deflate-raw"));
   const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
   let binary = "";
@@ -28,8 +34,10 @@ export async function encodeShare({ expression, input, bindings }) {
 }
 
 /**
- * Decodes the fragment of a shared address (with `#s=`) into `{ expression, input, bindings }`.
- * Returns `null` for a fragment that is not a shared one; throws for a damaged one.
+ * Decodes the fragment of a shared address (with `#s=`) into
+ * `{ expression, input, bindings, overrides }`; an address made before the overrides existed
+ * opens with none. Returns `null` for a fragment that is not a shared one; throws for a damaged
+ * one.
  */
 export async function decodeShare(fragment) {
   if (!fragment.startsWith(PREFIX)) return null;
@@ -56,8 +64,16 @@ export async function decodeShare(fragment) {
     throw new Error("The shared address holds no expression.");
   }
   const bindings = state.bindings ?? {};
-  if (bindings === null || typeof bindings !== "object" || Array.isArray(bindings)) {
+  if (!isObject(bindings)) {
     throw new Error("The bindings of the shared address are not a JSON object.");
   }
-  return { expression: state.expression, input: state.input ?? null, bindings };
+  const overrides = state.overrides ?? {};
+  if (!isObject(overrides)) {
+    throw new Error("The schema overrides of the shared address are not a JSON object.");
+  }
+  return { expression: state.expression, input: state.input ?? null, bindings, overrides };
+}
+
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

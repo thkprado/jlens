@@ -1,5 +1,5 @@
 // The examples offered by the web editor. Each has an input document, bindings (a JSON object of
-// variables) and an expression.
+// variables), an expression, and may have schema overrides (a JSON object of settings by path).
 //
 // The Invoice, Address, Schema, Library and Bindings examples are the samples of the JSONata
 // Exerciser (https://try.jsonata.org, https://github.com/jsonata-js/jsonata-exerciser,
@@ -21,6 +21,25 @@ export const samples = [
       ],
     },
     bindings: { approvedCustomers: ["alice.walker99", "bob.harrison42"] },
+    // What the inferred schema cannot know: names for people, the closed list of product types
+    // (a value outside it is warned about), the open domain of customer logins (completed from
+    // domains.js), and an internal code that completion should not offer.
+    overrides: {
+      number: { label: "Order number" },
+      "customer.login": {
+        label: "Customer login",
+        description: "The login of the customer who placed the order.",
+        domain: "customers",
+      },
+      "customer.name": { label: "Customer name" },
+      "items[].code": { hidden: true },
+      "items[].type": {
+        label: "Product type",
+        enum: ["apparel", "electronic", "grocery", "home"],
+      },
+      "items[].unitPrice": { label: "Unit price", description: "The price of one unit, before tax." },
+      "items[].tax": { label: "Tax", description: "The tax on the whole line." },
+    },
     expression: `(
   $total       := $sum(items.(unitPrice * quantity));
   $electronics := $sum(items[type = 'electronic'].(unitPrice * quantity));

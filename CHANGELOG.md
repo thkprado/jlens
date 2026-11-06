@@ -26,6 +26,10 @@ All notable changes are recorded here. The format follows
   and writes them with `ValueRequest::literal` or `jlens_schema::value_literal` (Wasm:
   `valueLiteral`). Such a field is never warned about by `W0206`, and hover names its domain. The
   web editor's CodeMirror module takes an asynchronous source for them.
+- The web editor has a Schema overrides panel: settings by path, passed to `inferSchema` with the
+  input document, so that labels, descriptions, hidden fields and domains survive changes to the
+  document. The "Free shipping" example uses each, with an open domain of customer logins that a
+  stand-in source answers. Shared addresses carry the overrides; older ones open with none.
 
 ### Changed
 

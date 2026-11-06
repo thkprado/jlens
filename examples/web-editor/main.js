@@ -40,12 +40,22 @@ async function fromAddress() {
 const initial = (await fromAddress()) ?? samples[0];
 let input = initial.input;
 let bindings = initial.bindings;
+let overrides = initial.overrides ?? {};
 let service = new LanguageService();
 let schema = null;
 
-/** Rebuilds the language service from the input document and the bindings. */
+/**
+ * Rebuilds the language service from the input document, the bindings and the schema overrides.
+ * Overrides that `inferSchema` rejects are shown as the panel's error, and left out.
+ */
 function updateService() {
-  schema = inferSchema([input]);
+  try {
+    schema = inferSchema([input], overrides);
+    $("input-error").textContent = "";
+  } catch (err) {
+    $("input-error").textContent = err.message; // "invalid overrides: ..."
+    schema = inferSchema([input]);
+  }
   const variables = Object.fromEntries(
     Object.entries(bindings).map(([name, value]) => [name, inferSchema([value])]),
   );
@@ -191,16 +201,26 @@ darkScheme.addEventListener("change", (event) => {
   editor.dispatch({ effects: colorScheme.reconfigure(schemeFlag(event.matches)) });
 });
 
-/** Reads the input document and the bindings from their text areas. */
+/** Parses a text area that holds a JSON object; an empty one is `{}`. */
+function readObject(id, what) {
+  let parsed;
+  try {
+    parsed = $(id).value.trim() ? JSON.parse($(id).value) : {};
+  } catch (err) {
+    throw new Error(`${what}: ${err.message}`);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${what} must be a JSON object.`);
+  }
+  return parsed;
+}
+
+/** Reads the input document, the bindings and the schema overrides from their text areas. */
 function readInputs() {
   try {
     input = JSON.parse($("input").value);
-    const parsed = $("bindings").value.trim() ? JSON.parse($("bindings").value) : {};
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("Bindings must be a JSON object.");
-    }
-    bindings = parsed;
-    $("input-error").textContent = "";
+    bindings = readObject("bindings", "Bindings");
+    overrides = readObject("overrides", "Schema overrides");
   } catch (err) {
     $("input-error").textContent = err.message;
     return;
@@ -209,13 +229,19 @@ function readInputs() {
   schedule();
 }
 
-/** Replaces the expression, the input document and the bindings with an example's. */
+/** Shows the input document, the bindings and the schema overrides in their text areas. */
+function showInputs() {
+  $("input").value = JSON.stringify(input, null, 2);
+  $("bindings").value = JSON.stringify(bindings, null, 2);
+  $("overrides").value = JSON.stringify(overrides, null, 2);
+}
+
+/** Replaces the expression, the input, the bindings and the overrides with an example's. */
 function loadSample(sample) {
   input = sample.input;
   bindings = sample.bindings;
-  $("input").value = JSON.stringify(sample.input, null, 2);
-  $("bindings").value = JSON.stringify(sample.bindings, null, 2);
-  $("input-error").textContent = "";
+  overrides = sample.overrides ?? {};
+  showInputs();
   updateService();
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: sample.expression } });
 }
@@ -232,16 +258,13 @@ $("sample").addEventListener("change", () => {
   loadSample(sample);
 });
 
-$("input").value = JSON.stringify(initial.input, null, 2);
-$("bindings").value = JSON.stringify(initial.bindings, null, 2);
-$("input").addEventListener("input", () => {
-  clearTimeout(timer);
-  timer = setTimeout(readInputs, 300);
-});
-$("bindings").addEventListener("input", () => {
-  clearTimeout(timer);
-  timer = setTimeout(readInputs, 300);
-});
+showInputs();
+for (const id of ["input", "bindings", "overrides"]) {
+  $(id).addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(readInputs, 300);
+  });
+}
 $("level").addEventListener("change", evaluate);
 
 // An address pasted into this tab changes only the fragment: nothing reloads.
@@ -253,14 +276,15 @@ window.addEventListener("hashchange", async () => {
   loadSample(state);
 });
 
-/** Puts the expression, the input document and the bindings in the address, and copies it. */
+/** Puts the expression, the input, the bindings and the overrides in the address, and copies it. */
 async function share() {
   const status = $("share-status");
   if ($("input-error").textContent) {
-    status.textContent = "Correct the input document or the bindings first.";
+    status.textContent = "Correct the input document, the bindings or the schema overrides first.";
     return;
   }
-  const fragment = await encodeShare({ expression: editor.state.doc.toString(), input, bindings });
+  const expression = editor.state.doc.toString();
+  const fragment = await encodeShare({ expression, input, bindings, overrides });
   const address = new URL(fragment, location.href).href;
   if (address.length > MAX_ADDRESS) {
     const kb = (address.length / 1000).toFixed(1);

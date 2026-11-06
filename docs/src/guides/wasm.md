@@ -568,6 +568,9 @@ complete page with no build step, published with this book as the
 [web editor](https://thkprado.github.io/jlens/editor/):
 - a JSONata editor (CodeMirror 6) with completion, diagnostics, hover and signature help, driven
   by a schema inferred from the input document;
+- a panel of schema overrides, passed to `inferSchema` with the input document, so that the
+  structure still follows the document and the overrides add labels, descriptions, hidden fields
+  and domains; the "Free shipping" example has some;
 - live evaluation, in a Web Worker (`worker.js`), so that a slow expression never blocks
   typing;
 - the explanation and an audit tree viewer; clicking a node selects its source;
@@ -577,7 +580,8 @@ complete page with no build step, published with this book as the
   example that uses it: the worker registers it on each expression, and the page declares it to
   the language service;
 - a stand-in asynchronous source for open domains (`domains.js`), which answers after a short
-  delay, as a server would.
+  delay, as a server would: in the "Free shipping" example, `customer.login = '` completes the
+  logins of its domain `customers`.
 
 ```sh
 cargo xtask wasm

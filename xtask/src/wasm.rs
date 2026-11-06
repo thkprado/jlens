@@ -237,9 +237,9 @@ fn gzip_len(bytes: &[u8]) -> Result<u64> {
 /// Builds the package, then runs the JavaScript test suite in Node.js and in a headless
 /// browser (Chrome, Chromium or Edge; set `JLENS_BROWSER` to choose the executable). With
 /// `example`, also tests the shared addresses of `examples/web-editor` in Node.js, and checks
-/// that the editor loads, evaluates its sample and restores a shared address, both from
-/// the repository and as `cargo xtask site` assembles it (this loads CodeMirror from esm.sh, so
-/// it needs network access).
+/// that the editor loads, evaluates its sample and restores a shared address with its schema
+/// overrides, both from the repository and as `cargo xtask site` assembles it (this loads
+/// CodeMirror from esm.sh, so it needs network access).
 pub fn test(require_browser: bool, example: bool) -> Result<()> {
     build(false)?;
     let tests = root().join("crates/jlens-wasm/tests");
@@ -323,35 +323,41 @@ pub fn test(require_browser: bool, example: bool) -> Result<()> {
 
 /// A page that loads the web editor named by `?editor=` in a frame and copies its result once
 /// the editor is ready, then loads it again from a shared address (`#s=`) and copies that result
-/// too; that expression calls the editor's host function `$try`. The editor evaluates in a Web Worker, and the headless browser's virtual time does not
-/// wait for a worker: it would dump the page before the worker has loaded the package. Each
-/// fetch pauses virtual time, so the page fetches until the editor is ready.
+/// and schema too; that expression calls the editor's host function `$try`, and the address
+/// carries schema overrides. The editor evaluates in a Web Worker, and the headless browser's
+/// virtual time does not wait for a worker: it would dump the page before the worker has loaded
+/// the package. Each fetch pauses virtual time, so the page fetches until the editor is ready.
 const EDITOR_CHECK: &str = r#"<!doctype html>
 <meta charset="utf-8">
 <iframe id="editor"></iframe>
 <iframe id="shared"></iframe>
 <pre id="result"></pre>
 <pre id="shared-result"></pre>
+<pre id="shared-schema"></pre>
 <script type="module">
   const editor = new URLSearchParams(location.search).get("editor");
-  async function resultOf(frame, src) {
+  async function pageOf(frame, src) {
     frame.src = src;
     for (let i = 0; i < 20000; i++) {
       const page = frame.contentDocument;
-      if (page?.body?.dataset.ready === "true") return page.getElementById("result").textContent;
+      if (page?.body?.dataset.ready === "true") return page;
       await fetch(location.href, { cache: "no-store" });
     }
-    return "(not ready)";
+    return null;
   }
   const $ = (id) => document.getElementById(id);
-  $("result").textContent = await resultOf($("editor"), editor);
+  const text = (page, id) => page?.getElementById(id).textContent ?? "(not ready)";
+  $("result").textContent = text(await pageOf($("editor"), editor), "result");
   const { encodeShare } = await import(`${editor}share.js`);
   const fragment = await encodeShare({
     expression: '($n := name; $try(function() { $error("x") }, function($e) { $tag & ": " & $n }))',
     input: { name: "jlens" },
     bindings: { tag: "shared-ok" },
+    overrides: { name: { label: "overrides-ok" } },
   });
-  $("shared-result").textContent = await resultOf($("shared"), editor + fragment);
+  const shared = await pageOf($("shared"), editor + fragment);
+  $("shared-result").textContent = text(shared, "result");
+  $("shared-schema").textContent = text(shared, "schema");
   document.body.dataset.ready = "true";
 </script>
 "#;
@@ -363,6 +369,9 @@ fn check_editor(browser: &Path, url: &str) -> Result<()> {
     }
     if !dom.contains("shared-ok: jlens") {
         bail!("the web editor did not restore a shared address, or call its host function ({url})");
+    }
+    if !dom.contains("overrides-ok") {
+        bail!("the web editor did not apply the schema overrides of a shared address ({url})");
     }
     Ok(())
 }

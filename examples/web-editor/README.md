@@ -5,6 +5,7 @@ It needs no build step, and runs online at <https://thkprado.github.io/jlens/edi
 - completion of fields, variables and functions, with the fields taken from a schema inferred
   from the input document, and of values: those of an enumeration, and those of an open domain,
   which `domains.js` answers after a short delay, as a server would;
+- schema overrides (see below), which add to the inferred schema what the document cannot say;
 - diagnostics: syntax errors, and fields that are not in the schema (with "did you mean");
 - hover and signature help;
 - live evaluation, with the explanation and the audit tree of every result (click a node to
@@ -14,8 +15,8 @@ It needs no build step, and runs online at <https://thkprado.github.io/jlens/edi
   samples of [try.jsonata.org](https://try.jsonata.org) (Invoice, Address, Schema, Library,
   Bindings), and last a host function that calls the function it receives (`#host-functions`,
   see below). The choice is kept in the address (`#invoice`), so an example can be linked;
-- shared addresses: the Share button puts the expression, the input document and the bindings
-  in the address and copies it (see below).
+- shared addresses: the Share button puts the expression, the input document, the bindings and
+  the schema overrides in the address and copies it (see below).
 
 Everything runs in the browser: no expression or document leaves it.
 
@@ -33,13 +34,32 @@ The worker registers it on each expression, and the page declares it to the lang
 for completion, hover and signature help. The Host functions example uses it to price order
 lines whose prices may not be numbers.
 
+## Schema overrides
+
+The schema is inferred from the input document again at each change, so a schema edited by hand
+would be overwritten, or go stale. The Schema overrides panel holds a JSON object of settings by
+path instead, and the schema is `inferSchema([input], overrides)`: the structure follows the
+document, and the overrides add what it means. The paths and settings are those of the
+[schema guide](../../docs/src/guides/schema.md); a malformed override is shown as the panel's
+error, and the schema is then inferred without overrides.
+
+The "Free shipping" example uses each kind:
+- `label` and `description`, shown by hover and completion;
+- `hidden` on `items[].code`, which completion no longer offers;
+- a closed domain, `enum` on `items[].type`: `items[type = |]` completes its values, and
+  `items[type = 'electonic']` is warned about (`W0206`);
+- an open domain, `domain: "customers"` on `customer.login`: `customer.login = '|` asks
+  `domains.js` for the logins.
+
 ## Shared addresses
 
 A shared address holds its state in the fragment, which browsers never send to the server:
-`#s=` followed by the JSON text `{"expression": ..., "input": ..., "bindings": ...}`,
-compressed with `deflate-raw` (`CompressionStream`) and written in base64url without padding.
-`share.js` encodes and decodes it; `share.test.mjs` tests the round trip in Node.js
-(`cargo xtask wasm-test --example` runs it, and loads the editor from a shared address).
+`#s=` followed by the JSON text `{"expression": ..., "input": ..., "bindings": ...,
+"overrides": ...}`, compressed with `deflate-raw` (`CompressionStream`) and written in base64url
+without padding. `overrides` is left out when empty, and an address without it, such as one made
+before the overrides existed, opens with none. `share.js` encodes and decodes it;
+`share.test.mjs` tests the round trip in Node.js (`cargo xtask wasm-test --example` runs it, and
+loads the editor from a shared address with overrides).
 
 Some tools (chat applications, mail clients, proxies) cut addresses beyond about 8 KB, so the
 Share button refuses a longer one and says so, rather than giving a link that would arrive
@@ -80,7 +100,7 @@ of the editor.
 | `audit-view.js` | Renders explanations and audit trees |
 | `main.js` | Wires the editor, the input document, the examples and the result panels |
 | `worker.js` | Evaluates in a Web Worker; the page passes it the address of the package, as import maps do not apply to workers |
-| `samples.js` | The examples: expression, input document and bindings of each |
+| `samples.js` | The examples: expression, input document, bindings and schema overrides of each |
 | `host-functions.js` | The host function `$try`, and its declaration for the language service |
 | `share.js`, `share.test.mjs` | Shared addresses, and the test of their round trip (left out of the site) |
 | `index.html`, `style.css` | The page |
