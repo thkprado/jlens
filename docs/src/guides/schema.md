@@ -65,7 +65,7 @@ An overrides file maps paths to settings; `[]` steps into array items:
 | `domain` | An open domain: values the application provides (see [Open domains](#open-domains)) |
 | `examples` | Example values |
 | `format` | A format name |
-| `type` | Replaces the inferred types, e.g. `["string", "null"]` |
+| `type` | Replaces the inferred types: one name such as `"integer"`, or a list such as `["string", "null"]`, as in JSON Schema. The names are JSON Schema's: `null`, `boolean`, `integer` (a number without a fraction), `number`, `string`, `array` and `object` |
 | `hidden` | Never suggested by completion |
 
 ```text

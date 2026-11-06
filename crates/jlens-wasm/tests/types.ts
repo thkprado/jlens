@@ -90,7 +90,7 @@ export async function check(): Promise<void> {
   const value: CompletionKind = "value";
   const request: ValueRequest | undefined = completions.valueRequest;
   const literal: string = valueLiteral("x", request?.quote ?? "'");
-  const domain: JsonSchema = inferSchema([{ a: "x" }], { a: { domain: "codes" } });
+  const domain: JsonSchema = inferSchema([{ a: "x" }], { a: { domain: "codes", type: "string" } });
   const missing: MissingOverridePath[] = missingOverridePaths([{ a: 1 }], { b: { label: "B" } });
   const meant: string | undefined = missing[0]?.suggestion;
   const hover = service.hover("a", 0)?.contents;

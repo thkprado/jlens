@@ -21,6 +21,14 @@ For ad-hoc JSON queries, `jq` remains the usual tool. jlens is for JSONata that 
 somewhere else, such as a rules engine or a jsonata-js service. It checks those expressions,
 tests them and explains their results before they ship.
 
+## 0.30
+
+The plan is still open; its items are added as they come.
+
+| # | Item | Done when | Status |
+|---|---|---|---|
+| 1 | A schema override's `type` takes one type name, as JSON Schema and the inferred schema write it, besides a list | `"type": "integer"` read like `["integer"]` and written back as one name; tests in `jlens-schema` and the Wasm suite; `SchemaOverride` in `types.d.ts` and the schema guide updated | **done**: `Override::types` read and written as `Schema::to_json_schema` writes `type` |
+
 ## In exploration: a regular expression engine of jlens's own
 
 `jlens-regress` is a backtracker. A catastrophic pattern runs within the evaluation's limits

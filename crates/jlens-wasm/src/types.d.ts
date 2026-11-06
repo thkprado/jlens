@@ -304,7 +304,8 @@ export interface SchemaOverride {
    */
   domain?: string;
   format?: string;
-  type?: JsonType[];
+  /** Replaces the inferred types: one name, or a list for a union, as in JSON Schema. */
+  type?: JsonType | JsonType[];
   examples?: unknown[];
 }
 

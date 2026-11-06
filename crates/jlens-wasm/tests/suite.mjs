@@ -729,6 +729,13 @@ export const cases = [
     // Paths missing from the samples are declared.
     const declared = j.inferSchema([order], { "customer.country": { type: ["string"] } });
     equal(declared.properties.customer.properties.country.type, "string", "declared field");
+    // `type` is one name or a list, as in JSON Schema.
+    const typed = j.inferSchema([order], {
+      "items[].tax": { type: "integer" },
+      "items[].code": { type: ["string", "null"] },
+    });
+    const line = typed.properties.items.items.properties;
+    equal([line.tax.type, line.code.type], ["integer", ["string", "null"]], "type name or list");
     throws(() => j.inferSchema([order], { "items[].type": { colour: "x" } }), (e) => {
       ok(e instanceof TypeError, "TypeError");
       ok(e.message.includes("colour"), e.message);

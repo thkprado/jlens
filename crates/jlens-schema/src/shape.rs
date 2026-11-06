@@ -410,11 +410,56 @@ pub struct Override {
     pub domain: Option<String>,
     /// The string format.
     pub format: Option<String>,
-    /// The types, replacing the inferred ones.
-    #[serde(rename = "type")]
+    /// The types, replacing the inferred ones. As in JSON Schema, `type` is one type name or a
+    /// list of them; it is written as one name when there is only one, as the export does.
+    #[serde(
+        rename = "type",
+        default,
+        deserialize_with = "one_or_more_types",
+        serialize_with = "types_as_json_schema"
+    )]
     pub types: Option<Vec<JsonType>>,
     /// Example values.
     pub examples: Option<Vec<JsonValue>>,
+}
+
+/// Reads `type` as JSON Schema writes it: `"integer"` or `["string", "null"]`.
+fn one_or_more_types<'de, D>(deserializer: D) -> Result<Option<Vec<JsonType>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct Types;
+    impl<'de> serde::de::Visitor<'de> for Types {
+        type Value = Vec<JsonType>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a type name or a list of type names")
+        }
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            JsonType::deserialize(serde::de::value::StrDeserializer::new(v)).map(|t| vec![t])
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut types = Vec::new();
+            while let Some(t) = seq.next_element()? {
+                types.push(t);
+            }
+            Ok(types)
+        }
+    }
+    deserializer.deserialize_any(Types).map(Some)
+}
+
+/// Writes `type` as [`Schema::to_json_schema`] does: one name alone, several as a list.
+fn types_as_json_schema<S>(types: &Option<Vec<JsonType>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match types.as_deref() {
+        Some([one]) => one.serialize(serializer),
+        _ => types.serialize(serializer),
+    }
 }
 
 /// Parses `a.b[].c` into `[(Some("a"), 0), (Some("b"), 1), (Some("c"), 0)]`.

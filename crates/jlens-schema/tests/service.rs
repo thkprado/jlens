@@ -561,6 +561,23 @@ fn open_domains_request_their_values_from_the_application() {
         hover.contents
     );
 
+    // An override's `type` is one name or a list, as in JSON Schema, and is written back as the
+    // export writes it.
+    let one: Override = serde_json::from_value(json!({"type": "integer"})).unwrap();
+    let list: Override = serde_json::from_value(json!({"type": ["integer"]})).unwrap();
+    assert_eq!(one, list);
+    assert_eq!(
+        serde_json::to_value(&one).unwrap()["type"],
+        json!("integer")
+    );
+    let union: Override = serde_json::from_value(json!({"type": ["string", "null"]})).unwrap();
+    assert_eq!(
+        serde_json::to_value(&union).unwrap()["type"],
+        json!(["string", "null"])
+    );
+    assert!(serde_json::from_value::<Override>(json!({"type": "int"})).is_err());
+    assert!(serde_json::from_value::<Override>(json!({"type": 1})).is_err());
+
     // An override declares a domain on an inferred schema, and literals keep the request's quote.
     let mut schema = Schema::infer(&[json!({"status": "open"}), json!({"status": "closed"})]);
     let overrides: std::collections::BTreeMap<String, Override> =

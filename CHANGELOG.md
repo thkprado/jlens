@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A schema override's `type` takes one type name, `"type": "integer"`, as well as a list, as JSON
+  Schema does and as the inferred schema writes it; a single name was rejected ("expected a
+  sequence"). The Wasm API's `SchemaOverride.type` is `JsonType | JsonType[]`.
+
 ## [0.29.0]
 
 Values in the language service. It completes the values of an `enum` or `const` on the right of
