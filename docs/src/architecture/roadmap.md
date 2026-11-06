@@ -23,7 +23,8 @@ tests them and explains their results before they ship.
 
 ## 0.30
 
-The plan is still open; its items are added as they come.
+Its items came from use, one at a time; the plan closes with upstream, the measurements and the
+release.
 
 | # | Item | Done when | Status |
 |---|---|---|---|
@@ -32,6 +33,9 @@ The plan is still open; its items are added as they come.
 | 3 | A value request carries its context, for domains whose values depend on another value (group → subgroup, country → state), and says whether the value is an element of `in [ ... ]` | Beside the prefix, `ValueRequest` names the literals compared with the other fields of the same predicate (`categories[group = 'X' and subgroup = '\|` gives `group: "X"`), read from incomplete expressions by the recovering parser, and whether several values may be inserted; tests in `jlens-schema`, `types.d.ts`, the Wasm suite and the schema guide updated | **done**: `ValueRequest::conditions` (`ValueCondition`: a path and its literals) and `in_array`; `!=`, a side of `or`, a call or another predicate is not a condition |
 | 4 | The web editor's "Open domains" example shows a domain that depends on another | A field whose values depend on another's, compared beside it; `domains.js` answers from the request's conditions; the example's comment explains it | **done**: category subgroups that depend on their group |
 | 5 | A value request names the literals already in the array of `in`, so that a domain's values are not offered twice | `ValueRequest::listed`, as the service already leaves them out of declared values; tests in `jlens-schema` and the Wasm suite; `types.d.ts` and the guides; the web editor leaves them out | **done**: `listed`, empty outside an array |
+| 6 | Upstream before the release: `regress` after `95c0404`, stacker#155 and #156, jsonata-js's commits after `c5be116` and its version on npm | Each `regress` commit worth porting ported one at a time, or none; each jsonata-js fix checked against jlens; the watch list updated | **done**: no `regress` commit after `95c0404`, on `master` or its other branches; stacker#155 and #156 unchanged; no jsonata-js commit after `c5be116`, npm still 2.2.2 |
+| 7 | The tables measured again, unattended, after the dependencies are brought up to date: jlens and the control columns; other engines only where their version changed | `ab` against 0.29.0 in every mode, Python and Java; the performance page's tables and version header updated; each case within the floor or its cause recorded | |
+| 8 | Release 0.30.0 | The release checklist; the channels checked | |
 
 ## In exploration: a regular expression engine of jlens's own
 
