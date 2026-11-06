@@ -16,8 +16,9 @@ All notable changes are recorded here. The format follows
   (group → subgroup, country → state): `ValueRequest::conditions` lists the fields compared with
   literals by `=` or `in` and joined to the value by `and`, in the same predicate, read from the
   unfinished expression; `ValueRequest::in_array` says whether the value is an element of
-  `in [...]`, where several may be inserted. Wasm: `conditions` (`ValueCondition[]`) and
-  `inArray`.
+  `in [...]`, where several may be inserted, and `ValueRequest::listed` the literals that array
+  already holds, not to offer again. Wasm: `conditions` (`ValueCondition[]`), `inArray` and
+  `listed`. The web editor leaves the listed values out of a domain's completions.
 
 ### Changed
 

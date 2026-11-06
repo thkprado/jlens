@@ -597,7 +597,7 @@ fn open_domains_request_their_values_from_the_application() {
         json["valueRequest"],
         json!({
             "domain": "statuses", "path": "status", "prefix": "", "range": {"start": 9, "end": 9},
-            "quote": "\"", "conditions": [], "inArray": false
+            "quote": "\"", "conditions": [], "inArray": false, "listed": []
         })
     );
 }
@@ -712,6 +712,19 @@ fn value_requests_carry_the_conditions_beside_them() {
         json["valueRequest"]["conditions"],
         json!([{"path": "country", "values": ["BR"]}])
     );
+
+    // The literals already in the array of `in`, wherever the cursor is in it; none elsewhere.
+    for (marked, listed) in [
+        ("state in ['SP', 'RJ', |]", json!(["SP", "RJ"])),
+        ("state in ['SP', '|', 'RJ']", json!(["SP", "RJ"])),
+        ("state in [|", json!([])),
+        ("year = 1 and state in ['SP', $x, 2, |]", json!(["SP", 2])),
+        ("state = |", json!([])),
+    ] {
+        let (text, offset) = cursor(marked);
+        let request = svc.complete(&text, offset).value_request.unwrap();
+        assert_eq!(Value::from(request.listed), listed, "{marked}");
+    }
 }
 
 #[test]

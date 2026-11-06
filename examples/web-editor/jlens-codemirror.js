@@ -121,13 +121,15 @@ function complete(getService, values) {
     };
     if (!valueRequest || !values) return result();
     // An open domain: the application fetches its values; they come first, as the declared
-    // values do, and a value both offer is listed once.
+    // values do, and a value both offer is listed once. Those already in the array of `in`
+    // (`listed`) are not offered again.
     return Promise.resolve()
       .then(() => values(valueRequest))
       .catch(() => [])
       .then((fetched) => {
         if (context.aborted) return null;
         const listed = new Set(options.map((option) => option.apply));
+        for (const value of valueRequest.listed) listed.add(valueLiteral(value, valueRequest.quote));
         const domain = [];
         for (const value of fetched ?? []) {
           const literal = valueLiteral(value, valueRequest.quote);

@@ -447,7 +447,8 @@ const service = new LanguageService(schema);
 const text = "customer.login = 'al";
 const { range, items, valueRequest } = service.complete(text, text.length);
 // valueRequest: { domain: "customers", path: "customer.login", prefix: "al",
-//                 range: {start: 17, end: 20}, quote: "'", conditions: [], inArray: false }
+//                 range: {start: 17, end: 20}, quote: "'", conditions: [], inArray: false,
+//                 listed: [] }
 const logins = await fetchCustomers(valueRequest.prefix);   // the application's own source
 const options = logins.map((login) => valueLiteral(login, valueRequest.quote)); // "'alice'"
 ```
@@ -456,15 +457,17 @@ const options = logins.map((login) => valueLiteral(login, valueRequest.quote)); 
 writes a string in `quote` (`"` by default) when it can, and other values as JSON.
 
 `conditions` lists the fields fixed to literals beside the value, for a domain whose values
-depend on another one, and `inArray` says whether the value is an element of `in [...]`, where
-several may be inserted ([schema guide](schema.md#open-domains)):
+depend on another one; `inArray` says whether the value is an element of `in [...]`, where
+several may be inserted, and `listed` holds the literals already in that array, not to offer
+again ([schema guide](schema.md#open-domains)):
 
 ```js
 // A schema whose items[].categories[].subgroup has a domain
-const text = "items[categories[group = 'Electronics' and subgroup in ['";
+const text = "items[categories[group = 'Electronics' and subgroup in ['TVs', '";
 const { valueRequest } = service.complete(text, text.length);
 // valueRequest.conditions: [{ path: "items[].categories[].group", values: ["Electronics"] }]
 // valueRequest.inArray: true
+// valueRequest.listed: ["TVs"]
 ```
 
 #### CodeMirror 6

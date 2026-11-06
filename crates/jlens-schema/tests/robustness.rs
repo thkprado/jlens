@@ -81,6 +81,10 @@ proptest! {
                 }
                 prop_assert!(text[..cursor].ends_with(&request.prefix), "{request:?}");
                 // A condition names a field of the schema and the literals it is compared with.
+                for value in &request.listed {
+                    prop_assert!(request.in_array, "{request:?}");
+                    prop_assert!(jlens_core::parse(&request.literal(value)).is_ok(), "{value}");
+                }
                 for condition in &request.conditions {
                     prop_assert!(paths.shape_at(&condition.path).is_some(), "{condition:?}");
                     prop_assert!(!condition.values.is_empty(), "{condition:?}");

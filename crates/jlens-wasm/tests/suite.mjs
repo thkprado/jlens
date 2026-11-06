@@ -799,6 +799,7 @@ export const cases = [
       {
         domain: "countries", path: "customer.country", prefix: "Br",
         range: { start: text.length - 3, end: text.length }, quote: "'", conditions: [], inArray: false,
+        listed: [],
       },
       "request",
     );
@@ -807,6 +808,7 @@ export const cases = [
     const beside = service.complete(text, text.length).valueRequest;
     equal(beside.conditions, [{ path: "customer.name", values: ["é𝄞"] }], "conditions");
     equal(beside.inArray, true, "in an array");
+    equal(beside.listed, ["PT"], "listed");
     equal(c.valueRequest.range, c.range, "same range");
     text = "customer.country = ";
     equal(service.complete(text, text.length).valueRequest.quote, '"', "quote outside a literal");

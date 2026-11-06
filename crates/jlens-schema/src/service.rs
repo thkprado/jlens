@@ -98,6 +98,9 @@ pub struct ValueRequest {
     /// Whether the value is an element of the array on the right of `in`, where several values
     /// may be inserted, separated by commas.
     pub in_array: bool,
+    /// The literals already in that array, which the application need not offer again, as the
+    /// service leaves them out of the declared values it completes. Empty outside an array.
+    pub listed: Vec<JsonValue>,
 }
 
 /// A field compared with literals beside the value a [`ValueRequest`] completes: by `=` (one
@@ -942,6 +945,7 @@ impl LanguageService {
             quote,
             conditions: probe.conditions.clone(),
             in_array: probe.in_array,
+            listed: probe.listed.clone(),
         })
     }
 

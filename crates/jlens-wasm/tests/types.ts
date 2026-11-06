@@ -93,13 +93,14 @@ export async function check(): Promise<void> {
   const literal: string = valueLiteral("x", request?.quote ?? "'");
   const conditions: ValueCondition[] = request?.conditions ?? [];
   const several: boolean | undefined = request?.inArray;
+  const listed: unknown[] = request?.listed ?? [];
   const domain: JsonSchema = inferSchema([{ a: "x" }], { a: { domain: "codes", type: "string" } });
   const missing: MissingOverridePath[] = missingOverridePaths([{ a: 1 }], { b: { label: "B" } });
   const meant: string | undefined = missing[0]?.suggestion;
   const hover = service.hover("a", 0)?.contents;
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();
-  console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, every, fields, text, failed, start, type, ast.id, d, kinds, value, request, literal, conditions, several, domain, hover, help, catalog);
+  console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, every, fields, text, failed, start, type, ast.id, d, kinds, value, request, literal, conditions, several, listed, domain, hover, help, catalog);
 }
 
 // The global set by jlens.global.js: the module's exports, with `init` for its default export.

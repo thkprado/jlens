@@ -356,6 +356,8 @@ export interface ValueRequest {
   conditions: ValueCondition[];
   /** Whether the value is an element of the array on the right of `in`: several may be inserted. */
   inArray: boolean;
+  /** The literals already in that array, not to offer again; empty outside an array. */
+  listed: unknown[];
 }
 
 /** A field compared with literals beside a requested value, by `=` or `in`. */

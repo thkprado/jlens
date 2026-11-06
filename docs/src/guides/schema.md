@@ -221,7 +221,9 @@ expression. In `items[categories[group = 'Electronics' and subgroup = '|`, the r
 expression as it is typed, unfinished. A comparison on one side of `or`, by `!=`, with something
 that is not a literal, inside a call such as `$not(...)` or in another predicate is not a
 condition. The request also says whether the value is an element of the array of `in [...]`
-(`in_array`), where the application may insert several values, separated by commas.
+(`in_array`), where the application may insert several values, separated by commas, and which
+literals that array already holds (`listed`), so that the application does not offer them again,
+as the service does not complete a declared value twice.
 
 Completion works on incomplete expressions too, such as `$count(items[` or
 `items[type = 'x' and `. That is the normal state of an expression while someone types it.
