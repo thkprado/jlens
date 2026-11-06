@@ -247,6 +247,8 @@ pub(crate) enum Event<'a, 's> {
     Bind { name: &'a str },
     /// A comparison, `=`, `!=` or `in`, reported after both sides are walked.
     Compare {
+        /// The comparison.
+        node: &'a Node,
         op: BinaryOp,
         /// The type of the left-hand side.
         lhs: &'a Ty<'s>,
@@ -366,6 +368,7 @@ impl<'s> Walker<'s, '_> {
                 self.walk(rhs, ctx, scope);
                 if matches!(op, BinaryOp::Eq | BinaryOp::Ne | BinaryOp::In) {
                     (self.visit)(Event::Compare {
+                        node,
                         op: *op,
                         lhs: &left,
                         rhs,

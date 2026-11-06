@@ -9,7 +9,7 @@ const TOKENS: &[&str] = &[
     "customer", "login", "items", "type", "unitPrice", "`odd name`", "$", "$$", "$x", "$limit",
     "1", "'s'", "\"t\"", ".", "[", "]", "(", ")", "{", "}", ":", ",", ";", "=", "!=", "and", "in", "?",
     ":=", "~>", "&", "**", "^(", "@$v", "#$i", "function($v){", "$sum(", "$substring(",
-    "$map(", "$rate(", "login =", "name in", "$summ(", "$bad(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
+    "$map(", "$rate(", "login =", "name in", "or", "type =", "unitPrice in [", "$summ(", "$bad(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
 ];
 
 fn text() -> impl Strategy<Value = String> {
@@ -32,13 +32,17 @@ proptest! {
         // scalars, whose values outside it are warned about, and an open domain.
         let overrides: std::collections::BTreeMap<String, Override> = serde_json::from_value(
             json!({
-                "items[].type": {"enum": ["a", "it's", "say \"é\"", 1, null, {"k": [1]}]},
+                "items[].type": {
+                    "enum": ["a", "it's", "say \"é\"", 1, null, {"k": [1]}],
+                    "domain": "types"
+                },
                 "login": {"enum": ["s", "é𝄞", 1, true]},
                 "customer.name": {"domain": "people"}
             }),
         )
         .unwrap();
         prop_assert!(schema.apply_overrides(&overrides).is_empty());
+        let paths = schema.clone();
         let service = LanguageService::new(Some(schema))
             .with_variable("limit", None)
             .with_function(
@@ -76,6 +80,11 @@ proptest! {
                     cursor -= 1;
                 }
                 prop_assert!(text[..cursor].ends_with(&request.prefix), "{request:?}");
+                // A condition names a field of the schema and the literals it is compared with.
+                for condition in &request.conditions {
+                    prop_assert!(paths.shape_at(&condition.path).is_some(), "{condition:?}");
+                    prop_assert!(!condition.values.is_empty(), "{condition:?}");
+                }
                 for value in [json!("it's"), json!("say \"é𝄞\""), json!(1.5), json!(null)] {
                     let literal = request.literal(&value);
                     prop_assert!(jlens_core::parse(&literal).is_ok(), "{literal}");

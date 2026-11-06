@@ -347,6 +347,23 @@ export interface ValueRequest {
   range: Span;
   /** The quote to write a string value with (pass it to `valueLiteral`). */
   quote: '"' | "'";
+  /**
+   * The fields fixed to literals beside the value, in the order written: the comparisons joined
+   * to this one by `and` within the same predicate (or, outside any, the whole expression). A
+   * domain whose values depend on another value reads it here, such as the group of
+   * `categories[group = 'X' and subgroup = '|']`.
+   */
+  conditions: ValueCondition[];
+  /** Whether the value is an element of the array on the right of `in`: several may be inserted. */
+  inArray: boolean;
+}
+
+/** A field compared with literals beside a requested value, by `=` or `in`. */
+export interface ValueCondition {
+  /** The field's path in the schema, as `ValueRequest.path` writes it. */
+  path: string;
+  /** The literal it is compared with, or those of the array it is in. */
+  values: unknown[];
 }
 
 export interface Hover {

@@ -110,8 +110,13 @@ machinery as `$map(items, function($i){ $i.`.
   (`Shape::domain`, `x-jlens-domain`) never warns either.
 - **Value requests**: where values are completed, the first shape of the left-hand side (or of
   its arrays' items) with a domain becomes a `ValueRequest` beside the items. Its path is found
-  by identity in the schema's tree of shapes, iteratively; a variable's shape has none. The
-  service never fetches anything: the request is all it returns.
+  by identity in the schema's tree of shapes, iteratively; a variable's shape has none. Its
+  conditions come from the same probe: before the walk, an iterative search of the tree finds
+  the comparison whose right-hand side is the placeholder and goes up through `and`, `or` and
+  parentheses around one expression, keeping the comparisons (`=`, `in`) of each `and`'s other
+  operand; the walk then types their left-hand sides, matched by address, and a field of the
+  schema compared with literals becomes a `ValueCondition`. The service never fetches anything:
+  the request is all it returns.
 - **Hover** keeps the innermost field or variable event whose span contains the offset, and
   renders its type and documentation as Markdown.
 - **Signature help** scans backwards from the cursor for the unmatched `(` of a call, ignoring

@@ -11,6 +11,12 @@ All notable changes are recorded here. The format follows
 - The web editor's "Open domains" example: three fields name an open domain (customers,
   countries, products), and the expression compares each with literals, so that typing a quote
   completes the values the application provides. `domains.js` answers for the three.
+- A value request carries its conditions, for a domain whose values depend on another value
+  (group → subgroup, country → state): `ValueRequest::conditions` lists the fields compared with
+  literals by `=` or `in` and joined to the value by `and`, in the same predicate, read from the
+  unfinished expression; `ValueRequest::in_array` says whether the value is an element of
+  `in [...]`, where several may be inserted. Wasm: `conditions` (`ValueCondition[]`) and
+  `inArray`.
 
 ### Changed
 

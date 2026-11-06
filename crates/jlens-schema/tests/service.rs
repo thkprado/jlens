@@ -595,7 +595,122 @@ fn open_domains_request_their_values_from_the_application() {
     let json = serde_json::to_value(svc.complete("status = ", 9)).unwrap();
     assert_eq!(
         json["valueRequest"],
-        json!({"domain": "statuses", "path": "status", "prefix": "", "range": {"start": 9, "end": 9}, "quote": "\""})
+        json!({
+            "domain": "statuses", "path": "status", "prefix": "", "range": {"start": 9, "end": 9},
+            "quote": "\"", "conditions": [], "inArray": false
+        })
+    );
+}
+
+#[test]
+fn value_requests_carry_the_conditions_beside_them() {
+    let schema = Schema::from_json_schema(&json!({
+        "type": "object",
+        "properties": {
+            "country": {"type": "string", "x-jlens-domain": "countries"},
+            "state": {"type": "string", "x-jlens-domain": "states"},
+            "year": {"type": "integer"},
+            "items": {"type": "array", "items": {"type": "object", "properties": {
+                "code": {"type": "integer"},
+                "categories": {"type": "array", "items": {"type": "object", "properties": {
+                    "group": {"type": "string", "x-jlens-domain": "groups"},
+                    "subgroup": {"type": "string", "x-jlens-domain": "subgroups"}
+                }}}
+            }}}
+        }
+    }))
+    .unwrap();
+    let svc = LanguageService::new(Some(schema));
+    let group = "items[].categories[].group";
+    // (expression, the conditions as (path, values), whether the value is in an array)
+    let cases: &[(&str, Value, bool)] = &[
+        // Unfinished, as while typing.
+        (
+            "items[categories[group = 'Electronics' and subgroup = '|",
+            json!([[group, ["Electronics"]]]),
+            false,
+        ),
+        (
+            "items[categories[group in ['A', 'B'] and subgroup in ['x', |]]]",
+            json!([[group, ["A", "B"]]]),
+            true,
+        ),
+        (
+            "items[categories[subgroup = | and group = 'A']]",
+            json!([[group, ["A"]]]),
+            false,
+        ),
+        // Through `or` and parentheses: `group = 'A'` holds whichever side does.
+        (
+            "items[categories[group = 'A' and (subgroup = | or subgroup = 'y')]]",
+            json!([[group, ["A"]]]),
+            false,
+        ),
+        // The other conditions of the same predicate, not those of an outer one.
+        (
+            "items[code = 1].categories[group = 'A' and subgroup = |]",
+            json!([[group, ["A"]]]),
+            false,
+        ),
+        (
+            "country = 'BR' and state = |",
+            json!([["country", ["BR"]]]),
+            false,
+        ),
+        // Numbers keep the value written: an integer stays one.
+        (
+            "year in [2025, 2026.5] and country = 'BR' and state = |",
+            json!([["year", [2025, 2026.5]], ["country", ["BR"]]]),
+            false,
+        ),
+        ("state = |", json!([]), false),
+        // Not a condition: one side of `or`, `!=`, a value that is not a literal, a negation, a
+        // comparison in another predicate, or something that is not a field.
+        (
+            "items[categories[(group = 'A' or group = 'B') and subgroup = |]]",
+            json!([]),
+            false,
+        ),
+        (
+            "items[categories[group != 'A' and subgroup = |]]",
+            json!([]),
+            false,
+        ),
+        (
+            "items[categories[group = $g and subgroup = |]]",
+            json!([]),
+            false,
+        ),
+        (
+            "items[categories[$not(group = 'A') and subgroup = |]]",
+            json!([]),
+            false,
+        ),
+        (
+            "items[categories[group = 'A']] and items[categories[subgroup = |]]",
+            json!([]),
+            false,
+        ),
+        ("$x = 'A' and 'B' = country and state = |", json!([]), false),
+    ];
+    for (marked, conditions, in_array) in cases {
+        let (text, offset) = cursor(marked);
+        let request = svc
+            .complete(&text, offset)
+            .value_request
+            .unwrap_or_else(|| panic!("no value request for {marked}"));
+        let found: Vec<Value> = request
+            .conditions
+            .iter()
+            .map(|c| json!([c.path, c.values]))
+            .collect();
+        assert_eq!(Value::from(found), *conditions, "{marked}");
+        assert_eq!(request.in_array, *in_array, "{marked}");
+    }
+    let json = serde_json::to_value(svc.complete("country = 'BR' and state = ", 27)).unwrap();
+    assert_eq!(
+        json["valueRequest"]["conditions"],
+        json!([{"path": "country", "values": ["BR"]}])
     );
 }
 

@@ -796,9 +796,17 @@ export const cases = [
     let c = service.complete(text, text.length);
     equal(
       c.valueRequest,
-      { domain: "countries", path: "customer.country", prefix: "Br", range: { start: text.length - 3, end: text.length }, quote: "'" },
+      {
+        domain: "countries", path: "customer.country", prefix: "Br",
+        range: { start: text.length - 3, end: text.length }, quote: "'", conditions: [], inArray: false,
+      },
       "request",
     );
+    // The conditions beside the value, which a domain may depend on, and whether it is in `in [...]`.
+    text = "customer.name = 'é𝄞' and customer.country in ['PT', ";
+    const beside = service.complete(text, text.length).valueRequest;
+    equal(beside.conditions, [{ path: "customer.name", values: ["é𝄞"] }], "conditions");
+    equal(beside.inArray, true, "in an array");
     equal(c.valueRequest.range, c.range, "same range");
     text = "customer.country = ";
     equal(service.complete(text, text.length).valueRequest.quote, '"', "quote outside a literal");

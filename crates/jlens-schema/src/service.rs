@@ -90,6 +90,25 @@ pub struct ValueRequest {
     pub range: Span,
     /// The quote a string value is written with: that of the literal being edited, or `"`.
     pub quote: char,
+    /// The fields fixed to literals beside the value, in the order written: the comparisons
+    /// joined to this one by `and` (through `or` and parentheses too), within the same predicate
+    /// or, outside any, the whole expression. A domain whose values depend on another value
+    /// reads it here, such as the group of `categories[group = 'X' and subgroup = '|']`.
+    pub conditions: Vec<ValueCondition>,
+    /// Whether the value is an element of the array on the right of `in`, where several values
+    /// may be inserted, separated by commas.
+    pub in_array: bool,
+}
+
+/// A field compared with literals beside the value a [`ValueRequest`] completes: by `=` (one
+/// value) or `in` (the values of its array). Comparisons by `!=`, with a value that is not a
+/// literal, or of something that is not a field of the schema are left out.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ValueCondition {
+    /// The field's path in the schema, as [`ValueRequest::path`] writes it.
+    pub path: String,
+    /// The literal it is compared with, or those of the array it is in.
+    pub values: Vec<JsonValue>,
 }
 
 impl ValueRequest {
@@ -340,6 +359,10 @@ struct Probe<'s> {
     listed: Vec<JsonValue>,
     /// The shape of that left-hand side that has an open domain.
     domain: Option<&'s Shape>,
+    /// Whether the cursor is an element of the array on the right of `in`.
+    in_array: bool,
+    /// The fields fixed to literals beside that comparison.
+    conditions: Vec<ValueCondition>,
 }
 
 /// Whether `node` is the placeholder, as a name or a path of one step.
@@ -351,10 +374,102 @@ fn is_placeholder(node: &Node) -> bool {
     }
 }
 
-/// The value of a literal node.
+/// Whether `node` is a comparison whose right-hand side is the placeholder, or an array holding
+/// it on the right of `in`.
+fn compares_placeholder(node: &Node) -> bool {
+    match &node.kind {
+        NodeKind::Binary {
+            op: op @ (BinaryOp::Eq | BinaryOp::Ne | BinaryOp::In),
+            rhs,
+            ..
+        } => {
+            is_placeholder(rhs)
+                || *op == BinaryOp::In
+                    && matches!(&rhs.kind, NodeKind::Array { items } if items.iter().any(is_placeholder))
+        }
+        _ => false,
+    }
+}
+
+/// The comparisons (`=` and `in`) joined by `and` to the one whose right-hand side is the
+/// placeholder: going up from it through `and`, `or` and parentheses around one expression, the
+/// other operand of each `and`. Anything else, such as a predicate, a call or `?:`, ends the
+/// search. They are compared by address, as nodes of the same tree.
+fn sibling_comparisons(root: &Node) -> Vec<*const Node> {
+    // Iterative, so that a deep expression cannot overflow the stack: each node with the index
+    // of its parent, until the comparison is found.
+    let mut nodes: Vec<(&Node, Option<usize>)> = vec![(root, None)];
+    let mut found = None;
+    let mut i = 0;
+    while i < nodes.len() {
+        let node = nodes[i].0;
+        if compares_placeholder(node) {
+            found = Some(i);
+            break;
+        }
+        node.for_each_child(|child| nodes.push((child, Some(i))));
+        i += 1;
+    }
+    let mut out = Vec::new();
+    let Some(mut current) = found else {
+        return out;
+    };
+    while let Some(parent) = nodes[current].1 {
+        let node = nodes[parent].0;
+        match &node.kind {
+            NodeKind::Binary {
+                op: BinaryOp::And,
+                lhs,
+                rhs,
+            } => {
+                let other = if std::ptr::eq(&**lhs, nodes[current].0) {
+                    rhs
+                } else {
+                    lhs
+                };
+                let mut pending = vec![&**other];
+                while let Some(node) = pending.pop() {
+                    match &node.kind {
+                        NodeKind::Binary {
+                            op: BinaryOp::And,
+                            lhs,
+                            rhs,
+                        } => {
+                            pending.push(rhs);
+                            pending.push(lhs);
+                        }
+                        NodeKind::Block { exprs, .. } if exprs.len() == 1 => {
+                            pending.push(&exprs[0])
+                        }
+                        NodeKind::Binary {
+                            op: BinaryOp::Eq | BinaryOp::In,
+                            ..
+                        } => out.push(node as *const Node),
+                        _ => {}
+                    }
+                }
+            }
+            NodeKind::Binary {
+                op: BinaryOp::Or, ..
+            } => {}
+            NodeKind::Block { exprs, .. } if exprs.len() == 1 => {}
+            _ => break,
+        }
+        current = parent;
+    }
+    out
+}
+
+/// The value of a literal node; a number that is an integer is written as one.
 fn literal_value(node: &Node) -> Option<JsonValue> {
     match &node.kind {
         NodeKind::String { value } => Some(JsonValue::String(value.clone())),
+        // Within ±2^53 an integer-valued double is exact, and `as` cannot saturate.
+        NodeKind::Number { value }
+            if value.fract() == 0.0 && value.abs() <= 9_007_199_254_740_992.0 =>
+        {
+            Some(JsonValue::from(*value as i64))
+        }
         NodeKind::Number { value } => serde_json::Number::from_f64(*value).map(JsonValue::Number),
         NodeKind::Bool { value } => Some(JsonValue::Bool(*value)),
         NodeKind::Null => Some(JsonValue::Null),
@@ -825,12 +940,43 @@ impl LanguageService {
             prefix: prefix.to_owned(),
             range,
             quote,
+            conditions: probe.conditions.clone(),
+            in_array: probe.in_array,
         })
+    }
+
+    /// The condition a comparison beside the cursor sets: a field of the schema compared with a
+    /// literal by `=`, or with an array of literals by `in`.
+    fn value_condition(&self, op: BinaryOp, lhs: &Ty<'_>, rhs: &Node) -> Option<ValueCondition> {
+        let values = match (op, &rhs.kind) {
+            (BinaryOp::In, NodeKind::Array { items }) => items
+                .iter()
+                .map(literal_value)
+                .collect::<Option<Vec<_>>>()?,
+            (BinaryOp::Eq | BinaryOp::In, _) => vec![literal_value(rhs)?],
+            _ => return None,
+        };
+        if values.is_empty() {
+            return None;
+        }
+        let root = &self.schema.as_ref()?.root;
+        let path = lhs
+            .shapes
+            .iter()
+            .copied()
+            .chain(lhs.elements().shapes)
+            .find_map(|shape| shape_path(root, shape))?;
+        Some(ValueCondition { path, values })
     }
 
     /// Parses `modified` (which contains the placeholder) and finds the placeholder's context.
     fn probe<'s>(&'s self, modified: &str, variable: bool) -> Probe<'s> {
         let ast = parse_recover(modified);
+        let siblings = if variable {
+            Vec::new()
+        } else {
+            sibling_comparisons(&ast.root)
+        };
         let mut probe = Probe::default();
         let mut visit = |event: Event<'_, 's>| match event {
             Event::Field {
@@ -843,7 +989,13 @@ impl LanguageService {
                 probe.scope = scope.clone();
                 probe.found_variable = true;
             }
-            Event::Compare { op, lhs, rhs } if !variable => {
+            Event::Compare { node, op, lhs, rhs } if !variable => {
+                if siblings.iter().any(|&s| std::ptr::eq(s, node)) {
+                    if let Some(condition) = self.value_condition(op, lhs, rhs) {
+                        probe.conditions.push(condition);
+                    }
+                    return;
+                }
                 let listed = match &rhs.kind {
                     NodeKind::Array { items }
                         if op == BinaryOp::In && items.iter().any(is_placeholder) =>
@@ -857,6 +1009,7 @@ impl LanguageService {
                     probe.values = enumeration(lhs);
                     probe.listed = listed;
                     probe.domain = domain_shape(lhs);
+                    probe.in_array = matches!(rhs.kind, NodeKind::Array { .. });
                 }
             }
             _ => {}
@@ -993,7 +1146,7 @@ impl LanguageService {
             }),
             Event::Variable { node, name, .. } => variables.push((node.span, name.to_owned())),
             Event::Bind { name } => bound.push(name.to_owned()),
-            Event::Compare { op, lhs, rhs } => {
+            Event::Compare { op, lhs, rhs, .. } => {
                 if let Some(values) = declared_values(lhs) {
                     value_diagnostics(text, op, &values, rhs, &mut out);
                 }

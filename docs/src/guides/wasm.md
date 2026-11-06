@@ -447,13 +447,25 @@ const service = new LanguageService(schema);
 const text = "customer.login = 'al";
 const { range, items, valueRequest } = service.complete(text, text.length);
 // valueRequest: { domain: "customers", path: "customer.login", prefix: "al",
-//                 range: {start: 17, end: 20}, quote: "'" }
+//                 range: {start: 17, end: 20}, quote: "'", conditions: [], inArray: false }
 const logins = await fetchCustomers(valueRequest.prefix);   // the application's own source
 const options = logins.map((login) => valueLiteral(login, valueRequest.quote)); // "'alice'"
 ```
 
 `range` is the same as the completions' range, in UTF-16 units. `valueLiteral(value, quote?)`
 writes a string in `quote` (`"` by default) when it can, and other values as JSON.
+
+`conditions` lists the fields fixed to literals beside the value, for a domain whose values
+depend on another one, and `inArray` says whether the value is an element of `in [...]`, where
+several may be inserted ([schema guide](schema.md#open-domains)):
+
+```js
+// A schema whose items[].categories[].subgroup has a domain
+const text = "items[categories[group = 'Electronics' and subgroup in ['";
+const { valueRequest } = service.complete(text, text.length);
+// valueRequest.conditions: [{ path: "items[].categories[].group", values: ["Electronics"] }]
+// valueRequest.inArray: true
+```
 
 #### CodeMirror 6
 
@@ -567,7 +579,7 @@ promptly in loops.
 
 The package ships `jlens.d.ts`. Every argument and result is typed: `AuditResult`, `AuditTree`,
 `AuditNode`, `Explanation`, `Diagnostic`, `Completions`, `CompletionItem`, `ValueRequest`,
-`Hover`, `SignatureHelp`, `FunctionInfo`, `JsonSchema`, `SchemaOverride`, `EvaluateOptions`,
+`ValueCondition`, `Hover`, `SignatureHelp`, `FunctionInfo`, `JsonSchema`, `SchemaOverride`, `EvaluateOptions`,
 `AuditOptions` and `JlensError`. Results of `evaluate` are `unknown`; narrow them as usual.
 
 ## The web editor example

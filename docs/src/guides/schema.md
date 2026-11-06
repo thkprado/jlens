@@ -212,6 +212,17 @@ that match the prefix, caches them as it sees fit, and writes each as a JSONata 
 `enum` are still completed as items. A value outside an open domain is never warned about, and
 hover names the domain.
 
+The values of one domain often depend on another value: the subgroups of a group, the states
+of a country. The request carries the fields already fixed beside the value, its *conditions*:
+each field compared with a literal by `=`, or with an array of literals by `in`, that is joined
+to the value's comparison by `and`, in the same predicate or, outside any, in the whole
+expression. In `items[categories[group = 'Electronics' and subgroup = '|`, the request for
+`subgroup` has the condition `items[].categories[].group` = `["Electronics"]`, read from the
+expression as it is typed, unfinished. A comparison on one side of `or`, by `!=`, with something
+that is not a literal, inside a call such as `$not(...)` or in another predicate is not a
+condition. The request also says whether the value is an element of the array of `in [...]`
+(`in_array`), where the application may insert several values, separated by commas.
+
 Completion works on incomplete expressions too, such as `$count(items[` or
 `items[type = 'x' and `. That is the normal state of an expression while someone types it.
 
