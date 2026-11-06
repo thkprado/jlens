@@ -60,6 +60,47 @@ export const samples = [
 )`,
   },
   {
+    id: "open-domains",
+    label: "Open domains",
+    input: {
+      order: "SO-12346",
+      customer: { login: "carla.mendes", country: "BR" },
+      shipTo: { city: "Lisboa", country: "PT" },
+      items: [
+        { sku: "TV-55-OLED", quantity: 1 },
+        { sku: "HDMI-2M", quantity: 2 },
+      ],
+    },
+    bindings: {},
+    // Three open domains: values only the application can fetch, which domains.js stands in for.
+    overrides: {
+      "customer.login": { label: "Customer login", domain: "customers" },
+      "shipTo.country": {
+        label: "Destination country",
+        description: "An ISO 3166-1 alpha-2 code.",
+        domain: "countries",
+      },
+      "items[].sku": { label: "Product", domain: "products" },
+    },
+    expression: `/* customer.login, shipTo.country and items[].sku have an open domain (see the Schema
+   overrides panel): a list of values only the application can fetch, such as from a server.
+   Completion asks the application for the values that start with what is typed; here,
+   domains.js stands in for a server. Try it: type a quote after = or inside [ ] below, as in
+   shipTo.country = '   or   items[sku = 'TV
+   Unlike an enum, a value outside an open domain is not warned about: the list is never
+   known in full. */
+(
+  $vip     := customer.login in ['alice.walker99', 'kenji.tanaka'];
+  $europe  := shipTo.country in ['PT', 'ES', 'FR', 'DE', 'IT'];
+  $fragile := items[sku in ['TV-55-OLED', 'MONITOR-27']];
+  {
+    'warehouse': $europe ? 'Lisbon' : 'São Paulo',
+    'priority': $vip ? 'high' : 'normal',
+    'packaging': $exists($fragile) ? 'fragile' : 'standard'
+  }
+)`,
+  },
+  {
     id: "invoice",
     label: "Invoice",
     input: {

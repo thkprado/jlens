@@ -53,6 +53,11 @@ The "Free shipping" example uses each kind:
 - an open domain, `domain: "customers"` on `customer.login`: `customer.login = '|` asks
   `domains.js` for the logins.
 
+The "Open domains" example is about open domains alone: three fields (`customer.login`,
+`shipTo.country`, `items[].sku`) name the domains `customers`, `countries` and `products`, and its
+expression compares each with literals, so that typing a quote after `=` or inside `in [...]`
+shows the values `domains.js` returns for what is typed.
+
 ## Shared addresses
 
 A shared address holds its state in the fragment, which browsers never send to the server:

@@ -28,6 +28,7 @@ The plan is still open; its items are added as they come.
 | # | Item | Done when | Status |
 |---|---|---|---|
 | 1 | A schema override's `type` takes one type name, as JSON Schema and the inferred schema write it, besides a list | `"type": "integer"` read like `["integer"]` and written back as one name; tests in `jlens-schema` and the Wasm suite; `SchemaOverride` in `types.d.ts` and the schema guide updated | **done**: `Override::types` read and written as `Schema::to_json_schema` writes `type` |
+| 2 | A web editor example about open domains, whose expression shows where values are completed | Several fields with a domain, compared with literals; `domains.js` answers for each; the editor's README and the Wasm guide name it | **done**: "Open domains", with customers, countries and products |
 
 ## In exploration: a regular expression engine of jlens's own
 

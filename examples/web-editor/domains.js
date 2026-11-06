@@ -20,6 +20,19 @@ const sources = {
     "lucia.romero",
     "olivia.brown7",
   ],
+  countries: ["AR", "BR", "CA", "CL", "DE", "ES", "FR", "GB", "IT", "JP", "MX", "PT", "US", "UY"],
+  products: [
+    "CABLE-USB-C",
+    "HDMI-2M",
+    "KEYBOARD-PT",
+    "LAPTOP-14",
+    "MONITOR-27",
+    "MOUSE-WIRELESS",
+    "PHONE-CASE",
+    "TV-43-LED",
+    "TV-55-OLED",
+    "TV-65-OLED",
+  ],
 };
 
 /** The values of `request.domain` that start with `request.prefix`, ignoring case. */

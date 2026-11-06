@@ -589,8 +589,8 @@ complete page with no build step, published with this book as the
   example that uses it: the worker registers it on each expression, and the page declares it to
   the language service;
 - a stand-in asynchronous source for open domains (`domains.js`), which answers after a short
-  delay, as a server would: in the "Free shipping" example, `customer.login = '` completes the
-  logins of its domain `customers`.
+  delay, as a server would: the "Open domains" example shows it on three fields, and in the
+  "Free shipping" example, `customer.login = '` completes the logins of its domain `customers`.
 
 ```sh
 cargo xtask wasm

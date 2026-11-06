@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The web editor's "Open domains" example: three fields name an open domain (customers,
+  countries, products), and the expression compares each with literals, so that typing a quote
+  completes the values the application provides. `domains.js` answers for the three.
+
 ### Changed
 
 - A schema override's `type` takes one type name, `"type": "integer"`, as well as a list, as JSON
