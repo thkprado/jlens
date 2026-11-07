@@ -46,6 +46,7 @@ mod host;
 pub mod input;
 mod json;
 mod lexer;
+mod map;
 mod offsets;
 pub mod output;
 mod parser;

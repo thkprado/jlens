@@ -26,3 +26,4 @@ earlier one instead.
 | [0019](0019-documents-from-rust-values.md) | Documents serialized straight from Rust values, as `serde_json::to_value` and `Document::new` would build them | Accepted |
 | [0020](0020-own-regress-fork.md) | `jlens-regress` is jlens's own fork of `regress`: upstream fixes ported, not rebased | Accepted |
 | [0021](0021-java-package.md) | The Java package: a C API called through Panama, for Java 25 | Accepted; amended to ship before the API work, on what the `Sink` allocates, and to write maps with what the expression reads (0.26) |
+| [0022](0022-small-map.md) | Objects keep their fields in a vector, with an index past 8 fields | Accepted |

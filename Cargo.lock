@@ -776,6 +776,7 @@ version = "0.30.0"
 dependencies = [
  "criterion",
  "foldhash",
+ "hashbrown",
  "indexmap",
  "insta",
  "jlens-regress",

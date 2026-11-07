@@ -88,3 +88,59 @@ So of the 7 allocations of an object built by a constructor, the map's hash tabl
 literal keys and string are four, made again for each object. A map without a hash table takes one
 allocation from each object, two if its fields are kept in the object itself; sharing literal keys
 and strings takes up to one per literal field of a constructor.
+
+## The map's threshold and layout (0.31 #2)
+
+Two scratch programs outside the workspace (release, `lto`, one codegen unit), with a stand-in
+for `Value` of 24 bytes (a tag, a number or an `Rc<str>`). Each time is the median of 15 samples
+of about 20 ms, the inner loop run 256 times between two readings of the clock; each program ran
+twice, each run on a new copy of it. The decision and its summary are in
+[ADR 0022](../src/adr/0022-small-map.md).
+
+**Search in order against foldhash.** A vector of `(Rc<str>, V)` searched comparing lengths then
+text, against `IndexMap<Rc<str>, V>` with foldhash, for 1 to 64 fields of 64 keys of the
+workload's kind (`id`, `code`, `customer`, `quantity`, …, 2 to 11 bytes). The keys looked up are
+other allocations of the same text, as a path step's key is. "Present" is the mean over every
+key of the map; "absent" over four keys it does not have; "building" makes a map of _n_ fields
+with a check for duplicates (`with_capacity` for both), then drops it.
+
+| Fields | Present: order / foldhash | Absent | Building, system heap | Building, `mimalloc` |
+|---:|---:|---:|---:|---:|
+| 1 | 5.1 / 6.5 ns | 2.3 / 4.5 ns | 35 / 86 ns | 10 / 51 ns |
+| 2 | 5.4 / 11.0 | 3.4 / 5.7 | 38 / 100 | 26 / 66 |
+| 3 | 6.3 / 10.9 | 4.5 / 5.7 | 43 / 115 | 19 / 73 |
+| 4 | 6.4 / 11.1 | 4.8 / 5.6 | 47 / 129 | 36 / 108 |
+| 6 | 7.5 / 11.0 | 5.7 / 5.8 | 60 / 164 | 37 / 134 |
+| 8 | 8.6 / 11.2 | 7.1 / 5.8 | 75 / 192 | 65 / 178 |
+| 10 | 10.0 / 11.2 | 8.5 / 6.3 | 97 / 224 | 77 / 200 |
+| 12 | 11.4 / 11.2 | 10.4 / 5.8 | 128 / 256 | 114 / 234 |
+| 16 | 13.4 / 11.7 | 14.2 / 5.8 | 189 / 319 | 192 / 298 |
+| 24 | 17.0 / 11.5 | 19.5 / 6.0 | 338 / 439 | 335 / 433 |
+| 32 | 19.2 / 11.6 | 23.7 / 5.9 | 616 / 552 | 595 / 549 |
+| 64 | 36.6 / 12.1 | 44.1 / 6.3 | 2,302 / 1,048 | 2,163 / 1,067 |
+
+The table gives the first run; the second read lookups up to 13% slower (at 8 fields, foldhash 16.6
+ns for a key present) and building within 7%.
+A key present is found as fast either way at about 12 fields, one absent at about 7; building
+in order is faster up to about 24. 8 is the threshold: past it, the map keeps an index.
+
+**Fields kept in the object.** 200 objects shaped like an `Object` (a `RefCell` of the fields and
+its 32 other bytes) in an `Rc`, built with _n_ fields and dropped, then the last key looked up in
+each; the fields in a `Vec` with its capacity, or in a `SmallVec` of 3, 4 or 6 kept in the
+object.
+
+| Fields | Layout | Bytes | Build and drop, system heap | `mimalloc` | Lookup |
+|---:|---|---:|---:|---:|---:|
+| 2 | `Vec` | 72 | 86 to 95 ns | 41 ns | 5.4 ns |
+| 2 | 3 inline | 184 | 67 to 73 | 42 | 5.6 |
+| 2 | 4 inline | 224 | 74 to 75 | 37 to 43 | 5.4 |
+| 3 | `Vec` | 72 | 93 to 104 | 43 | 9.2 |
+| 3 | 4 inline | 224 | 85 to 87 | 44 to 53 | 9.1 |
+| 6 | `Vec` | 72 | 112 to 133 | 68 to 69 | 8.0 |
+| 6 | 4 inline | 224 | 149 to 152 | 72 to 93 | 8.8 |
+| 6 | 6 inline | 304 | 101 to 123 | 81 to 88 | 8.4 |
+
+On the system heap, where one run differs from the other by up to 10%, fields kept in the object
+save 10 to 20 ns per object of 2 or 3 fields; with `mimalloc`, nothing. An object that holds more
+than its inline fields costs 20 to 40 ns more, and a small object takes three times the memory.
+The fields stay in the vector. With the map of #2, an `Object` is 72 bytes (104 with `IndexMap`).
