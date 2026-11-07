@@ -12,7 +12,6 @@ use std::rc::{Rc, Weak};
 use std::sync::{Arc, OnceLock};
 
 use indexmap::IndexMap;
-use indexmap::map::Entry;
 use web_time::{Duration, Instant};
 
 use crate::ast::{Ast, BinaryOp, FallbackOp, Node, NodeKind, SortTerm, Stage, TransformDef};
@@ -376,9 +375,14 @@ fn tuple_get<'a>(tuple: &Value<'a>, key: &str) -> Value<'a> {
 }
 
 fn tuple_map<'a>(tuple: &Value<'a>) -> Map<'a> {
+    tuple_map_with_room(tuple, 0)
+}
+
+/// The fields of `tuple`, copied with room for `additional` more.
+fn tuple_map_with_room<'a>(tuple: &Value<'a>, additional: usize) -> Map<'a> {
     match tuple {
-        Value::Object(o) => o.borrow().clone(),
-        _ => Map::default(),
+        Value::Object(o) => o.borrow().cloned_with_room(additional),
+        _ => Map::with_capacity(additional),
     }
 }
 
@@ -1283,6 +1287,11 @@ impl<'a> Evaluator<'_, 'a> {
         }
         let focus = step.attrs.focus.as_deref().map(Rc::<str>::from);
         let label = step.attrs.ancestor_label.as_deref().map(Rc::<str>::from);
+        // The fields a step adds to each tuple that is not a tuple stream.
+        let adds = 1
+            + usize::from(focus.is_some())
+            + usize::from(index.is_some())
+            + usize::from(label.is_some());
 
         let bindings: Vec<Value<'a>> = match tuple_bindings {
             Some(b) => b.items_or_self(),
@@ -1316,7 +1325,12 @@ impl<'a> Evaluator<'_, 'a> {
             };
             self.check_array(out.len() + items.len())?;
             for (bb, item) in items.iter().enumerate() {
-                let mut t = tuple_map(tuple);
+                let room = match (res_is_tuple, item) {
+                    (true, Value::Object(o)) => o.borrow().len(),
+                    (true, _) => 0,
+                    (false, _) => adds,
+                };
+                let mut t = tuple_map_with_room(tuple, room);
                 if res_is_tuple {
                     if let Value::Object(o) = item {
                         for (k, v) in o.borrow().iter() {
@@ -1781,7 +1795,7 @@ impl<'a> Evaluator<'_, 'a> {
         env: &Env<'a>,
     ) -> Result<Value<'a>> {
         // Until its value is evaluated, each key holds the index of the pair that produced it.
-        let mut result = Map::with_capacity_and_hasher(pairs.len(), Default::default());
+        let mut result = Map::with_capacity(pairs.len());
         for (pair_index, (key_expr, _)) in pairs.iter().enumerate() {
             let literal = string_literal(key_expr)
                 .filter(|_| self.tracer.is_none() && self.depth < self.limits.max_depth);
@@ -1797,13 +1811,8 @@ impl<'a> Evaluator<'_, 'a> {
                 },
             };
             // Each pair gives the item one key, so a key seen before comes from another pair.
-            match result.entry(key) {
-                Entry::Occupied(e) => {
-                    return Err(err_at("D1009", expr).with("value", &**e.key()));
-                }
-                Entry::Vacant(e) => {
-                    e.insert(Value::Number(pair_index as f64));
-                }
+            if let Err((key, _)) = result.insert_new(key, Value::Number(pair_index as f64)) {
+                return Err(err_at("D1009", expr).with("value", &*key));
             }
         }
         let mut undefined = false;

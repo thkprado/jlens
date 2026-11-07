@@ -1250,9 +1250,11 @@ mod tests {
         let Value::Object(object) = &nested else {
             unreachable!();
         };
-        object
-            .borrow_mut()
-            .shift_insert(0, Rc::from("list"), Value::array(Vec::new(), 0));
+        let mut map = object.borrow_mut();
+        let rest = std::mem::take(&mut *map);
+        map.insert(Rc::from("list"), Value::array(Vec::new(), 0));
+        map.extend(rest);
+        drop(map);
         assert!(FirstFields::of(&[nested], 0).is_none());
         assert!(FirstFields::of(&[Value::Number(1.0)], 0).is_none());
         assert!(FirstFields::of(&[Value::object(Map::default())], 0).is_none());

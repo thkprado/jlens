@@ -362,7 +362,7 @@ pub(super) fn match_<'a>(
             } else {
                 Value::array(f.group_values(&s), 0)
             };
-            let mut m = Map::with_capacity_and_hasher(3, Default::default());
+            let mut m = Map::with_capacity(3);
             m.insert(keys.match_.clone(), Value::string(f.matched(&s)));
             m.insert(keys.index.clone(), Value::Number(f.start.utf16 as f64));
             m.insert(keys.groups.clone(), groups);

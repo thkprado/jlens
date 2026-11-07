@@ -717,8 +717,9 @@ Java packages evaluate this way too: from Java, `$v.total` takes 0.83 µs where 
 
 ## Where the time goes
 
-- **Allocation.** Values are reference-counted (`Rc`). Objects are `IndexMap`s that keep
-  insertion order, hashed with `foldhash`. Their keys are shared strings: converting a document
+- **Allocation.** Values are reference-counted (`Rc`). Objects keep their fields in insertion
+  order, in a vector searched in order; one of more than 8 fields also keeps an index of its keys
+  ([ADR 0022](../adr/0022-small-map.md)). Their keys are shared strings: converting a document
   allocates each distinct key once, not once per object. Building results, sequences and tuple
   streams allocates, and that is most of the cost of evaluation.
 - **Sequences.** Following jsonata-js, paths build sequences step by step and flatten them.

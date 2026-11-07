@@ -64,7 +64,7 @@ impl<'k> Serializer<'k> {
         Ok(Object {
             depth: Self::nested(self.depth)?,
             keys: self.keys,
-            map: Map::with_capacity_and_hasher(len, Default::default()),
+            map: Map::with_capacity(len),
             next_key: None,
             variant,
         })
@@ -72,7 +72,7 @@ impl<'k> Serializer<'k> {
 
     /// `{variant: value}`, as `serde_json` writes an enum's newtype, tuple and struct variants.
     fn variant(keys: &mut Keys, variant: &str, value: Value<'static>) -> Value<'static> {
-        let mut map = Map::with_capacity_and_hasher(1, Default::default());
+        let mut map = Map::with_capacity(1);
         map.insert(keys.get(variant), value);
         Value::object(map)
     }
@@ -277,7 +277,7 @@ impl Seq<'_> {
         match self.variant {
             None => array,
             Some(variant) => {
-                let mut map = Map::with_capacity_and_hasher(1, Default::default());
+                let mut map = Map::with_capacity(1);
                 map.insert(variant, array);
                 Value::object(map)
             }
@@ -360,7 +360,7 @@ impl Object<'_> {
         match self.variant {
             None => object,
             Some(variant) => {
-                let mut map = Map::with_capacity_and_hasher(1, Default::default());
+                let mut map = Map::with_capacity(1);
                 map.insert(variant, object);
                 Value::object(map)
             }

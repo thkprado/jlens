@@ -35,7 +35,7 @@ and measures each step against 0.30.0. Nothing public changes.
 |---|---|---|---|
 | 1 | What objects hold, before any change, below | The field counts of the objects the benchmark workload builds and converts, and of tuples; allocations and times of `tuples`, `object constructor`, `group-by`, `transform`, `distinct items` and a `$match` case, at 0.30.0; written to `docs/notes/perf-0.31.md` | done: no object of the workload has more than 6 fields (the suite's datasets: 11); a path looks a key up in each item; of the 7 allocations of a constructed object, 1 is the hash table and 4 its literal keys and string (#5) |
 | 2 | The map, below; after #1 | A module of `jlens-core` with the operations the crate uses, insertion order kept, the threshold of the index set by #1's counts and a measured crossover of a search in order against foldhash; unit tests and a property test against `IndexMap` as the model; an ADR | done: `jlens_core::map::Map`, an index past 8 fields ([ADR 0022](../adr/0022-small-map.md)); a search in order is faster up to 8 fields; no fields kept in the object |
-| 3 | `Map` is the new map, crate-wide; after #2 | Every object, tuple and `$match` result uses it, and the hasher that lazy values share goes; `cargo xtask ab` against 0.30.0 in each mode, Python and Java; #1's allocations counted again; each case within the floor or faster, or its cause recorded | planned |
+| 3 | `Map` is the new map, crate-wide; after #2 | Every object, tuple and `$match` result uses it, and the hasher that lazy values share goes; `cargo xtask ab` against 0.30.0 in each mode, Python and Java; #1's allocations counted again; each case within the floor or faster, or its cause recorded | done: one allocation fewer for each object, tuple and match; `tuples` 10 to 14% faster, `distinct items` 17 to 20% with a converted input, `object constructor` 5 to 7%; nothing slower past the floor |
 | 4 | Objects compared without hashing; after #3 | `deep_eq` and `$distinct` compare two small objects field by field, without a lookup per key; `distinct items` and a case of objects with few fields measured | planned |
 | 5 | Literal keys and strings made once, below; after #4 | An object constructor's literal keys and literal string values are made once, not for each object; `object constructor` counted and measured against #4 and 0.30.0 | planned |
 | 6 | Upstream before the release: `regress` after `95c0404`, stacker#155 and #156, jsonata-js's commits after `c5be116` and its version on npm | Each `regress` commit worth porting ported one at a time, or none; each jsonata-js fix checked against jlens; the watch list updated | planned |
@@ -58,6 +58,14 @@ allocation only on the system heap, cost more with `mimalloc` and for objects th
 triple a small object's size: they were left out. The module has the operations of `IndexMap` the
 crate uses, and a property test compares the two maps; a trial swap of the type showed that only
 the hasher's constructors are missing, which #3 removes. The measurements are in the notes.
+
+**#3, the map in place.** Every object, tuple and `$match` result now has the map of #2, and the
+hasher the lazy values shared is gone: one allocation fewer for each object built. A tuple step
+now copies the tuple it extends with room for the fields it adds, which saved one more allocation
+for each tuple. Against 0.30.0, `tuples` is 10 to 14% faster, `distinct items` 17 to 20% when the
+input is converted, and Python and Java follow. `filter + aggregate` and `group-by` read 1.5 to
+2.4% slower from a lazily converted input, whose lookups do not reach the map; an aligned build
+puts them at the floor. The measurements are in the notes.
 
 **#5, literal keys and strings.** `items.{'code': code, 'kind': 'item'}` allocates each key with
 `Rc::from` and the string `'item'` again for each item: 4 of the 7 allocations of each object of

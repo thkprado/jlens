@@ -144,3 +144,70 @@ On the system heap, where one run differs from the other by up to 10%, fields ke
 save 10 to 20 ns per object of 2 or 3 fields; with `mimalloc`, nothing. An object that holds more
 than its inline fields costs 20 to 40 ns more, and a small object takes three times the memory.
 The fields stay in the vector. With the map of #2, an `Object` is 72 bytes (104 with `IndexMap`).
+
+## The map in place (0.31 #3)
+
+`Map` became the map of every object, tuple and `$match` result. The hasher that the lazy
+values of one evaluation shared went with `IndexMap`. Three operations the trial swap of #2 had
+not shown were added for the object constructor (`insert_new`, `retain`, a field by position), and
+`cloned_with_room` for the tuple step.
+
+**Tuples.** The first count saved 104 allocations of `tuples`, not the 204 of its tuples: a
+tuple step copies the tuple it extends with exactly its fields, then adds 1 to 3, and the copy's
+vector grew again for them. The step now copies it with room for the fields it adds; `tuples`
+went from 1,441 to 1,241 allocations, 13.7% faster than 0.30.0 instead of 6.7%.
+
+**Allocations,** counted as in #1 (one evaluation with the result converted to JSON, then
+without it):
+
+| Case | 0.30.0 | #3 | of the evaluation, 0.30.0 | #3 |
+|---|---:|---:|---:|---:|
+| `object constructor` | 2,807 | 2,607 | 1,406 | 1,206 |
+| `group-by` | 132 | 129 | 120 | 117 |
+| `transform` | 5,037 | 4,635 | 2,824 | 2,422 |
+| `tuples` | 1,545 | 1,241 | 1,541 | 1,237 |
+| `$count($match(text, /\w+/))` | 6,290 | 4,732 | 6,290 | 4,732 |
+| `$count($match(text, /(\w)(\w*)/))` | 14,090 | 12,532 | 14,090 | 12,532 |
+
+One allocation fewer for each object built; `path`, `names over items`, `filter + aggregate` and
+`distinct items` allocated no object and are unchanged.
+
+**`cargo xtask ab` against 0.30.0,** 10 rounds, the median (the table of the performance page's
+cases that moved by more than the floor):
+
+| Case | `document` | `evaluate` | `source` |
+|---|---:|---:|---:|
+| `path` | -3.0% | -9.1% | -6.8% |
+| `names over items` | -18.7% | -3.9% | +0.3% |
+| `filter + aggregate` | -2.6% | +1.8% | +1.7% |
+| `group-by` | -3.8% | +2.4% | +1.5% |
+| `object constructor` | -6.6% | -6.9% | -4.6% |
+| `transform` | -6.4% | -1.9% | -2.3% |
+| `shipping rule` | -8.0% | +1.3% | +0.8% |
+| `index into 10,000 items` | -1.9% | -5.8% | -5.7% |
+| `distinct items` | -4.9% | -20.0% | -16.9% |
+| `tuples` | -13.7% | -10.8% | -9.7% |
+
+The other cases are within 2%. `distinct items` with a converted input compares the items read
+from JSON, and each object read whole no longer builds a hash table.
+
+`filter + aggregate` and `group-by` are 1.5 to 2.4% slower when the input is converted lazily, in
+three runs of 10 and 20 rounds, and faster against a `Document`. Their lookups do not reach the
+map: a lazy object reads a scalar from its input each time and keeps only arrays and objects. With
+the functions and blocks aligned (`-align-all-functions=6 -align-all-nofallthru-blocks=5`),
+`filter + aggregate` was +1.3% and +0.6%, `group-by` -0.1% in `source` and bimodal in `evaluate`
+(median +6.4%, fastest round -0.4%). Recorded as placement, at the floor. Aligned, `recursion`
+was 3 to 4% slower in every mode, and 1% faster alone in a process unaligned: it builds no
+object, and its time follows where the heap puts its frames
+([0.27](perf-0.27.md#recursion-against-a-document-027-3)).
+
+**Python** (`python.py ab`, 5 rounds, Windows): nothing slower past the mark. Marked faster with a
+`Document`: `object constructor` -13.3%, `distinct items` -17.6%, `tuples` -11.9%, `names over
+items` -13.6%, `shipping rule` -10.1%, `transform` -9.5%; from Python values, `transform` -8.6%,
+`distinct items` -10.9%, `tuples` -8.0%. `group-by` from Python values +2.4%, unmarked.
+
+**Java** (`java-compare ab`, 5 rounds, Windows, the machine in use: spreads of 10 to 15% where
+3% is usual): nothing marked slower. Marked faster: `$sum(items.price)` over 100,000 converted
+items -40.9%, `object constructor` -14 to -17%, `transform` -12 to -15%, `distinct items` from
+JSON text -19%, one thread of `$sum(items.price)` +11.9% evaluations per second. `recursion` +3.5
+to +4.1% in its four variants, unmarked: the placement above.

@@ -14,7 +14,6 @@ use std::hash::{BuildHasher, Hasher};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use indexmap::IndexMap;
 use serde_json::Value as JsonValue;
 
 use crate::ast::{LambdaDef, Span, TransformDef};
@@ -29,7 +28,7 @@ pub(crate) use crate::text::Text;
 
 /// The fields of an object, in insertion order. Keys are shared: the objects of a converted
 /// document that have the same key point to one string (see [`Keys`]).
-pub(crate) type Map<'a> = IndexMap<Rc<str>, Value<'a>, foldhash::fast::RandomState>;
+pub(crate) type Map<'a> = crate::map::Map<Value<'a>>;
 
 /// The keys met while converting one document, so that objects with the same keys (the items
 /// of an array, typically) share them instead of allocating each.
@@ -61,13 +60,11 @@ impl Keys {
     }
 }
 
-/// What the lazy values of one evaluation share (ADR 0010): the table of their keys, the hasher
-/// of their maps, made once rather than for each object, and the first error of a [`Source`]
-/// that failed to read a level.
+/// What the lazy values of one evaluation share (ADR 0010): the table of their keys and the first
+/// error of a [`Source`] that failed to read a level.
 #[derive(Default)]
 pub(crate) struct Shared {
     keys: RefCell<Keys>,
-    hasher: foldhash::fast::RandomState,
     failed: Cell<bool>,
     failure: RefCell<Option<String>>,
 }
@@ -515,11 +512,10 @@ impl<'a> Object<'a> {
         let Ok(mut map) = self.map.try_borrow_mut() else {
             return true;
         };
-        let hasher = map.hasher().clone();
-        let mut alone = std::mem::replace(&mut *map, Map::with_hasher(hasher.clone()));
+        let mut alone = std::mem::take(&mut *map);
         match &pending.origin {
             Origin::Json(JsonValue::Object(fields)) => {
-                *map = Map::with_capacity_and_hasher(fields.len(), hasher);
+                *map = Map::with_capacity(fields.len());
                 let mut keys = pending.shared.keys.borrow_mut();
                 keys.reserve(fields.len());
                 for (k, v) in fields {
@@ -697,9 +693,7 @@ impl Drop for Object<'_> {
         if !map.values().any(owned) {
             return;
         }
-        // Moved out with the same hasher, which costs no allocation; clearing it in place would
-        // reset its table first.
-        let map = std::mem::replace(map, Map::with_hasher(map.hasher().clone()));
+        let map = std::mem::take(map);
         nested_drop(|deep| {
             if deep {
                 release(map.into_values());
@@ -1072,7 +1066,7 @@ impl<'a> Value<'a> {
                 0,
             ),
             JsonValue::Object(map) => {
-                let mut out = Map::with_capacity_and_hasher(map.len(), Default::default());
+                let mut out = Map::with_capacity(map.len());
                 for (k, v) in map {
                     let v = nest(depth + 1, || Value::from_json_with(v, keys, depth + 1));
                     out.insert(keys.get(k), v);
@@ -1101,8 +1095,7 @@ impl<'a> Value<'a> {
         };
         match json {
             JsonValue::Object(map) => {
-                let mut out =
-                    Map::with_capacity_and_hasher(fields.len().min(map.len()), Default::default());
+                let mut out = Map::with_capacity(fields.len().min(map.len()));
                 for (name, read) in fields {
                     if let Some(v) = map.get(name) {
                         let v = nest(depth + 1, || {
@@ -1164,7 +1157,7 @@ impl<'a> Value<'a> {
 
     fn lazy_object(pending: Pending<'a>, member: u32) -> Value<'a> {
         Value::Object(Rc::new(Object {
-            map: RefCell::new(Map::with_hasher(pending.shared.hasher.clone())),
+            map: RefCell::new(Map::new()),
             pending: Some(pending),
             read: Cell::new(Read::Nothing),
             member,
@@ -2225,7 +2218,7 @@ impl Copier {
             }
             Value::Object(o) => {
                 let o = o.borrow();
-                let mut out = Map::with_capacity_and_hasher(o.len(), Default::default());
+                let mut out = Map::with_capacity(o.len());
                 for (k, v) in o.iter() {
                     if v.is_undefined() {
                         continue;
@@ -2286,7 +2279,7 @@ impl Copier {
                 Value::array(out, 0)
             }
             JsonValue::Object(fields) => {
-                let mut out = Map::with_capacity_and_hasher(fields.len(), Default::default());
+                let mut out = Map::with_capacity(fields.len());
                 self.keys.reserve(fields.len());
                 for (k, v) in fields {
                     self.add(json_string_len(k) + 2);

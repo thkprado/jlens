@@ -189,7 +189,7 @@ fn object<'a>(re: &Rc<Regex>, text: &Rc<str>, found: Option<Found>) -> Value<'a>
         return Value::Undefined;
     };
     let keys = &re.keys;
-    let mut obj = Map::with_capacity_and_hasher(5, Default::default());
+    let mut obj = Map::with_capacity(5);
     obj.insert(keys.match_.clone(), Value::string(found.matched(text)));
     obj.insert(keys.start.clone(), Value::Number(found.start.utf16 as f64));
     obj.insert(keys.end.clone(), Value::Number(found.end.utf16 as f64));

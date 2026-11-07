@@ -10,9 +10,6 @@
 //! The operations are those of `IndexMap` that jlens uses, with the same meaning: a key inserted
 //! again keeps its position and its first key, and `shift_remove` keeps the order of the others.
 
-// Nothing uses it until it replaces `IndexMap` (roadmap 0.31 #3).
-#![allow(dead_code)]
-
 use std::hash::BuildHasher;
 use std::rc::Rc;
 
@@ -101,6 +98,20 @@ impl<V> Map<V> {
         }
     }
 
+    /// A copy of the map with room for `additional` more fields, so that adding them does not
+    /// move its fields again, as adding to a clone does.
+    pub(crate) fn cloned_with_room(&self, additional: usize) -> Self
+    where
+        V: Clone,
+    {
+        let mut entries = Vec::with_capacity(self.entries.len() + additional);
+        entries.extend_from_slice(&self.entries);
+        Map {
+            entries,
+            index: self.index.clone(),
+        }
+    }
+
     /// The number of fields.
     #[inline]
     pub(crate) fn len(&self) -> usize {
@@ -161,6 +172,16 @@ impl<V> Map<V> {
         None
     }
 
+    /// Adds the field `key`, last, unless the map has it: then nothing changes, and the key and
+    /// value are given back.
+    pub(crate) fn insert_new(&mut self, key: Rc<str>, value: V) -> Result<(), (Rc<str>, V)> {
+        if self.contains_key(&key) {
+            return Err((key, value));
+        }
+        self.push(key, value);
+        Ok(())
+    }
+
     /// Adds a field whose key the map does not have.
     fn push(&mut self, key: Rc<str>, value: V) {
         let at = self.entries.len();
@@ -180,21 +201,6 @@ impl<V> Map<V> {
                 }
             }
         }
-    }
-
-    /// Inserts the field `key` at position `at`, which is at most the number of fields. A key
-    /// already present moves there and takes `value`; its former value is returned.
-    pub(crate) fn shift_insert(&mut self, at: usize, key: Rc<str>, value: V) -> Option<V> {
-        let (entry, old) = match self.get_index_of(&key) {
-            Some(i) => {
-                let (key, old) = self.entries.remove(i);
-                ((key, value), Some(old))
-            }
-            None => ((key, value), None),
-        };
-        self.entries.insert(at, entry);
-        self.reindex();
-        old
     }
 
     /// Removes the field `key`, keeping the order of the others, and returns its value.
@@ -236,6 +242,15 @@ impl<V> Map<V> {
             }
         }
         Some(value)
+    }
+
+    /// Keeps the fields for which `keep` is true, in their order.
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&Rc<str>, &mut V) -> bool) {
+        let len = self.entries.len();
+        self.entries.retain_mut(|(k, v)| keep(k, v));
+        if self.entries.len() != len {
+            self.reindex();
+        }
     }
 
     /// Builds the index again after the entries moved, or drops it if the map got small.
@@ -281,24 +296,10 @@ impl<V> Map<V> {
         self.entries.iter().map(|(_, v)| v)
     }
 
-    /// The values, in order, mutable.
-    #[inline]
-    pub(crate) fn values_mut(
-        &mut self,
-    ) -> impl DoubleEndedIterator<Item = &mut V> + ExactSizeIterator {
-        self.entries.iter_mut().map(|(_, v)| v)
-    }
-
     /// The values, in order, taken from the map.
     #[inline]
     pub(crate) fn into_values(self) -> impl DoubleEndedIterator<Item = V> + ExactSizeIterator {
         self.entries.into_iter().map(|(_, v)| v)
-    }
-
-    /// The fields as a slice, in order.
-    #[inline]
-    pub(crate) fn as_slice(&self) -> &[(Rc<str>, V)] {
-        &self.entries
     }
 }
 
@@ -421,6 +422,22 @@ impl<V> std::ops::Index<&str> for Map<V> {
     }
 }
 
+impl<V> std::ops::Index<usize> for Map<V> {
+    type Output = V;
+
+    /// The value of the field at position `i`; panics past the last field, as `IndexMap` does.
+    fn index(&self, i: usize) -> &V {
+        &self.entries[i].1
+    }
+}
+
+impl<V> std::ops::IndexMut<usize> for Map<V> {
+    /// The value of the field at position `i`; panics past the last field, as `IndexMap` does.
+    fn index_mut(&mut self, i: usize) -> &mut V {
+        &mut self.entries[i].1
+    }
+}
+
 impl<V: std::fmt::Debug> std::fmt::Debug for Map<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_map().entries(self.iter()).finish()
@@ -488,18 +505,18 @@ mod tests {
         assert_eq!(map.swap_remove("a"), Some(0));
         assert_eq!(map.keys().map(|k| &**k).collect::<Vec<_>>(), ["d", "c"]);
         assert_eq!(map.shift_remove("x"), None);
-        assert_eq!(map.shift_insert(0, key("c"), 9), Some(2));
-        assert_eq!(fields(&map), [("c".into(), 9), ("d".into(), 3)]);
     }
 
     #[derive(Debug, Clone)]
     enum Op {
         Insert(usize, u32),
-        ShiftInsert(usize, usize, u32),
         ShiftRemove(usize),
         SwapRemove(usize),
         GetMut(usize, u32),
         Clear,
+        Retain(u32),
+        InsertNew(usize, u32),
+        ClonedWithRoom(usize),
         Extend(Vec<(usize, u32)>),
     }
 
@@ -511,11 +528,13 @@ mod tests {
         let k = 0..KEYS;
         prop_oneof![
             6 => (k.clone(), any::<u32>()).prop_map(|(k, v)| Op::Insert(k, v)),
-            1 => (any::<usize>(), k.clone(), any::<u32>()).prop_map(|(at, k, v)| Op::ShiftInsert(at, k, v)),
             2 => k.clone().prop_map(Op::ShiftRemove),
             2 => k.clone().prop_map(Op::SwapRemove),
             1 => (k.clone(), any::<u32>()).prop_map(|(k, v)| Op::GetMut(k, v)),
             1 => Just(Op::Clear),
+            1 => any::<u32>().prop_map(Op::Retain),
+            1 => (0..4usize).prop_map(Op::ClonedWithRoom),
+            2 => (k.clone(), any::<u32>()).prop_map(|(k, v)| Op::InsertNew(k, v)),
             1 => prop::collection::vec((k, any::<u32>()), 0..12).prop_map(Op::Extend),
         ]
     }
@@ -533,14 +552,6 @@ mod tests {
                     Op::Insert(k, v) => {
                         prop_assert_eq!(map.insert(names[k].clone(), v), model.insert(names[k].clone(), v));
                     }
-                    Op::ShiftInsert(at, k, v) => {
-                        let len = model.len() - usize::from(model.contains_key(&names[k]));
-                        let at = at % (len + 1);
-                        let (_, old) = model.insert_full(names[k].clone(), v);
-                        let from = model.get_index_of(&names[k]).unwrap();
-                        model.move_index(from, at);
-                        prop_assert_eq!(map.shift_insert(at, names[k].clone(), v), old);
-                    }
                     Op::ShiftRemove(k) => {
                         prop_assert_eq!(map.shift_remove(&names[k]), model.shift_remove(&names[k]));
                     }
@@ -557,6 +568,23 @@ mod tests {
                     Op::Clear => {
                         map.clear();
                         model.clear();
+                    }
+                    Op::Retain(bits) => {
+                        // Keeps the fields whose value has the bit of `bits` that its key names.
+                        let keep = |k: &Rc<str>, v: &mut u32| (*v ^ bits) >> (k.len() % 32) & 1 == 0;
+                        map.retain(keep);
+                        model.retain(keep);
+                    }
+                    Op::ClonedWithRoom(room) => {
+                        map = map.cloned_with_room(room);
+                        prop_assert!(map.entries.capacity() >= map.len() + room);
+                    }
+                    Op::InsertNew(k, v) => {
+                        let had = model.contains_key(&names[k]);
+                        if !had {
+                            model.insert(names[k].clone(), v);
+                        }
+                        prop_assert_eq!(map.insert_new(names[k].clone(), v).is_err(), had);
                     }
                     Op::Extend(fields) => {
                         let fields: Vec<_> = fields.into_iter().map(|(k, v)| (names[k].clone(), v)).collect();

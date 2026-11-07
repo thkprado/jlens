@@ -273,8 +273,7 @@ impl<'de, 'a> Visitor<'de> for ValueSeed<'_, 'a> {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Value<'a>, A::Error> {
-        let mut map =
-            Map::with_capacity_and_hasher(access.size_hint().unwrap_or(0), Default::default());
+        let mut map = Map::with_capacity(access.size_hint().unwrap_or(0));
         // A repeated key keeps its first position and takes the last value, as in `JSON.parse`.
         while let Some(key) = access.next_key_seed(KeySeed(self.0))? {
             let value = access.next_value_seed(ValueSeed(&mut *self.0, PhantomData))?;
@@ -346,7 +345,7 @@ impl<'de, 'a> Visitor<'de> for CutSeed<'_, '_, 'a> {
         let Read::Fields(fields) = self.1 else {
             return ValueSeed(self.0, PhantomData).visit_map(access);
         };
-        let mut map = Map::with_capacity_and_hasher(fields.len(), Default::default());
+        let mut map = Map::with_capacity(fields.len());
         while let Some(field) = access.next_key_seed(FieldSeed(&mut *self.0, fields))? {
             match field {
                 Some((key, read)) => {
