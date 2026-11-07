@@ -1034,7 +1034,21 @@ impl<'a> Value<'a> {
                 if a.len() != b.len() {
                     return Ok(false);
                 }
-                for (k, v) in a.iter() {
+                // Objects of one shape hold their keys in one order: their fields are compared in
+                // pairs, and a key is looked up only from the first pair whose keys differ. The
+                // values compared, and their order, are those of a lookup for each key.
+                let mut fields = a.iter();
+                let mut unpaired = None;
+                for ((k, v), (l, w)) in fields.by_ref().zip(b.iter()) {
+                    if !Rc::ptr_eq(k, l) && **k != **l {
+                        unpaired = Some((k, v));
+                        break;
+                    }
+                    if !nested(v, w)? {
+                        return Ok(false);
+                    }
+                }
+                for (k, v) in unpaired.into_iter().chain(fields) {
                     match b.get(k) {
                         Some(w) if nested(v, w)? => {}
                         _ => return Ok(false),
@@ -2425,6 +2439,27 @@ mod tests {
         assert!(a.deep_eq(&b).unwrap());
         assert!(!a.strict_eq(&b));
         assert_eq!(js_string_cmp("a", "b"), Ordering::Less);
+    }
+
+    /// Fields compared in pairs while the keys agree, then looked up: the order of the keys
+    /// never matters.
+    #[test]
+    fn objects_equal_in_any_order() {
+        let of = |json| Value::from_json(&json);
+        let a = of(serde_json::json!({"a": 1, "b": 2, "c": 3, "d": 4}));
+        for (other, equal) in [
+            (serde_json::json!({"a": 1, "b": 2, "c": 3, "d": 4}), true),
+            (serde_json::json!({"a": 1, "b": 2, "d": 4, "c": 3}), true),
+            (serde_json::json!({"d": 4, "c": 3, "b": 2, "a": 1}), true),
+            (serde_json::json!({"a": 1, "b": 2, "d": 4, "c": 5}), false),
+            (serde_json::json!({"a": 1, "b": 2, "c": 3, "e": 4}), false),
+            (serde_json::json!({"a": 1, "c": 3, "b": 2, "e": 4}), false),
+            (serde_json::json!({"a": 1, "b": 2, "c": 3}), false),
+        ] {
+            let b = of(other);
+            assert_eq!(a.deep_eq(&b).unwrap(), equal, "{a:?} = {b:?}");
+            assert_eq!(b.deep_eq(&a).unwrap(), equal, "{b:?} = {a:?}");
+        }
     }
 
     mod deep_copy {

@@ -36,7 +36,7 @@ and measures each step against 0.30.0. Nothing public changes.
 | 1 | What objects hold, before any change, below | The field counts of the objects the benchmark workload builds and converts, and of tuples; allocations and times of `tuples`, `object constructor`, `group-by`, `transform`, `distinct items` and a `$match` case, at 0.30.0; written to `docs/notes/perf-0.31.md` | done: no object of the workload has more than 6 fields (the suite's datasets: 11); a path looks a key up in each item; of the 7 allocations of a constructed object, 1 is the hash table and 4 its literal keys and string (#5) |
 | 2 | The map, below; after #1 | A module of `jlens-core` with the operations the crate uses, insertion order kept, the threshold of the index set by #1's counts and a measured crossover of a search in order against foldhash; unit tests and a property test against `IndexMap` as the model; an ADR | done: `jlens_core::map::Map`, an index past 8 fields ([ADR 0022](../adr/0022-small-map.md)); a search in order is faster up to 8 fields; no fields kept in the object |
 | 3 | `Map` is the new map, crate-wide; after #2 | Every object, tuple and `$match` result uses it, and the hasher that lazy values share goes; `cargo xtask ab` against 0.30.0 in each mode, Python and Java; #1's allocations counted again; each case within the floor or faster, or its cause recorded | done: one allocation fewer for each object, tuple and match; `tuples` 10 to 14% faster, `distinct items` 17 to 20% with a converted input, `object constructor` 5 to 7%; nothing slower past the floor |
-| 4 | Objects compared without hashing; after #3 | `deep_eq` and `$distinct` compare two small objects field by field, without a lookup per key; `distinct items` and a case of objects with few fields measured | planned |
+| 4 | Objects compared without hashing; after #3 | `deep_eq` and `$distinct` compare two small objects field by field, without a lookup per key; `distinct items` and a case of objects with few fields measured | done: fields compared in pairs until two keys differ; at most 4% faster up to 8 fields, where a lookup hashes nothing; `$distinct` over objects of 12 fields 44% faster against a `Document` |
 | 5 | Literal keys and strings made once, below; after #4 | An object constructor's literal keys and literal string values are made once, not for each object; `object constructor` counted and measured against #4 and 0.30.0 | planned |
 | 6 | Upstream before the release: `regress` after `95c0404`, stacker#155 and #156, jsonata-js's commits after `c5be116` and its version on npm | Each `regress` commit worth porting ported one at a time, or none; each jsonata-js fix checked against jlens; the watch list updated | planned |
 | 7 | The tables measured again, unattended, after the dependencies are brought up to date: jlens and the control columns; other engines only where their version changed | `ab` against 0.30.0 in every mode, Python and Java; the performance page's tables and version header updated; each case within the floor or its cause recorded | planned |
@@ -66,6 +66,14 @@ for each tuple. Against 0.30.0, `tuples` is 10 to 14% faster, `distinct items` 1
 input is converted, and Python and Java follow. `filter + aggregate` and `group-by` read 1.5 to
 2.4% slower from a lazily converted input, whose lookups do not reach the map; an aligned build
 puts them at the floor. The measurements are in the notes.
+
+**#4, objects compared in pairs.** Two objects of one shape hold their keys in one order, so
+`deep_eq` compares their fields in pairs and looks a key up only from the first pair whose keys
+differ; the values compared, and their order, are those of the lookups. Up to 8 fields a lookup
+hashed nothing and skipped most keys on their length: `distinct items` is 1 to 4% faster, and
+objects of two fields compare as they did. Past 8 fields each lookup hashed its key: `$distinct`
+over 200 objects of 12 fields, each twice, is 44% faster against a `Document` and 15% from JSON.
+The measurements are in the notes.
 
 **#5, literal keys and strings.** `items.{'code': code, 'kind': 'item'}` allocates each key with
 `Rc::from` and the string `'item'` again for each item: 4 of the 7 allocations of each object of

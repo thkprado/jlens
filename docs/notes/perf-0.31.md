@@ -211,3 +211,28 @@ items` -13.6%, `shipping rule` -10.1%, `transform` -9.5%; from Python values, `t
 items -40.9%, `object constructor` -14 to -17%, `transform` -12 to -15%, `distinct items` from
 JSON text -19%, one thread of `$sum(items.price)` +11.9% evaluations per second. `recursion` +3.5
 to +4.1% in its four variants, unmarked: the placement above.
+
+## Objects compared in pairs (0.31 #4)
+
+`deep_eq` looked each key of one object up in the other. Two objects of one shape hold their keys
+in one order, so their fields are now compared in pairs, and a key is looked up only from the
+first pair whose keys differ (a key read from JSON is shared, so most pairs compare a pointer).
+The values compared, and their order, are those of the lookups, so results and errors do not
+change. `$distinct` hashes objects without lookups and compares them with `deep_eq`.
+
+**`cargo xtask ab` against #3** (c52b841), 10 rounds, the median; the cases below the line were
+added to `cases.json` for the run only:
+
+| Case | `evaluate` | `document` | `source` |
+|---|---:|---:|---:|
+| `distinct items` | -1.9% | -3.8% | -1.3% |
+| `group-by` | -0.0% | -0.5% | -0.7% |
+| `$count($distinct(items.{'type': type, 'color': color}))` | +0.1% | -0.8% | -0.1% |
+| `$count(items.{'type': type, 'color': color}[$ = {'type': 'apparel', 'color': 'black'}])` | +0.5% | -0.7% | -1.4% |
+| `$count($distinct($append(items, items)))` | +0.5% | -1.2% | |
+| `$count(items[$ = $$.items[0]])` | +0.7% | -0.1% | |
+| the same `$distinct` over 200 rows of 12 fields | -14.9% | -44.4% | |
+
+Up to 8 fields a lookup hashes nothing and skips most keys on their length (the workload's six
+keys have four lengths), so pairs gain little there: building the objects takes the time. Past 8
+fields each lookup hashed its key, which pairs no longer do.
