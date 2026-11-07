@@ -33,26 +33,39 @@ and measures each step against 0.30.0. Nothing public changes.
 
 | # | Item | Done when | Status |
 |---|---|---|---|
-| 1 | What objects hold, before any change, below | The field counts of the objects the benchmark workload builds and converts, and of tuples; allocations and times of `tuples`, `object constructor`, `group-by`, `transform`, `distinct items` and a `$match` case, at 0.30.0; written to `docs/notes/perf-0.31.md` | planned |
-| 2 | The map, below; after #1 | A module of `jlens-core` with the operations the crate uses, insertion order kept, the threshold of the index set by #1's counts; unit tests and a property test against `IndexMap` as the model; an ADR | planned |
+| 1 | What objects hold, before any change, below | The field counts of the objects the benchmark workload builds and converts, and of tuples; allocations and times of `tuples`, `object constructor`, `group-by`, `transform`, `distinct items` and a `$match` case, at 0.30.0; written to `docs/notes/perf-0.31.md` | done: no object of the workload has more than 6 fields (the suite's datasets: 11); a path looks a key up in each item; of the 7 allocations of a constructed object, 1 is the hash table and 4 its literal keys and string (#5) |
+| 2 | The map, below; after #1 | A module of `jlens-core` with the operations the crate uses, insertion order kept, the threshold of the index set by #1's counts and a measured crossover of a search in order against foldhash; unit tests and a property test against `IndexMap` as the model; an ADR | planned |
 | 3 | `Map` is the new map, crate-wide; after #2 | Every object, tuple and `$match` result uses it; `cargo xtask ab` against 0.30.0 in each mode, Python and Java; #1's allocations counted again; each case within the floor or faster, or its cause recorded | planned |
 | 4 | Objects compared without hashing; after #3 | `deep_eq` and `$distinct` compare two small objects field by field, without a lookup per key; `distinct items` and a case of objects with few fields measured | planned |
-| 5 | Upstream before the release: `regress` after `95c0404`, stacker#155 and #156, jsonata-js's commits after `c5be116` and its version on npm | Each `regress` commit worth porting ported one at a time, or none; each jsonata-js fix checked against jlens; the watch list updated | planned |
-| 6 | The tables measured again, unattended, after the dependencies are brought up to date: jlens and the control columns; other engines only where their version changed | `ab` against 0.30.0 in every mode, Python and Java; the performance page's tables and version header updated; each case within the floor or its cause recorded | planned |
-| 7 | Release 0.31.0 | The release checklist; the channels checked | planned |
+| 5 | Literal keys and strings made once, below; after #4 | An object constructor's literal keys and literal string values are made once, not for each object; `object constructor` counted and measured against #4 and 0.30.0 | planned |
+| 6 | Upstream before the release: `regress` after `95c0404`, stacker#155 and #156, jsonata-js's commits after `c5be116` and its version on npm | Each `regress` commit worth porting ported one at a time, or none; each jsonata-js fix checked against jlens; the watch list updated | planned |
+| 7 | The tables measured again, unattended, after the dependencies are brought up to date: jlens and the control columns; other engines only where their version changed | `ab` against 0.30.0 in every mode, Python and Java; the performance page's tables and version header updated; each case within the floor or its cause recorded | planned |
+| 8 | Release 0.31.0 | The release checklist; the channels checked | planned |
 
 **#1, what objects hold.** The map's shape depends on how many fields objects have: a search in
-order is faster than hashing for a few fields and slower for many. #1 counts them where jlens
-spends its time (the workload's documents, the objects its expressions build, tuples, whose
-fields are the bindings of a path) and records the numbers that #3 compares against, so that the
-plan does not pick a threshold by guess.
+order is faster than hashing for a few fields and slower for many. #1 counted them where jlens
+spends its time and recorded the numbers that #3 compares against, in
+[`docs/notes/perf-0.31.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.31.md).
+Lookups matter as much as construction: `filter + aggregate` builds no object and looks a key up
+in 367 objects of 6 fields.
 
-**#2, the map.** Fields in a vector, in insertion order, with their shared `Rc<str>` keys; a
-lookup compares a key's pointer first, then its text. Past the threshold, an index of the keys is
-built once and kept with the vector, so that an object with thousands of fields (a document whose
-keys are identifiers) stays linear to read. Its operations are those `IndexMap` gives the crate
-today: lookup, insertion, removal keeping the order, an entry, insertion at the front, iteration.
-A property test runs random operations on both maps and compares them.
+**#2, the map.** Fields in a vector, in insertion order, with their shared `Rc<str>` keys. A path
+step's key is the expression's text, not the document's `Rc<str>`, so a lookup compares lengths,
+then text; comparing pointers first helps only between keys of one table (the items of one
+document, a tuple step's keys). The threshold comes from #1's counts and a crossover measured on
+this machine, 1 to 64 fields; past it, an index of the keys is built once and kept with the
+vector, so that an object with thousands of fields (a document whose keys are identifiers) stays
+linear to read. #2 also measures whether a few fields kept in the `Object` itself (104 bytes
+today) are worth its larger size: that would take the vector's allocation too. Its operations are
+those `IndexMap` gives the crate today: lookup, insertion, removal keeping the order, an entry,
+insertion at the front, iteration. A property test runs random operations on both maps and
+compares them.
+
+**#5, literal keys and strings.** `items.{'code': code, 'kind': 'item'}` allocates each key with
+`Rc::from` and the string `'item'` again for each item: 4 of the 7 allocations of each object of
+`object constructor`. An `Expression` is shared between threads, so its tree cannot hold the
+`Rc<str>` a `Value` takes; the strings are made once for each evaluation (or the tree holds them
+in a form an evaluation shares without a copy), and the constructor clones them.
 
 ## In exploration: a regular expression engine of jlens's own
 
