@@ -21,6 +21,39 @@ For ad-hoc JSON queries, `jq` remains the usual tool. jlens is for JSONata that 
 somewhere else, such as a rules engine or a jsonata-js service. It checks those expressions,
 tests them and explains their results before they ship.
 
+## 0.31: a small map for objects
+
+Every object jlens builds or converts is an `IndexMap`: a vector of entries and a hash table over
+it, two allocations and a hashed key for each lookup, even for an object of three fields. Tuples
+are such objects, one per item (4 of the 9 allocations per item of `tuples`); the object `$match`
+returns costs 4 allocations a match (0.52 µs against jsonata-js's 0.23 µs on the Windows heap);
+and `$distinct` compares objects by looking each key up in the other. 0.31 gives `jlens-core` a
+map of its own, a vector of fields searched in order, with an index only past a number of fields,
+and measures each step against 0.30.0. Nothing public changes.
+
+| # | Item | Done when | Status |
+|---|---|---|---|
+| 1 | What objects hold, before any change, below | The field counts of the objects the benchmark workload builds and converts, and of tuples; allocations and times of `tuples`, `object constructor`, `group-by`, `transform`, `distinct items` and a `$match` case, at 0.30.0; written to `docs/notes/perf-0.31.md` | planned |
+| 2 | The map, below; after #1 | A module of `jlens-core` with the operations the crate uses, insertion order kept, the threshold of the index set by #1's counts; unit tests and a property test against `IndexMap` as the model; an ADR | planned |
+| 3 | `Map` is the new map, crate-wide; after #2 | Every object, tuple and `$match` result uses it; `cargo xtask ab` against 0.30.0 in each mode, Python and Java; #1's allocations counted again; each case within the floor or faster, or its cause recorded | planned |
+| 4 | Objects compared without hashing; after #3 | `deep_eq` and `$distinct` compare two small objects field by field, without a lookup per key; `distinct items` and a case of objects with few fields measured | planned |
+| 5 | Upstream before the release: `regress` after `95c0404`, stacker#155 and #156, jsonata-js's commits after `c5be116` and its version on npm | Each `regress` commit worth porting ported one at a time, or none; each jsonata-js fix checked against jlens; the watch list updated | planned |
+| 6 | The tables measured again, unattended, after the dependencies are brought up to date: jlens and the control columns; other engines only where their version changed | `ab` against 0.30.0 in every mode, Python and Java; the performance page's tables and version header updated; each case within the floor or its cause recorded | planned |
+| 7 | Release 0.31.0 | The release checklist; the channels checked | planned |
+
+**#1, what objects hold.** The map's shape depends on how many fields objects have: a search in
+order is faster than hashing for a few fields and slower for many. #1 counts them where jlens
+spends its time (the workload's documents, the objects its expressions build, tuples, whose
+fields are the bindings of a path) and records the numbers that #3 compares against, so that the
+plan does not pick a threshold by guess.
+
+**#2, the map.** Fields in a vector, in insertion order, with their shared `Rc<str>` keys; a
+lookup compares a key's pointer first, then its text. Past the threshold, an index of the keys is
+built once and kept with the vector, so that an object with thousands of fields (a document whose
+keys are identifiers) stays linear to read. Its operations are those `IndexMap` gives the crate
+today: lookup, insertion, removal keeping the order, an entry, insertion at the front, iteration.
+A property test runs random operations on both maps and compares them.
+
 ## In exploration: a regular expression engine of jlens's own
 
 `jlens-regress` is a backtracker. A catastrophic pattern runs within the evaluation's limits
