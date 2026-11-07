@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.30.0]
+
+Value requests with their context. A value request names the fields compared beside the value in
+the same predicate, so that a domain can depend on another (group → subgroup), says whether the
+value is an element of `in [...]`, and lists the literals that array already holds. The web editor
+gains an "Open domains" example that uses them, and a schema override's `type` takes one type
+name as well as a list.
+
 ### Added
 
 - The web editor's "Open domains" example: fields name an open domain (customers, countries,
@@ -1339,7 +1347,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/thkprado/jlens/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/thkprado/jlens/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/thkprado/jlens/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/thkprado/jlens/compare/v0.26.0...v0.27.0

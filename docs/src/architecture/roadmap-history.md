@@ -283,3 +283,18 @@ that the Wasm package kept to itself. No evaluation code changed, and the tables
 floor. How it was measured is in
 [`docs/notes/perf-0.29.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.29.md).
 ([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0290))
+
+## 0.30
+
+*Value requests with their context.* 0.29's value request said which field's domain to fetch,
+but not what the expression already said about it. A request now carries its conditions: the
+fields compared with literals by `=` or `in` and joined to the value by `and` in the same
+predicate, read from the unfinished expression by the recovering parser, so that a domain can
+depend on another (`categories[group = 'X' and subgroup = '|` asks for the subgroups of `X`). It
+says whether the value is an element of `in [...]`, where several may be inserted, and lists the
+literals the array already holds, which the application leaves out as the service leaves out
+declared values. The web editor's "Open domains" example shows each. A schema override's `type`
+takes one type name, as JSON Schema writes it, besides a list. No evaluation code changed, and the
+tables moved within the floor but for cases that draw one of two speeds. How it was measured is in
+[`docs/notes/perf-0.30.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.30.md).
+([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0300))
