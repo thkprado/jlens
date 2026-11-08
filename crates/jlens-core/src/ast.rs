@@ -452,6 +452,27 @@ pub struct Attrs {
     /// Ancestor slots that still need to be resolved by an enclosing path.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub seeking_parent: Vec<SlotId>,
+    /// For a variable read in a lambda's body, where the call of that lambda holds it.
+    #[serde(skip)]
+    pub(crate) param: Param,
+}
+
+/// Where a variable read in a lambda's body, outside any lambda or block of its own, finds its
+/// value in a frame that calls that lambda: one of its parameters, or none, so that the lookup
+/// starts in the frame above without comparing the name with theirs (0.32 #6). Set when the
+/// expression is processed. The evaluator uses it only once the frame shows a call of that
+/// lambda, with all its parameters, so a place that does not fit is never used.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Param {
+    /// The address of the lambda's [`LambdaDef`]; 0 when the read is in no lambda's body.
+    pub lambda: usize,
+    /// The parameter's index, or [`Param::NONE`] when the name is none of them.
+    pub index: u32,
+}
+
+impl Param {
+    /// The index of a name that no parameter has.
+    pub const NONE: u32 = u32::MAX;
 }
 
 fn is_false(b: &bool) -> bool {
@@ -635,6 +656,12 @@ impl Node {
     }
 
     fn for_each_child_mut(&mut self, f: &mut impl FnMut(&mut Node)) {
+        self.for_each_kind_child_mut(f);
+        self.for_each_attr_child_mut(f);
+    }
+
+    /// Calls `f` for each child of the node's kind, without the children of its attributes.
+    pub(crate) fn for_each_kind_child_mut(&mut self, f: &mut impl FnMut(&mut Node)) {
         match &mut self.kind {
             NodeKind::Path { steps, .. } => steps.iter_mut().for_each(&mut *f),
             NodeKind::Binary { lhs, rhs, .. }
@@ -684,6 +711,11 @@ impl Node {
             NodeKind::Sort { terms } => terms.iter_mut().for_each(|t| f(&mut t.expr)),
             _ => {}
         }
+    }
+
+    /// Calls `f` for each child held by the attributes: the filters of its stages and
+    /// predicates, and its group-by pairs.
+    pub(crate) fn for_each_attr_child_mut(&mut self, f: &mut impl FnMut(&mut Node)) {
         for stage in self
             .attrs
             .stages

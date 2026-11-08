@@ -12,7 +12,7 @@
 //!
 //! In recover mode errors become [`NodeKind::Error`] nodes and diagnostics instead of aborting.
 
-use crate::ast::{BinaryOp, FallbackOp, LambdaDef, Slot, TransformDef};
+use crate::ast::{BinaryOp, FallbackOp, LambdaDef, Param, Slot, TransformDef};
 use crate::ast::{Group, Node, NodeKind, SlotId, SortTerm, Span, Stage};
 use crate::error::{Error, Result};
 use crate::lexer::Lit;
@@ -64,6 +64,7 @@ impl<'a> Processor<'a> {
             node.attrs.ancestor_label = node.attrs.ancestor.map(|s| slots[s].label.clone());
             mark_frame(node, eval);
         });
+        place_params(&mut root, None);
         Ok(root)
     }
 
@@ -828,6 +829,45 @@ fn tail_call_optimize_inner(mut expr: Node) -> Node {
 /// `$eval` binds in the frame of its caller, as in jsonata-js, so when `eval` is set (the
 /// expression names `$eval`, or was parsed by it) a block whose expressions call a function
 /// keeps its frame too: the function called may be `$eval` under another name.
+/// Gives each variable read in a lambda's body, outside any lambda or block with a frame of its
+/// own, the place of the parameter it reads ([`Param`]). `lambda` is the address and the
+/// parameters of the innermost lambda around `node`, if any. Runs once the blocks' frames are
+/// known, while the definitions are unique.
+fn place_params(node: &mut Node, lambda: Option<(usize, &[String])>) {
+    match &mut node.kind {
+        NodeKind::Lambda(def) => {
+            let address = Arc::as_ptr(def) as usize;
+            if let Some(def) = Arc::get_mut(def) {
+                let LambdaDef { params, body, .. } = def;
+                crate::stack::grow(|| place_params(body, Some((address, params))));
+            }
+        }
+        NodeKind::Variable { name } => {
+            if let Some((address, params)) = lambda
+                && !name.is_empty()
+            {
+                // The last of two parameters of one name holds, as in `Vars::get`.
+                let index = match params.iter().rposition(|p| p == name) {
+                    Some(i) => u32::try_from(i).ok().filter(|&i| i != Param::NONE),
+                    None => Some(Param::NONE),
+                };
+                if let Some(index) = index {
+                    node.attrs.param = Param {
+                        lambda: address,
+                        index,
+                    };
+                }
+            }
+        }
+        // Its expressions read the block's frame first.
+        NodeKind::Block { frame: true, .. } => {
+            node.for_each_kind_child_mut(&mut |c| crate::stack::grow(|| place_params(c, None)))
+        }
+        _ => node.for_each_kind_child_mut(&mut |c| crate::stack::grow(|| place_params(c, lambda))),
+    }
+    node.for_each_attr_child_mut(&mut |c| crate::stack::grow(|| place_params(c, lambda)));
+}
+
 pub(crate) fn mark_frame(node: &mut Node, eval: bool) {
     fn binds(node: &Node, eval: bool) -> bool {
         match &node.kind {

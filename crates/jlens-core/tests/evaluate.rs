@@ -291,6 +291,72 @@ fn a_lambda_frame_names_its_arguments_as_if_each_were_bound() {
 }
 
 #[test]
+fn a_read_in_a_lambdas_body_takes_its_parameter_only_from_a_call_of_that_lambda() {
+    // A variable read in a lambda's body knows the place of its parameter, or that no parameter
+    // has its name, from the compiled expression (0.32 #6). Every other frame between, and every
+    // other call that runs the body, looks the name up. The results are those of jsonata-js.
+    let cases = [
+        // Read by their place, and past the call's frame for a name no parameter has.
+        (
+            "($f := function($n){ $n <= 1 ? $n : $f($n - 1) + $f($n - 2) }; $f(15))",
+            Some(json!(610)),
+        ),
+        ("function($n){ $sum([$n, 1]) }(1)", Some(json!(2))),
+        ("function($sum){ $sum }(5)", Some(json!(5))),
+        ("function($x){ $$.a + $x }(1)", Some(json!(3))),
+        (
+            "$map([1, 2], function($v, $i){ $v * 10 + $i })",
+            Some(json!([10, 21])),
+        ),
+        // A partial application calls the body with the parameters it has left to supply.
+        (
+            "($f := function($a, $b){ $a & $b }; [$f('a', ?)('b'), $f(?, 'b')('a')])",
+            Some(json!(["ab", "ab"])),
+        ),
+        // A tail call runs in a thunk of its own.
+        (
+            "($f := function($n, $s){ $n = 0 ? $s : $f($n - 1, $s + $n) }; $f(100, 0))",
+            Some(json!(5050)),
+        ),
+        // A lambda inside reads the outer one's parameter, or hides it with its own.
+        (
+            "function($x){ function($y){ $x + $y } }(1)(2)",
+            Some(json!(3)),
+        ),
+        ("function($x){ function($x){ $x } }(1)(2)", Some(json!(2))),
+        // A block's frame and a tuple's hide a parameter, and only within them.
+        (
+            "function($x){ [($x := 5; $x), $x] }(1)",
+            Some(json!([5, 1])),
+        ),
+        (
+            "function($i){ [items#$i.$i, $i] }(7)",
+            Some(json!([0, 1, 7])),
+        ),
+        // The body binds a name of its own in the call's frame.
+        (
+            "function($x){ [$y := 2, $x, $y] }(1)",
+            Some(json!([2, 1, 2])),
+        ),
+        // `$eval` compiles an expression of its own, which, as in jsonata-js, does not see the
+        // call's parameters, though its lambdas do.
+        ("function($n){ $eval('$n + 1') }(1)", None),
+        (
+            "function($n){ $eval('function($m){ $n + $m }')(2) }(1)",
+            Some(json!(3)),
+        ),
+        (
+            "function($n){ $eval('function($n){ $n }')(2) + $n }(1)",
+            Some(json!(3)),
+        ),
+    ];
+    for (expr, expected) in cases {
+        let input = json!({"a": 2, "items": [{"x": 1}, {"x": 2}]});
+        assert_eq!(eval(expr, input), expected, "{expr}");
+    }
+}
+
+#[test]
 fn a_constructor_evaluates_its_items_in_order() {
     // The first two differ from jsonata-js on purpose (compatibility.md): its items run
     // concurrently, so that a plain `$x` reads the value from before the binding.

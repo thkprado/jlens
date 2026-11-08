@@ -19,6 +19,12 @@ All notable changes are recorded here. The format follows
   read the items without building the array the function would be given. The results, the
   errors and the steps counted are those of the general path, which still runs where a value
   is not a number, an item is an array, or `$sum` names another function.
+- A variable read in a lambda's body knows, from the compiled expression, which parameter holds
+  it, or that none does: in a call of that lambda it takes the argument at that place, or looks
+  further up, without comparing its name with the parameters'. Any other frame, and a partial
+  application, look the name up as before. `recursion` is another 5 to 6% faster.
+- `jlens-core`: `Attrs` has a private field, so it is made with `Attrs::default()` and no longer
+  with a struct expression.
 
 ### Fixed
 

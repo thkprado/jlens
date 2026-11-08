@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 use indexmap::IndexMap;
 use web_time::{Duration, Instant};
 
-use crate::ast::{Ast, BinaryOp, FallbackOp, Node, NodeKind, SortTerm, Stage, TransformDef};
+use crate::ast::{Ast, BinaryOp, FallbackOp, Node, NodeKind, Param, SortTerm, Stage, TransformDef};
 use crate::audit::{Branch, EvalInfo, Outcome, Tracer, ValueRef};
 use crate::error::{Error, Result};
 use crate::functions::{self, Call, Picture, boolean};
@@ -225,6 +225,31 @@ impl<'a> Frame<'a> {
                 None => return frame.builtin(name),
             }
         }
+    }
+
+    /// [`Self::lookup`] of a variable read in a lambda's body, which `param` places: when this
+    /// frame is a call of that lambda with all its parameters, the parameter's value, or for a
+    /// name that none of them has, the lookup from the frame above, without comparing the name
+    /// with theirs (0.32 #6). A frame of another kind, another lambda, a partial application,
+    /// or a call whose body bound a name of its own, takes the general lookup.
+    #[inline]
+    fn lookup_param(&self, name: &str, param: Param) -> Value<'a> {
+        if param.lambda != 0
+            && let Vars::Call(function, values) = &*self.vars.borrow()
+            && let Function::Lambda(lambda) = &**function
+            && lambda.params.is_none()
+            && Arc::as_ptr(&lambda.def) as usize == param.lambda
+        {
+            if let Some(value) = values.get(param.index as usize) {
+                return value.clone();
+            }
+            if param.index == Param::NONE
+                && let Some(parent) = &self.parent
+            {
+                return parent.lookup(name);
+            }
+        }
+        self.lookup(name)
     }
 
     /// The value of a host function, or else of a built-in one, kept in the root frame once it
@@ -1048,7 +1073,7 @@ impl<'a> Evaluator<'_, 'a> {
             NodeKind::Function { procedure, args } => {
                 self.call(expr, procedure, args, input, env, None)?
             }
-            NodeKind::Variable { name } => variable(name, input, env),
+            NodeKind::Variable { name } => variable(name, expr.attrs.param, input, env),
             NodeKind::Lambda(def) => Value::function(Function::Lambda(Lambda {
                 def: def.clone(),
                 params: None,
@@ -2143,11 +2168,11 @@ impl<'a> Evaluator<'_, 'a> {
         let (base, taken) = match prefix {
             [] => (input.clone(), 0),
             [
-                Node {
+                step @ Node {
                     kind: NodeKind::Variable { name },
                     ..
                 },
-            ] => (variable(name, input, env), 1),
+            ] => (variable(name, step.attrs.param, input, env), 1),
             _ => match plain_fields(prefix, input, env) {
                 Some(found) => found,
                 None => return Ok(None),
@@ -2780,7 +2805,7 @@ fn is_plain_step(step: &Node) -> bool {
 }
 
 /// The value of a variable; `$` alone is the context value.
-fn variable<'a>(name: &str, input: &Value<'a>, env: &Env<'a>) -> Value<'a> {
+fn variable<'a>(name: &str, param: Param, input: &Value<'a>, env: &Env<'a>) -> Value<'a> {
     if name.is_empty() {
         match input {
             Value::Array(a) if a.has(OUTER_WRAPPER) => {
@@ -2789,7 +2814,7 @@ fn variable<'a>(name: &str, input: &Value<'a>, env: &Env<'a>) -> Value<'a> {
             other => other.clone(),
         }
     } else {
-        env.lookup(name)
+        env.lookup_param(name, param)
     }
 }
 
@@ -2799,7 +2824,11 @@ fn variable<'a>(name: &str, input: &Value<'a>, env: &Env<'a>) -> Value<'a> {
 /// general path. With the value, the steps the general path would evaluate (ADR 0018).
 fn plain_fields<'a>(steps: &[Node], input: &Value<'a>, env: &Env<'a>) -> Option<(Value<'a>, u64)> {
     let (mut value, names, mut taken) = match &steps[0].kind {
-        NodeKind::Variable { name } => (variable(name, input, env), &steps[1..], 1),
+        NodeKind::Variable { name } => (
+            variable(name, steps[0].attrs.param, input, env),
+            &steps[1..],
+            1,
+        ),
         _ => (input.clone(), steps, 0),
     };
     if value.is_array() {

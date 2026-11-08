@@ -201,3 +201,37 @@ each item with a string literal. It builds nothing.
   a variable read in a lambda's body, with no scope between, knows its parameter's place from
   the compiled expression, and the frame confirms it at run time before it is used; anything
   else takes the general lookup.
+
+## #6: a lambda's parameters read by their place
+
+When an expression is compiled, a last pass gives each variable read in a lambda's body, outside
+any lambda or block with a frame of its own, the address of that lambda's definition and the
+index of the parameter of its name, or a mark that none has it (`ast::Param`, a private field
+of `Attrs`). A read checks that the innermost frame is a call of that definition, with all its
+parameters (not a partial application, which names those left to supply) and nothing bound
+by the body beside them; then it takes the argument at that index, or for a name no parameter
+has, looks it up from the frame above. Every other frame looks the name up as before.
+
+- The address is that of the definition holding the read, which lives as long as the read does,
+  so no other definition can have it while the read runs. A tree whose definitions are copied
+  keeps the old address, which no call of the copy has: the reads take the general lookup.
+- `$eval` compiles its own tree, whose reads are placed against its own lambdas; a tail call's
+  thunk is a lambda without parameters, so its reads go to the frame above.
+- `Attrs` was made with a struct expression before: a breaking change, so the version is 0.32.0
+  from here on.
+
+`cargo xtask ab` against fd2534c, 10 rounds, medians:
+
+| | Ryzen `document` | `evaluate` | `source` | M1 `document` | `evaluate` | `source` |
+|---|---:|---:|---:|---:|---:|---:|
+| `recursion` | -4.9% | -5.8% | -5.7% | -9.1% | -8.9% | -8.3% |
+| shipping rule | -0.0% | -2.6% | +0.0% | +0.0% | +0.4% | -0.5% |
+
+- Every other case is between -3.1% and +1.6%, except `transform` in the Ryzen's `evaluate`
+  mode, +4.3% on the median and -0.6% on the fastest round, the case whose floor is widest, and
+  on the M1 in `document`, `distinct items` +2.0% (alone in 20 rounds +1.5%, fastest +1.4%) and
+  `index in a variable` +1.0% (alone +2.0%, fastest +1.0%). Neither reads a variable in a
+  lambda: on their path the change adds the test of one field, far below their 5 to 160 ns, so
+  they are taken as layout, as in #4.
+- #3 to #6 together make `recursion` about 27% faster on the Ryzen and 29% on the M1 than
+  0.31.0.
