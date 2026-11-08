@@ -85,6 +85,20 @@ allocations instead of 6: the constructor is 14 to 17% faster than at #4 on the 
 than 0.30.0, and 2% with `mimalloc`, where an allocation costs little. The measurements are in
 the notes.
 
+## After 0.31: where releases are measured
+
+From 0.32 on, the performance page's tables are measured on the Apple M1 alone, which 0.31 #7
+found quieter (two comparisons within 1.3 points, against up to 3 on the Ryzen) and steady through
+three hours. x86_64 keeps a check without tables: while the Ryzen is available, each release runs
+`cargo xtask ab` against the previous tag in every mode and `python.py ab` under Linux on it,
+about 30 minutes, and investigates only what passes the floor. A release is compared with an
+older one by measuring the older tag on the M1, not by the Ryzen's tables.
+
+| # | Item | Done when | Status |
+|---|---|---|---|
+| 1 | The page on the M1 | The next release's measure item fills every table from the M1 (jlens and the controls; the other engines from 0.31's M1 runs until their versions change), states the M1 as the machine and the Ryzen as an `ab` check only, and folds the section "On an Apple M1" into the tables | planned |
+| 2 | `filter + aggregate` with Python values on the M1 | Its 3 to 4% against 0.30.0, found by 0.31 #7, explained or removed | planned |
+
 ## In exploration: a regular expression engine of jlens's own
 
 `jlens-regress` is a backtracker. A catastrophic pattern runs within the evaluation's limits
