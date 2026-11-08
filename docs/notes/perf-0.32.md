@@ -235,3 +235,54 @@ has, looks it up from the frame above. Every other frame looks the name up as be
   they are taken as layout, as in #4.
 - #3 to #6 together make `recursion` about 27% faster on the Ryzen and 29% on the M1 than
   0.31.0.
+
+## #10: a value's tag a word wide
+
+0.27 found `path` stalling about seven times an item on a store the processor could not forward
+to a load. The Ryzen counts these loads (`ls_bad_status2.stli_other`, raw event `r0224` under
+`perf` in WSL); sampled on that event, the probe of #6 at 160719e shows the cause:
+
+- `Value` had a byte for its tag. Where a value is moved after it was built in parts, as in
+  `Ok(value)`, `Some(value)` or a value `clone()` returned, LLVM copies the tag byte and the
+  bytes after it apart: the byte, then 16 bytes at offset 1, or 8, 4, 2 and 1 bytes from offset
+  1. The next copy reads 16 bytes from offset 0, across both stores, and waits for them to reach
+  the cache.
+- It is not the path's alone: every node's `Result<Value>` is written that way on return, which
+  is part of the 11% the profile of #6 gives to the `?` on each node's result. `recursion` met
+  about 107,000 such loads an evaluation, `filter + aggregate` about 7,400.
+
+Two changes were tried:
+
+- **The path step alone.** The step that looks a field up in each item built an `Option<Value>`,
+  copied in parts. Without it, `items.quantity` met 510 such loads an evaluation instead of
+  1,930; on Windows, 3% faster in `document` and `source`, nothing in `evaluate`, and
+  `names over items` 3% slower in `evaluate`. With the next change, it added 2 to 4% to
+  `items.quantity` and took 2% from `recursion` in every mode, so it was dropped.
+- **A tag a word wide** (`#[repr(u64)]` on `Value`). Every part of a value now starts on a word,
+  so that a copy in parts and a copy whole meet on the same edges. `recursion` meets 7,600 such
+  loads an evaluation instead of 107,000, `filter + aggregate` 1,300 instead of 7,400, and the
+  probe in WSL times them 14% and 22% faster. The value stays three words, and `Option<Value>`
+  and `Result<Value>` too, as the tag keeps its niche; a test holds the three sizes.
+
+`cargo xtask ab` against 160719e, 10 rounds, medians:
+
+| | Ryzen `document` | `evaluate` | `source` | M1 `document` | `evaluate` | `source` |
+|---|---:|---:|---:|---:|---:|---:|
+| `recursion` | -8.8% | -7.6% | -7.6% | -4.8% | -5.4% | -5.1% |
+| shipping rule | -16.3% | -7.5% | -7.1% | -13.1% | -10.6% | -5.7% |
+| `filter + aggregate` | -16.3% | -6.1% | -7.6% | -9.7% | -7.2% | -5.5% |
+| `group-by` | -9.0% | -5.5% | -8.5% | -9.6% | -8.7% | -6.1% |
+| object constructor | -5.1% | -4.5% | -2.3% | -9.8% | -10.2% | -11.3% |
+| index in a variable | +0.0% | -1.3% | -1.3% | -13.0% | -10.7% | -9.4% |
+| `path` | -1.3% | -1.3% | +0.4% | +0.0% | +0.4% | -4.5% |
+| `names over items` | -0.2% | +1.3% | -2.7% | +1.8% | +0.2% | +0.8% |
+
+- On the Ryzen, every other case is between -9.0% (`strings` in `document`) and +1.1%; none is
+  slower past the floor. On the M1, the indexes into 10,000 items are 8 to 10% faster too.
+- One case is slower: `names over items` on the M1 in `document`, +1.8%, +1.9% alone in 20
+  rounds and +2.0% with functions and blocks aligned on both sides, so not placement; 1.68 to
+  1.71 µs for 200 items. Its loop (#5's aggregate) only looks a field up and matches its
+  variant; no cause was found, and it is left against the gains elsewhere.
+- The robustness properties pass with `PROPTEST_CASES=100000`; the change is to the layout only.
+- 0.27's stall in `path` is this one: `path` itself, a single object, is within 1.3% on the
+  Ryzen and 0 to 4.5% faster on the M1.

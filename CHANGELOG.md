@@ -23,6 +23,10 @@ All notable changes are recorded here. The format follows
   it, or that none does: in a call of that lambda it takes the argument at that place, or looks
   further up, without comparing its name with the parameters'. Any other frame, and a partial
   application, look the name up as before. `recursion` is another 5 to 6% faster.
+- A value's tag takes a word instead of a byte, so that a value built in parts and copied whole
+  no longer waits for its stores to reach the cache before it is read again. The value keeps
+  its size. On the Ryzen and the M1, `recursion` is another 5 to 9% faster, the shipping rule 6
+  to 16%, `filter + aggregate` and `group-by` 5 to 17%.
 - `jlens-core`: `Attrs` has a private field, so it is made with `Attrs::default()` and no longer
   with a struct expression.
 

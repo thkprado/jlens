@@ -199,7 +199,13 @@ impl<'a> Pending<'a> {
 }
 
 /// A JSONata value.
+///
+/// The tag takes a whole word. With a byte, LLVM copied a value as that byte and the bytes after
+/// it, which a copy reading 16 bytes from the start cannot take from the store while the
+/// writes are in flight: about 100,000 times an evaluation of `recursion` (0.32 #10). The
+/// value stays three words, as the payload needs the second and third.
 #[derive(Clone, Default)]
+#[repr(u64)]
 pub(crate) enum Value<'a> {
     #[default]
     Undefined,

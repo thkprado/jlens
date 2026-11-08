@@ -305,6 +305,15 @@ mod tests {
     fn a_string_stays_two_words() {
         assert_eq!(size_of::<Text>(), size_of::<Rc<str>>());
         assert_eq!(size_of::<crate::value::Value<'_>>(), 3 * size_of::<usize>());
+        // The word-wide tag keeps its niche: neither wraps the value in a word more.
+        assert_eq!(
+            size_of::<Option<crate::value::Value<'_>>>(),
+            3 * size_of::<usize>()
+        );
+        assert_eq!(
+            size_of::<crate::error::Result<crate::value::Value<'_>>>(),
+            3 * size_of::<usize>()
+        );
     }
 
     #[test]
