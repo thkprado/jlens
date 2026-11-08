@@ -273,3 +273,223 @@ alternated on new copies, `object constructor` went from 275 to 222 µs on the s
 Against #4 every other case is within 2.7%. Against 0.30.0 the cases that #3 and #4 moved keep
 their gains; one `evaluate` run read every case of its B program 20 to 35% slow, the machine
 busy, and was run again.
+
+## The release measured (0.31 #7)
+
+Measured on 2026-11-07 and 08 at cc5981a, against v0.30.0 (192726c), on the Ryzen 7 3700X that
+every table up to 0.30.0 came from (Windows 11, and Ubuntu 26.04 under WSL 2), and on a MacBook Air
+M1 (macOS 27), a new platform for the tables. Nothing needed bringing up to date first: `cargo
+update` found nothing in `Cargo.lock` (nor past the MSRV), npm and Maven had no newer version of
+what the benchmarks run, binaryen 132 is the latest on npm (133 is on GitHub only), and no other
+engine had a new version, so their columns on the Ryzen keep the numbers of 0.27.0.
+
+### Natively
+
+`cargo xtask ab v0.30.0 HEAD`, 10 rounds, two comparisons of plain builds and, on the Ryzen, a
+third built aligned (in parentheses); B against A, the median, in percent:
+
+| Case | Windows `evaluate` | `document` | `source` | Linux `document` | M1 `evaluate` | M1 `document` | M1 `source` |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| path | -8.5, -10.4 (-6.8) | -4.5, -2.5 (-3.0) | -6.1, -7.1 (-6.1) | -15.1, -12.9 (-10.3) | -11.8, -13.6 | -13.6, -12.6 | -6.6, -10.1 |
+| names over items | -2.7, -3.1 (+0.3) | -18.1, -18.1 (-18.5) | -1.4, -1.7 (-0.5) | -17.5, -17.8 (-18.1) | -1.8, -1.5 | -20.9, -20.1 | -1.7, -1.9 |
+| filter + aggregate | -0.3, -3.1 (+0.7) | -4.1, -5.7 (-2.9) | +0.4, -0.2 (-0.5) | -3.3, -3.2 (-7.6) | +0.4, +0.2 | -13.7, -13.1 | +0.2, +0.7 |
+| group-by | -3.5, -4.1 (-0.3) | -7.0, -7.1 (-4.5) | -1.1, -1.3 (-1.3) | -1.7, -1.2 (-5.0) | +0.3, +0.9 | -11.1, -10.7 | +0.8, +0.8 |
+| sort + map | -1.9, -3.8 (-1.3) | -2.0, -4.9 (-3.4) | +0.5, -0.6 (-1.6) | -5.9, -6.1 (-5.3) | -0.8, -1.1 | -6.3, -5.8 | -1.7, -1.1 |
+| strings | -0.4, -0.6 (+0.1) | -1.5, -5.5 (-2.7) | +0.4, -0.2 (-1.0) | -1.6, +0.5 (-5.4) | -0.9, -0.8 | -11.5, -10.9 | -0.4, -0.1 |
+| regex | -0.2, +0.0 (+1.1) | -1.7, -1.1 (-1.3) | -19.0, +0.3 (+2.0) | -2.1, -3.1 (-2.6) | -1.9, -2.4 | -3.9, -4.0 | -0.6, +0.6 |
+| number formatting | -0.9, -3.0 (-0.5) | -0.2, -3.1 (-2.2) | -1.4, -1.0 (-0.8) | -4.6, -3.3 (-5.1) | -2.9, -2.2 | -3.1, -2.8 | -1.6, -1.3 |
+| object constructor | -25.5, -24.4 (-23.2) | -22.9, -22.2 (-20.7) | -22.0, -20.7 (-21.9) | -17.0, -17.6 (-19.1) | -8.8, -9.0 | -14.8, -14.7 | -6.7, -6.6 |
+| transform | -5.9, -6.0 (-8.8) | -10.3, -10.0 (-10.8) | -7.3, -7.4 (-6.8) | -15.0, -13.9 (-14.4) | -9.0, -9.0 | -9.0, -8.9 | -10.1, -10.6 |
+| recursion | -0.5, -0.0 (+0.5) | -0.7, -0.7 (+1.8) | +6.0, -0.5 (+0.9) | +9.1, +9.7 (-0.5) | +0.6, +0.5 | +0.4, +0.4 | +0.5, +0.5 |
+| shipping rule | -0.2, -0.5 (+3.2) | -8.7, -8.0 (-8.4) | +0.3, +0.9 (-0.3) | -6.0, -6.8 (-10.3) | +1.1, +1.3 | -17.6, -17.3 | +1.2, +1.1 |
+| index into 10,000 items | -5.8, -6.4 (-6.0) | -2.3, -3.0 (+0.9) | -6.1, -6.9 (-2.9) | -9.2, -8.8 (-9.0) | -3.2, -3.8 | +0.6, +2.7 | -4.7, -2.9 |
+| index in a variable | -4.8, -3.8 (-3.6) | -1.0, -1.6 (+1.8) | -4.3, -3.4 (-2.1) | -1.9, -1.2 (-0.4) | -4.9, -5.0 | -1.0, -0.8 | -5.0, -3.1 |
+| regex over a long text | +5.4, +4.9 (-3.2) | +5.1, +5.7 (-3.0) | +5.4, +5.0 (-4.1) | -8.1, -8.4 (+5.2) | -0.1, +0.0 | +0.2, -0.1 | +0.0, +0.2 |
+| distinct items | -19.9, -20.9 (-19.5) | -8.3, -8.6 (-7.9) | -16.9, -16.5 (-18.5) | -8.2, -7.4 (-8.5) | -13.2, -13.1 | -4.9, -4.8 | -12.1, -11.7 |
+| tuples | -10.9, -10.8 (-11.2) | -13.5, -13.3 (-14.1) | -10.6, -11.0 (-10.8) | -11.0, -10.6 (-12.8) | -7.2, -7.2 | -11.4, -11.3 | -6.8, -6.5 |
+
+- `object constructor` (#3, #5), `distinct items` (#3, #4), `tuples` (#3), `transform` and the
+  cases against a `Document` that read objects of six fields (`names over items`, the shipping
+  rule, `group-by`, `strings`) are faster in every comparison on every machine.
+- Layout, settled by the aligned run: `regex over a long text` +4.9 to +5.7% on Windows in every
+  mode, −3.0 to −4.1% aligned; `recursion` +9.1 and +9.7% under Linux, −0.5% aligned. Under Linux
+  `regex over a long text` turned the other way, −8% plain and +5.2% aligned: the bimodal case
+  (149 to 165 µs) of 0.30.
+- Draws: Windows `source` read `regex` −19.0% and `recursion` +6.0% in one comparison, with the
+  fastest rounds equal (+0.2%, −0.5%); the other comparison and the aligned one put both within 2%.
+  Windows `evaluate` read the shipping rule +3.2% aligned only.
+- The M1's two comparisons agree within 1.3 points on every case. Nothing there is slower than
+  +2.7% (`index into 10,000 items` against a `Document`, +0.6 in the other comparison); `recursion`
+  and the shipping rule read +0.4 to +1.3% in every comparison.
+
+### Python
+
+`python.py ab`, two comparisons of five rounds on each machine (Linux: Python 3.14.8; the M1:
+Python 3.14.10), and a third on the M1 with both wheels built aligned.
+
+- Under Linux, nothing slower than +1.6% (the shipping rule with Python values, in one comparison;
+  −1.5% in the other). Marked in both: `object constructor` −9.5 to −16.6%, `transform`
+  −8.4 to −11.5%, `tuples` −8.0 to −11.5%, `names over items` against a `Document` −15%,
+  `distinct items` −4.7 to −5.7%, `path` with Python values −4.2 to −4.5%.
+- On the M1, the same gains, and against a `Document` larger ones (`shipping rule` −17 to −19%,
+  `group-by` −12 to −13%, `names over items` −13 to −16%). One case is slower: `filter + aggregate`
+  with Python values, +4.0% (marked), +3.6% and, aligned, +3.0% (unmarked, A 42.8 against B 44.0
+  µs). It is not layout, which the aligned build would have moved, and not the Python package's
+  own code, which 0.31 did not change; but the M1's native `source` mode, which reads values one
+  level at a time as the package does, reads it +0.2 and +0.7%, and Linux −0.3 and −2.2%. Not
+  found; left for a later plan, as the case reads 367 objects of six fields from a Python dict
+  each, the shape #3 made cheaper elsewhere.
+- The M1's second comparison ran across 4 minutes of sleep (the lid was closed): three cells
+  spread 37 to 67%, and its medians agree with the first comparison's.
+
+### Java
+
+`cargo xtask java-compare ab`, every part, five rounds: two comparisons under Linux, one on the M1
+(55 minutes each). Under Linux, 49 and 28 differences marked, all faster: `$sum(items.price)` over
+100,000 items in a `Document` −35%, `object constructor` −14 to −19%, `distinct items` from JSON
+text −20%, `transform` −12 to −15%; from JSON text on 1 to 16 threads and on 1,000 virtual
+threads, 5.5 to 9.9% more evaluations a second. Unmarked and past +2.5%: `names over items` over
+Java objects +3.7% (spreads 5 and 6%), and `items[0].name` over Java objects from JSON text +3.1%
+(spreads 9 and 13%), each in one comparison only. On the M1, 42 marked, all faster (the threads
++5.9 to +7.3%), and four cells between +3.0 and +3.5%, unmarked, three of them with spreads of 9
+to 14%.
+
+### WebAssembly
+
+The release's table, the median of three runs, against 0.30.0's. Faster: `object constructor`
+−16% with `evaluate` (270 → 226 µs), −13% from JSON, −24% against a `Document` (174 → 133 µs);
+`tuples` −14, −13 and −18%; `transform` −15, −12 and −16%; `distinct items` −14, −16 and −15%;
+`names over items` against a `Document` −12%; `evaluateJson` on the 10,000 items −16% (3.93 → 3.29
+ms), as `Document.fromJson` builds each item's object in one allocation fewer. Slower by at most
+2.2%: `regex over a long text` with `evaluate` (272 → 278 µs), `recursion` (+1.5 to +2.1%).
+jsonata-js, the control, read from −3.2% (`names over items`) to +2.3% (`recursion`).
+
+### The tables
+
+- Natively, on Windows: `cargo xtask bench-table`, three copies, which agreed within 3% but on `distinct items` with `evaluate` (6%)
+  and the indexes into 10,000 items (5 to 8%, two of them marked); run again with `--runs 5`,
+  within 2% of the first run but on `index into 10,000 items` against a `Document` (733 → 689
+  ns; 0.68 µs in 0.30.0's table), within 5.5%. The page takes the five copies for the indexes.
+  Against 0.30.0's table, every case more than 2% away is one that `ab` puts faster, and so are
+  `Document::parse` (170 → 141 µs) and `Document::new` (112 → 88 µs), which make each object
+  with one allocation fewer. On the M1, three copies, within 2.6%.
+- WebAssembly, on Windows: three runs of `compare.mjs --engines jsonata-js`, within 5% but
+  `distinct items` with `evaluateJson` (8%).
+- Python, under Linux: three runs of jlens alone, within 3% but the index in a variable (7%), and
+  one with jsonata-python, the control, within 2.8% of its 0.30.0 numbers (`path` 1.49 → 1.53 ms,
+  the index into 10,000 items 28.7 → 29.5 ms).
+- Java, under Linux: `java-compare` with jlens and jsonata-java, then with jlens and
+  jlens-objects; jlens's two JVMs within 3% on every case, and the page takes the faster.
+  jsonata-java, the control, within 4% of its 0.30.0 numbers (`recursion` 1.48 → 1.53 ms, `sort +
+  map` 747 → 770 µs).
+
+## On an Apple M1
+
+The M1 is measured for the first time for 0.31.0, to decide whether all measuring moves there. It
+was reached over SSH and ran the same harnesses: `cargo xtask ab` and `bench-table`, `compare.mjs`
+with both other engines, `python.py speed` with every package (`jsonatapy` built from its source
+distribution, as on Linux; every package has what arm64 needs), and `java-compare` with every
+engine in one JVM. The whole run took about 2 h 40 min, and 25 min more for the aligned Python control, alongside
+the Ryzen's 3 h 15 min.
+
+**How it behaved.**
+
+- **Noise.** Two `ab` comparisons agree within 1.3 points on every case, and a revision against
+  itself within 0.8% (measured before the plan). Under Windows the same comparisons differ by up
+  to 3 points, and by draws of the heap of up to 20.
+- **Heat.** No throttling: the performance cores held 3,204 MHz in all 22 samples where one was
+  busy past 80% (`macmon pipe`, every 30 s); the CPU stayed at 36 to 53 °C and reached 76 °C only
+  in the Java threads part, all eight cores busy at 14.7 W. The thermal pressure stayed nominal.
+- **What disturbed it.** `airportd` took 50 to 67% of a core, AWDL in conflict with Symless
+  Synergy; turned off (`ifconfig awdl0 down`) and the Mac moved to a cable, the Wi-Fi off.
+  Spotlight indexed every new clone and `target` directory (`mds` 94% of a core) until
+  `~/workspaces` went into its privacy list. The lid, closed, put the Mac to sleep despite
+  `caffeinate -i`, during a Python comparison. The native `ab` runs came before these fixes, and
+  agree within 1.3 points anyway.
+- **One failure.** The first `bench-table` failed in a second: two rustup proxies installed the
+  `rust-src` component at once, and the second's rename failed. It ran again after the other runs.
+- **A harness bug.** On 8 hardware threads, `java-compare`'s `threads` part ran 4 threads twice
+  (1, 2, 4, half of 8, 8); it now runs each count once.
+
+**Its tables,** with every engine (native in the page). "jlens 0.30.0" in the harnesses' headers
+is cc5981a, which still carried 0.30.0's version.
+
+WebAssembly, the median of three runs, within 6% but jsonata2js's `index in a variable` (24%) and
+`tuples` (27%):
+
+| Case | jsonata-js | jsonata2js | jlens-wasm `evaluate` | jlens-wasm `evaluateJson` | jlens-wasm `evaluateDocument` |
+|---|---:|---:|---:|---:|---:|
+| path | 1.30 µs | 200 ns | 2.40 µs | 72.7 µs | 700 ns |
+| names over items | 41.5 µs | 3.20 µs | 30.7 µs | 102 µs | 5.30 µs |
+| filter + aggregate | 402 µs | 8.80 µs | 91 µs | 149 µs | 28.9 µs |
+| group-by | 667 µs | 13.8 µs | 130 µs | 180 µs | 60.1 µs |
+| sort + map | 3.09 ms | 60.6 µs | 296 µs | 356 µs | 240 µs |
+| strings | 367 µs | 11.1 µs | 129 µs | 186 µs | 53.6 µs |
+| regex | 385 µs | 10.1 µs | 134 µs | 201 µs | 95.6 µs |
+| number formatting | 340 µs | 75.4 µs | 50.2 µs | 132 µs | 24.8 µs |
+| object constructor | 745 µs | 51.5 µs | 156 µs | 287 µs | 89.7 µs |
+| transform | 798 µs | 204 µs | 364 µs | 502 µs | 198 µs |
+| recursion | 5.61 ms | 42.1 µs | 453 µs | 520 µs | 448 µs |
+| shipping rule | 1.11 ms | 26.7 µs | 198 µs | 209 µs | 69.5 µs |
+| index into 10,000 items | 1.30 µs | 145 µs | 3.40 µs | 2.28 ms | 900 ns |
+| index in a variable | 1.99 ms | 197 µs | 3.70 µs | 2.33 ms | 1.10 µs |
+| regex over a long text | 319 µs | 135 µs | 176 µs | 179 µs | 153 µs |
+| distinct items | 6.5 ms | 55.5 µs | 180 µs | 165 µs | 17.3 µs |
+| tuples | 664 µs | 27.6 µs | 170 µs | 227 µs | 109 µs |
+
+Python, the median of three runs (jsonata-python one), within 3% but jlens's `path` against a
+`Document` (0.3 or 0.4 µs), `regex` and the shipping rule with Python values (8%), and the index in a
+variable and number formatting (11%):
+
+| Case | jsonatapy | jsonatapy converted once | jsonata2py | jsonata-python | jlens | jlens converted once |
+|---|---:|---:|---:|---:|---:|---:|
+| path | 500 ns | 300 ns | 500 ns | 1.06 ms | 500 ns | 400 ns |
+| names over items | 15.2 µs | 3.70 µs | 13.2 µs | 1.4 ms | 15.2 µs | 3.00 µs |
+| filter + aggregate | 58.8 µs | 35.3 µs | 61.7 µs | 3.12 ms | 41.8 µs | 20.8 µs |
+| group-by | 87.5 µs | 60.8 µs | 151 µs | 4.27 ms | 73.7 µs | 43.1 µs |
+| sort + map | 310 µs | 229 µs | 266 µs | 15.9 ms | 185 µs | 142 µs |
+| strings | 81.6 µs | 53.9 µs | 64.1 µs | 3.07 ms | 52.5 µs | 30.7 µs |
+| regex | 90.9 µs | 74.1 µs | 158 µs | 3.2 ms | 73.5 µs | 52.7 µs |
+| number formatting | 72.8 µs | 68 µs | 90.2 µs | 2.77 ms | 17.7 µs | 15.6 µs |
+| object constructor | 153 µs | 124 µs | 182 µs | 3.98 ms | 101 µs | 71.2 µs |
+| transform | 734 µs | 664 µs | 347 µs | 3.76 ms | 211 µs | 143 µs |
+| recursion | 581 µs | 578 µs | 1.39 ms | 28.2 ms | 339 µs | 345 µs |
+| shipping rule | 184 µs | 101 µs | 221 µs | 6.88 ms | 122 µs | 52.6 µs |
+| index into 10,000 items | 178 µs | 400 ns | 700 ns | 20.6 ms | 800 ns | 500 ns |
+| index in a variable | 624 µs | 437 µs | 1.29 ms | 36 ms | 1.00 µs | 600 ns |
+| regex over a long text | 97.4 µs | 96.7 µs | differs: 4150 | differs: 4150 | 87.7 µs | 88.6 µs |
+| distinct items | 496 µs | 402 µs | 307 µs | 1.48 ms | 78 µs | 10.6 µs |
+| tuples | 266 µs | 240 µs | 277 µs | 4.25 ms | 94 µs | 74.6 µs |
+
+Java, microseconds per evaluation, the best of five runs, every engine in one JVM (OpenJDK
+25.0.5, 8 hardware threads):
+
+| Case | jlens 0.30.0, converted | jlens 0.30.0, JSON text | jlens 0.30.0 (objects), converted | jlens 0.30.0 (objects), JSON text | jsonata-java 0.9.10, converted | jsonata-java 0.9.10, JSON text | jsonata-jvm-compiler 1.0.7, converted | jsonata-jvm-compiler 1.0.7, JSON text |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| path | 0.21 | 32.93 | 0.89 | 76.14 | 8.96 | 99.64 | 0.03 | 71.66 |
+| names over items | 2.88 | 44.45 | 18.12 | 92.17 | 17.97 | 103 | 1.32 | 73.62 |
+| filter + aggregate | 20.96 | 69.24 | 56.31 | 131 | 58.73 | 145 | 4.11 | 76.72 |
+| group-by | 44.01 | 91.78 | 84.66 | 161 | 129 | 216 | 13.33 | 89.75 |
+| sort + map | 141 | 185 | 185 | 257 | 426 | 511 | 39.33 | 115 |
+| strings | 31.58 | 84.02 | 73.25 | 150 | 68.64 | 152 | 7.34 | 81.62 |
+| regex | 51.77 | 93.64 | 72.99 | 154 | 111 | 194 | 11.95 | 86.71 |
+| number formatting | 14.21 | 60.22 | 20.61 | 97.77 | 92.99 | 174 | 8.64 | 84.13 |
+| object constructor | 70.48 | 120 | 109 | 184 | 99.88 | 184 | 6.88 | 80.94 |
+| transform | 134 | 194 | 219 | 294 | 237 | 319 | 26.74 | 101 |
+| recursion | 343 | 380 | 339 | 412 | 775 | 1,023 | 44.72 | 118 |
+| shipping rule | 52.53 | 112 | 143 | 219 | 161 | 247 | 15.07 | 90.46 |
+| index into 10,000 items | 0.40 | 895 | 1.23 | 1,416 | 149 | 1,445 | 0.04 | 1,396 |
+| index in a variable | 0.55 | 895 | 1.37 | 1,422 | 646 | 1,951 | 35.12 | 1,377 |
+| regex over a long text | 87.97 | 117 | 115 | 124 | 116 | 134 | differs | differs |
+| distinct items | 10.78 | 69.26 | 94.80 | 171 | 25.90 | 109 | 20.16 | 97.65 |
+| tuples | 75.01 | 123 | 107 | 183 | 153 | 238 | differs | differs |
+
+Evaluations per second of `$sum(items.price)` on the JSON text of 100 items (the harness ran 4
+threads twice, as above; the second run, within 0.7% of the first, is left out):
+
+| Engine | 1 thread | 2 threads | 4 threads | 8 threads | 1,000 virtual threads |
+|---|---:|---:|---:|---:|---:|
+| jlens 0.30.0 | 41,893 (1.0×) | 81,837 (2.0×) | 154,812 (3.7×) | 200,930 (4.8×) | 200,923 (4.8×) |
+| jlens 0.30.0 (objects) | 15,900 (1.0×) | 31,705 (2.0×) | 59,778 (3.8×) | 79,603 (5.0×) | 79,119 (5.0×) |
+| jsonata-java 0.9.10 | 18,705 (1.0×) | 36,474 (1.9×) | 69,500 (3.7×) | 91,050 (4.9×) | 90,757 (4.9×) |
+| jsonata-jvm-compiler 1.0.7 | 18,225 (1.0×) | 36,620 (2.0×) | 68,263 (3.7×) | 91,114 (5.0×) | 91,178 (5.0×) |

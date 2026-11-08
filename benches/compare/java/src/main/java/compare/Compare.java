@@ -244,7 +244,9 @@ public final class Compare {
     static void threads(List<Engine> engines) throws Exception {
         String json = document(100);
         int cores = Runtime.getRuntime().availableProcessors();
-        int[] counts = {1, 2, 4, cores / 2, cores};
+        // Each count once: on 8 hardware threads, half of them is 4 again.
+        int[] counts = Arrays.stream(new int[] {1, 2, 4, cores / 2, cores})
+            .filter(c -> c >= 1).distinct().sorted().toArray();
         System.out.println();
         System.out.printf("Evaluations per second of `%s` on %,d bytes of JSON text:%n%n",
             THREADS_EXPRESSION, json.length());
