@@ -286,3 +286,65 @@ Two changes were tried:
 - The robustness properties pass with `PROPTEST_CASES=100000`; the change is to the layout only.
 - 0.27's stall in `path` is this one: `path` itself, a single object, is within 1.3% on the
   Ryzen and 0 to 4.5% faster on the M1.
+
+## #7: every package
+
+Each package at 2a1ece0 (#3 to #6, #10, #14, #15) against 0.31.0, on the M1: `python.py ab`
+twice, `cargo xtask java-compare ab` once, and for the WebAssembly package `compare.mjs --pkg
+--engines jsonata-js`, four processes a build, alternated, each on a new copy of its package.
+
+**Python**, the two comparisons, 5 rounds each:
+
+| | `evaluate` | `document` |
+|---|---:|---:|
+| `recursion` | -26.4%, -28.2% | -27.5%, -28.1% |
+| shipping rule | -10.5%, -11.1% | -20.7%, -20.9% |
+| `names over items` | -8.7%, -10.2% | -35.1%, -34.6% |
+| `filter + aggregate` | -9.5%, -9.8% | -17.7%, -17.5% |
+| object constructor | -11.3%, -12.4% | -15.1%, -15.1% |
+| `group-by` | -6.1%, -7.8% | -11.6%, -10.6% |
+| `tuples` | -6.9%, -4.9% | -8.9%, -8.5% |
+
+Every other case is 3 to 10% faster or within 1.4%: `regex over a long text`, `distinct items`,
+`path` and the index into 10,000 items against a `Document`, which evaluate few nodes. None is
+slower.
+
+**Java**, 5 rounds; "converted" is an input converted once, as a `Document`:
+
+| | converted | JSON text | objects, converted | objects, JSON text |
+|---|---:|---:|---:|---:|
+| `recursion` | -30.4% | -26.8% | -27.7% | -23.2% |
+| shipping rule | -21.8% | -12.1% | -7.4% | -5.4% |
+| `names over items` | -35.6% | -3.4% | -6.7% | -1.4% |
+| `filter + aggregate` | -19.7% | -6.7% | -7.0% | -3.0% |
+| `group-by` | -12.5% | -5.7% | -7.8% | -2.7% |
+| `$sum(items.price)`, 1,000 items | -41.1% | -2.8% | -5.7% | -1.2% |
+
+- Reading JSON text or Java objects takes most of an evaluation's time where little is
+  evaluated, so the gains shrink there; the threads evaluate 1 to 4% more a second.
+- Slower: `$count(items)` on a converted document, +7.6% (0.306 against 0.330 µs), marked. #5's
+  aggregate did every check of its shape, the lookup of `$count` and a copy of the input before
+  finding that the input, an object, is not the array a field of each item needs; the general
+  path then looked `$count` up again. It now tells that from the input before the lookup.
+  Natively on the M1, with the case added for the run, `$count(items)` against a `Document` took
+  234 ns at 0.31.0, 251 ns at 2a1ece0 and 234 ns with the change. Against 2a1ece0, 10 rounds in
+  each mode, it is 3.0 to 8.2% faster, and no other case is slower by more than 1.0%.
+- `$` converted, +6.7% and +8.9%, and the 100,000 items read from JSON text as Java objects,
+  +4.6 to 8.6%, are unmarked, with spreads of 10 to 25%: the first converts the whole document
+  back to Java, the second is read whole, and neither changed.
+
+**WebAssembly**, the medians of four processes:
+
+| | `evaluate` | `evaluateJson` | `evaluateDocument` | jsonata-js, the control |
+|---|---:|---:|---:|---:|
+| `names over items` | -5.2% | -1.8% | -26.9% | +1.9% |
+| `recursion` | -2.1% | -2.7% | -4.8% | +2.9% |
+| `group-by` | -1.8% | -2.6% | -2.6% | +4.8% |
+| `distinct items` | -0.4% | -1.4% | -2.6% | +1.6% |
+
+- Every other number is within 3%, as jsonata-js's own column moves by up to 4.8% from one
+  process to the next; `path` in `evaluateDocument`, +7.7%, is 0.7 µs printed to a tenth.
+- Only #5's aggregate reaches the package as it reaches the others. On `wasm32`, 0.31.0 already
+  guarded each node with one comparison of an address, without `stacker`, so #3 had nothing to
+  remove there; the rest of the series gives `recursion` 5%, where #4, #6 and #10 give about
+  19% natively on the M1. Why was not looked into: the package is not a priority of this plan.

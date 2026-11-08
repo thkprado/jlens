@@ -2172,6 +2172,18 @@ impl<'a> Evaluator<'_, 'a> {
         }) {
             return Ok(None);
         }
+        // Without a prefix, the base is the input: an array for a field of each item, anything
+        // else for `$count(items[..])`. Told before the function's lookup, which `$count(items)`
+        // against an object would otherwise pay twice.
+        if prefix.is_empty()
+            && if is_plain_step(last) {
+                !input.is_array()
+            } else {
+                kind != Aggregate::Count || input.is_array() || input.is_undefined()
+            }
+        {
+            return Ok(None);
+        }
         let function = env.lookup(name);
         let native = matches!(&function, Value::Function(f)
             if matches!(&**f, Function::Native(native) if native.name == name));
