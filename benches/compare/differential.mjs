@@ -7,7 +7,9 @@
 // An outcome is {"value": <JSON>}, {"undefined": true} or {"error": <code>}. Functions are
 // dropped as `JSON.stringify` drops them, as jlens does when it converts a result to JSON. An
 // outcome also has "mutated": true when the evaluation changed its input document (a group-by
-// on an empty array adds an item to it), which the rest of the expression may see. A result with
+// on an empty array adds an item to it), which the rest of the expression may see, or when a
+// group-by added that item to an empty array it did not create: a variable's, or an item of a
+// value the expression built (`([1, []])^(({}; 1))` gives `[1, [null]]`). A result with
 // a lone surrogate in a string, half of a character outside the BMP (`$match('𝄞', /[^a]/)`),
 // has the outcome {"split": true}: jlens strings are UTF-8 and cannot hold one.
 //
@@ -93,8 +95,25 @@ if (isMainThread) {
       : value;
   };
 
+  // A group-by (`evaluateGroupExpression`) pushes `undefined` into an empty input array; into
+  // one it made itself, `createSequence` pushes it, so the push's caller tells them apart.
+  let grew;
+  const push = Array.prototype.push;
+  Array.prototype.push = function (item) {
+    if (
+      arguments.length === 1 &&
+      item === undefined &&
+      this.length === 0 &&
+      /^\s*at evaluateGroupExpression /.test(new Error().stack.split("\n")[2] ?? "")
+    ) {
+      grew = true;
+    }
+    return push.apply(this, arguments);
+  };
+
   for (const { expr, input } of cases.slice(start)) {
     let outcome;
+    grew = false;
     // A fresh copy for each case: jsonata-js may modify its input (`@` does).
     const data = input === null ? undefined : structuredClone(inputs[input]);
     try {
@@ -111,7 +130,7 @@ if (isMainThread) {
       // An error without a code is a JavaScript exception inside jsonata-js.
       outcome = { error: err?.code ?? `js: ${err?.message ?? err}` };
     }
-    if (input !== null && JSON.stringify(data) !== JSON.stringify(inputs[input])) {
+    if (grew || (input !== null && JSON.stringify(data) !== JSON.stringify(inputs[input]))) {
       outcome.mutated = true;
     }
     parentPort.postMessage(outcome);

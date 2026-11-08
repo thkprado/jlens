@@ -15,7 +15,8 @@
 //! regular expression literal on the left of `??` or `?:`, which the jsonata-js parser mangles;
 //! different error codes from an expression whose array or object constructors jsonata-js
 //! evaluates concurrently; a name that one item of such a constructor binds and another reads or
-//! binds; an evaluation in which jsonata-js changed its input document; a
+//! binds; an evaluation in which jsonata-js changed its input document, or grew an empty array
+//! of a value the expression holds; a
 //! wildcard that gives jsonata-js's internal flag `sequence` as a `true` item; an expression
 //! that may meet one of the jsonata-js quirks that jlens dropped; a number that overflows to
 //! infinity, where jlens fails and jsonata-js goes on, or that `$round` shifts to infinity and
@@ -459,7 +460,10 @@ fn wildcard_first(expr: &str) -> bool {
 /// (`#$j`), which jsonata-js leaves unbound. And a
 /// call with a group-by in tail position of a lambda, whose group-by jsonata-js drops. And
 /// `$fromMillis` with a computed picture, where a marker with an unknown component and a
-/// presentation gives jsonata-js the text "undefined" and jlens `D3132`.
+/// presentation gives jsonata-js the text "undefined" and jlens `D3132`. And a left side of `??`
+/// or `?:` that binds, in the frame it is evaluated in, a name it reads: jsonata-js evaluates
+/// that side twice, so the second sees the first's binding
+/// (`$count($x := [$x, 1]) ?: 0` is 5 there, 4 in jlens).
 fn dropped_quirk(expr: &str) -> bool {
     let Ok(compiled) = Expression::compile(expr) else {
         return false;
@@ -511,10 +515,28 @@ fn dropped_quirk(expr: &str) -> bool {
                 _ => false,
             },
             NodeKind::Lambda(def) => tail_group(&def.body),
+            NodeKind::Fallback { lhs, .. } => {
+                let mut bound = Vec::new();
+                bound_names(lhs, &mut bound);
+                !bound.is_empty() && reads_any(lhs, &bound)
+            }
             _ => false,
         };
     });
     found
+}
+
+/// Whether `node` reads one of `names`, other than as the target of a binding.
+fn reads_any(node: &Node, names: &[&str]) -> bool {
+    match &node.kind {
+        NodeKind::Variable { name } => names.contains(&name.as_str()),
+        NodeKind::Bind { rhs, .. } => reads_any(rhs, names),
+        _ => {
+            let mut found = false;
+            node.for_each_child(|c| found |= reads_any(c, names));
+            found
+        }
+    }
 }
 
 /// Whether a call in tail position of `body`, a lambda's, has a group-by. jsonata-js runs such a

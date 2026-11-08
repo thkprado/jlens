@@ -190,7 +190,9 @@ counts them apart:
   (`($x := 1; [$x := 5, $x])` is `[5, 1]`, and `[5, 5]` with `0 + $x`). jlens evaluates them in
   order.
 - **jsonata-js changed its input**: the jsonata-js runner saw the input document change during
-  the evaluation (a group-by on an empty array adds an item to it), and the outcomes differ.
+  the evaluation (a group-by on an empty array adds an item to it), or saw a group-by add that
+  item to an empty array it did not create, a variable's or an item of a value the expression
+  built (`([1, []])^(({}; 1))` is `[1, [null]]`), and the outcomes differ.
 - **Wildcard over a sequence**: the expression has a wildcard, and the jsonata-js result is
   jlens's with `true` items added. An array that jsonata-js builds from a path carries an own
   property `sequence: true`, which its wildcard enumerates with the items. Without a context, the
@@ -204,8 +206,10 @@ counts them apart:
   a regular expression literal applied with `~>` to anything but a string literal,
   `$formatNumber` with a literal picture whose integer part has irregular grouping
   (`'#,##,##0'`), `$substringBefore` / `$substringAfter` whose `chars` is not a string literal,
-  `$replace` whose replacement is neither a string literal nor a lambda, or `$fromMillis` with a computed picture, which may hold a marker with an unknown component and
-  a presentation.
+  `$replace` whose replacement is neither a string literal nor a lambda, `$fromMillis` with a
+  computed picture, which may hold a marker with an unknown component and a presentation, or a
+  left side of `??` or `?:` that binds a name it reads, which jsonata-js evaluates twice
+  (`$count($x := [$x, 1]) ?: 0`).
 - **Overflow to infinity**: jlens failed with `D1001`, which it raises only where a number
   overflows to infinity (`1 / 0`). jsonata-js passes the infinity on, to its result or to an
   operator that fails later.
