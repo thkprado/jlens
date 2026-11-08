@@ -90,9 +90,11 @@ evaluator therefore records every frame that a variable binding (`:=`) gives a f
 object, and clears those frames when the evaluation ends. The frame of a call or of a tuple is not
 recorded for its arguments or fields: they existed before it, so none can reach it, and it goes
 back to the evaluator for the next call or tuple once its scope ends. A value only gains a
-reference later when a transform stores into an object; with the built-in `$clone` that object is
-a fresh copy no frame holds, and with another `$clone`, which may give the object itself, the
-transform records every frame reachable from what it stores.
+reference later when a transform stores into an object, and every cycle such a store closes
+passes through that object. A closure reaches it by its input, since the update runs with the
+object as input, or through a frame, so a transform that stores something holding a function
+records the object, and the evaluator clears its fields when the evaluation ends, after the
+result is written.
 
 ## Guardrails
 

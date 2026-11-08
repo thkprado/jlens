@@ -554,3 +554,21 @@ frames cannot break it; it is #21.
 
 The differential's 20,000 cases (seed 1794171808827423200) found two divergences, which 0de804f
 gives too: #22.
+
+## #21: a cycle through a transform's copy
+
+A transform's update runs with the copy as its input, and a closure keeps the input of its
+definition, so `({'a': 1} ~> | $ | {'g': function(){1}} |)` stored in the copy a closure holding
+the copy, with no frame between, and the evaluation's memory of it was never returned. 0de804f
+leaked it already. #20 added two more, through frames the update makes after the copy: a call's
+(`(function($o){ [1].function(){$o} })($)`) and a tuple's (`$@$c.[1].function(){$c}`), which it no
+longer recorded, and which `record_frames` did not look for with the built-in `$clone`.
+
+Every cycle a store into an object closes passes through that object, and what is stored can
+reach it again only through a function: through arrays and objects alone it is `U1001`. The walk
+that looks for `U1001` now also notes a function, once for all the fields of an update instead of
+once a field, and an object that receives one is recorded by a weak reference; its fields are
+cleared when the evaluation ends, after the result is written, when nothing else can read them.
+This replaces #20's `record_frames`, which walked the frames a stored closure reaches, for any
+`$clone`. A test in `host.rs` counts the references to a host function the copy holds after each
+case: the three cases above, a match below the root, and #20's two with a `$clone` of its own.

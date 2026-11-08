@@ -114,16 +114,6 @@ enum Vars<'a> {
 }
 
 impl<'a> Vars<'a> {
-    fn each_value(&self, mut f: impl FnMut(&Value<'a>)) {
-        match self {
-            Vars::Call(_, values) => values.iter().for_each(f),
-            Vars::Empty => {}
-            Vars::One(_, value) => f(value),
-            Vars::Few(vars) => vars.iter().for_each(|(_, v)| f(v)),
-            Vars::Many(vars) => vars.values().for_each(f),
-        }
-    }
-
     fn get(&self, name: &str) -> Option<&Value<'a>> {
         match self {
             Vars::Call(function, values) => values.get(param(function, name)?),
@@ -346,6 +336,10 @@ pub(crate) struct Evaluator<'t, 'a> {
     /// Frames that may be part of reference cycles (a frame binding a closure that captures
     /// it). Their bindings are cleared when the evaluation ends so the memory is reclaimed.
     cyclic: Vec<Weak<Frame<'a>>>,
+    /// Objects a transform stored a function into: the function may hold the object, by its
+    /// input or a frame, and every cycle such a store closes passes through the object. Their
+    /// fields are cleared when the evaluation ends, after its result is written (0.32 #21).
+    stored: Vec<Weak<Object<'a>>>,
     /// Frames of calls and blocks that ended unshared, empty and without a parent, for the next
     /// to reuse instead of allocating one (0.32 #4): the last kept, whose parent is the one kept
     /// before it. A list of them on the heap, or in place, cost an evaluation with few calls
@@ -386,6 +380,12 @@ impl Drop for Evaluator<'_, '_> {
         for frame in self.cyclic.drain(..) {
             if let Some(frame) = frame.upgrade() {
                 frame.vars.borrow_mut().clear();
+            }
+        }
+        for object in self.stored.drain(..) {
+            if let Some(object) = object.upgrade() {
+                let fields = std::mem::take(&mut *object.borrow_mut());
+                drop(fields);
             }
         }
         // One by one: dropped through their parents, a recursion's frames would take the
@@ -566,6 +566,7 @@ pub(crate) fn evaluate<'a, 'v, R>(
         rng: limits.seed.map_or(0, |seed| splitmix64(seed) | 1),
         limits,
         cyclic: Vec::new(),
+        stored: Vec::new(),
         spare: None,
         lists: Vec::new(),
         regexes: HashMap::new(),
@@ -770,52 +771,6 @@ impl<'a> Evaluator<'_, 'a> {
         };
         // Not in `cyclic`: see `apply_lambda`.
         self.frame(env, vars)
-    }
-
-    /// Records in [`Self::cyclic`] every frame the values reach, through functions and the
-    /// frames' own bindings, before they are stored in an object made before them: a frame
-    /// holding that object then closes a cycle. A frame's own bindings never reach it when it
-    /// is made, so frames are recorded only by [`Self::bind`] and here (0.32 #20); this runs
-    /// only for a transform whose `$clone` is not the built-in one.
-    fn record_frames<'v>(&mut self, values: impl Iterator<Item = &'v Value<'a>>)
-    where
-        'a: 'v,
-    {
-        let mut seen: std::collections::HashSet<*const ()> = std::collections::HashSet::new();
-        let mut values: Vec<Value<'a>> = values.cloned().collect();
-        let mut frames: Vec<Env<'a>> = Vec::new();
-        loop {
-            if let Some(frame) = frames.pop() {
-                if seen.insert(Rc::as_ptr(&frame) as *const ()) {
-                    self.cyclic.push(Rc::downgrade(&frame));
-                    frame.vars.borrow().each_value(|v| values.push(v.clone()));
-                    frames.extend(frame.parent.clone());
-                }
-                continue;
-            }
-            let Some(value) = values.pop() else { break };
-            match &value {
-                Value::Object(o) if !o.is_unread() && seen.insert(Rc::as_ptr(o) as *const ()) => {
-                    values.extend(o.borrow().values().cloned());
-                }
-                Value::Array(a) if !a.is_unread() && seen.insert(Rc::as_ptr(a) as *const ()) => {
-                    values.extend(a.items().iter().cloned());
-                }
-                Value::Function(f) if seen.insert(Rc::as_ptr(f) as *const ()) => match &**f {
-                    Function::Lambda(lambda) => {
-                        frames.push(lambda.env.clone());
-                        values.push(lambda.input.clone());
-                    }
-                    Function::Transform { env, .. } => frames.push(env.clone()),
-                    Function::Partial { target, args } => {
-                        values.push(Value::Function(target.clone()));
-                        values.extend(args.iter().flatten().cloned());
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-        }
     }
 
     /// Checks the evaluation's limits, and spends a step: once for each node the general path
@@ -2703,7 +2658,8 @@ impl<'a> Evaluator<'_, 'a> {
         args.resize_with(lambda.params().len(), Value::default);
         // The frame is new, or one kept unshared, so no value reaches it, and the arguments
         // cannot: it joins a cycle only by a later binding of a closure, which `bind` records,
-        // as it does for a block's frame. Recorded here, with its weak reference, a call or a
+        // as it does for a block's frame, or by a transform storing a closure that reaches it
+        // into an object it holds, which the transform records (0.32 #21). Recorded here, with its weak reference, a call or a
         // tuple whose values hold an object or a function would never give its frame back
         // (0.32 #20).
         let frame = self.frame(&lambda.env, Vars::Call(function.clone(), args));
@@ -2841,10 +2797,6 @@ impl<'a> Evaluator<'_, 'a> {
         if !clone.is_function() {
             return Err(Error::new("T2013"));
         }
-        // The built-in `$clone` gives a copy no frame reaches; another may give the object
-        // itself, which a frame made before can hold.
-        let fresh = matches!(&clone, Value::Function(f)
-            if matches!(&**f, Function::Native(n) if n.name == "clone"));
         let result = self.apply(&clone, vec![obj], &Value::Undefined, env)?;
         let matches = self.eval(&def.pattern, &result, env)?;
         if matches.is_undefined() {
@@ -2862,18 +2814,20 @@ impl<'a> Evaluator<'_, 'a> {
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
                 if let Value::Object(target) = &m {
-                    // jsonata-js would build a circular object here, which cannot be
-                    // converted to JSON; jlens reports it instead.
-                    if entries.iter().any(|(_, v)| reaches(v, target)) {
-                        return Err(Error::new("U1001")
-                            .with(
-                                "message",
-                                "The transform would make an object contain itself",
-                            )
-                            .at(def.update.span, def.update.position));
-                    }
-                    if !fresh {
-                        self.record_frames(entries.iter().map(|(_, v)| v));
+                    match reaches(entries.iter().map(|(_, v)| v), target) {
+                        // jsonata-js would build a circular object here, which cannot be
+                        // converted to JSON; jlens reports it instead.
+                        Reach::Itself => {
+                            return Err(Error::new("U1001")
+                                .with(
+                                    "message",
+                                    "The transform would make an object contain itself",
+                                )
+                                .at(def.update.span, def.update.position));
+                        }
+                        // A closure may hold the target, by its input or a frame (0.32 #21).
+                        Reach::Function => self.stored.push(Rc::downgrade(target)),
+                        Reach::Nothing => {}
                     }
                     let mut target = target.borrow_mut();
                     for (k, v) in entries {
@@ -3248,14 +3202,30 @@ fn join_group<'a>(values: Vec<Value<'a>>) -> Value<'a> {
     }
 }
 
-/// Whether `object` can be reached from `value` (or is `value`). Shared substructures are
-/// visited once, so this is linear in the size of `value`.
-fn reaches<'a>(value: &Value<'a>, object: &Rc<Object<'a>>) -> bool {
+/// What a transform's update stores into `object`, seen through its arrays and objects.
+enum Reach {
+    /// It is `object` or holds it: storing it would make the object contain itself.
+    Itself,
+    /// It holds a function, which may reach `object` through its frames or its input.
+    Function,
+    /// Neither: storing it closes no cycle.
+    Nothing,
+}
+
+/// Whether `object` can be reached from `values` (or is one of them) through arrays and
+/// objects, or else whether a function can be. Shared substructures are visited once, so this is
+/// linear in the size of `values`.
+fn reaches<'v, 'a: 'v>(
+    values: impl Iterator<Item = &'v Value<'a>>,
+    object: &Rc<Object<'a>>,
+) -> Reach {
     let mut seen: std::collections::HashSet<*const ()> = std::collections::HashSet::new();
-    let mut stack = vec![value.clone()];
+    let mut stack: Vec<Value<'a>> = values.cloned().collect();
+    let mut function = false;
     while let Some(v) = stack.pop() {
         match &v {
-            Value::Object(o) if Rc::ptr_eq(o, object) => return true,
+            Value::Object(o) if Rc::ptr_eq(o, object) => return Reach::Itself,
+            Value::Function(_) => function = true,
             // An array or object not read yet holds only values of the input, none of which
             // exists before its parent is read.
             Value::Object(o) if o.is_unread() => {}
@@ -3269,5 +3239,8 @@ fn reaches<'a>(value: &Value<'a>, object: &Rc<Object<'a>>) -> bool {
             _ => {}
         }
     }
-    false
+    match function {
+        true => Reach::Function,
+        false => Reach::Nothing,
+    }
 }

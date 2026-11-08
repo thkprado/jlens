@@ -315,16 +315,16 @@ mod tests {
     use super::*;
     use crate::{Bindings, Expression};
 
-    /// A transform whose `$clone` gives the object itself stores a closure in an object that a
-    /// frame made before already holds: the frames that closure reaches are recorded, so that
-    /// the cycle is broken when the evaluation ends (0.32 #20). The host function's `Arc` counts
-    /// the frames left alive that hold it.
+    /// A transform that stores a closure in an object the closure can reach, by a frame or by
+    /// its input, closes a cycle through that object; the object's fields are cleared when the
+    /// evaluation ends (0.32 #20, #21). The host function's `Arc` counts the values left alive
+    /// that hold it.
     #[test]
     fn a_transform_in_place_leaves_no_cycle() {
         let h = HostFunction::new(0, |_, _| Ok(None));
         let imp = Arc::clone(&h.imp);
         let bindings = Bindings::new().function("h", h);
-        let held = Arc::strong_count(&imp);
+        let mut leaked = Vec::new();
         for source in [
             // A call's frame, holding the object and the function.
             "($clone := function($x){$x}; $f := function($v, $k){ ($g := function(){$v}; \
@@ -335,10 +335,21 @@ mod tests {
             // The built-in `$clone`: a copy, which no frame made before holds.
             "$map([{'a': 1, 'k': $h}], function($v){ ($g := function(){$v}; \
              $v ~> | $ | {'g': $g} |; 1) })",
+            // A closure keeps its definition's input, and the update runs on the copy: the copy
+            // holds a closure that holds the copy, with no frame between (0.32 #21).
+            "({'a': 1, 'k': $h} ~> | $ | {'g': function(){1}} |; 1)",
+            "({'a': {'b': 1}, 'k': $h} ~> | a | {'g': function(){1}} |; 1)",
+            // Through frames made by the update after the copy: a call's, a tuple's.
+            "({'a': 1, 'k': $h} ~> | $ | {'g': (function($o){ [1].function(){$o} })($)} |; 1)",
+            "({'a': 1, 'k': $h} ~> | $ | {'g': $@$c.[1].function(){$c}} |; 1)",
         ] {
             let expr = Expression::compile(source).unwrap();
+            let held = Arc::strong_count(&imp);
             expr.evaluate(None, &bindings).unwrap();
-            assert_eq!(Arc::strong_count(&imp), held, "{source}");
+            if Arc::strong_count(&imp) != held {
+                leaked.push(source);
+            }
         }
+        assert!(leaked.is_empty(), "{leaked:#?}");
     }
 }
