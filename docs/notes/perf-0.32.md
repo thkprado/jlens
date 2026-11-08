@@ -572,3 +572,15 @@ cleared when the evaluation ends, after the result is written, when nothing else
 This replaces #20's `record_frames`, which walked the frames a stored closure reaches, for any
 `$clone`. A test in `host.rs` counts the references to a host function the copy holds after each
 case: the three cases above, a match below the root, and #20's two with a `$clone` of its own.
+
+`cargo xtask ab` on the M1, 10 rounds a mode, medians, A = 33253e3 (#20), B = e1e67e5:
+
+| | `document` | `evaluate` | `source` |
+|---|---:|---:|---:|
+| `transform` | -0.3% | -0.0% | -0.1% |
+| `recursion` | -6.0% | -7.5% | -4.7% |
+| `recursion`, functions and blocks aligned | -1.0% | -1.2% | -1.2% |
+
+Every other case is between -1.6% and +2.0%, the largest `path` in `document` (+2 ns). #21 does
+not touch `recursion`'s path; aligned, A takes 232 to 233 µs and B 230 µs, so A's 241 to 247 µs
+unaligned was placement, and nothing is gained or lost past the floor.
