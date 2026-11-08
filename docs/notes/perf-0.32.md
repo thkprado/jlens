@@ -175,3 +175,29 @@ each item with a string literal. It builds nothing.
   of the case. The shipping rule calls `$sum` and `$count` three times.
 - No case of the workload counts a filtered list, so `count of a literal` stays out of
   `cases.json`: a new case would need a column in every engine's table.
+
+## #6: the test, the lookup after #3 to #5
+
+#6 was to go ahead only if the lookup still took more than a tenth of `recursion`. The profile of
+0.31.0 was repeated at 1f17557 (#5), with the same program and method, about 50,000 samples:
+
+| `recursion`, shares of the samples | 0.31.0 | 1f17557 |
+|---|---:|---:|
+| Variable lookup (`Frame::lookup`, `Vars::get`, `param`), inclusive | 9.6% | 10.9% |
+| of which `param`, the search of the lambda's parameters by name, inclusive | | 5.2% |
+| Guards of each node (`guardrails`, `stack::above`, `stack::position`), self | 10.0% | 8.4% |
+| The `?` on each node's `Result`, self | 11.0% | 11.0% |
+| libc, self | 4.7% | 2.8% |
+
+- #3 and #4 took time away from the rest of each call, so the lookup's share grew past the
+  tenth, and #6 goes ahead. The program's own times (frame pointers, the system allocator) are
+  not compared; `cargo xtask ab` measures each item.
+- Half of it is `param`: a read of `$n` in the body of `function($n)` finds its frame at once,
+  then compares `n` with each parameter's name (a `memcmp` call for one byte), and a read of `$f`
+  compares `f` with `n` before going up to the block that binds it. Each call reads `$n` three
+  times and `$f` twice.
+- A slot for every variable would have to follow every way a frame is made (blocks, calls,
+  tuples, `$eval`, bindings in a conditional) to be right. #6 takes the half the profile shows:
+  a variable read in a lambda's body, with no scope between, knows its parameter's place from
+  the compiled expression, and the frame confirms it at run time before it is used; anything
+  else takes the general lookup.
