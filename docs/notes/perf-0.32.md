@@ -461,3 +461,33 @@ the M1, twice, 5 rounds each, Python 3.14.10:
   proof, but no sign of it either.
 - Every other case is faster or within 1.6% (`regex over a long text`, which evaluates few
   nodes); `strings` with Python values -6.4% and -3.2%.
+
+## #19: where the allocations of `tuples` go
+
+`tuples`, `items#$n@$i[$n % 2 = 0]{$i.type: $sum($i.(unitPrice * quantity))}`, made 1,237
+allocations against a `Document` of the workload's 200 items at 0.31.0 (0.31 #3). Counted again at
+a35cfd4 as in [0.27 #14](perf-0.27.md#the-tuples-of-a-path-027-14), with a global allocator that
+records the size and the `jlens-core` functions of each allocation, one evaluation without its
+JSON result: still 1,237. The path has one step, `items`, with a position and a focus, so it
+makes 200 tuples, of which the filter keeps 100, in two groups.
+
+| Where | Allocations |
+|---|---:|
+| Each tuple's object | 201 |
+| Each tuple's fields: the one field of the tuple before (`@`, the document), copied with room for the step's three | 200 |
+| The filter's frame for each tuple, and its list of bindings | 400 |
+| The group-by's frame for each tuple it reads a key from, and its list | 200 |
+| The group-by's copy of each tuple, made only to read its fields into its group's | 100 |
+| The rest: the sequences, the groups, the vectors grown, the `$sum` calls | 136 |
+
+A tuple that refers to the one before instead of copying its fields, the item's candidate,
+saves no allocation: the new tuple still needs a list of its own for the fields its step adds,
+and the copy is that list, made at its final size since 0.31 #3. With more steps the copy holds
+more fields, but stays one allocation; sharing would save bytes copied, not an allocation, and
+would change every reader of a tuple. The item stops there.
+
+The frames are the largest part, 600 of 1,237: the filter and the group-by bind each tuple's fields
+in a frame of their own, which ends with the predicate or the key, as a call's frame ends with
+the call. #4 keeps such a frame for the next call, and #16 a call's list of arguments; neither
+reaches these frames, made by `frame_from_tuple`. Together with the group-by's copy, which can read
+each tuple in place, 700 allocations of the 1,237 are candidates: #20.
