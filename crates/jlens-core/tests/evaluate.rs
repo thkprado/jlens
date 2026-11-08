@@ -37,6 +37,33 @@ fn shipping_rule_fixture_reaches_the_expected_decision() {
 }
 
 #[test]
+fn literals_of_another_tree_keep_their_text() {
+    // An evaluation keeps each string literal's string by node id. The tree `$eval` parses
+    // numbers its nodes from 0 too: there 'w' and 'z' have the ids of 'k' and 'v' (6 and 7)
+    // in the first case, and the key 'w' and 'z' those of 'v' and 'e' (7 and 8) in the second.
+    assert_eq!(
+        eval(
+            "[1..2].{'k': 'v', 'e': $eval(\"[0,0,0,0,0,'w','z']\")}",
+            json!(null)
+        ),
+        Some(json!([
+            {"k": "v", "e": [0, 0, 0, 0, 0, "w", "z"]},
+            {"k": "v", "e": [0, 0, 0, 0, 0, "w", "z"]}
+        ]))
+    );
+    assert_eq!(
+        eval(
+            "[1..2].{'k': 'v', 'e': $eval(\"[0,0,0,0,0,{'w': 'z'}]\")}",
+            json!(null)
+        ),
+        Some(json!([
+            {"k": "v", "e": [0, 0, 0, 0, 0, {"w": "z"}]},
+            {"k": "v", "e": [0, 0, 0, 0, 0, {"w": "z"}]}
+        ]))
+    );
+}
+
+#[test]
 fn filters_aggregates_and_construction() {
     let doc: Value = serde_json::from_str(&fixture("online-store-order.json")).unwrap();
     assert_eq!(

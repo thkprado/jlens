@@ -236,3 +236,40 @@ added to `cases.json` for the run only:
 Up to 8 fields a lookup hashes nothing and skips most keys on their length (the workload's six
 keys have four lengths), so pairs gain little there: building the objects takes the time. Past 8
 fields each lookup hashed its key, which pairs no longer do.
+
+## Literal keys and strings made once (0.31 #5)
+
+A string literal made a new `Rc<str>` each time it was evaluated: the literal keys of an object
+constructor for each object, and `'item'` in `{'kind': 'item'}` too. An `Expression` is shared
+between threads, so its tree cannot hold the `Rc<str>` a value takes. The evaluation now keeps the
+string of each literal it evaluates in a vector indexed by node id, made the first time, and
+clones it afterwards. Node ids are unique only within one tree, and `$eval` evaluates trees of its
+own whose ids start at 0 as well, so each use compares the kept string's text with the literal's
+(a length, then a few bytes); a different text makes a string again and takes the place. Ids
+past 65,536 are not kept, so that a tree built by hand cannot make the vector large.
+
+**Allocations,** counted as in #1, one evaluation of `object constructor`
+(`items.{'code': code, 'kind': 'item', 'total': unitPrice * quantity}`) with the result converted
+to JSON, then without it:
+
+| Case | #4 | #5 | of the evaluation, #4 | #5 |
+|---|---:|---:|---:|---:|
+| `object constructor` | 2,607 | 1,814 | 1,206 | 413 |
+| `transform` | 4,635 | 4,239 | 2,422 | 2,026 |
+
+Each object of the constructor takes 2 allocations instead of 6: its `Rc<Object>` and its
+vector of fields. `transform` saves the key `'total'` of each update and the array `['tax']`'s
+string. The other cases of #1 allocate as many as before. In the same program, three runs each
+alternated on new copies, `object constructor` went from 275 to 222 µs on the system heap
+(-19%) and from 127 to 124 µs with `mimalloc` (-2%), where an allocation costs little.
+
+**`cargo xtask ab`,** 10 rounds, the median:
+
+| Case | `evaluate`, against #4 | `document` | `source` | `evaluate`, against 0.30.0 | `document` |
+|---|---:|---:|---:|---:|---:|
+| `object constructor` | -16.5% | -13.5% | -16.8% | -20.9% | -21.7% |
+| `transform` | -2.6% | +0.1% | -3.9% | -2.1% | -7.7% |
+
+Against #4 every other case is within 2.7%. Against 0.30.0 the cases that #3 and #4 moved keep
+their gains; one `evaluate` run read every case of its B program 20 to 35% slow, the machine
+busy, and was run again.

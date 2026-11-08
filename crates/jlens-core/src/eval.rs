@@ -278,6 +278,10 @@ pub(crate) const DEFAULT_MAX_DEPTH: usize = 500;
 /// steps late.
 const CLOCK_EVERY: u64 = 256;
 
+/// The node ids below which an evaluation keeps the shared string of each string literal it
+/// evaluates: a tree with more nodes makes the strings of the others again each time.
+const LITERALS_MAX: usize = 1 << 16;
+
 /// Default maximum length of a built string, in bytes (256 MiB). jsonata-js is limited by the
 /// JavaScript engine (about 2^29 UTF-16 units in V8); jlens fails cleanly instead of running
 /// out of memory.
@@ -316,6 +320,10 @@ pub(crate) struct Evaluator<'t, 'a> {
     tracer: Option<&'t mut dyn Tracer>,
     /// The state of an input read from a `Source`, which can fail (ADR 0010, decision 6).
     source: Option<Rc<Shared>>,
+    /// The string of each string literal evaluated, by node id, made the first time: an
+    /// `Expression` is shared between threads, so its tree cannot hold the `Rc<str>` a value
+    /// takes.
+    literals: Vec<Option<Rc<str>>>,
 }
 
 impl Drop for Evaluator<'_, '_> {
@@ -501,6 +509,7 @@ pub(crate) fn evaluate<'a, 'v, R>(
         clock: None,
         tracer,
         source,
+        literals: Vec::new(),
     };
     let mut input = input;
     let env = Rc::new(Frame {
@@ -868,7 +877,7 @@ impl<'a> Evaluator<'_, 'a> {
             NodeKind::Array { items } => self.array_constructor(expr, items, input, env)?,
             NodeKind::Object { pairs } => self.group(pairs, expr, input.clone(), env)?,
             NodeKind::Name { name } => functions::lookup(input, name),
-            NodeKind::String { value } => Value::string(value.as_str()),
+            NodeKind::String { value } => Value::string(self.literal(expr, value)),
             NodeKind::Number { value } => Value::Number(*value),
             NodeKind::Bool { value } => Value::Bool(*value),
             NodeKind::Null => Value::Null,
@@ -1550,6 +1559,26 @@ impl<'a> Evaluator<'_, 'a> {
     }
 
     /// [`Self::guardrails`] of a literal evaluated one level below the current node.
+    /// The shared string of the string literal `node`, whose text is `text`: made the first time
+    /// the evaluation meets it and cloned afterwards. The text is compared on each use, since
+    /// node ids are unique only within one tree and `$eval` evaluates others.
+    fn literal(&mut self, node: &Node, text: &str) -> Rc<str> {
+        let id = node.id as usize;
+        if let Some(Some(shared)) = self.literals.get(id)
+            && **shared == *text
+        {
+            return shared.clone();
+        }
+        let shared: Rc<str> = Rc::from(text);
+        if id < LITERALS_MAX {
+            if id >= self.literals.len() {
+                self.literals.resize(id + 1, None);
+            }
+            self.literals[id] = Some(shared.clone());
+        }
+        shared
+    }
+
     fn literal_guardrails(&self) -> Result<()> {
         if self.depth >= self.limits.max_depth {
             return Err(Error::new("D1011").with("value", self.limits.max_depth));
@@ -1759,7 +1788,10 @@ impl<'a> Evaluator<'_, 'a> {
                         data.push(item.clone());
                     }
                     None => {
-                        let key = evaluated.clone().unwrap_or_else(|| Rc::from(key));
+                        let key = match evaluated.clone() {
+                            Some(key) => key,
+                            None => self.literal(key_expr, key),
+                        };
                         groups.insert(key, (vec![item.clone()], pair_index));
                     }
                 }
@@ -1802,7 +1834,7 @@ impl<'a> Evaluator<'_, 'a> {
             let key = match literal {
                 Some(text) => {
                     self.literal_guardrails()?;
-                    Rc::from(text)
+                    self.literal(key_expr, text)
                 }
                 None => match self.eval(key_expr, &item, env)? {
                     Value::Undefined => continue,

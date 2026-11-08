@@ -37,7 +37,7 @@ and measures each step against 0.30.0. Nothing public changes.
 | 2 | The map, below; after #1 | A module of `jlens-core` with the operations the crate uses, insertion order kept, the threshold of the index set by #1's counts and a measured crossover of a search in order against foldhash; unit tests and a property test against `IndexMap` as the model; an ADR | done: `jlens_core::map::Map`, an index past 8 fields ([ADR 0022](../adr/0022-small-map.md)); a search in order is faster up to 8 fields; no fields kept in the object |
 | 3 | `Map` is the new map, crate-wide; after #2 | Every object, tuple and `$match` result uses it, and the hasher that lazy values share goes; `cargo xtask ab` against 0.30.0 in each mode, Python and Java; #1's allocations counted again; each case within the floor or faster, or its cause recorded | done: one allocation fewer for each object, tuple and match; `tuples` 10 to 14% faster, `distinct items` 17 to 20% with a converted input, `object constructor` 5 to 7%; nothing slower past the floor |
 | 4 | Objects compared without hashing; after #3 | `deep_eq` and `$distinct` compare two small objects field by field, without a lookup per key; `distinct items` and a case of objects with few fields measured | done: fields compared in pairs until two keys differ; at most 4% faster up to 8 fields, where a lookup hashes nothing; `$distinct` over objects of 12 fields 44% faster against a `Document` |
-| 5 | Literal keys and strings made once, below; after #4 | An object constructor's literal keys and literal string values are made once, not for each object; `object constructor` counted and measured against #4 and 0.30.0 | planned |
+| 5 | Literal keys and strings made once, below; after #4 | An object constructor's literal keys and literal string values are made once, not for each object; `object constructor` counted and measured against #4 and 0.30.0 | done: kept by node id for each evaluation; 2 allocations for each object instead of 6; `object constructor` 14 to 17% faster than #4, 21% than 0.30.0 |
 | 6 | Upstream before the release: `regress` after `95c0404`, stacker#155 and #156, jsonata-js's commits after `c5be116` and its version on npm | Each `regress` commit worth porting ported one at a time, or none; each jsonata-js fix checked against jlens; the watch list updated | planned |
 | 7 | The tables measured again, unattended, after the dependencies are brought up to date: jlens and the control columns; other engines only where their version changed | `ab` against 0.30.0 in every mode, Python and Java; the performance page's tables and version header updated; each case within the floor or its cause recorded | planned |
 | 8 | Release 0.31.0 | The release checklist; the channels checked | planned |
@@ -75,11 +75,15 @@ objects of two fields compare as they did. Past 8 fields each lookup hashed its 
 over 200 objects of 12 fields, each twice, is 44% faster against a `Document` and 15% from JSON.
 The measurements are in the notes.
 
-**#5, literal keys and strings.** `items.{'code': code, 'kind': 'item'}` allocates each key with
-`Rc::from` and the string `'item'` again for each item: 4 of the 7 allocations of each object of
-`object constructor`. An `Expression` is shared between threads, so its tree cannot hold the
-`Rc<str>` a `Value` takes; the strings are made once for each evaluation (or the tree holds them
-in a form an evaluation shares without a copy), and the constructor clones them.
+**#5, literal keys and strings.** `items.{'code': code, 'kind': 'item'}` allocated each key with
+`Rc::from` and the string `'item'` again for each item: 4 of the 6 allocations of each object of
+`object constructor` at #4. An `Expression` is shared between threads, so its tree cannot hold the
+`Rc<str>` a `Value` takes. The evaluation now keeps the string of each literal it evaluates, by
+node id, and clones it; since `$eval` evaluates trees of its own, numbered from 0 as well, each
+use compares the text kept with the literal's. An object of `object constructor` takes 2
+allocations instead of 6: the constructor is 14 to 17% faster than at #4 on the system heap, 21%
+than 0.30.0, and 2% with `mimalloc`, where an allocation costs little. The measurements are in
+the notes.
 
 ## In exploration: a regular expression engine of jlens's own
 
