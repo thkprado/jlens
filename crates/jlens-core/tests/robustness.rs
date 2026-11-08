@@ -2138,6 +2138,8 @@ fn found_reads_keep_what_an_evaluation_needs() {
         "(a ? 1 : $x := 2; $x)",
         "(a ?: $x := 2; $x)",
         "(a ?? 1; nothing ?? 2; a and nothing ? $x := 1 : 0; $x[0])",
+        // The right side reads the binding the assignment hides (the property below, 0.32 #4).
+        "$x := $x",
     ] {
         let expr = Expression::compile(source).unwrap();
         agrees_when_cut(&expr, &expr.reads()).unwrap();

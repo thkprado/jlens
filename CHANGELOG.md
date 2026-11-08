@@ -13,6 +13,13 @@ All notable changes are recorded here. The format follows
   before. A source and a cancellation token take one test together. `recursion` is 11 to 17%
   faster, the shipping rule 2 to 7%.
 
+### Fixed
+
+- `Expression::reads` leaves out no binding that an assignment of the same name hides after it
+  is read: in `$x := $x` the right side reads the binding `x`, which the result now lists whole.
+  Evaluations were not affected: against a `Document`, an expression whose analysis gives up
+  converts every binding.
+
 ## [0.31.0]
 
 A small map for objects. Every object, tuple and `$match` result keeps its fields in a vector,

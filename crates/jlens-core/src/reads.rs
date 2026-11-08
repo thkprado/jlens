@@ -945,8 +945,10 @@ impl<'n> Analysis<'n> {
                 }
                 None
             } else if !found && self.locals.contains(name) {
-                // A variable bound somewhere the analysis does not see from here.
+                // A variable bound somewhere the analysis does not see from here; it may still
+                // be a binding's, as the right side of `$x := $x` is.
                 self.everything = true;
+                self.named.insert(name.to_owned());
                 None
             } else {
                 self.named.insert(name.to_owned());
