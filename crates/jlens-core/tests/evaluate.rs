@@ -485,6 +485,42 @@ fn a_frame_kept_for_reuse_is_one_nothing_else_holds() {
 }
 
 #[test]
+fn a_tuple_frame_kept_for_reuse_is_one_nothing_else_holds() {
+    // The frame a tuple step, a filter, a sort's key or a group-by makes for each tuple goes
+    // back to the evaluation when its tuple is done, and so does a call's frame whose arguments
+    // hold objects (0.32 #20), unless a closure still holds it: closures made for each tuple or
+    // call, called after the others ended. The results are those of jsonata-js 2.2.2.
+    let input = json!({"items": [{"a": 3}, {"a": 1}, {"a": 2}]});
+    let cases = [
+        (
+            "$map(items@$i.{'f': function(){ $i.a }}, function($o){ ($o.f)() })",
+            json!([3, 1, 2]),
+        ),
+        (
+            "$map(items#$p.{'f': function(){ [a, $p] }}, function($o){ ($o.f)() })",
+            json!([[3, 0], [1, 1], [2, 2]]),
+        ),
+        (
+            "$map(items#$p[$p > 0].{'f': function(){ [a, $p] }}, function($o){ ($o.f)() })",
+            json!([[1, 1], [2, 2]]),
+        ),
+        (
+            "($o := items@$i{$string($i.a): {'f': function(){ $i.a }}}; \
+             [($o.`1`.f)(), ($o.`3`.f)()])",
+            json!([1, 3]),
+        ),
+        (
+            "$map($map(items, function($o){ {'f': function(){ $o.a }} }), \
+             function($x){ ($x.f)() })",
+            json!([3, 1, 2]),
+        ),
+    ];
+    for (expr, expected) in cases {
+        assert_eq!(eval(expr, input.clone()), Some(expected), "{expr}");
+    }
+}
+
+#[test]
 fn a_constructor_evaluates_its_items_in_order() {
     // The first two differ from jsonata-js on purpose (compatibility.md): its items run
     // concurrently, so that a plain `$x` reads the value from before the binding.

@@ -491,3 +491,66 @@ in a frame of their own, which ends with the predicate or the key, as a call's f
 the call. #4 keeps such a frame for the next call, and #16 a call's list of arguments; neither
 reaches these frames, made by `frame_from_tuple`. Together with the group-by's copy, which can read
 each tuple in place, 700 allocations of the 1,237 are candidates: #20.
+
+## #20: the frames of a tuple stream kept for reuse
+
+A tuple step, a filter, a sort's key and a group-by now give the frame they make for each tuple
+back to the evaluator when the tuple is done, as #4 does for a call's frame, and the frame keeps
+its emptied list of bindings for the next tuple's fields. The group-by reads each tuple of a group
+in place instead of copying its fields first.
+
+That alone saved about 100 of `tuples`' allocations: no frame came back. Each tuple holds `@`, an
+object, and a frame binding an object, an array or a function was recorded, by a weak reference,
+in the list of frames that may be part of a cycle, which the evaluation clears when it ends; the
+weak reference is enough for `Rc::get_mut` to fail, so the frame was never reused. The same rule
+kept #4 from reusing the frame of any call whose arguments hold an object or a function, as in
+`$map(items, function($v){ … })`.
+
+The record was conservative. A frame's own bindings existed before it, and nothing reaches a frame
+just made or one kept unshared, so they cannot close a cycle through it; a later binding (`:=`)
+goes through `bind`, which records the frame itself. Only one path gives an existing value a new
+reference: a transform stores into the object `$clone` gave it. The built-in `$clone` gives a
+fresh copy, which no frame made before holds. A `$clone` of the expression or the host may give the
+object itself; a frame holding it then closes a cycle through what the transform stores. The scratch
+probe that counts live allocations showed it: with the record removed, a call whose argument was
+transformed that way left 12 allocations per evaluation. So calls and tuples no longer record their
+frames, and such a transform records every frame reachable from what it stores (functions, their
+frames up to the root, those frames' bindings); a test in `host.rs` watches the strong count of a
+host function held inside such a cycle, and fails without that record.
+
+Allocations of one evaluation against a `Document` of the workload, counted with a global
+allocator in a scratch probe, at 0de804f (A) and with the change (B); each expression ran inside a
+block binding `$f := function($v){$v.unitPrice}`, a few allocations of its own:
+
+| Expression | A | B |
+|---|---:|---:|
+| `tuples` | 1,243 | 539 |
+| `items#$n[$n % 2 = 0].unitPrice` | 1,246 | 640 |
+| `items#$n^(unitPrice).unitPrice` | 2,043 | 1,237 |
+| `items#$n{type: $count($n)}` | 1,113 | 510 |
+| `items@$i.$i.unitPrice` | 2,050 | 1,244 |
+| `$map(items, function($v){$v.unitPrice})` | 423 | 221 |
+| `$sum(items.$f($))` | 422 | 19 |
+
+`cargo xtask ab` on the M1, 10 rounds a mode, medians, A = a71efdd (the code of 0de804f), with two
+cases added for the run only: `map over objects`, `$sum($map(items, function($v){ $v.unitPrice *
+$v.quantity }))`, and `sort in a tuple stream`, `items#$n^(unitPrice)[$n < 50].code`:
+
+| | `document` | `evaluate` | `source` |
+|---|---:|---:|---:|
+| `tuples` | -12.8% | -12.1% | -10.3% |
+| sort in a tuple stream | -17.5% | -16.0% | -13.6% |
+| map over objects | -16.7% | -13.0% | -6.5% |
+| `sort + map` | -3.3% | -4.0% | -3.6% |
+
+Every other case is between -2.6% and +1.4% on the median; the largest, `filter + aggregate` and
+`recursion` in `evaluate` and `index in a variable` in `source`, are +1.1 to 1.4%, inside the M1's
+floor, and the same cases are -1.0% to +0.5% in another mode.
+
+The probe also found a cycle with no frame in it, at 0de804f as well: a closure keeps the input of
+its definition, and a transform's update is evaluated with the copy as input, so
+`(x ~> | $ | {'g': function(){1}} |)` stores in the copy a closure that holds the copy. Clearing
+frames cannot break it; it is #21.
+
+The differential's 20,000 cases (seed 1794171808827423200) found two divergences, which 0de804f
+gives too: #22.

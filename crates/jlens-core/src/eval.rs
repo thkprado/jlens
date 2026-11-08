@@ -114,6 +114,16 @@ enum Vars<'a> {
 }
 
 impl<'a> Vars<'a> {
+    fn each_value(&self, mut f: impl FnMut(&Value<'a>)) {
+        match self {
+            Vars::Call(_, values) => values.iter().for_each(f),
+            Vars::Empty => {}
+            Vars::One(_, value) => f(value),
+            Vars::Few(vars) => vars.iter().for_each(|(_, v)| f(v)),
+            Vars::Many(vars) => vars.values().for_each(f),
+        }
+    }
+
     fn get(&self, name: &str) -> Option<&Value<'a>> {
         match self {
             Vars::Call(function, values) => values.get(param(function, name)?),
@@ -706,11 +716,17 @@ impl<'a> Evaluator<'_, 'a> {
     #[inline]
     fn release(&mut self, mut frame: Env<'a>) {
         if let Some(kept) = Rc::get_mut(&mut frame) {
-            if let Vars::Call(_, mut values) = std::mem::replace(kept.vars.get_mut(), Vars::Empty)
-                && self.lists.len() < LISTS
-            {
-                values.clear();
-                self.lists.push(values);
+            match std::mem::replace(kept.vars.get_mut(), Vars::Empty) {
+                Vars::Call(_, mut values) if self.lists.len() < LISTS => {
+                    values.clear();
+                    self.lists.push(values);
+                }
+                // Emptied, the list stays with the frame for the next tuple's fields (0.32 #20).
+                Vars::Few(mut vars) => {
+                    vars.clear();
+                    *kept.vars.get_mut() = Vars::Few(vars);
+                }
+                _ => {}
             }
             kept.parent = self.spare.take();
             self.spare = Some(frame);
@@ -719,17 +735,26 @@ impl<'a> Evaluator<'_, 'a> {
 
     /// A frame binding every field of a tuple (`createFrameFromTuple`). Its fields are known, so
     /// the frame's list is made at their number, where binding them in turn grew it (0.27 #14).
+    /// The frame is one [`Self::release`] kept, and so is its list when it kept one, so that the
+    /// filter, the sort and the group-by of a tuple stream, which give each frame back when its
+    /// tuple is done, allocate neither for each tuple (0.32 #20).
     fn frame_from_tuple(&mut self, env: &Env<'a>, tuple: &Value<'a>) -> Env<'a> {
         let Value::Object(o) = tuple else {
             return self.child(env);
         };
         let o = o.borrow();
-        let cyclic = o.values().any(may_hold_frame);
         let mut fields = o.iter();
         let vars = match (o.len(), fields.next()) {
             (1, Some((k, v))) => Vars::One(Name::new(k), v.clone()),
             (len, Some(first)) if len <= FEW_VARS => {
-                let mut vars = Vec::with_capacity(len);
+                let mut vars = match self.spare.as_mut().and_then(Rc::get_mut) {
+                    Some(kept) => match std::mem::replace(kept.vars.get_mut(), Vars::Empty) {
+                        Vars::Few(vars) => vars,
+                        _ => Vec::new(),
+                    },
+                    None => Vec::new(),
+                };
+                vars.reserve_exact(len);
                 for (k, v) in std::iter::once(first).chain(fields) {
                     vars.push((Name::new(k), v.clone()));
                 }
@@ -743,16 +768,54 @@ impl<'a> Evaluator<'_, 'a> {
             ),
             (_, None) => Vars::Empty,
         };
-        let frame = Rc::new(Frame {
-            vars: RefCell::new(vars),
-            parent: Some(env.clone()),
-            input: Value::Undefined,
-            functions: None,
-        });
-        if cyclic {
-            self.cyclic.push(Rc::downgrade(&frame));
+        // Not in `cyclic`: see `apply_lambda`.
+        self.frame(env, vars)
+    }
+
+    /// Records in [`Self::cyclic`] every frame the values reach, through functions and the
+    /// frames' own bindings, before they are stored in an object made before them: a frame
+    /// holding that object then closes a cycle. A frame's own bindings never reach it when it
+    /// is made, so frames are recorded only by [`Self::bind`] and here (0.32 #20); this runs
+    /// only for a transform whose `$clone` is not the built-in one.
+    fn record_frames<'v>(&mut self, values: impl Iterator<Item = &'v Value<'a>>)
+    where
+        'a: 'v,
+    {
+        let mut seen: std::collections::HashSet<*const ()> = std::collections::HashSet::new();
+        let mut values: Vec<Value<'a>> = values.cloned().collect();
+        let mut frames: Vec<Env<'a>> = Vec::new();
+        loop {
+            if let Some(frame) = frames.pop() {
+                if seen.insert(Rc::as_ptr(&frame) as *const ()) {
+                    self.cyclic.push(Rc::downgrade(&frame));
+                    frame.vars.borrow().each_value(|v| values.push(v.clone()));
+                    frames.extend(frame.parent.clone());
+                }
+                continue;
+            }
+            let Some(value) = values.pop() else { break };
+            match &value {
+                Value::Object(o) if !o.is_unread() && seen.insert(Rc::as_ptr(o) as *const ()) => {
+                    values.extend(o.borrow().values().cloned());
+                }
+                Value::Array(a) if !a.is_unread() && seen.insert(Rc::as_ptr(a) as *const ()) => {
+                    values.extend(a.items().iter().cloned());
+                }
+                Value::Function(f) if seen.insert(Rc::as_ptr(f) as *const ()) => match &**f {
+                    Function::Lambda(lambda) => {
+                        frames.push(lambda.env.clone());
+                        values.push(lambda.input.clone());
+                    }
+                    Function::Transform { env, .. } => frames.push(env.clone()),
+                    Function::Partial { target, args } => {
+                        values.push(Value::Function(target.clone()));
+                        values.extend(args.iter().flatten().cloned());
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
         }
-        frame
     }
 
     /// Checks the evaluation's limits, and spends a step: once for each node the general path
@@ -1465,7 +1528,9 @@ impl<'a> Evaluator<'_, 'a> {
         for tuple in &bindings {
             let step_env = self.frame_from_tuple(env, tuple);
             let context = tuple_get(tuple, "@");
-            let res = self.eval(step, &context, &step_env)?;
+            let res = self.eval(step, &context, &step_env);
+            self.release(step_env);
+            let res = res?;
             if res.is_undefined() {
                 continue;
             }
@@ -1590,7 +1655,11 @@ impl<'a> Evaluator<'_, 'a> {
             } else {
                 (item.clone(), env.clone())
             };
-            let mut res = self.eval(predicate, &context, &frame)?;
+            let res = self.eval(predicate, &context, &frame);
+            if is_tuple {
+                self.release(frame);
+            }
+            let mut res = res?;
             if res.is_numeric()? {
                 res = Value::array(vec![res], 0);
             }
@@ -1937,6 +2006,9 @@ impl<'a> Evaluator<'_, 'a> {
                     }
                 }
             }
+            if reduce {
+                self.release(frame);
+            }
         }
 
         let mut result = Map::default();
@@ -1950,7 +2022,11 @@ impl<'a> Evaluator<'_, 'a> {
             } else {
                 (data, env.clone())
             };
-            let value = self.eval(&pairs[pair_index].1, &context, &frame)?;
+            let value = self.eval(&pairs[pair_index].1, &context, &frame);
+            if reduce {
+                self.release(frame);
+            }
+            let value = value?;
             if !value.is_undefined() {
                 result.insert(key, value);
             }
@@ -2037,7 +2113,9 @@ impl<'a> Evaluator<'_, 'a> {
                     let v = &items[i];
                     let k = if is_tuple {
                         let frame = ev.frame_from_tuple(env, v);
-                        ev.eval(&term.expr, &tuple_get(v, "@"), &frame)?
+                        let k = ev.eval(&term.expr, &tuple_get(v, "@"), &frame);
+                        ev.release(frame);
+                        k?
                     } else {
                         ev.eval(&term.expr, v, env)?
                     };
@@ -2623,11 +2701,12 @@ impl<'a> Evaluator<'_, 'a> {
     ) -> Result<Value<'a>> {
         // Missing arguments are undefined so that they shadow outer variables.
         args.resize_with(lambda.params().len(), Value::default);
-        let cyclic = args.iter().any(may_hold_frame);
+        // The frame is new, or one kept unshared, so no value reaches it, and the arguments
+        // cannot: it joins a cycle only by a later binding of a closure, which `bind` records,
+        // as it does for a block's frame. Recorded here, with its weak reference, a call or a
+        // tuple whose values hold an object or a function would never give its frame back
+        // (0.32 #20).
         let frame = self.frame(&lambda.env, Vars::Call(function.clone(), args));
-        if cyclic {
-            self.cyclic.push(Rc::downgrade(&frame));
-        }
         let result = self.eval(&lambda.def.body, &lambda.input, &frame);
         self.release(frame);
         result
@@ -2762,6 +2841,10 @@ impl<'a> Evaluator<'_, 'a> {
         if !clone.is_function() {
             return Err(Error::new("T2013"));
         }
+        // The built-in `$clone` gives a copy no frame reaches; another may give the object
+        // itself, which a frame made before can hold.
+        let fresh = matches!(&clone, Value::Function(f)
+            if matches!(&**f, Function::Native(n) if n.name == "clone"));
         let result = self.apply(&clone, vec![obj], &Value::Undefined, env)?;
         let matches = self.eval(&def.pattern, &result, env)?;
         if matches.is_undefined() {
@@ -2788,6 +2871,9 @@ impl<'a> Evaluator<'_, 'a> {
                                 "The transform would make an object contain itself",
                             )
                             .at(def.update.span, def.update.position));
+                    }
+                    if !fresh {
+                        self.record_frames(entries.iter().map(|(_, v)| v));
                     }
                     let mut target = target.borrow_mut();
                     for (k, v) in entries {
@@ -3124,8 +3210,15 @@ fn reduce_tuple_stream<'a>(stream: &Value<'a>) -> Map<'a> {
     };
     let mut fields: IndexMap<Rc<str>, Vec<Value<'a>>> = IndexMap::new();
     for tuple in a.items() {
-        for (k, v) in tuple_map(tuple) {
-            fields.entry(k).or_default().push(v);
+        // Read in place: a copy of the tuple's fields would be dropped once read (0.32 #20).
+        let Value::Object(o) = tuple else { continue };
+        for (k, v) in o.borrow().iter() {
+            match fields.get_mut(k) {
+                Some(values) => values.push(v.clone()),
+                None => {
+                    fields.insert(k.clone(), vec![v.clone()]);
+                }
+            }
         }
     }
     fields

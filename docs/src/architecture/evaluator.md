@@ -86,8 +86,13 @@ to the regular expression jsonata-js builds, but needs no regex engine. The matc
 Frames form a chain from the innermost scope to the root; the built-ins sit behind the root. A
 closure stored in the frame that it captured creates a reference cycle, as in
 `$f := function(){ $f() }`. Reference counting cannot reclaim such a cycle on its own. The
-evaluator therefore records every frame that receives a function, array or object binding, and
-clears those frames when the evaluation ends.
+evaluator therefore records every frame that a variable binding (`:=`) gives a function, array or
+object, and clears those frames when the evaluation ends. The frame of a call or of a tuple is not
+recorded for its arguments or fields: they existed before it, so none can reach it, and it goes
+back to the evaluator for the next call or tuple once its scope ends. A value only gains a
+reference later when a transform stores into an object; with the built-in `$clone` that object is
+a fresh copy no frame holds, and with another `$clone`, which may give the object itself, the
+transform records every frame reachable from what it stores.
 
 ## Guardrails
 
