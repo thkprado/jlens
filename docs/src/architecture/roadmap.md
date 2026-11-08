@@ -21,7 +21,7 @@ For ad-hoc JSON queries, `jq` remains the usual tool. jlens is for JSONata that 
 somewhere else, such as a rules engine or a jsonata-js service. It checks those expressions,
 tests them and explains their results before they ship.
 
-## After 0.31: where releases are measured
+## 0.32: the tables on the M1, and what each node costs
 
 From 0.32 on, the performance page's tables are measured on the Apple M1 alone, which 0.31 #7
 found quieter (two comparisons within 1.3 points, against up to 3 on the Ryzen) and steady through
@@ -30,10 +30,26 @@ three hours. x86_64 keeps a check without tables: while the Ryzen is available, 
 about 30 minutes, and investigates only what passes the floor. A release is compared with an
 older one by measuring the older tag on the M1, not by the Ryzen's tables.
 
+The engines that compile an expression to their host's code (jsonata-jvm-compiler, jsonata2js)
+are 3 to 5 times faster than jlens on most cases that do much work per item, about 10 on
+`recursion`. A profile of 0.31.0
+([`perf-0.32.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.32.md)) puts the
+variable lookup at a tenth of `recursion` and next to nothing elsewhere. Most of the time goes to
+what every node costs: the dispatch, the check of its result, and the guards (depth, steps,
+cancellation, the stack), which alone take 10% of `recursion` and 5% of the shipping rule. Items
+#3 to #6 lower that cost in `jlens-core`, so that every package gains. Each is measured against
+0.31.0 and kept only past the floor. If #3 and #4 together gain less than 5%, the series stops
+there, and the performance page says the interpreter is near its limit.
+
 | # | Item | Done when | Status |
 |---|---|---|---|
 | 1 | The page on the M1 | The next release's measure item fills every table from the M1 (jlens and the controls; the other engines from 0.31's M1 runs until their versions change), states the M1 as the machine and the Ryzen as an `ab` check only, and folds the section "On an Apple M1" into the tables | planned |
 | 2 | `filter + aggregate` with Python values on the M1 | Its 3 to 4% against 0.30.0, found by 0.31 #7, explained or removed | planned |
+| 3 | Cheaper guards for each node: the stack check and `guardrails` | `cargo xtask ab` against 0.31.0 in each mode, on the M1 and the Ryzen: `recursion` and the shipping rule faster past the floor, nothing slower; `D1011` and `U1006` where they were, the robustness properties with `PROPTEST_CASES=100000`; or reverted, with the reason in `perf-0.32.md` | planned |
+| 4 | One `Rc<Frame>` fewer for each lambda call (6% of `recursion`); after #3 | As #3; the depth WebAssembly reaches by default (500) kept | planned |
+| 5 | Aggregates over a field as nodes of their own, chosen when the expression is compiled: `$sum`, `$average`, `$max`, `$min` and `$count` of `x.f`, `$count(x[f = literal])` | As #3, on the cases that use them; their results and errors those of the general path; `cargo xtask differential` with 20,000 cases clean | planned |
+| 6 | Variables in fixed slots, resolved when the expression is compiled; only if #3 to #5 leave the lookup above a tenth of `recursion` | As #3; `$eval` sees the variables of its block as before | planned |
+| 7 | Every package after #3 to #6 | `python.py ab` and `cargo xtask java-compare ab` against 0.31.0, and `compare.mjs --pkg` for the WebAssembly package; what each gains or loses in `perf-0.32.md` | planned |
 
 ## In exploration: a regular expression engine of jlens's own
 
@@ -110,3 +126,9 @@ the exception rethrown in WebAssembly is that of the level that failed; tests in
   function can block. An application can fetch what its functions need before evaluating.
   Should real use call for it, the cheaper way is an `evaluateAsync` that stops at the first
   promise, awaits the pending ones and evaluates again with their results.
+- **Compiling an expression to its host's code.** jsonata-jvm-compiler and jsonata2js translate
+  an expression to Java or JavaScript and let the host's JIT compile it, which makes them faster
+  where an expression does much work per item. Rust has no compiler at run time: compiling when
+  the application is built would serve only expressions known then, and generating WebAssembly
+  would help that package alone, where a Content-Security-Policy allows it. jlens lowers what
+  each node costs in the core instead (0.32), which every package gains from.
