@@ -439,3 +439,25 @@ past the parameters of `$append`, `$reverse` or `$shuffle` fails with `T0410`, w
 is that argument, but the analysis of reads followed it as part of the result, as it follows the
 others, so the bindings were cut to what the rest read. Such an argument is now read whole, as
 `$merge`'s was in 0.31 #8.
+
+## #2: `filter + aggregate` with Python values against 0.30.0
+
+0.31 #7 found the case 3 to 4% slower than 0.30.0 on the M1 with Python values, and nowhere
+else, without a cause. `python.py ab` of 0.30.0 against a71efdd (#3 to #6, #10, #14 to #17), on
+the M1, twice, 5 rounds each, Python 3.14.10:
+
+| | `evaluate` | `document` |
+|---|---:|---:|
+| `filter + aggregate` | -9.5%, -9.7% | -25.2%, -26.0% |
+| `recursion` | -29.7%, -31.4% | -30.5%, -31.1% |
+| shipping rule | -10.8%, -10.2% | -33.0%, -35.2% |
+| `names over items` | -11.3%, -11.0% | -43.5%, -43.5% |
+| object constructor | -13.1%, -13.7% | -20.2%, -20.6% |
+| `tuples` | -11.8%, -12.3% | -18.5%, -19.7% |
+
+- `filter + aggregate` with Python values takes 38.6 to 38.7 µs, against 42.7 to 42.8 µs at
+  0.30.0: removed, and well past it. The cause of 0.31's +3 to 4% was not found. In #7 the same
+  M1 gave 0.31.0 42.2 µs, against 0.30.0's 42.7 to 42.8 µs here: in separate runs, so not a
+  proof, but no sign of it either.
+- Every other case is faster or within 1.6% (`regex over a long text`, which evaluates few
+  nodes); `strings` with Python values -6.4% and -3.2%.

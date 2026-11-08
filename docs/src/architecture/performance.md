@@ -795,6 +795,6 @@ long text` read 5% slower on Windows, `recursion` 9% under Linux, both layout). 
 are 5 to 35% faster on the same cases; Java from JSON text makes 5 to 10% more evaluations a
 second on any number of threads. One case is slower: `filter + aggregate` with Python values on
 the M1, by 3 to 4% in three comparisons, aligned too, but not under Linux nor natively on the M1;
-its cause is not found. In WebAssembly, against 0.30.0's table, `object constructor` against a
+its cause is not found, and 0.32 is 9.5 to 9.7% faster than 0.30.0 there. In WebAssembly, against 0.30.0's table, `object constructor` against a
 `Document` is 24% faster (174 → 133 µs) and no cell more than 2.2% slower, while jsonata-js, the
 control, read within 2.3%.
