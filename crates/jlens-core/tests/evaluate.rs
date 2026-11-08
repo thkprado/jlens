@@ -860,14 +860,19 @@ fn a_tuple_binds_each_of_its_fields() {
 
 #[test]
 fn an_order_by_keeps_the_tuple_stream() {
-    // jsonata-js gives a filter or group-by after the sort its internal tuples, unless the
-    // stream has a single item (compatibility.md); jlens keeps the tuple stream.
+    // jsonata-js gives a filter, group-by or second order-by after the sort its internal tuples,
+    // unless the stream has a single item (compatibility.md); jlens keeps the tuple stream.
     let input = json!({"items": [{"p": 2, "t": "a"}, {"p": 1, "t": "b"}, {"p": 3, "t": "a"}]});
     for (expr, expected) in [
         ("items@$o^($o.p){'s': $o.p}", json!({"s": [1, 2, 3]})),
         ("items@$o^($o.p){$o.t: $o.p}", json!({"b": 1, "a": [2, 3]})),
         ("items@$o.{}^(1){'s': $}", json!({"s": [{}, {}, {}]})),
         ("items@$o^(>$o.p)[$o.p > 1].$o.t", json!(["a", "a"])),
+        ("items#$i^(p)[$i > 0].p", json!([1, 3])),
+        // jsonata-js keeps the first order ([1, 2, 3]): every key of the second is missing.
+        ("items#$i^(p)^(>$i).p", json!([3, 1, 2])),
+        // jsonata-js fails with T2008: `$` is a tuple, an object.
+        ("items#$i.p^($)^(>$)", json!([3, 2, 1])),
     ] {
         assert_eq!(eval(expr, input.clone()), Some(expected), "{expr}");
     }

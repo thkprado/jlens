@@ -453,8 +453,9 @@ fn wildcard_first(expr: &str) -> bool {
 /// places separators with no digit on their left; and `$substringBefore` or `$substringAfter`
 /// whose `chars` is not a string literal, which jsonata-js searches as "undefined" when missing;
 /// `$replace` whose replacement is neither a string literal nor a lambda, which jsonata-js
-/// writes as "undefined" when missing; and an order-by after a step that binds `@`, `#` or an ancestor, filtered or ending a path
-/// with a group-by, where jsonata-js gives the filter or group-by its internal tuples. And a
+/// writes as "undefined" when missing; and an order-by after a step that binds `@`, `#` or an
+/// ancestor, filtered, followed by another order-by or ending a path with a group-by, where
+/// jsonata-js gives the filter, order-by or group-by its internal tuples. And a
 /// call with a group-by in tail position of a lambda, whose group-by jsonata-js drops. And
 /// `$fromMillis` with a computed picture, where a marker with an unknown component and a
 /// presentation gives jsonata-js the text "undefined" and jlens `D3132`.
@@ -473,6 +474,9 @@ fn dropped_quirk(expr: &str) -> bool {
                         .stages
                         .iter()
                         .any(|s| matches!(s, Stage::Filter { .. }))
+                        || steps
+                            .get(ii + 1)
+                            .is_some_and(|s| matches!(s.kind, NodeKind::Sort { .. }))
                         || ii + 1 == steps.len() && node.attrs.group.is_some())
             }),
             NodeKind::Apply { lhs, rhs } => {
