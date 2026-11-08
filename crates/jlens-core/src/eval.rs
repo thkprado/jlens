@@ -1380,7 +1380,21 @@ impl<'a> Evaluator<'_, 'a> {
         let index = step.attrs.index.as_deref().map(Rc::<str>::from);
         if let NodeKind::Sort { terms } = &step.kind {
             let result = match tuple_bindings {
-                Some(bindings) => self.sort(step, terms, bindings, env)?,
+                Some(bindings) => {
+                    let sorted = self.sort(step, terms, bindings, env)?;
+                    // jsonata-js binds no position on a sort that does not start the stream
+                    // (`items#$i^(p)#$j`); jlens binds it, as `items^(p)#$j` does
+                    // (compatibility.md). The tuples are the path's own, as for an index stage.
+                    if let (Some(index), Value::Array(arr)) = (&index, &sorted) {
+                        for (ss, tuple) in arr.items().iter().enumerate() {
+                            if let Value::Object(o) = tuple {
+                                o.borrow_mut()
+                                    .insert(index.clone(), Value::Number(ss as f64));
+                            }
+                        }
+                    }
+                    sorted
+                }
                 None => {
                     let sorted = self.sort(step, terms, input, env)?;
                     let tuples = sorted

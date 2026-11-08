@@ -873,6 +873,11 @@ fn an_order_by_keeps_the_tuple_stream() {
         ("items#$i^(p)^(>$i).p", json!([3, 1, 2])),
         // jsonata-js fails with T2008: `$` is a tuple, an object.
         ("items#$i.p^($)^(>$)", json!([3, 2, 1])),
+        // jsonata-js leaves `$j` unbound: it binds a sort's position only when the sort starts
+        // the stream, or through a stage (`items#$i^(p)[true]#$j`).
+        ("items#$i^(p)#$j.($i * 10 + $j)", json!([10, 1, 22])),
+        ("items@$o^($o.p)#$j.($j & $o.t)", json!(["0b", "1a", "2a"])),
+        ("items#$i^(p)#$j[$j > 0].t", json!(["a", "a"])),
     ] {
         assert_eq!(eval(expr, input.clone()), Some(expected), "{expr}");
     }

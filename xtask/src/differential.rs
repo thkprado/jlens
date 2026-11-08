@@ -455,7 +455,8 @@ fn wildcard_first(expr: &str) -> bool {
 /// `$replace` whose replacement is neither a string literal nor a lambda, which jsonata-js
 /// writes as "undefined" when missing; and an order-by after a step that binds `@`, `#` or an
 /// ancestor, filtered, followed by another order-by or ending a path with a group-by, where
-/// jsonata-js gives the filter, order-by or group-by its internal tuples. And a
+/// jsonata-js gives the filter, order-by or group-by its internal tuples, or binding a position
+/// (`#$j`), which jsonata-js leaves unbound. And a
 /// call with a group-by in tail position of a lambda, whose group-by jsonata-js drops. And
 /// `$fromMillis` with a computed picture, where a marker with an unknown component and a
 /// presentation gives jsonata-js the text "undefined" and jlens `D3132`.
@@ -469,11 +470,12 @@ fn dropped_quirk(expr: &str) -> bool {
             NodeKind::Path { steps, .. } => steps.iter().enumerate().any(|(ii, step)| {
                 matches!(step.kind, NodeKind::Sort { .. })
                     && steps[..ii].iter().any(|s| s.attrs.tuple)
-                    && (step
-                        .attrs
-                        .stages
-                        .iter()
-                        .any(|s| matches!(s, Stage::Filter { .. }))
+                    && (step.attrs.index.is_some()
+                        || step
+                            .attrs
+                            .stages
+                            .iter()
+                            .any(|s| matches!(s, Stage::Filter { .. }))
                         || steps
                             .get(ii + 1)
                             .is_some_and(|s| matches!(s.kind, NodeKind::Sort { .. }))
