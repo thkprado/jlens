@@ -291,6 +291,33 @@ fn a_lambda_frame_names_its_arguments_as_if_each_were_bound() {
 }
 
 #[test]
+fn a_call_reusing_an_argument_list_sees_only_its_own_arguments() {
+    // A call's argument list goes back to the evaluation when its frame ends, emptied, for the
+    // next call to fill (0.32 #16): a call with fewer arguments, or one called back by a
+    // built-in function, never sees one left by a call before it.
+    let cases = [
+        (
+            "($f := function($a, $b){ {'a': $a, 'b': $b} }; [$f(1, 2), $f(3), $f(), $f(4, 5, 6)])",
+            json!([{"a": 1, "b": 2}, {"a": 3}, {}, {"a": 4, "b": 5}]),
+        ),
+        (
+            "($f := function($a, $b, $c){ $count([$a, $b, $c]) }; $g := function($x){ $x }; \
+             [$f(1, 2, 3), $g(7), $f($g(8)), $f($g(9), $g(10))])",
+            json!([3, 7, 1, 2]),
+        ),
+        // More calls back than the evaluation keeps lists, each with its own item.
+        (
+            "($f := function($n){ $n <= 1 ? $n : $f($n - 1) + $f($n - 2) }; \
+             $map([1..40], function($v, $i){ $v - $i - $f(2) }))",
+            json!(vec![0; 40]),
+        ),
+    ];
+    for (expr, expected) in cases {
+        assert_eq!(eval(expr, json!(null)), Some(expected), "{expr}");
+    }
+}
+
+#[test]
 fn a_read_in_a_lambdas_body_takes_its_parameter_only_from_a_call_of_that_lambda() {
     // A variable read in a lambda's body knows the place of its parameter, or that no parameter
     // has its name, from the compiled expression (0.32 #6). Every other frame between, and every

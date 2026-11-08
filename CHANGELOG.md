@@ -27,6 +27,10 @@ All notable changes are recorded here. The format follows
   no longer waits for its stores to reach the cache before it is read again. The value keeps
   its size. On the Ryzen and the M1, `recursion` is another 5 to 9% faster, the shipping rule 6
   to 16%, `filter + aggregate` and `group-by` 5 to 17%.
+- A lambda's call takes the list of arguments that a call before it gave back, in place of
+  allocating one, and on WebAssembly the evaluation of each node is inlined into its caller.
+  In WebAssembly, `recursion` is 13 to 16% faster and the shipping rule 3 to 7%; natively,
+  `recursion` is another 4 to 6% faster on the M1.
 - `jlens-core`: `Attrs` has a private field, so it is made with `Attrs::default()` and no longer
   with a struct expression.
 
@@ -36,6 +40,9 @@ All notable changes are recorded here. The format follows
   is read: in `$x := $x` the right side reads the binding `x`, which the result now lists whole.
   Evaluations were not affected: against a `Document`, an expression whose analysis gives up
   converts every binding.
+- Against a `Document`, an argument past the parameters of `$append`, `$reverse` or `$shuffle`
+  is converted whole, so that its `T0410` gives it as its `value`, as `evaluate` does. It was
+  cut to what the rest of the expression read, and the error had no `value`.
 
 ## [0.31.0]
 

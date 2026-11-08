@@ -1090,11 +1090,12 @@ impl<'n> Analysis<'n> {
             }
             ("append" | "reverse" | "shuffle" | "zip" | "merge", _) => {
                 let mut value = Vec::new();
-                for arg in &args {
+                for (index, arg) in args.iter().enumerate() {
                     let places = self.arg(arg, context, scope);
                     // `$merge` fails on an item that is not an object, used or not, and its
-                    // `T0412` gives the whole argument as its `value`.
-                    if name == "merge" {
+                    // `T0412` gives the whole argument as its `value`; so does `T0410` for an
+                    // argument past the function's parameters (`$zip` takes any number).
+                    if name == "merge" || (name != "zip" && index >= native.params.len()) {
                         self.use_whole(&places);
                     }
                     self.join(&mut value, places);

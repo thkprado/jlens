@@ -307,6 +307,10 @@ const CLOCK_EVERY: u64 = 256;
 /// evaluates: a tree with more nodes makes the strings of the others again each time.
 const LITERALS_MAX: usize = 1 << 16;
 
+/// The most argument lists an evaluation keeps for its calls to reuse (0.32 #16): a recursion
+/// takes one back for each call it starts, and needs few more.
+const LISTS: usize = 16;
+
 /// Default maximum length of a built string, in bytes (256 MiB). jsonata-js is limited by the
 /// JavaScript engine (about 2^29 UTF-16 units in V8); jlens fails cleanly instead of running
 /// out of memory.
@@ -337,6 +341,11 @@ pub(crate) struct Evaluator<'t, 'a> {
     /// before it. A list of them on the heap, or in place, cost an evaluation with few calls
     /// more than it saved; these are at most the frames once alive together.
     spare: Option<Env<'a>>,
+    /// The argument lists of calls whose frames [`Self::release`] kept, emptied, for the next
+    /// call's arguments instead of allocating a list (0.32 #16); at most [`LISTS`], as a
+    /// function called back by a built-in one (`$map`) gives a list back for each item without
+    /// taking one.
+    lists: Vec<Vec<Value<'a>>>,
     regexes: HashMap<(String, String), Rc<Regex>>,
     /// The pictures `$formatNumber` parsed last, at most `numeric::PICTURES`.
     pictures: Vec<Picture>,
@@ -548,6 +557,7 @@ pub(crate) fn evaluate<'a, 'v, R>(
         limits,
         cyclic: Vec::new(),
         spare: None,
+        lists: Vec::new(),
         regexes: HashMap::new(),
         pictures: Vec::new(),
         clock: None,
@@ -696,7 +706,12 @@ impl<'a> Evaluator<'_, 'a> {
     #[inline]
     fn release(&mut self, mut frame: Env<'a>) {
         if let Some(kept) = Rc::get_mut(&mut frame) {
-            *kept.vars.get_mut() = Vars::Empty;
+            if let Vars::Call(_, mut values) = std::mem::replace(kept.vars.get_mut(), Vars::Empty)
+                && self.lists.len() < LISTS
+            {
+                values.clear();
+                self.lists.push(values);
+            }
             kept.parent = self.spare.take();
             self.spare = Some(frame);
         }
@@ -900,7 +915,12 @@ impl<'a> Evaluator<'_, 'a> {
     }
 
     /// Evaluates `expr` against `input` (jsonata-js `evaluate`).
-    #[inline]
+    ///
+    /// WebAssembly's `opt-level = "s"` left this a call of its own for every node; inlined, with
+    /// [`Self::eval_grow`], it makes `recursion` about 4% faster there (0.32 #16). Natively,
+    /// forcing it slowed other cases by up to 9%, so the compiler keeps the choice.
+    #[cfg_attr(target_arch = "wasm32", inline(always))]
+    #[cfg_attr(not(target_arch = "wasm32"), inline)]
     pub(crate) fn eval(
         &mut self,
         expr: &Node,
@@ -915,7 +935,8 @@ impl<'a> Evaluator<'_, 'a> {
 
     /// Evaluates with stack growth on native targets, and a stack check on WebAssembly. Above
     /// the stack's floor, a node runs with one comparison of addresses.
-    #[inline]
+    #[cfg_attr(target_arch = "wasm32", inline(always))]
+    #[cfg_attr(not(target_arch = "wasm32"), inline)]
     fn eval_grow(&mut self, expr: &Node, input: &Value<'a>, env: &Env<'a>) -> Result<Value<'a>> {
         if crate::stack::above(self.stack_floor) {
             return self.eval_inner(expr, input, env);
@@ -2098,7 +2119,18 @@ impl<'a> Evaluator<'_, 'a> {
             // The user probably forgot the leading `$`.
             return Err(err_at("T1005", expr).with("token", step_name));
         }
-        let mut evaluated = Vec::with_capacity(args.len() + 1);
+        // A lambda's frame gives its list back when the call ends, so only a lambda takes one;
+        // the list of a built-in function goes with its arguments.
+        let mut evaluated = match &proc {
+            Value::Function(f) if matches!(**f, Function::Lambda(_)) => match self.lists.pop() {
+                Some(mut list) => {
+                    list.reserve_exact(args.len() + 1);
+                    list
+                }
+                None => Vec::with_capacity(args.len() + 1),
+            },
+            _ => Vec::with_capacity(args.len() + 1),
+        };
         if let Some(context) = apply_to {
             evaluated.push(context);
         }

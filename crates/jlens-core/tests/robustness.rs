@@ -2222,6 +2222,19 @@ fn found_reads_keep_what_an_evaluation_needs() {
     let document = expr.evaluate_document(&Document::new(&input), &bindings(), &options);
     assert_eq!(lazy.as_ref().unwrap_err().code(), "T0412");
     assert_eq!(format!("{document:?}"), format!("{lazy:?}"));
+    // So does `T0410` for an argument past the parameters of `$shuffle`, `$reverse` or
+    // `$append`, whose values the analysis followed as a result (0.32 #16's property tests).
+    for source in [
+        "($y := $shuffle(a, $x); 1)",
+        "($y := $reverse(a, $x); 1)",
+        "($y := $append(a, a, $x); 1)",
+    ] {
+        let expr = Expression::compile(source).unwrap();
+        let lazy = expr.evaluate_with(Some(&input), &bindings(), &options);
+        let document = expr.evaluate_document(&Document::new(&input), &bindings(), &options);
+        assert_eq!(lazy.as_ref().unwrap_err().code(), "T0410", "{source}");
+        assert_eq!(format!("{document:?}"), format!("{lazy:?}"), "{source}");
+    }
     // And a predicate evaluated once, whose steps overflowed across a read of the clock.
     let expr = Expression::compile("items@$o.$x.($k := $; $x.$$.o.p[$k])").unwrap();
     agrees_when_cut_with(&expr, &expr.reads_with(&without_input(bindings())), true).unwrap();

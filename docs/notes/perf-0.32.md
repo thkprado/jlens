@@ -348,3 +348,94 @@ slower.
   guarded each node with one comparison of an address, without `stacker`, so #3 had nothing to
   remove there; the rest of the series gives `recursion` 5%, where #4, #6 and #10 give about
   19% natively on the M1. Why was not looked into: the package is not a priority of this plan.
+
+## #16: why WebAssembly gained little
+
+#7 found the series giving WebAssembly's `recursion` about 5%, against about 19% natively.
+
+### The profile
+
+`recursion` against a `Document` (`evaluateDocument`) in Node.js 24.19 on the Ryzen, `node
+--cpu-prof --cpu-prof-interval 100`, about 20,000 samples. The module is the package's
+(`wasm-release`, `wasm-opt -Os`) with `wasm-opt -g`, which keeps the functions' names; V8 gives
+no line within a function, so the shares are of functions after inlining, self:
+
+| `recursion`, shares of the samples | f418ca9 | with #16 |
+|---|---:|---:|
+| `eval_inner` | 54.7% | 63.4% |
+| `eval`, a function of its own | 9.6% | inlined |
+| `apply_inner`, `call`, `apply` | 16.0% | 21.7% |
+| `variable` and `Frame::lookup` | 9.1% | 11.5% |
+| The allocator (`dlmalloc`'s `malloc` and `free`, `deallocate`, `__rust_dealloc`) | 6.2% | 0.1% |
+| The drop of a `Vec<Value>` | 1.5% | 0% |
+
+- Two costs that native builds do not pay. The allocator: each call allocates its list of
+  arguments, freed when its frame is released, and `dlmalloc` costs more than glibc's, which
+  took 2.8% of the native profile at #5 for every allocation and copy. And `eval`: the module
+  is built with `opt-level = "s"`, whose inliner left it a call for every node with its
+  checks of the tracer and the stack and its result written to memory.
+- #4 took the frame's allocation away, but not the list's; #10's stall needs a 16-byte load,
+  which `wasm32` without SIMD does not make.
+
+### The change
+
+- An evaluation keeps up to 16 argument lists. A frame released at the end of a lambda's call
+  gives its list back, emptied, and a call of a lambda takes one before evaluating its
+  arguments. A built-in function's list goes with its arguments, so it is made as before. A
+  function called back by a built-in one (`$map`) gives a list back without taking one, hence
+  the bound. A first version let every call take a list; on the M1 it measured as the final
+  one, the shipping rule and `filter + aggregate` 2 to 3% slower unaligned in `document` both
+  times.
+- `eval` and `eval_grow` are `#[inline(always)]` on `wasm32` alone. Natively it made
+  `filter + aggregate` 8.7% and the shipping rule 5.5% slower in `document` on the Ryzen.
+- In Node on the Ryzen, quick runs of one process: 525 µs at f418ca9, about 504 with the lists,
+  about 500 with the inlining, 455 with both, more than the sum of the two.
+- The module grows by 3 KiB gzipped (531 to 534). The depth tests of the WebAssembly suite
+  (`D1011` at the default 500, 999 levels under `maxDepth: 1000`) pass.
+
+### Results
+
+**WebAssembly**, on the M1, `compare.mjs --pkg --engines jsonata-js`, four processes a build,
+alternated, each on a new copy of its package, medians:
+
+| | `evaluate` | `evaluateJson` | `evaluateDocument` | jsonata-js, the control |
+|---|---:|---:|---:|---:|
+| `recursion` | -15.2% | -13.4% | -15.6% | -0.5% |
+| shipping rule | -3.1% | -4.0% | -7.4% | -0.9% |
+| `filter + aggregate` | -4.1% | -2.0% | -9.1% | -1.5% |
+| object constructor | -3.6% | -1.8% | -3.8% | +0.6% |
+| `tuples` | -1.0% | -2.5% | -4.0% | +0.5% |
+
+- Every other case is up to 4% faster or within 1.4%, but `path` and `names over items` in
+  `evaluateDocument`, +7.7% and +4.1%: 0.6 to 0.7 µs and 3.7 to 3.8 µs, printed to a tenth, as
+  in #7. With #7's -4.8%, `recursion` in `evaluateDocument` is about 20% faster than 0.31.0,
+  as natively.
+- These packages hold the lists and the inlining; the fix found by the property tests below
+  changes only what `Expression::reads` gives for three functions.
+
+**Natively**, `cargo xtask ab` against f418ca9, 10 rounds, medians, on the M1:
+
+| | `document` | `evaluate` | `source` | aligned `document` | aligned `source` |
+|---|---:|---:|---:|---:|---:|
+| `recursion` | -4.1% | -5.8% | -6.0% | -7.4% | -8.8% |
+| shipping rule | +2.7% | -0.6% | +2.4% | +1.2% | +0.8% |
+| `filter + aggregate` | +2.6% | +1.2% | +1.2% | +1.3% | +0.8% |
+| `sort + map` | +0.1% | +0.5% | +5.9% | +0.9% | +2.8% |
+
+- Aligned is `-C llvm-args=-align-all-functions=6 -C llvm-args=-align-all-nofallthru-blocks=5`
+  on both builds. What stays past the M1's floor aligned is `sort + map` in `source`, whose
+  evaluation is that of `document`, +0.9%, and `path` in `document`, 96 to 99 ns, which calls
+  nothing: taken as placement.
+- macOS's allocator is cheap, so the M1 gains less than WebAssembly. On the Ryzen under
+  Windows, with the lists taken by every call (before they were kept to lambdas), `recursion`
+  was 12 to 16% faster in each mode; `names over items` in `evaluate`, +3.0% (+3.9% alone), was
+  +0.5% aligned. The Ryzen was in use during part of those runs.
+
+### Found by the property tests
+
+`PROPTEST_CASES=100000` found `($y := $shuffle(a, $x); 1)` giving `T0410` with the argument
+as its `value` from `evaluate` and without it from a `Document`, at f418ca9 as well. An argument
+past the parameters of `$append`, `$reverse` or `$shuffle` fails with `T0410`, whose `value`
+is that argument, but the analysis of reads followed it as part of the result, as it follows the
+others, so the bindings were cut to what the rest read. Such an argument is now read whole, as
+`$merge`'s was in 0.31 #8.
