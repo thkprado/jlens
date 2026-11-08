@@ -2042,6 +2042,14 @@ impl<'a> Evaluator<'_, 'a> {
         env: &Env<'a>,
         apply_to: Option<Value<'a>>,
     ) -> Result<Value<'a>> {
+        if apply_to.is_none()
+            && let NodeKind::Variable { name } = &procedure.kind
+            && let [arg] = args
+            && let NodeKind::Path { .. } = arg.kind
+            && let Some(value) = self.aggregate(expr, procedure, name, arg, input, env)?
+        {
+            return Ok(value);
+        }
         let proc = self.eval(procedure, input, env)?;
         let name = procedure_name(procedure);
         if proc.is_undefined()
@@ -2065,6 +2073,274 @@ impl<'a> Evaluator<'_, 'a> {
                 None => e,
             }
         })
+    }
+
+    /// `$sum`, `$average`, `$max`, `$min` or `$count` of a field of each item of an array
+    /// (`items.price`), or `$count` of the items whose field is or is not a string literal
+    /// (`items[code = "x"]`), computed from the items without building the array that the
+    /// general path passes to the function. The steps are those the general path would take
+    /// (ADR 0018), spent at the end. `None`, having spent nothing, where the general path would
+    /// do anything else: another function bound to the name, a shape, a value or a limit it
+    /// handles differently, a tracer.
+    #[inline(never)]
+    fn aggregate(
+        &mut self,
+        expr: &Node,
+        procedure: &Node,
+        name: &str,
+        arg: &Node,
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Option<Value<'a>>> {
+        let kind = match name {
+            "sum" => Aggregate::Sum,
+            "count" => Aggregate::Count,
+            "max" => Aggregate::Max,
+            "min" => Aggregate::Min,
+            "average" => Aggregate::Average,
+            _ => return Ok(None),
+        };
+        let NodeKind::Path {
+            steps,
+            keep_singleton_array: false,
+        } = &arg.kind
+        else {
+            return Ok(None);
+        };
+        // The general path evaluates nodes at most four levels below this one: the predicate's
+        // field, in `$count(items[code = "x"])`.
+        if self.tracer.is_some()
+            || self.depth + 4 > self.limits.max_depth
+            || !is_plain_step(procedure)
+            || !is_plain_step(arg)
+            || arg.attrs.keep_array
+        {
+            return Ok(None);
+        }
+        let Some((last, prefix)) = steps.split_last() else {
+            return Ok(None);
+        };
+        let NodeKind::Name { name: field } = &last.kind else {
+            return Ok(None);
+        };
+        if !prefix.iter().enumerate().all(|(ii, step)| {
+            is_plain_step(step)
+                && match step.kind {
+                    NodeKind::Name { .. } => true,
+                    NodeKind::Variable { .. } => ii == 0,
+                    _ => false,
+                }
+        }) {
+            return Ok(None);
+        }
+        let function = env.lookup(name);
+        let native = matches!(&function, Value::Function(f)
+            if matches!(&**f, Function::Native(native) if native.name == name));
+        if !native {
+            return Ok(None);
+        }
+        // The value the last step is evaluated against, and the steps that gave it.
+        let (base, taken) = match prefix {
+            [] => (input.clone(), 0),
+            [
+                Node {
+                    kind: NodeKind::Variable { name },
+                    ..
+                },
+            ] => (variable(name, input, env), 1),
+            _ => match plain_fields(prefix, input, env) {
+                Some(found) => found,
+                None => return Ok(None),
+            },
+        };
+        let reduced = if is_plain_step(last) {
+            self.aggregate_field(kind, &base, !prefix.is_empty(), field, taken)?
+        } else if kind == Aggregate::Count && !base.is_array() && !base.is_undefined() {
+            self.count_equal(last, &base, field, taken)?
+        } else {
+            None
+        };
+        reduced
+            .map(|r| {
+                r.map_err(|e| {
+                    e.at_if_missing(expr.span, expr.position)
+                        .with_token_if_missing(name)
+                })
+            })
+            .transpose()
+    }
+
+    /// [`Self::aggregate`] of a field of each item of `base`, an array that a prefix of the path
+    /// gave when `after_prefix`, or else the input. The outer `Result` holds the limits, the
+    /// inner one the function's error.
+    fn aggregate_field(
+        &mut self,
+        kind: Aggregate,
+        base: &Value<'a>,
+        after_prefix: bool,
+        field: &str,
+        taken: u64,
+    ) -> Result<Option<Result<Value<'a>>>> {
+        let Value::Array(array) = base else {
+            return Ok(None);
+        };
+        // An array made by a constructor is a single item to the step after it.
+        if after_prefix && array.has(CONS) {
+            return Ok(None);
+        }
+        let items = array.items();
+        // Each value the step gives; any other than a number, or undefined, which the general
+        // path leaves out, makes the function fail, except for `$count`, which counts it. An
+        // item or a value that is an array is flattened by the general path.
+        let mut count = 0usize;
+        let mut other = false;
+        let numbers = items.iter().filter_map(|item| {
+            if item.is_array() {
+                other = true;
+                return None;
+            }
+            match functions::lookup(item, field) {
+                Value::Undefined => None,
+                Value::Number(x) => {
+                    count += 1;
+                    Some(x)
+                }
+                Value::Array(_) => {
+                    other = true;
+                    None
+                }
+                _ => {
+                    count += 1;
+                    other |= kind != Aggregate::Count;
+                    None
+                }
+            }
+        });
+        let reduced = match kind {
+            Aggregate::Sum | Aggregate::Average => numbers.sum(),
+            Aggregate::Max => numbers.reduce(f64::max).unwrap_or(f64::NAN),
+            Aggregate::Min => numbers.reduce(f64::min).unwrap_or(f64::NAN),
+            Aggregate::Count => {
+                numbers.for_each(drop);
+                0.0
+            }
+        };
+        if other || count > self.limits.max_array_length {
+            return Ok(None);
+        }
+        // The procedure, the path, the prefix's steps and one for each item.
+        self.charge(2 + taken + items.len() as u64)?;
+        self.watch()?;
+        // No value is an undefined argument.
+        Ok(Some(match (kind, count) {
+            (Aggregate::Count, n) => Ok(Value::Number(n as f64)),
+            (_, 0) => Ok(Value::Undefined),
+            (Aggregate::Sum, _) => value::finite(reduced),
+            (Aggregate::Max | Aggregate::Min, _) => Ok(Value::Number(reduced)),
+            (Aggregate::Average, n) => functions::mean(reduced, n, || {
+                items
+                    .iter()
+                    .filter_map(|item| functions::lookup(item, field).as_number())
+            }),
+        }))
+    }
+
+    /// `$count` of the items of `base`'s field `field` that a filter comparing one of their
+    /// fields with a string literal lets pass (`items[code = "x"]`), `base` being neither an
+    /// array nor undefined. As [`Self::aggregate_field`].
+    fn count_equal(
+        &mut self,
+        step: &Node,
+        base: &Value<'a>,
+        field: &str,
+        taken: u64,
+    ) -> Result<Option<Result<Value<'a>>>> {
+        let a = &step.attrs;
+        let [
+            Stage::Filter {
+                expr: predicate,
+                constant: false,
+                ..
+            },
+        ] = &a.stages[..]
+        else {
+            return Ok(None);
+        };
+        if !a.predicate.is_empty()
+            || a.group.is_some()
+            || a.tuple
+            || a.cons_array
+            || a.focus.is_some()
+            || a.index.is_some()
+            || a.ancestor_label.is_some()
+        {
+            return Ok(None);
+        }
+        let NodeKind::Binary {
+            op: op @ (BinaryOp::Eq | BinaryOp::Ne),
+            lhs,
+            rhs,
+        } = &predicate.kind
+        else {
+            return Ok(None);
+        };
+        if !is_plain_step(predicate) || predicate.attrs.keep_array {
+            return Ok(None);
+        }
+        // As `equals_literal` picks them.
+        let (literal, other) = match (string_literal(lhs), string_literal(rhs)) {
+            (_, Some(literal)) => (literal, lhs),
+            (Some(literal), None) => (literal, rhs),
+            (None, None) => return Ok(None),
+        };
+        let NodeKind::Path {
+            steps,
+            keep_singleton_array: false,
+        } = &other.kind
+        else {
+            return Ok(None);
+        };
+        let [
+            key @ Node {
+                kind: NodeKind::Name { name: key_name },
+                ..
+            },
+        ] = &steps[..]
+        else {
+            return Ok(None);
+        };
+        if !is_plain_step(other) || other.attrs.keep_array || !is_plain_step(key) {
+            return Ok(None);
+        }
+        let value = functions::lookup(base, field);
+        if is_sequence(&value) {
+            return Ok(None);
+        }
+        let items: &[Value<'a>] = match &value {
+            Value::Array(array) => array.items(),
+            other => std::slice::from_ref(other),
+        };
+        let mut passed = 0usize;
+        for item in items {
+            if item.is_array() {
+                return Ok(None);
+            }
+            let passes = match functions::lookup(item, key_name) {
+                Value::Undefined => false,
+                Value::String(s) => (*s == *literal) == (*op == BinaryOp::Eq),
+                v if is_sequence(&v) => return Ok(None),
+                _ => *op == BinaryOp::Ne,
+            };
+            passed += usize::from(passes);
+        }
+        if passed > self.limits.max_array_length {
+            return Ok(None);
+        }
+        // The procedure, the path, the prefix's steps, the step, and for each item the
+        // comparison, the literal, the field's path and its step.
+        self.charge(3 + taken + 4 * items.len() as u64)?;
+        self.watch()?;
+        Ok(Some(Ok(Value::Number(passed as f64))))
     }
 
     /// Applies a function on behalf of a native function (`$map`, `$sort`, `$replace`...). A
@@ -2466,6 +2742,16 @@ impl<'a> Lambda<'a> {
             None => &self.def.params,
         }
     }
+}
+
+/// The functions [`Evaluator::aggregate`] computes from the items of an array.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Aggregate {
+    Sum,
+    Count,
+    Max,
+    Min,
+    Average,
 }
 
 /// The name used as the `token` of errors raised by a call: `$name` → `name`.

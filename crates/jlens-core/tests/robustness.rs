@@ -46,6 +46,7 @@ fn valid() -> impl Strategy<Value = String> {
             "[]",
             "{}",
             "items.price",
+            "items[a = 'p']",
             "a.b",
             "o.p.r",
             "o.p.r.z",
@@ -72,6 +73,8 @@ fn valid() -> impl Strategy<Value = String> {
                 "$sum",
                 "$count",
                 "$max",
+                "$min",
+                "$average",
                 "$keys",
                 "$reverse",
                 "$sort",
@@ -720,6 +723,107 @@ fn field_paths_agree_with_an_audit() {
                 format!("{plain:?}"),
                 format!("{audited:?}"),
                 "{source} at depth {depth}"
+            );
+        }
+    }
+}
+
+/// An aggregate of a field of each item, and a count of the items a string literal compared
+/// lets pass, take a fast path that falls back on the general one where the values, the
+/// function or a limit differ; an audit takes the general path. The results and errors are the
+/// same, at any depth, step limit and array length limit.
+#[test]
+fn aggregates_agree_with_an_audit() {
+    let input = json!({
+        "items": [{"p": 1, "c": "x"}, {"p": 2.5, "c": "y"}, {"c": 3}, {"p": -0.0, "c": "x"}],
+        "one": {"items": [{"p": 4, "c": "x"}], "n": {"p": 5}},
+        "mixed": [{"p": 1}, {"p": "2"}, {"p": [3, 4]}, {"p": null}, 5, [{"p": 6}]],
+        "nested": [{"p": [1, 2]}, {"p": []}, {"p": [[3]]}],
+        "huge": [{"p": 1e308}, {"p": 1e308}, {"p": -1e308}],
+        "seq": {"items": [{"c": ["x", "y"]}, {"c": "x"}, [{"c": "x"}], 7, {"c": {"d": 1}}]},
+        "empty": [],
+        "zero": [{"p": -0.0}]
+    });
+    let bindings = Bindings::new()
+        .var("v", input.clone())
+        .var("w", json!([{"p": 1}, {"p": 2}]))
+        .var("o", json!({"p": 3, "c": "x"}));
+    let fields = [
+        "items.p",
+        "items.c",
+        "one.items.p",
+        "one.n.p",
+        "mixed.p",
+        "nested.p",
+        "huge.p",
+        "empty.p",
+        "zero.p",
+        "nothing.p",
+        "$v.items.p",
+        "$w.p",
+        "$o.p",
+        "$u.p",
+        "$.items.p",
+        "$$.items.p",
+        "p",
+        "items.p[]",
+        "items[0].p",
+        "$v.huge.p",
+    ];
+    let mut sources: Vec<String> = Vec::new();
+    for f in ["sum", "count", "max", "min", "average"] {
+        for path in fields {
+            sources.push(format!("${f}({path})"));
+        }
+    }
+    sources.extend(
+        [
+            "$count(items[c = 'x'])",
+            "$count(items[c != 'x'])",
+            "$count(items['x' = c])",
+            "$count(items['x' = 'x'])",
+            "$count(items[c = 'x'][p = 1])",
+            "$count(items[c = 'x'].p)",
+            "$count(one.items[c = 'x'])",
+            "$count(one.n[p = 'x'])",
+            "$count(one.n[p != 'x'])",
+            "$count(one.missing[c != 'x'])",
+            "$count(seq.items[c = 'x'])",
+            "$count(seq.items[c != 'x'])",
+            "$count($o[c = 'x'])",
+            "$count($w[p != 'x'])",
+            "$count(items[c = 'x'][])",
+            "$count(items#$i[c = 'x'])",
+            "$sum(items[c = 'x'])",
+            "($sum := function($a){ 42 }; $sum(items.p))",
+            "($count := $sum; $count(items.p))",
+            "$count(items.p) ~> $string()",
+            "items.p ~> $sum()",
+            "$sum(items.p, 1)",
+            "[1, 2].$sum(items.p)",
+            "$sum([{'p': 1}, {'p': 2}].p)",
+            "($a := [{'p': 1}, {'p': 2}]; $sum($a.p))",
+            "($a := {'q': [{'p': 1}, {'p': 2}]}; $sum($a.q.p))",
+        ]
+        .map(str::to_owned),
+    );
+    for source in &sources {
+        let expr = Expression::compile(source).unwrap();
+        let mut runs = vec![Options::new(), Options::new().max_array_length(1)];
+        runs.extend([1, 2, 3, 4, 5, 6].map(|d| Options::new().max_depth(d)));
+        runs.extend((0..25).map(|s| Options::new().max_steps(s)));
+        for options in runs {
+            let plain = expr.evaluate_with(Some(&input), &bindings, &options);
+            let (audited, _) = expr.evaluate_audited(
+                Some(&input),
+                &bindings,
+                &options,
+                &jlens_core::audit::AuditOptions::full(),
+            );
+            assert_eq!(
+                format!("{plain:?}"),
+                format!("{audited:?}"),
+                "{source} with {options:?}"
             );
         }
     }

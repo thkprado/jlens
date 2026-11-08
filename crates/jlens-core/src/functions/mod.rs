@@ -136,14 +136,8 @@ natives! {
         let Some(arr) = items.as_array().filter(|a| !a.items().is_empty()) else {
             return Ok(Value::Undefined);
         };
-        let n = arr.len() as f64;
-        let total: f64 = arr.items().iter().filter_map(Value::as_number).sum();
-        if total.is_infinite() {
-            // The sum overflows, but the mean of finite numbers is finite.
-            let mean = arr.items().iter().filter_map(Value::as_number).map(|x| x / n).sum();
-            return value::finite(mean);
-        }
-        Ok(Value::Number(total / n))
+        let numbers = || arr.items().iter().filter_map(Value::as_number);
+        mean(numbers().sum(), arr.len(), numbers)
     };
 
     // String
@@ -378,6 +372,20 @@ fn extreme<'a>(items: &Value<'a>, pick: fn(f64, f64) -> f64) -> Result<Value<'a>
         )),
         _ => Ok(Value::Undefined),
     }
+}
+
+/// `$average` of `len` numbers (at least one) whose sum is `total`: when the sum overflows, the
+/// mean of finite numbers is still finite, so it is taken again from `numbers`, each divided.
+pub(crate) fn mean<'a, I: Iterator<Item = f64>>(
+    total: f64,
+    len: usize,
+    numbers: impl FnOnce() -> I,
+) -> Result<Value<'a>> {
+    let n = len as f64;
+    if total.is_infinite() {
+        return value::finite(numbers().map(|x| x / n).sum());
+    }
+    Ok(Value::Number(total / n))
 }
 
 /// `$clone`: a deep copy with the values jsonata-js gets by serializing and parsing, made

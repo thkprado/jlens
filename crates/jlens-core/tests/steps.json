@@ -55,6 +55,20 @@
       ]
     },
     {
+      "note": "An aggregate of a field, or a count of the items a string compared lets pass, takes the steps of its nodes.",
+      "counts": [
+        ["$sum(items.price)", 7],
+        ["$average(items.price)", 7],
+        ["$max(items.price)", 7],
+        ["$min(items.price)", 7],
+        ["$count(items.code)", 7],
+        ["$sum(nothing.price)", 4],
+        ["$count(items[code = \"x\"])", 16],
+        ["$count(items[\"x\" != code])", 16],
+        ["$count(a.b[c = \"x\"])", 9]
+      ]
+    },
+    {
       "note": "A function called back is a step, and its body counts its nodes.",
       "counts": [
         ["$map(items, function($v){ $v.price * 2 })", 23],

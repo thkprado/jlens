@@ -131,3 +131,47 @@ evaluator, 10 rounds, medians:
   layout.
 - #3 and #4 together make `recursion` about 22% faster on the Ryzen and 22% on the M1 than
   0.31.0, so the series goes on to #5.
+
+## #5: aggregates over a field
+
+`$sum(items.price)` built the array of the prices, a `Vec` and an `Rc`, then gave it to the
+function, whose signature checked each item once more; `$count(items[code = "x"])` built the
+array of the items that passed. Now a call whose function is a variable naming `$sum`,
+`$average`, `$max`, `$min` or `$count`, with one argument that is a path of field names
+(the first may be a variable), checks that the variable holds the built-in function and reads
+the items itself: the field of each item, or for `$count`, a filter that compares one field of
+each item with a string literal. It builds nothing.
+
+- The general path runs, from the start and with nothing spent, wherever it would do anything
+  else: a value that is not a number (for `$count`, an array), an item that is an array, an
+  array made by a constructor after the first step, more values than `max_array_length`, a
+  depth within four levels of `max_depth`, a tracer, or a variable `$sum` bound to another
+  function. So the errors (`T0412`, `D1001`, `U1001`, `D1011`) come from the general path.
+- The steps are those the general path counts (ADR 0018): for `$sum(items.price)`, the
+  function's variable, the path, the steps before the last and one for each item; for the
+  count, four for each item (the comparison, the literal, the field's path and its step). They
+  are spent once the items are read, and the cancellation is checked then. `steps.json` has
+  the cases, which the audit counts through the general path.
+- The test was first written in `eval_inner`, before the call: on the Ryzen, `recursion` was 1.6
+  to 2.7% slower in every mode, alone in 20 rounds too, for a test that costs a few branches a
+  call (about 2,000 calls a run, so far below 1 ns each). Moved to the start of `call`, it was
+  +0.5% and +0.6%, at the floor: the size of `eval_inner`, not the work.
+
+`cargo xtask ab` against 53744f1, 10 rounds, medians, with a case added for the run only
+(`count of a literal`: `$count(items[type = 'electronic'])` over the 200 orders' items):
+
+| | Ryzen `document` | `evaluate` | `source` | M1 `document` | `evaluate` | `source` |
+|---|---:|---:|---:|---:|---:|---:|
+| `names over items` | -49.7% | -7.1% | -11.1% | -38.6% | -17.4% | -16.7% |
+| `count of a literal` | -83.7% | -42.2% | -33.4% | -75.3% | -40.0% | -29.2% |
+| shipping rule | -4.0% | +0.1% | -1.1% | -1.2% | -2.7% | -2.7% |
+
+- Every other case is between -2.6% and +1.8%, except three that rerun alone at the floor:
+  `object constructor` on the Ryzen, +5.1% in `document` (alone in 20 rounds +1.1%, and +1.8%
+  in `source`), the case whose floor is widest and which calls no function; on the M1,
+  `filter + aggregate` in `source`, +9.9% (alone -0.7%), and `recursion` in `document`, +2.4%
+  on the median and -1.0% on the fastest round (alone in `source` -0.9%).
+- `names over items` gains less with `evaluate` and `source`, where reading the input takes most
+  of the case. The shipping rule calls `$sum` and `$count` three times.
+- No case of the workload counts a filtered list, so `count of a literal` stays out of
+  `cases.json`: a new case would need a column in every engine's table.

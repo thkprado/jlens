@@ -14,6 +14,11 @@ All notable changes are recorded here. The format follows
   faster, the shipping rule 2 to 7%.
 - A lambda's call, and a block that binds a variable, reuse a frame whose scope has ended
   with nothing holding it, in place of allocating one: `recursion` is another 7 to 13% faster.
+- `$sum`, `$average`, `$max`, `$min` and `$count` of a field of each item (`$sum(items.price)`),
+  and `$count` of the items whose field is or is not a string (`$count(items[type = "x"])`),
+  read the items without building the array the function would be given. The results, the
+  errors and the steps counted are those of the general path, which still runs where a value
+  is not a number, an item is an array, or `$sum` names another function.
 
 ### Fixed
 
