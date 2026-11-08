@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Each node checks the stack with one comparison of addresses: the evaluation keeps the floor of
+  the stack it runs on, and goes through `stacker` only below it, where it grows the stack as
+  before. A source and a cancellation token take one test together. `recursion` is 11 to 17%
+  faster, the shipping rule 2 to 7%.
+
 ## [0.31.0]
 
 A small map for objects. Every object, tuple and `$match` result keeps its fields in a vector,

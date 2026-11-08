@@ -20,8 +20,7 @@ pub fn exhausted() -> bool {
         // rustc links wasm32 modules with `--stack-first`: the stack occupies the start of
         // linear memory and grows down towards address 0, so the address of a local is the
         // space left.
-        let marker = 0u8;
-        (std::hint::black_box(&marker) as *const u8 as usize) < RED_ZONE
+        position() < RED_ZONE
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -36,12 +35,56 @@ pub fn grow<R>(f: impl FnOnce() -> R) -> R {
     musl::map_main_stack();
     #[cfg(not(target_arch = "wasm32"))]
     {
-        stacker::maybe_grow(128 * 1024, 4 * 1024 * 1024, f)
+        stacker::maybe_grow(NATIVE_RED_ZONE, 4 * 1024 * 1024, f)
     }
     #[cfg(target_arch = "wasm32")]
     {
         f()
     }
+}
+
+/// Stack bytes [`grow`] keeps free on native targets.
+#[cfg(not(target_arch = "wasm32"))]
+const NATIVE_RED_ZONE: usize = 128 * 1024;
+
+/// The address below which a recursive step must go through [`grow`] (natively) or stop
+/// ([`exhausted`], on WebAssembly), for a hot recursion that keeps it, such as the evaluator,
+/// and compares an address with it in [`above`] at each step instead of reading `stacker`'s
+/// thread-local limit. It holds for the stack the caller runs on: a step run by [`grow`] on a
+/// new segment takes the floor of that segment, and puts the caller's back when it returns.
+/// `usize::MAX` when the limit of the stack is unknown, so that every step goes through
+/// [`grow`], as it would without a floor.
+#[inline]
+pub fn floor() -> usize {
+    #[cfg(target_arch = "wasm32")]
+    {
+        RED_ZONE
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        #[cfg(all(target_os = "linux", target_env = "musl"))]
+        musl::map_main_stack();
+        match stacker::remaining_stack() {
+            Some(remaining) => position()
+                .saturating_sub(remaining)
+                .saturating_add(NATIVE_RED_ZONE),
+            None => usize::MAX,
+        }
+    }
+}
+
+/// Whether the stack is above `floor` (from [`floor`]), so that a step may run without [`grow`].
+#[inline(always)]
+pub fn above(floor: usize) -> bool {
+    position() >= floor
+}
+
+/// The address of a local, about the stack pointer. Native stacks grow down on every target
+/// jlens supports, and so does WebAssembly's (see [`exhausted`]).
+#[inline(always)]
+fn position() -> usize {
+    let marker = 0u8;
+    std::hint::black_box(&marker) as *const u8 as usize
 }
 
 /// The main thread on musl. `stacker` asks `pthread_getattr_np` where a thread's stack ends,

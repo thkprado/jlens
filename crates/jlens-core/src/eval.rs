@@ -320,6 +320,12 @@ pub(crate) struct Evaluator<'t, 'a> {
     tracer: Option<&'t mut dyn Tracer>,
     /// The state of an input read from a `Source`, which can fail (ADR 0010, decision 6).
     source: Option<Rc<Shared>>,
+    /// Whether each step reads [`Self::source`] or the cancellation token: one test on each
+    /// node for both when the evaluation has neither.
+    watched: bool,
+    /// The stack's floor ([`crate::stack::floor`]) for the segment the evaluation runs on:
+    /// below it, a node grows the stack (natively) or fails with `D1011` (WebAssembly).
+    stack_floor: usize,
     /// The string of each string literal evaluated, by node id, made the first time: an
     /// `Expression` is shared between threads, so its tree cannot hold the `Rc<str>` a value
     /// takes.
@@ -496,6 +502,7 @@ pub(crate) fn evaluate<'a, 'v, R>(
         Some(_) => budget.min(CLOCK_EVERY),
         None => budget,
     };
+    let limits_cancel = limits.cancel_token.is_some();
     let mut ev = Evaluator {
         depth: 0,
         steps: Cell::new(first),
@@ -508,8 +515,10 @@ pub(crate) fn evaluate<'a, 'v, R>(
         pictures: Vec::new(),
         clock: None,
         tracer,
+        watched: source.is_some() || limits_cancel,
         source,
         literals: Vec::new(),
+        stack_floor: crate::stack::floor(),
     };
     let mut input = input;
     let env = Rc::new(Frame {
@@ -669,8 +678,18 @@ impl<'a> Evaluator<'_, 'a> {
             return Err(Error::new("D1011").with("value", self.limits.max_depth));
         }
         self.charge(1)?;
-        self.read_failure()?;
-        self.cancelled()
+        self.watch()
+    }
+
+    /// Fails with `U1004` once the input's source has failed, or with `U1003` once the
+    /// evaluation is cancelled; one test when it can do neither.
+    #[inline]
+    fn watch(&self) -> Result<()> {
+        if self.watched {
+            self.read_failure()?;
+            self.cancelled()?;
+        }
+        Ok(())
     }
 
     /// Spends `steps` of the budget, those the general path would take where a fast path skips
@@ -825,13 +844,31 @@ impl<'a> Evaluator<'_, 'a> {
         self.eval_grow(expr, input, env)
     }
 
-    /// Evaluates with stack growth on native targets, and a stack check on WebAssembly.
+    /// Evaluates with stack growth on native targets, and a stack check on WebAssembly. Above
+    /// the stack's floor, a node runs with one comparison of addresses.
     #[inline]
     fn eval_grow(&mut self, expr: &Node, input: &Value<'a>, env: &Env<'a>) -> Result<Value<'a>> {
+        if crate::stack::above(self.stack_floor) {
+            return self.eval_inner(expr, input, env);
+        }
         if crate::stack::exhausted() {
             return Err(Error::new("D1011").with("value", self.depth));
         }
-        crate::stack::grow(|| self.eval_inner(expr, input, env))
+        self.grown(|ev| ev.eval_inner(expr, input, env))
+    }
+
+    /// Runs `f` below the stack's floor: through [`crate::stack::grow`], on a new segment when
+    /// little of the stack is left, with that segment's floor while `f` runs.
+    #[cold]
+    #[inline(never)]
+    fn grown<R>(&mut self, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
+        crate::stack::grow(|| {
+            let saved = self.stack_floor;
+            self.stack_floor = crate::stack::floor();
+            let result = f(self);
+            self.stack_floor = saved;
+            result
+        })
     }
 
     /// [`Self::eval`] with `enter`/`exit` events, kept out of the untraced hot path.
@@ -1584,8 +1621,7 @@ impl<'a> Evaluator<'_, 'a> {
             return Err(Error::new("D1011").with("value", self.limits.max_depth));
         }
         self.charge(1)?;
-        self.read_failure()?;
-        self.cancelled()
+        self.watch()
     }
 
     fn binary(
@@ -1996,14 +2032,20 @@ impl<'a> Evaluator<'_, 'a> {
         args: Vec<Value<'a>>,
         env: &Env<'a>,
     ) -> Result<Value<'a>> {
-        if crate::stack::exhausted() {
+        let deep = !crate::stack::above(self.stack_floor);
+        if deep && crate::stack::exhausted() {
             return Err(Error::new("D1011").with("value", self.depth));
         }
         self.depth += 1;
-        let result = crate::stack::grow(|| {
-            self.guardrails()?;
-            self.apply(func, args, &Value::Null, env)
-        });
+        let result = if deep {
+            self.grown(|ev| {
+                ev.guardrails()?;
+                ev.apply(func, args, &Value::Null, env)
+            })
+        } else {
+            self.guardrails()
+                .and_then(|()| self.apply(func, args, &Value::Null, env))
+        };
         self.depth -= 1;
         result
     }

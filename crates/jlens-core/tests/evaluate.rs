@@ -431,6 +431,40 @@ fn recursion_through_native_callbacks_is_bounded() {
     }
 }
 
+/// Deep recursion on a small stack runs on new segments of stack and comes back from them, more
+/// than once in an evaluation and through functions called back: each segment's floor is kept
+/// while it runs, and the caller's put back (0.32 #3).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn deep_recursion_grows_the_stack_and_returns() {
+    let run = || {
+        let options = Options::new().max_depth(200_000);
+        for (source, expected) in [
+            (
+                "($f := function($n){ $n = 0 ? 0 : 1 + $f($n - 1) }; [$f(20000), $f(20000)])",
+                json!([20000, 20000]),
+            ),
+            (
+                "($f := function($n){ $n = 0 ? 0 : 1 + $map([$n - 1], function($v){ $f($v) })[0] }; \
+                 $f(5000) + $f(5000))",
+                json!(10000),
+            ),
+        ] {
+            let result = Expression::compile(source)
+                .unwrap()
+                .evaluate_with(None, &Bindings::new(), &options)
+                .unwrap();
+            assert_eq!(result, Some(expected), "{source}");
+        }
+    };
+    std::thread::Builder::new()
+        .stack_size(256 << 10)
+        .spawn(run)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
 #[test]
 fn guardrails_stop_catastrophic_regexes() {
     // Without a limit this match would backtrack for years (ADR 0009).
