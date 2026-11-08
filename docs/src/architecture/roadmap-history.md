@@ -298,3 +298,22 @@ takes one type name, as JSON Schema writes it, besides a list. No evaluation cod
 tables moved within the floor but for cases that draw one of two speeds. How it was measured is in
 [`docs/notes/perf-0.30.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.30.md).
 ([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0300))
+
+## 0.31
+
+*A small map for objects.* Every object jlens built or converted was an `IndexMap`, a vector and
+a hash table over it, though no object of the benchmark workload has more than 6 fields. 0.31
+gave `jlens-core` a map of its own ([ADR 0022](../adr/0022-small-map.md)): the fields in a vector,
+in insertion order, searched by length and then text, with a table of positions only past 8
+fields, where a search in order stops being faster than hashing. Every object, tuple and `$match`
+result uses it, one allocation fewer each; two objects of one shape are compared field by field,
+looking a key up only from the first pair whose keys differ; and an object constructor keeps its
+literal keys and strings by node id for each evaluation, 2 allocations for each object where it
+took 6. Against 0.30.0, `object constructor` is 7 to 25% faster, `transform` 6 to 15%, `tuples`
+7 to 14% and `distinct items` 5 to 21%, and the Python and Java packages 5 to 35% on those cases;
+nothing public changed. Before the tag, the property tests found that `$merge`'s `T0412` showed
+its argument cut against a `Document`, as the analysis read it only needed since 0.24; it reads it
+whole since. The tables were measured on an Apple M1 as well, which ranks the engines
+the same and is quieter; from 0.32 they are measured there. How it was measured is in
+[`docs/notes/perf-0.31.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.31.md).
+([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0310))

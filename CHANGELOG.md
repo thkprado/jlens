@@ -6,6 +6,39 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.31.0]
+
+A small map for objects. Every object, tuple and `$match` result keeps its fields in a vector,
+searched in order, with an index only past 8 fields, in place of a hash table; two objects are
+compared field by field; and an object constructor makes its literal keys and strings once for
+each evaluation. `object constructor` is 7 to 25% faster, `transform` 6 to 15%, `tuples` 7 to 14%
+and `distinct items` 5 to 21%, and the Python and Java packages follow. Nothing public changes.
+
+### Changed
+
+- Objects keep their fields in a private map of `jlens-core`'s own in place of `IndexMap`: a
+  vector in insertion order, searched by length and then text, with an index of positions only past 8
+  fields ([ADR 0022](docs/src/adr/0022-small-map.md)). Each object, tuple and `$match` result
+  takes one allocation fewer, and a tuple step copies the tuple it extends with room for the
+  fields it adds: `tuples` is 7 to 14% faster, `distinct items` up to 21% with a converted input.
+- `=`, `!=` and `$distinct` compare two objects field by field while their keys match, and look
+  a key up only from the first pair that differs: `$distinct` over 200 objects of 12 fields, each
+  twice, is 44% faster against a `Document`.
+- An object constructor makes its literal keys and literal string values once for each
+  evaluation, not once for each object: `items.{'code': code, 'kind': 'item'}` allocates 2 times
+  for each object instead of 6, and `object constructor` is 21% faster on the system heap.
+
+### Fixed
+
+- `Expression::reads` reads the arguments of `$merge` whole, since its `T0412` gives the whole
+  argument as its `value`: against a `Document`, a binding cut by it showed an object's fields as
+  `{}` there, in `($y := $merge($x); 1)`. The error code was right.
+
+### Documentation
+
+- The performance page gives the native table on an Apple M1 beside the Ryzen's, and the
+  reference, the fastest engine and jlens on the M1 for each platform.
+
 ## [0.30.0]
 
 Value requests with their context. A value request names the fields compared beside the value in
@@ -1347,7 +1380,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/thkprado/jlens/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/thkprado/jlens/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/thkprado/jlens/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/thkprado/jlens/compare/v0.27.0...v0.28.0

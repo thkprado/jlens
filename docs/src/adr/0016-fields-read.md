@@ -300,6 +300,11 @@ read nothing of `$x`, so the bindings cut by its `Reads` dropped `$x`, and the e
 which is all the check looks at. The places of its value are unchanged. The other four accept
 any value.
 
+That kept the error code, not its text: the `T0412` gives the whole argument as its `value`, and
+against a `Document` the bindings cut by that `Reads` showed `{"p": [...]}` as `{}` there. The
+property tests found it in 0.31 (`a[($y := $merge($x); 1)]`), and `$merge` reads its arguments
+whole since.
+
 ## Amendment: a focus and a tail call (0.24)
 
 A run of the property tests with `PROPTEST_CASES=100000` found two more expressions whose

@@ -2109,6 +2109,15 @@ fn found_reads_keep_what_an_evaluation_needs() {
     // its argument is read even when its result is not used.
     let expr = Expression::compile("($y := $merge($x); a)").unwrap();
     agrees_when_cut(&expr, &expr.reads()).unwrap();
+    // And read whole, as its `T0412` gives the argument as its `value`: against a document the
+    // bindings were cut to `{}` there (the property tests, 0.31 #8).
+    let expr = Expression::compile("a[($y := $merge($x); 1)]").unwrap();
+    let input = input();
+    let options = Options::new();
+    let lazy = expr.evaluate_with(Some(&input), &bindings(), &options);
+    let document = expr.evaluate_document(&Document::new(&input), &bindings(), &options);
+    assert_eq!(lazy.as_ref().unwrap_err().code(), "T0412");
+    assert_eq!(format!("{document:?}"), format!("{lazy:?}"));
     // And a predicate evaluated once, whose steps overflowed across a read of the clock.
     let expr = Expression::compile("items@$o.$x.($k := $; $x.$$.o.p[$k])").unwrap();
     agrees_when_cut_with(&expr, &expr.reads_with(&without_input(bindings())), true).unwrap();
