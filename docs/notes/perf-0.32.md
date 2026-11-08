@@ -92,3 +92,42 @@ input's source and the cancellation token. Now:
 - `number formatting` on the M1, alone in 20 rounds: +0.9% (fastest +1.2%), at the M1's floor; it
   evaluates few nodes per item, and it is faster on the Ryzen, so it is taken as layout.
 - The two parts were not measured apart.
+
+## #4: one frame fewer for each lambda call
+
+Each call of a lambda made its frame with `Rc::new` and freed it when the call returned, and so
+did each block that binds a variable. Now the evaluator keeps the frames whose scope ended with
+nothing else holding them (`Rc::get_mut` succeeds: no closure, thunk or entry of the list of
+cyclic frames refers to them), and the next call or block takes one of them before allocating.
+Their bindings and parent are dropped when the scope ends, as before. The kept frames make a
+list through their own `parent`, so the evaluator gains one field and the list never allocates;
+it holds at most the frames that were once alive together, and the evaluator drops it one frame
+at a time, since a list dropped through the parents would take the stack as deep as the
+recursion went (the test of 20,000 levels on a 256 KiB thread overflows without that loop).
+
+Two ways to keep them were measured first and left:
+
+- In a `Vec`: an evaluation with one block (`index in a variable`) paid the list's allocation
+  for a frame it never reused, +2 to 3.5% on both machines.
+- In an array of 16 in the evaluator: on the M1, `path` +6 to 7% and `regex` +4 to 5% in every
+  mode, cases that make no frame, from the 136 bytes the evaluator grew.
+
+`cargo xtask ab` against 18e3f95 (the Ryzen) and the same tree on the M1, which has #3's
+evaluator, 10 rounds, medians:
+
+| | Ryzen `document` | `evaluate` | `source` | M1 `document` | `evaluate` | `source` |
+|---|---:|---:|---:|---:|---:|---:|
+| `recursion` | -12.8% | -12.5% | -13.0% | -7.2% | -7.1% | -7.2% |
+| shipping rule | -0.5% | -4.6% | -1.2% | +0.3% | +0.2% | -0.6% |
+| `index in a variable` | -0.5% | +0.4% | +0.7% | +2.3% | +1.8% | +1.2% |
+| `index into 10,000 items` | -2.0% | -0.7% | +1.3% | +0.9% | +1.6% | +1.1% |
+
+- Every other case is between -4.0% and +1.8%, except `path` in the M1's `source` mode, +6.5% on
+  the median and -1.3% on the fastest round.
+- Alone in 20 rounds on the M1, `index in a variable` is +0.0% (`document`) and +0.4%
+  (`evaluate`), and `path` -1.0% and +2.8% (fastest -0.8%); `index into 10,000 items` is +1.5%
+  (`document`, about 5 ns) and +0.5%. That case makes no frame: the change reaches it only by the
+  evaluator's one more field and the test of an empty list when it is dropped, so it is taken as
+  layout.
+- #3 and #4 together make `recursion` about 22% faster on the Ryzen and 22% on the M1 than
+  0.31.0, so the series goes on to #5.

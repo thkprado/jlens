@@ -12,6 +12,8 @@ All notable changes are recorded here. The format follows
   the stack it runs on, and goes through `stacker` only below it, where it grows the stack as
   before. A source and a cancellation token take one test together. `recursion` is 11 to 17%
   faster, the shipping rule 2 to 7%.
+- A lambda's call, and a block that binds a variable, reuse a frame whose scope has ended
+  with nothing holding it, in place of allocating one: `recursion` is another 7 to 13% faster.
 
 ### Fixed
 

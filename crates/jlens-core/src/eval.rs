@@ -307,6 +307,11 @@ pub(crate) struct Evaluator<'t, 'a> {
     /// Frames that may be part of reference cycles (a frame binding a closure that captures
     /// it). Their bindings are cleared when the evaluation ends so the memory is reclaimed.
     cyclic: Vec<Weak<Frame<'a>>>,
+    /// Frames of calls and blocks that ended unshared, empty and without a parent, for the next
+    /// to reuse instead of allocating one (0.32 #4): the last kept, whose parent is the one kept
+    /// before it. A list of them on the heap, or in place, cost an evaluation with few calls
+    /// more than it saved; these are at most the frames once alive together.
+    spare: Option<Env<'a>>,
     regexes: HashMap<(String, String), Rc<Regex>>,
     /// The pictures `$formatNumber` parsed last, at most `numeric::PICTURES`.
     pictures: Vec<Picture>,
@@ -338,6 +343,12 @@ impl Drop for Evaluator<'_, '_> {
             if let Some(frame) = frame.upgrade() {
                 frame.vars.borrow_mut().clear();
             }
+        }
+        // One by one: dropped through their parents, a recursion's frames would take the
+        // stack as deep as it went.
+        let mut spare = self.spare.take();
+        while let Some(mut frame) = spare {
+            spare = Rc::get_mut(&mut frame).and_then(|kept| kept.parent.take());
         }
     }
 }
@@ -511,6 +522,7 @@ pub(crate) fn evaluate<'a, 'v, R>(
         rng: limits.seed.map_or(0, |seed| splitmix64(seed) | 1),
         limits,
         cyclic: Vec::new(),
+        spare: None,
         regexes: HashMap::new(),
         pictures: Vec::new(),
         clock: None,
@@ -631,6 +643,38 @@ impl<'a> Evaluator<'_, 'a> {
 
     fn child(&mut self, parent: &Env<'a>) -> Env<'a> {
         Frame::new(Some(parent))
+    }
+
+    /// A frame for a call or a block, whose scope ends with it: one kept by [`Self::release`]
+    /// when there is one, so that a call allocates no frame (0.32 #4).
+    #[inline]
+    fn frame(&mut self, parent: &Env<'a>, vars: Vars<'a>) -> Env<'a> {
+        if let Some(mut frame) = self.spare.take()
+            && let Some(kept) = Rc::get_mut(&mut frame)
+        {
+            self.spare = kept.parent.replace(parent.clone());
+            *kept.vars.get_mut() = vars;
+            return frame;
+        }
+        Rc::new(Frame {
+            vars: RefCell::new(vars),
+            parent: Some(parent.clone()),
+            input: Value::Undefined,
+            functions: None,
+        })
+    }
+
+    /// Keeps a frame made by [`Self::frame`] once its scope has ended, unless something still
+    /// holds it (a closure, a thunk, the list of frames that may be cyclic): its bindings and its
+    /// parent are dropped now, as they were when the frame was, and its parent links it to the
+    /// frames kept before it.
+    #[inline]
+    fn release(&mut self, mut frame: Env<'a>) {
+        if let Some(kept) = Rc::get_mut(&mut frame) {
+            *kept.vars.get_mut() = Vars::Empty;
+            kept.parent = self.spare.take();
+            self.spare = Some(frame);
+        }
     }
 
     /// A frame binding every field of a tuple (`createFrameFromTuple`). Its fields are known, so
@@ -962,16 +1006,17 @@ impl<'a> Evaluator<'_, 'a> {
                 }
             }
             NodeKind::Block { exprs, frame } => {
-                let child;
-                let frame = if *frame {
-                    child = self.child(env);
-                    &child
-                } else {
-                    env
-                };
                 let mut result = Value::Undefined;
-                for e in exprs {
-                    result = self.eval(e, input, frame)?;
+                if *frame {
+                    let child = self.frame(env, Vars::Empty);
+                    for e in exprs {
+                        result = self.eval(e, input, &child)?;
+                    }
+                    self.release(child);
+                } else {
+                    for e in exprs {
+                        result = self.eval(e, input, env)?;
+                    }
                 }
                 result
             }
@@ -2220,16 +2265,13 @@ impl<'a> Evaluator<'_, 'a> {
         // Missing arguments are undefined so that they shadow outer variables.
         args.resize_with(lambda.params().len(), Value::default);
         let cyclic = args.iter().any(may_hold_frame);
-        let frame = Rc::new(Frame {
-            vars: RefCell::new(Vars::Call(function.clone(), args)),
-            parent: Some(lambda.env.clone()),
-            input: Value::Undefined,
-            functions: None,
-        });
+        let frame = self.frame(&lambda.env, Vars::Call(function.clone(), args));
         if cyclic {
             self.cyclic.push(Rc::downgrade(&frame));
         }
-        self.eval(&lambda.def.body, &lambda.input, &frame)
+        let result = self.eval(&lambda.def.body, &lambda.input, &frame);
+        self.release(frame);
+        result
     }
 
     /// Partial application (jsonata-js `evaluatePartialApplication`).
