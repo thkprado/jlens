@@ -114,7 +114,9 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    (cd crates/jlens-wasm/pkg && npm pack --dry-run)
    ```
 
-5. Commit, push the commit to `main`, tag it `vX.Y.Z`, and push the tag. The `Release` workflow
+5. Before the tag, check that Maven Central has room for one more release
+   ([its limits](#publishing-the-java-package)). Commit, push the commit to `main`, tag it
+   `vX.Y.Z`, and push the tag. The `Release` workflow
    first builds the `jlens` binaries for Linux, macOS and Windows, the Python wheels and
    source distribution, and the Java package's JAR with the libraries of its seven targets,
    each tested on its platform (CI builds all three on each push to `main` too), and waits for
@@ -279,6 +281,16 @@ deployment, which the Portal validates and then holds until the maintainer publi
 workspace and of `pom.xml` (CI's Java job fails on each push while those two differ), and that
 the JAR it built is byte for byte the one the JAR workflow tested on the seven targets: the JAR's
 entries have a fixed time (`project.build.outputTimestamp`).
+
+Maven Central limits what a namespace publishes (2026): about seven releases a month, 78 MB and
+1,167 files a release. A release of jlens is about 9 MB in 24 files, so the number of releases
+binds first; going past a limit starts a grace period of 30 days. Before each tag, read the
+count in the Portal's **Usage Center**. When it leaves no room, release the other channels and
+**Drop** the Java deployment at step 6: the Java package then skips that version. Say so in the
+version's section of `CHANGELOG.md`, and keep the Maven and Gradle snippets of the installation
+page and the Java guide at the last version published there. The next release with room
+publishes the Java package again. Whether a dropped deployment counts toward the limit is not
+known yet.
 
 To set it up, once:
 

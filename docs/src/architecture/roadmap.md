@@ -37,19 +37,26 @@ are 3 to 5 times faster than jlens on most cases that do much work per item, abo
 variable lookup at a tenth of `recursion` and next to nothing elsewhere. Most of the time goes to
 what every node costs: the dispatch, the check of its result, and the guards (depth, steps,
 cancellation, the stack), which alone take 10% of `recursion` and 5% of the shipping rule. Items
-#3 to #6 lower that cost in `jlens-core`, so that every package gains. Each is measured against
-0.31.0 and kept only past the floor. If #3 and #4 together gain less than 5%, the series stops
+#3 to #6 lower that cost in `jlens-core`, so that every package gains. #8 and #9 come first, so
+that each of them is measured against up-to-date dependencies, from #8's commit, and kept only
+past the floor. If #3 and #4 together gain less than 5%, the series stops
 there, and the performance page says the interpreter is near its limit.
 
 | # | Item | Done when | Status |
 |---|---|---|---|
 | 1 | The page on the M1 | The next release's measure item fills every table from the M1 (jlens and the controls; the other engines from 0.31's M1 runs until their versions change), states the M1 as the machine and the Ryzen as an `ab` check only, and folds the section "On an Apple M1" into the tables | planned |
 | 2 | `filter + aggregate` with Python values on the M1 | Its 3 to 4% against 0.30.0, found by 0.31 #7, explained or removed | planned |
-| 3 | Cheaper guards for each node: the stack check and `guardrails` | `cargo xtask ab` against 0.31.0 in each mode, on the M1 and the Ryzen: `recursion` and the shipping rule faster past the floor, nothing slower; `D1011` and `U1006` where they were, the robustness properties with `PROPTEST_CASES=100000`; or reverted, with the reason in `perf-0.32.md` | planned |
+| 3 | Cheaper guards for each node: the stack check and `guardrails`; after #8 and #9 | `cargo xtask ab` against #8's commit in each mode, on the M1 and the Ryzen: `recursion` and the shipping rule faster past the floor, nothing slower; `D1011` and `U1006` where they were, the robustness properties with `PROPTEST_CASES=100000`; or reverted, with the reason in `perf-0.32.md` | planned |
 | 4 | One `Rc<Frame>` fewer for each lambda call (6% of `recursion`); after #3 | As #3; the depth WebAssembly reaches by default (500) kept | planned |
 | 5 | Aggregates over a field as nodes of their own, chosen when the expression is compiled: `$sum`, `$average`, `$max`, `$min` and `$count` of `x.f`, `$count(x[f = literal])` | As #3, on the cases that use them; their results and errors those of the general path; `cargo xtask differential` with 20,000 cases clean | planned |
 | 6 | Variables in fixed slots, resolved when the expression is compiled; only if #3 to #5 leave the lookup above a tenth of `recursion` | As #3; `$eval` sees the variables of its block as before | planned |
 | 7 | Every package after #3 to #6 | `python.py ab` and `cargo xtask java-compare ab` against 0.31.0, and `compare.mjs --pkg` for the WebAssembly package; what each gains or loses in `perf-0.32.md` | planned |
+| 8 | The dependencies at their newest versions, before #3 | As step 1 of the release checklist says: `cargo update` here and in `fuzz/`, npm, both `pom.xml`, the Maven Wrapper and the actions; `cargo xtask ab` against 0.31.0 in each mode, what passes the floor explained | planned |
+| 9 | Upstream, before #3: stacker#155 and #156, which #3 depends on, `regress` after `95c0404`, jsonata-js's commits after `c5be116` and its version on npm | Each `regress` commit worth porting ported one at a time, or none; each jsonata-js fix checked against jlens; the watch list updated | planned |
+| 10 | A path step without the stall 0.27 found: a `Value` written as a tag byte and 16 bytes, then read as 16 bytes at once, about 7 times an item | As #3, on `path` and `names over items`; or the cause recorded and left | planned |
+| 11 | An evaluation against documents with no input: `evaluate_document_with` needs one, so variables bound to documents cannot go with an undefined `$`, as `evaluate(None, ..)` allows | An addition to the API, nothing changed; `$` undefined as with `evaluate(None, ..)`; a test, the crate guide; the packages checked for the same gap | planned |
+| 12 | Maven Central's limit in the release checklist | Before the tag, the checklist reads the count on the Central Portal, and says what to do when there is no room | done: [`CONTRIBUTING.md`](https://github.com/thkprado/jlens/blob/main/CONTRIBUTING.md#publishing-the-java-package); without room, the Java package skips the version |
+| 13 | Release 0.32.0 | The release checklist, with room on Maven Central or the Java package skipping 0.32.0 (#12); the channels checked | planned |
 
 ## In exploration: a regular expression engine of jlens's own
 
