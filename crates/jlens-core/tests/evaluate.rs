@@ -384,6 +384,107 @@ fn a_read_in_a_lambdas_body_takes_its_parameter_only_from_a_call_of_that_lambda(
 }
 
 #[test]
+fn a_frame_kept_for_reuse_is_one_nothing_else_holds() {
+    // A call's or a block's frame goes back to the evaluation when its scope ends, for the next
+    // to reuse (0.32 #4), unless a closure or a thunk still holds it; and a read in a lambda's
+    // body takes its parameter by its place (0.32 #6). Closures that outlive their call or
+    // block, recursion through closures kept in variables, and `$eval` inside a lambda, against
+    // the calls and blocks that run between. The results are those of jsonata-js 2.2.2.
+    let cases = [
+        // Closures that outlive their call, called after other calls ended.
+        (
+            "($mk := function($x){ function(){ $x } }; $fs := [1..5].$mk($); \
+             $map($fs, function($f){ $f() }))",
+            json!([1, 2, 3, 4, 5]),
+        ),
+        (
+            "($mk := function($x){ function($y){ $x + $y } }; $a := $mk(1); $b := $mk(10); \
+             [$a(1), $b(1), $mk(100)(1), $a(2)])",
+            json!([2, 11, 101, 3]),
+        ),
+        (
+            "($acc := function($n){ $n = 0 ? [] : $append($acc($n - 1), function(){ $n }) }; \
+             $map($acc(5), function($f){ $f() }))",
+            json!([1, 2, 3, 4, 5]),
+        ),
+        // Closures that outlive their block.
+        (
+            "($fs := [1..3].($y := $ * 10; function(){ $y }); \
+             $map($fs, function($f){ ($z := 0; $f() + $z) }))",
+            json!([10, 20, 30]),
+        ),
+        (
+            "function($x){ ($y := $x * 2; function($z){ $x + $y + $z }) }(1)(10)",
+            json!(13),
+        ),
+        (
+            "($f := function($x){ ($y := $x + 1; function(){ ($w := $y * 2; $w + $x) }) }; \
+             $g := $f(1); $h := $f(5); [$g(), $h(), $g()])",
+            json!([5, 17, 5]),
+        ),
+        // Recursion through closures kept in variables.
+        (
+            "($fact := function($n){ $n <= 1 ? 1 : $n * $fact($n - 1) }; $fact(10))",
+            json!(3628800),
+        ),
+        (
+            "($even := function($n){ $n = 0 ? true : $odd($n - 1) }; \
+             $odd := function($n){ $n = 0 ? false : $even($n - 1) }; \
+             [$even(10), $odd(7), $even(7)])",
+            json!([true, true, false]),
+        ),
+        (
+            "($Y := function($f){ function($n){ $f($f, $n) } }; \
+             $fib := $Y(function($self, $n){ $n < 2 ? $n : \
+             $self($self, $n - 1) + $self($self, $n - 2) }); $fib(15))",
+            json!(610),
+        ),
+        (
+            "($walk := function($t){ $t.kids ? $t.v + $sum($t.kids.$walk($)) : $t.v }; \
+             $walk({'v': 1, 'kids': [{'v': 2}, {'v': 3, 'kids': [{'v': 4}]}]}))",
+            json!(10),
+        ),
+        (
+            "($compose := function($f, $g){ function($x){ $g($f($x)) } }; \
+             $inc := function($x){ $x + 1 }; $twice := function($f){ $compose($f, $f) }; \
+             $twice($twice($inc))(0))",
+            json!(4),
+        ),
+        // `$eval` inside a lambda, binding in the frame of its caller.
+        ("function($n){ ($eval('$y := 3'); $y + $n) }(1)", json!(4)),
+        // With no block, in the call's frame; jsonata-js gives `[3, 1]`, as its items run
+        // concurrently (`a_constructor_evaluates_its_items_in_order`).
+        (
+            "function($n){ [$eval('$y := 3'), $y, $n] }(1)",
+            json!([3, 3, 1]),
+        ),
+        (
+            "$map([1, 2, 3], function($v){ ($eval('$w := 7'); $w + $v) })",
+            json!([8, 9, 10]),
+        ),
+        (
+            "$map([1, 2, 3], function($v){ $eval('$ * 2', $v) })",
+            json!([2, 4, 6]),
+        ),
+        (
+            "($f := function($n){ $n = 0 ? 0 : $eval('$x := 1') + $f($n - 1) }; $f(5))",
+            json!(5),
+        ),
+        (
+            "($e := function($s){ $eval($s) }; [$e('1 + 1'), $e('$e(\"2 + 2\")')])",
+            json!([2, 4]),
+        ),
+        (
+            "function($x){ $eval('function($y){ $y * 2 }')($x) }(4)",
+            json!(8),
+        ),
+    ];
+    for (expr, expected) in cases {
+        assert_eq!(eval(expr, json!({})), Some(expected), "{expr}");
+    }
+}
+
+#[test]
 fn a_constructor_evaluates_its_items_in_order() {
     // The first two differ from jsonata-js on purpose (compatibility.md): its items run
     // concurrently, so that a plain `$x` reads the value from before the binding.
