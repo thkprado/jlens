@@ -280,7 +280,9 @@ Four kinds of disagreement are counted apart:
 - **V8 timed out**, or **jlens-regress was interrupted**: a search did not finish within a
   second in V8, or within about ten million backtracking steps in jlens-regress.
 - **UTF-16 code units**: without `u` or `v`, the case has a character outside the BMP, which V8
-  matches as two code units and jlens-regress as one character. A search that V8 would go on
+  matches as two code units and jlens-regress as one character. The pattern may write it as a
+  surrogate pair of escapes, `𝄞`, which V8 reads as two characters: in a class,
+  `[﻿-𝄞]` is then a range out of order. A search that V8 would go on
   inside a surrogate pair is compared up to there.
 - **Known V8 bugs**, where jlens-regress follows the specification, each recorded in the corpus:
   two groups of the same name that both take part in a match, which V8 accepts when one is in an

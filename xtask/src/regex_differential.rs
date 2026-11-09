@@ -369,11 +369,30 @@ fn agree(actual: &Value, expected: &Value) -> bool {
 }
 
 /// Whether V8 may see the case as UTF-16 code units where jlens-regress sees characters: it has
-/// no `u` or `v` flag, and a character outside the BMP in its pattern or inputs.
+/// no `u` or `v` flag, and a character outside the BMP in its pattern or inputs, written plainly
+/// or, in the pattern, as a surrogate pair of escapes: `𝄞` is two characters to V8,
+/// so `[﻿-𝄞]` is a range out of order.
 fn code_unit_case(case: &Case) -> bool {
     let astral = |text: &str| text.chars().any(|c| c > '\u{FFFF}');
     !case.flags.contains(['u', 'v'])
-        && (astral(&case.pattern) || case.inputs.iter().any(|i| astral(i)))
+        && (astral(&case.pattern)
+            || surrogate_pair_escape(&case.pattern)
+            || case.inputs.iter().any(|i| astral(i)))
+}
+
+/// Whether `pattern` has a `\u` escape of a high surrogate followed by one of a low surrogate.
+fn surrogate_pair_escape(pattern: &str) -> bool {
+    let unit = |text: &str| {
+        text.strip_prefix("\\u")
+            .and_then(|rest| rest.get(..4))
+            .filter(|hex| hex.bytes().all(|b| b.is_ascii_hexdigit()))
+            .and_then(|hex| u16::from_str_radix(hex, 16).ok())
+    };
+    pattern.match_indices("\\u").any(|(i, _)| {
+        let rest = &pattern[i..];
+        matches!(unit(rest), Some(0xD800..=0xDBFF))
+            && matches!(rest.get(6..).and_then(unit), Some(0xDC00..=0xDFFF))
+    })
 }
 
 /// Whether a case that differs may meet one of V8's bugs, where jlens-regress follows the
