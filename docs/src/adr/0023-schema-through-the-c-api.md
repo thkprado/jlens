@@ -40,7 +40,7 @@ what the JAR's deflate gives):
 The diagnostics bring the JSON Schema reader and the typing, 162 KB; the three editor operations
 add 89 KB to that. Over the JAR's seven targets, of about 9.1 MB together, that is about 0.5 MB
 for the first row and 0.7 MB for both. The code of #5 and #6 is not written yet and is not in
-these numbers; roadmap 0.33 #10 measures the library and the JAR as released.
+these numbers; roadmap 0.33 #11 measures the library and the JAR as released.
 
 ## Decision
 
@@ -181,7 +181,7 @@ Five exports: `jlens_schema_new`, `jlens_schema_free`, `jlens_service_new`,
 - **The size.** The Windows library is 3,346,432 bytes, 7.1% over 0.32.0 (1,258,732
   compressed, 7.8%), where the probe had measured 5.2% and 5.9%: the exports read the
   declarations and write the diagnostics as JSON, which the probe did not. Decision 1 stands;
-  roadmap 0.33 #10 measures the library and the JAR as released. No evaluation export changed.
+  roadmap 0.33 #11 measures the library and the JAR as released. No evaluation export changed.
 ## Results: the Java package (0.33 #4)
 
 `Schema`, `LanguageService` with its builder, and the `Diagnostic` record with its `Severity`.
@@ -227,5 +227,5 @@ Two exports: `jlens_service_uses` and `jlens_uses_changes`.
 - **The size.** The Windows library is 3,507,200 bytes, 12.2% over 0.32.0 (1,321,041
   compressed, 13.1%), and 4.8% over the library of #3: the answers of #5 and #6, read and
   written as JSON, add 161 KB, as much as the schema reader and the typing did. Decision 1
-  estimated 5 to 6% before #5 and #6; roadmap 0.33 #10 measures the library and the JAR as
+  estimated 5 to 6% before #5 and #6; roadmap 0.33 #11 measures the library and the JAR as
   released, and looks at what of these 161 KB the JSON forms cost.
