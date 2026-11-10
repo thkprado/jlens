@@ -2,7 +2,8 @@
 
 How the measurements of roadmap 0.32 were made: methods, traps and intermediate numbers that the
 [performance page](../src/architecture/performance.md) leaves out. The item numbers are those of
-the plan in [the roadmap](../src/architecture/roadmap.md).
+the plan in [the roadmap](../src/architecture/roadmap.md); the last sections hold what its items
+without a measurement found.
 
 ## Where an evaluation's time goes at 0.31.0 (before the plan)
 
@@ -584,3 +585,64 @@ case: the three cases above, a match below the root, and #20's two with a `$clon
 Every other case is between -1.6% and +2.0%, the largest `path` in `document` (+2 ns). #21 does
 not touch `recursion`'s path; aligned, A takes 232 to 233 µs and B 230 µs, so A's 241 to 247 µs
 unaligned was placement, and nothing is gained or lost past the floor.
+
+## #8 and #9: dependencies and upstream
+
+Nothing was measured for either, as neither changed the code built.
+
+#8: only Jackson moved, to 2.23.0, in the Java comparison harness. Both `Cargo.lock`s, npm, the
+Maven Wrapper and the actions were already at their newest, so the code built is 0.31.0's, no
+`ab` was run, and #3's base is 0.31.0.
+
+#9, on 11-08: stacker#155 has no reply and #156 is still open at `3b927ba`, so #3 keeps the musl
+workaround in `stack.rs`. `regress` has nothing after `95c0404`, and its side branches have not
+moved. jsonata-js has nothing after `c5be116` and is still 2.2.2 on npm, and none of its open pull
+requests has changed.
+
+## #14, #15 and #22: what the differential found
+
+Three runs of `cargo xtask differential` met jsonata-js quirks in new places. Each ends in a row
+of `compatibility.md` and a rule in `xtask/src/differential.rs`, not in a measurement.
+
+#14, seed 1794147750000045200, found by #5's run: `items#$i.($x)^(price)^(*)` fails with `T2008`
+in jsonata-js and gives a value in jlens; a single sort, or the same path without `#$i`, agrees.
+It is the leak `compatibility.md` already listed for a filter or group-by after such a sort.
+jsonata-js's `$sort` returns a plain array, without the mark of a tuple stream, so the next
+order-by evaluates its keys against the internal tuples: every key missing, and the first order
+kept (`items#$i^(price)^(>$i)`), or `T2008` when a key is the tuple itself (`$`, `*`). jlens keeps
+its result, the one the documentation gives; the row and the differential's rule now name a second
+order-by, and a test has both cases.
+
+#15, found by #14: `items#$i^(p)#$j` never binds `$j` in jsonata-js, which sets the index only on
+a sort that starts the stream, and jlens copied it without a row. jsonata-js binds the position in
+`items^(p)#$j` and in `items#$i^(p)[true]#$j`, so the unbound one is a slip, wrong by the
+documentation. jlens now binds `$j`; the row is in `compatibility.md`, the differential's rule for
+an order-by after a tuple step also covers a position, and tests hold both.
+
+#22, seed 1794171808827423200, found by #20's run, at 0de804f too. Two divergences, both quirks
+already in `compatibility.md`, and jlens keeps its results:
+
+- Nested bindings of `$w` and `$x` in an object constructor's key and value
+  (`{$w := $string($x := {$w := $string($w := $x): $w}): $string($x)}`, `$x` bound to
+  `[1, "two", null]`): jsonata-js's key and value nest one level more. It is the left side of `?:`
+  evaluated twice, which binds `$w` and `$x` again from the first binding; that side binding a
+  name it reads is now a dropped quirk.
+- An order-by over a block's result holding `[]`, where jsonata-js gives `[null]`. It is a
+  group-by's `undefined` pushed into an empty array: the runner saw it only in the input document,
+  and here the array is an item of the value being sorted (`([1, []])^(({}; 1))` is `[1, [null]]`);
+  it now sees the push itself, wherever the array is.
+
+Both rows were widened; the seed and a new one are clean with 20,000 cases each.
+
+## #18: the plan's code checked whole
+
+#3 to #6, #10 and #16 changed the evaluator the same day, after the last scheduled fuzz (11-04)
+and differential (11-02) runs, so the final code was checked before the tables. Nothing was found.
+
+- At ecc0b54, the differential's 20,000 cases agree (0 differ).
+- The fuzz workflow's six targets, run as it runs them for 10 minutes each under WSL from the
+  seeds of `cargo xtask fuzz-seed` (1 to 2.2 million inputs each), found nothing.
+- A test aimed at #4's reused frames and #6's parameter places (closures that outlive their call
+  or block, recursion through closures kept in variables, `$eval` inside a lambda) gives
+  jsonata-js's results, but for an array constructor's items run in order (`compatibility.md`),
+  and fails when #6's check that the frame calls the same lambda is removed.

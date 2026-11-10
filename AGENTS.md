@@ -88,7 +88,7 @@ cargo xtask java                                  # after touching jlens-java, j
   - Python snippets in the Python guide are scripts in `crates/jlens-python/tests/guide/`,
     included whole or between `ANCHOR` comments.
   - Never edit the generated pages by hand: run `cargo xtask gen-docs`.
-  - Significant design decisions get an ADR in `docs/adr/`.
+  - Significant design decisions get an ADR in `docs/src/adr/`.
   - The performance page and the roadmap are for readers: the performance page holds the current
     tables and what a user needs, and how a change was measured goes to `docs/notes/perf-X.Y.md`;
     the roadmap holds the open plans, one short row per item, and a finished plan becomes a
