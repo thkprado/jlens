@@ -311,7 +311,7 @@ impl Schema {
         let trimmed = path.trim();
         let trimmed = trimmed.strip_prefix('$').unwrap_or(trimmed);
         let trimmed = trimmed.strip_prefix('.').unwrap_or(trimmed);
-        let segments: Vec<&str> = trimmed.split('.').collect();
+        let segments = split_path(trimmed);
         let steps = parse_path(path)?;
         let mut shape = &self.root;
         for (i, (name, arrays)) in steps.iter().enumerate() {
@@ -473,17 +473,42 @@ fn parse_path(path: &str) -> Option<Vec<(Option<String>, usize)>> {
         return Some(Vec::new());
     }
     let mut out = Vec::new();
-    for segment in path.split('.') {
+    for segment in split_path(path) {
         let mut name = segment;
         let mut arrays = 0;
         while let Some(rest) = name.strip_suffix("[]") {
             name = rest;
             arrays += 1;
         }
+        // A name between backquotes is taken as written, the empty one included.
+        let quoted = name.len() >= 2 && name.starts_with('`') && name.ends_with('`');
         let name = name.trim_matches('`');
-        out.push(((!name.is_empty()).then(|| name.to_owned()), arrays));
+        out.push((
+            (quoted || !name.is_empty()).then(|| name.to_owned()),
+            arrays,
+        ));
     }
     Some(out)
+}
+
+/// The segments of a path: split at each `.` that is not between backquotes, so that a name
+/// holding one is written `` `a.b` ``.
+fn split_path(path: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut quoted = false;
+    for (i, b) in path.bytes().enumerate() {
+        match b {
+            b'`' => quoted = !quoted,
+            b'.' if !quoted => {
+                out.push(&path[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&path[start..]);
+    out
 }
 
 impl Shape {
@@ -724,5 +749,15 @@ mod tests {
             vec![(Some("items".into()), 1), (Some("a b".into()), 0)]
         );
         assert_eq!(parse_path("").unwrap(), vec![]);
+        // A dot between backquotes is part of the name, and `` is the empty name.
+        assert_eq!(
+            parse_path("`a.b`[].``.c").unwrap(),
+            vec![
+                (Some("a.b".into()), 1),
+                (Some(String::new()), 0),
+                (Some("c".into()), 0)
+            ]
+        );
+        assert_eq!(parse_path("[].a").unwrap()[0], (None, 1));
     }
 }

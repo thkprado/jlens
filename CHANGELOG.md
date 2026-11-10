@@ -15,6 +15,20 @@ All notable changes are recorded here. The format follows
   records, with the codes and messages of the other packages and spans in UTF-16 offsets. Both
   are shared between threads. Completion, hover, signature help and schema inference stay out
   of the Java package.
+- `jlens-schema`: `LanguageService::uses` tells what an expression uses of its schema. Given the
+  fields the expression reads (`Expression::reads`), it lists each path with what the schema
+  says there: its types, its enumeration and whether it is closed, its domain, its format and
+  whether it is required; a value read whole (`*`, `**`, `$eval`) comes with every path the
+  schema has under it, and a field the schema does not declare is marked unknown. The answer
+  (`Uses`) has one JSON form, written in order, which an application keeps beside the expression
+  and compares when a new version of the schema arrives. The schema guide has "What an
+  expression uses of its schema".
+
+### Changed
+
+- `jlens-schema`: a path of `Schema::shape_at` and of the overrides takes a field name that
+  holds a dot, between backquotes (`` customer.`odd.name` ``), and the empty name as ` `` `.
+  Such a path was split at the dot before, and found nothing.
 
 ## [0.32.0]
 

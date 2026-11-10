@@ -241,9 +241,9 @@ struct CallSite {
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct LanguageService {
-    schema: Option<Schema>,
-    variables: Vec<(String, Option<Shape>)>,
-    functions: Vec<FunctionDecl>,
+    pub(crate) schema: Option<Schema>,
+    pub(crate) variables: Vec<(String, Option<Shape>)>,
+    pub(crate) functions: Vec<FunctionDecl>,
 }
 
 /// Lexical situation at an offset.
@@ -303,7 +303,7 @@ fn is_word_char(c: char) -> bool {
 }
 
 /// Inserts a field name, quoting it with backquotes when it is not a plain name.
-fn field_insert(name: &str) -> String {
+pub(crate) fn field_insert(name: &str) -> String {
     let plain = !name.is_empty()
         && name.chars().all(is_word_char)
         && !name.starts_with(|c: char| c.is_ascii_digit() || c == '$')

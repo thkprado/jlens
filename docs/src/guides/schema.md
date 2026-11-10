@@ -259,3 +259,67 @@ Missing fields are reported only where the context is fully known. Nothing is re
 user-defined function, an object constructor or `$lookup`, so the warnings do not produce false
 alarms. Schemas inferred from samples can miss optional fields that the samples did not contain.
 Add those fields with overrides, or treat `W0201` as advice.
+
+## What an expression uses of its schema
+
+An application may store expressions written against a schema that changes. When a new version
+of the schema arrives, the diagnostics tell whether each expression still passes. They do not
+tell whether something it uses changed: a field that went from a boolean to a string leaves
+`active = true` valid, and always false.
+
+`LanguageService::uses` answers that. It takes [the fields an expression
+reads](crate.md#the-fields-an-expression-reads) and gives what the schema says of each:
+
+```rust
+use jlens_core::Expression;
+use jlens_schema::{LanguageService, Schema};
+
+let service = LanguageService::new(Some(schema));
+let expression = Expression::compile(r#"$sum(items[type = "book"].price)"#)?;
+let uses = service.uses(&expression.reads());
+let json = serde_json::to_string(&uses)?;   // kept beside the expression
+```
+
+```json
+{
+  "input": {
+    "$": {"types": ["object"]},
+    "items": {"types": ["array"], "required": true},
+    "items[]": {"types": ["object"]},
+    "items[].price": {"whole": true, "types": ["number"], "required": false},
+    "items[].type": {"whole": true, "types": ["string"], "enum": ["book", "toy"],
+                     "closed": true, "required": true}
+  },
+  "bindings": {}
+}
+```
+
+`input` holds the paths read of the input, and `bindings` those of each variable, by name;
+`input` is left out when the expression does not read its input. A path is written as the
+overrides write it: `$` is the value itself, `[]` steps into the items of an array, and a name
+that is not a plain one is written between backquotes, as in an expression (``customer.`odd
+name` ``). `Schema::shape_at` reads every path of an answer, but a name that itself holds a
+backquote. Every value on the way to a field has its own path, and so do the items of an array.
+
+What the schema says of a path:
+
+| Member | Meaning |
+|---|---|
+| `types` | The types the schema gives the value, as JSON Schema names them; left out when it gives none |
+| `enum` | The values it lists |
+| `closed` | `true` when the enumeration is declared and has no open domain, so that a value outside it is warned about (`W0206`); left out for one inferred from samples |
+| `domain` | Its [open domain](#open-domains) |
+| `format` | Its string format |
+| `required` | Whether the object that holds the field requires it. Left out for `$` and for the items of an array. A field is always there only when the fields on its way are required too |
+| `whole` | `true` when the expression reads the value whole, not only some of its fields |
+| `unknown` | `true` when the schema says nothing there: the value has no schema, or the field is not one it declares |
+
+The paths are those of the analysis of the reads, which is an upper bound. Where it follows a
+value, they are the fields the expression names, those of a predicate included. Where it does
+not (`*`, `**`, `$eval`, a value given to a host function), the value is read whole, and every
+path the schema has under it is listed. `$eval` can also read any variable: the answer then has
+`"everyBinding": true`, and every variable declared with a schema, whole. The host functions
+declared to the service are not values, and are left out of `bindings`.
+
+The answer depends on nothing else in the schema, and its paths and names are written in order:
+two schemas that give an expression the same text differ in nothing it uses.

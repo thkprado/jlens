@@ -13,6 +13,9 @@
 //!   references to fields that the schema does not have), hover and signature help for JSONata
 //!   expressions. It types each part of an expression against the schema, following the
 //!   evaluator's rules for paths, filters and variables.
+//! * **What an expression uses.** [`LanguageService::uses`] tells what the schema says of each
+//!   field an expression reads, in a form ([`Uses`]) that an application keeps and compares when
+//!   the schema changes.
 //!
 //! ```
 //! use jlens_schema::{LanguageService, Schema};
@@ -40,6 +43,9 @@ mod jsonschema;
 mod service;
 mod shape;
 mod typing;
+mod uses;
+
+pub use uses::{Use, Uses};
 
 pub use service::{
     CompletionItem, CompletionKind, Completions, FunctionDecl, Hover, LanguageService,

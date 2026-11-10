@@ -127,6 +127,92 @@ proptest! {
     }
 }
 
+/// The fields of the sample document of `what_an_expression_uses`, each with its path in the
+/// answer and the JSON pointer that removes it from the sample.
+const SAMPLE_FIELDS: &[(&str, &str)] = &[
+    ("customer", "/customer"),
+    ("customer.login", "/customer/login"),
+    ("customer.`odd.name`", "/customer/odd.name"),
+    ("items", "/items"),
+    ("items[].type", "/items/0/type"),
+    ("items[].unitPrice", "/items/0/unitPrice"),
+    ("items[].tags", "/items/0/tags"),
+    ("items[].tags[][].``", "/items/0/tags/0/0/"),
+    ("total", "/total"),
+];
+
+fn without(sample: &serde_json::Value, pointer: &str) -> serde_json::Value {
+    let mut sample = sample.clone();
+    let (parent, name) = pointer.rsplit_once('/').unwrap();
+    let removed = sample
+        .pointer_mut(parent)
+        .and_then(|p| p.as_object_mut())
+        .and_then(|o| o.remove(name));
+    assert!(removed.is_some(), "{pointer}");
+    sample
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1000))]
+
+    /// What an expression uses of its schema: every path is one the schema reads, the JSON
+    /// form reads back, and the answer does not depend on a field it does not list.
+    #[test]
+    fn what_an_expression_uses(text in text()) {
+        let Ok(expression) = jlens_core::Expression::compile(&text) else {
+            return Ok(());
+        };
+        let reads = expression.reads();
+        let sample = json!({
+            "customer": {"login": "1", "odd.name": "X"},
+            "items": [{"type": "a", "unitPrice": 1.5, "tags": [[{"": 1}]]}],
+            "total": 1
+        });
+        let service = |sample: &serde_json::Value| {
+            let schema = Schema::infer(std::slice::from_ref(sample));
+            let limit = schema.root.fields.get("customer").map(|f| f.shape.clone());
+            (
+                schema.clone(),
+                LanguageService::new(Some(schema))
+                    .with_variable("limit", limit)
+                    .with_variable("x", None)
+                    .with_function(FunctionDecl::new("rate", "A rate")),
+            )
+        };
+        let (schema, whole) = service(&sample);
+        let uses = whole.uses(&reads);
+        let json = serde_json::to_string(&uses).unwrap();
+        prop_assert_eq!(&serde_json::from_str::<jlens_schema::Uses>(&json).unwrap(), &uses);
+        prop_assert_eq!(uses.input.is_some(), reads.input().is_some());
+        prop_assert_eq!(uses.every_binding, reads.every_binding());
+        prop_assert!(!uses.bindings.contains_key("rate"));
+        let paths = uses.input.iter().flatten();
+        for (path, entry) in paths.chain(uses.bindings.get("limit").into_iter().flatten()) {
+            prop_assert!(!entry.unknown || entry.types.is_empty(), "{path}: {entry:?}");
+        }
+        for (path, entry) in uses.input.iter().flatten() {
+            // A name that holds a backquote is not read back: `shape_at` drops the quotes.
+            if entry.unknown && path.contains('`') {
+                continue;
+            }
+            prop_assert_eq!(schema.shape_at(path).is_some(), !entry.unknown, "{}", path);
+        }
+        for (name, read) in reads.bindings() {
+            prop_assert!(name == "rate" || uses.bindings.contains_key(name), "{name}: {read:?}");
+        }
+        // A field the answer does not list is not used: without it, the answer is the same.
+        // The variable `limit` has the shape of `customer`, so its fields stay.
+        let listed = |path: &str| uses.input.as_ref().is_some_and(|i| i.contains_key(path));
+        for (path, pointer) in SAMPLE_FIELDS {
+            if listed(path) || path.starts_with("customer") {
+                continue;
+            }
+            let (_, cut) = service(&without(&sample, pointer));
+            prop_assert_eq!(&cut.uses(&reads), &uses, "without {}", path);
+        }
+    }
+}
+
 #[rustfmt::skip]
 const PATH_TOKENS: &[&str] = &[
     "customer", "custmer", "login", "logn", "items", "type", "tags", "`odd name`", "odd name",
