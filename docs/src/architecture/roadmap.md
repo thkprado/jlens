@@ -39,7 +39,7 @@ today, a recursive schema and one that refers to another document, load too.
 
 | # | Item | Done when | Status |
 |---|---|---|---|
-| 1 | The dependencies at their newest versions and the upstream watch, before the rest | Step 1 of the release checklist; stacker, `regress` and jsonata-js checked | planned |
+| 1 | The dependencies at their newest versions and the upstream watch, before the rest | Step 1 of the release checklist; stacker, `regress` and jsonata-js checked | done, on 2026-11-10: nothing to move, as 0.32.0 was released the same day. Cargo (here and in `fuzz/`), npm, the Python lock, both `pom.xml` files, the Maven Wrapper and the actions are at their newest stable versions, with no advisory and no Dependabot proposal open; the Maven plugins' 4.0 betas and Maven 4.0's release candidate are left for their releases. Upstream: stacker#155 and #156 still open, `regress` has nothing after `95c0404`, jsonata-js is 2.2.2 with nothing after `c5be116` |
 | 2 | ADR 0023: the schema and the language service through the C API and in the Java package | The ADR accepted: what crosses (a schema, the diagnostics, #5 and #6; whether completion, hover and signature help do), in which form, the objects' lifetimes and threads, and what `jlens-schema` adds to the library's size, measured | planned |
 | 3 | `jlens-capi`: a schema from JSON Schema text, a language service with the variables and host functions declared, and its diagnostics | As ADR 0023 says; the C API's tests; nothing paid by a host that does not use them | planned |
 | 4 | Java: `Schema` and `LanguageService` | Diagnostics as records, their spans in UTF-16 offsets, their codes those of the other packages; JUnit; the Java guide, with "What the package leaves out" updated | planned |
