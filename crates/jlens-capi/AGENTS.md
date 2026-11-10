@@ -9,6 +9,9 @@ repository-wide rules are in the root [AGENTS.md](../../AGENTS.md).
 - The host's own values are read through a reader it calls back (`src/source.rs`); host
   functions are called back too (`src/host.rs`).
 - Audits are replied as values (`src/audit.rs`); replies carry a status byte.
+- Schemas and language services are known by handle too, and a service's diagnostics are
+  replied as JSON text (`src/schema.rs`, ADR 0023); completion, hover and signature help do
+  not cross.
 - mimalloc is its allocator.
 
 ## Rules

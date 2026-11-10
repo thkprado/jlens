@@ -671,3 +671,89 @@ proptest! {
         reply(jlens_call(1, 0, 0))?;
     }
 }
+
+/// Texts for schemas, declarations and expressions, nearly in their form included.
+fn schema_bytes() -> impl Strategy<Value = Vec<u8>> {
+    prop_oneof![
+        prop::sample::select(vec![
+            "{\"type\": \"object\", \"properties\": {\"a\": {\"type\": \"string\", \"enum\": [\"x\"]}, \"items\": {\"type\": \"array\", \"items\": {\"$ref\": \"#/$defs/item\"}}}, \"$defs\": {\"item\": {\"type\": \"object\", \"properties\": {\"price\": {\"type\": \"number\"}}}}}",
+            "{\"$ref\": \"#\"}",
+            "{\"$ref\": \"other.json\"}",
+            "{\"properties\": {\"a\": {\"$ref\": \"#/properties/a\"}}}",
+            "{\"anyOf\": [{\"type\": \"string\"}, {\"type\": [\"null\", 1]}], \"enum\": 1, \"required\": {}}",
+            "true",
+            "{\"variables\": {\"x\": null, \"$y\": 1, \"z\": 4294967297}}",
+            "{\"variables\": {\"x\": 18446744073709551615}, \"functions\": null}",
+            "{\"functions\": [{\"name\": \"$f\", \"signature\": \"<n-:n\", \"params\": [\"a\"]}, {\"name\": \"\"}]}",
+            "{\"functions\": [[\"f\"]], \"variables\": {}}",
+            "a.nope = \"y\" and $f(1, items.price) ~> $g()",
+            "items[price > $x.a].`a` & \"é😀\" & $y",
+            "$f(",
+        ])
+        .prop_map(|s| s.as_bytes().to_vec()),
+        bytes(),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1000))]
+
+    /// Schemas, services and diagnostics of any bytes, with handles of any kind in each place,
+    /// are made or fail with an error, never a panic, and every handle made is freed once.
+    #[test]
+    fn schemas_and_services_of_any_bytes_fail_cleanly(
+        texts in prop::collection::vec(schema_bytes(), 1..5),
+        picks in prop::collection::vec(any::<usize>(), 8),
+    ) {
+        let buffers: Vec<u64> = texts.into_iter().map(buffers::insert).collect();
+        let buffer = |pick: usize| buffers[picks[pick] % buffers.len()];
+        let mut schemas = Vec::new();
+        for &text in &buffers {
+            if let Replied::Handle(schema) = reply(jlens_schema_new(text))? {
+                schemas.push(schema);
+            }
+        }
+        // Handles of other kinds, and of the right kind, in each place.
+        let schema = schemas.first().copied().unwrap_or(buffer(0));
+        let mut services = Vec::new();
+        for (schema, declarations) in [
+            (0, 0),
+            (schema, 0),
+            (0, buffer(1)),
+            (schema, buffer(2)),
+            (buffer(3), schema),
+            (schema, schema),
+        ] {
+            if let Replied::Handle(service) = reply(jlens_service_new(schema, declarations))? {
+                services.push(service);
+            }
+        }
+        prop_assert!(services.len() >= 2 || schemas.is_empty(), "no declarations never fail");
+        // A service does not need the schemas it was made from.
+        for &schema in &schemas {
+            prop_assert_eq!(jlens_schema_free(schema), 1);
+            prop_assert_eq!(jlens_schema_free(schema), 0);
+            prop_assert_eq!(reply(jlens_service_new(schema, 0))?, unknown());
+        }
+        for &service in &services {
+            for &text in &buffers {
+                // Diagnostics, or the error of a text that is not UTF-8.
+                let replied = reply(jlens_service_diagnostics(service, text))?;
+                prop_assert!(
+                    replied == Replied::Value || replied == Replied::Error("U2003".to_owned()),
+                    "{:?}",
+                    replied
+                );
+            }
+            reply(jlens_service_diagnostics(service, service))?;
+            reply(jlens_service_diagnostics(buffer(4), buffer(5)))?;
+            reply(jlens_schema_new(service))?;
+            prop_assert_eq!(jlens_service_free(service), 1);
+            prop_assert_eq!(jlens_service_free(service), 0);
+            prop_assert_eq!(reply(jlens_service_diagnostics(service, buffer(6)))?, unknown());
+        }
+        for buffer in buffers {
+            prop_assert_eq!(jlens_buffer_free(buffer), 1);
+        }
+    }
+}

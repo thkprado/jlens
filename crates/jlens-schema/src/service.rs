@@ -1122,10 +1122,7 @@ impl LanguageService {
         let mut visit = |event: Event<'_, '_>| match event {
             Event::Field {
                 node, name, ctx, ..
-            } if self.schema.is_some()
-                && ctx.is_known_objects()
-                && ctx.fields().iter().all(|(n, _)| *n != name) =>
-            {
+            } if self.schema.is_some() && ctx.is_known_objects() && !ctx.has_field(name) => {
                 let known: Vec<&str> = ctx.fields().iter().map(|(n, _)| *n).collect();
                 let quoted = text[node.span.start..].starts_with('`');
                 let len = name.len() + if quoted { 2 } else { 0 };

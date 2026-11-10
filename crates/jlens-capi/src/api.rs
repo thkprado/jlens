@@ -505,7 +505,7 @@ pub(crate) fn handle_reply(handle: Option<u64>) -> Result<Vec<u8>, Vec<u8>> {
 }
 
 /// The reply holding `value` as compact JSON text.
-fn json_reply(value: &Value) -> Vec<u8> {
+pub(crate) fn json_reply(value: &Value) -> Vec<u8> {
     let text = jlens_core::format_json(value, false);
     let mut reply = Vec::with_capacity(1 + text.len());
     reply.push(REPLY_JSON);
@@ -514,7 +514,7 @@ fn json_reply(value: &Value) -> Vec<u8> {
 }
 
 /// The `U2001` reply for input that is not JSON.
-fn not_json(message: String) -> Vec<u8> {
+pub(crate) fn not_json(message: String) -> Vec<u8> {
     failure(&Error::new("U2001").with("message", message), "")
 }
 

@@ -101,15 +101,25 @@ impl<'s> Ty<'s> {
 
     /// The fields available on the (element) shapes, merged by name in first-seen order.
     pub fn fields(&self) -> Vec<(&'s str, &'s Field)> {
+        let shapes = self.elements().shapes;
         let mut out: Vec<(&'s str, &'s Field)> = Vec::new();
-        for shape in &self.elements().shapes {
+        for (index, shape) in shapes.iter().enumerate() {
             for (name, field) in &shape.fields {
-                if !out.iter().any(|(n, _)| *n == name) {
+                // A shape has each name once: only an earlier shape can have given it already.
+                if !shapes[..index].iter().any(|s| s.fields.contains_key(name)) {
                     out.push((name, field));
                 }
             }
         }
         out
+    }
+
+    /// Whether one of the (element) shapes has field `name`.
+    pub fn has_field(&self, name: &str) -> bool {
+        self.elements()
+            .shapes
+            .iter()
+            .any(|shape| shape.fields.contains_key(name))
     }
 
     /// The value of field `name` on the element shapes.

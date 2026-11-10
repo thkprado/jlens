@@ -76,4 +76,18 @@ export! {
     /// reached: a reply with the result, its error, the audit tree and its explanation as values
     /// (the `audit` module), or the error of an argument.
     jlens_evaluate_audited(expression: u64, input: u64, bindings: u64, options: u64, audit: u64) -> u64 = crate::audit::evaluate_audited, crate::api::panicked;
+    /// Reads the JSON Schema text in buffer `text`: a reply with the schema's handle or the
+    /// error.
+    jlens_schema_new(text: u64) -> u64 = crate::schema::schema_new, crate::api::panicked;
+    /// Frees a schema: 1 when it was live, 0 for an unknown or freed handle.
+    jlens_schema_free(schema: u64) -> u32 = crate::schema::schema_free, crate::zero;
+    /// Makes a language service of schema `schema` (0 for none) and the declarations of
+    /// variables and host functions in buffer `declarations` (JSON text, 0 for none), as the
+    /// `schema` module describes: a reply with the service's handle or the error.
+    jlens_service_new(schema: u64, declarations: u64) -> u64 = crate::schema::service_new, crate::api::panicked;
+    /// Frees a service: 1 when it was live, 0 for an unknown or freed handle.
+    jlens_service_free(service: u64) -> u32 = crate::schema::service_free, crate::zero;
+    /// The diagnostics of the UTF-8 expression in buffer `text`, as service `service` gives
+    /// them: a reply with a JSON array, its spans in UTF-16 offsets, or the error.
+    jlens_service_diagnostics(service: u64, text: u64) -> u64 = crate::schema::service_diagnostics, crate::api::panicked;
 }

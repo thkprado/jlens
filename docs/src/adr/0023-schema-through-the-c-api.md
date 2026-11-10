@@ -151,3 +151,34 @@ these numbers; roadmap 0.33 #10 measures the library and the JAR as released.
   from #9 on a schema is no longer one text.
 - **The whole language service now.** Decision 2: no Java application asks for completion, and
   each operation is surface to keep.
+
+## Results: the exports (0.33 #3)
+
+Five exports: `jlens_schema_new`, `jlens_schema_free`, `jlens_service_new`,
+`jlens_service_free` and `jlens_service_diagnostics`, in `jlens-capi`'s `schema` module.
+
+- **A service copies its schemas** (decision 4). Sharing would put the schema behind an `Arc`
+  in `jlens-schema`'s `LanguageService`, a change to that crate's API for every user; the copy is
+  made once per service and costs about a sixth of what loading the schema does. On the
+  repository's largest schema fixture (`fixtures/cli/order.schema.json`, 2.4 KB): the load 22 µs,
+  the copy 3 µs. On generated schemas of 200 and 2,000 fields (28 KB and 224 KB of text): the
+  load 0.78 and 6.5 ms, the copy 0.13 and 1.1 ms (Ryzen, the release profile, the best of seven
+  runs).
+- **The handle of a variable's schema is a JSON number**, read as an unsigned 64-bit integer;
+  a string or a fraction fails with `U2005`. A host whose integers are signed writes it
+  unsigned (`Long.toUnsignedString` in Java). The declarations must be an object: an array fails
+  too.
+- **A handle named inside the declarations is checked after their form**, as it cannot be read
+  before: declarations that are not JSON fail with `U2001` even when a variable would name a
+  freed schema.
+- **Measuring the copy found the diagnostics quadratic in an object's fields**: each field step
+  listed the fields of its context, and the list was built by comparing every name with every
+  other. One step against the object of 2,000 fields took 3.3 ms; with a look-up by name it
+  takes 17 µs, the same as with 30 fields. A field the schema does not have still reads every
+  name, for its suggestion (1.4 ms there). The diagnostics of `1` take about 17 µs with any
+  schema, a fixed cost whose cause was not looked for; roadmap 0.34 #10 measures the
+  diagnostics.
+- **The size.** The Windows library is 3,346,432 bytes, 7.1% over 0.32.0 (1,258,732
+  compressed, 7.8%), where the probe had measured 5.2% and 5.9%: the exports read the
+  declarations and write the diagnostics as JSON, which the probe did not. Decision 1 stands;
+  roadmap 0.33 #10 measures the library and the JAR as released. No evaluation export changed.

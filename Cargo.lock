@@ -745,6 +745,7 @@ version = "0.32.0"
 dependencies = [
  "foldhash",
  "jlens-core",
+ "jlens-schema",
  "mimalloc",
  "proptest",
  "scoped-tls-hkt",
