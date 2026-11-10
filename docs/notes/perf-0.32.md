@@ -646,3 +646,140 @@ and differential (11-02) runs, so the final code was checked before the tables. 
   or block, recursion through closures kept in variables, `$eval` inside a lambda) gives
   jsonata-js's results, but for an array constructor's items run in order (`compatibility.md`),
   and fails when #6's check that the frame calls the same lambda is removed.
+
+## #1: the release measured
+
+Measured on 2026-11-09 and 10 at 31e3050, against v0.31.0 (e39190b). `cargo update` had moved
+`itoa` to 1.0.19 and `syn` to 3.0.10 that day, the first in the measured code (`serde_json` writes
+numbers with it), so the tables come from the commit that updates them. No other engine had a new
+version, so their columns keep 0.31's runs on the M1. From this release on the tables come from
+the M1 alone; the Ryzen 7 3700X ran the comparison below and no table, as `eval.rs` changed after
+its last run of the plan (#10) and no Python comparison of the plan ran on x86_64.
+
+### Natively
+
+`cargo xtask ab v0.31.0 HEAD`, 10 rounds, two comparisons of plain builds on each machine and, on
+the Ryzen, a third built aligned (in parentheses); B against A, the median, in percent:
+
+| Case | Windows `evaluate` | `document` | `source` | M1 `evaluate` | M1 `document` | M1 `source` |
+|---|---:|---:|---:|---:|---:|---:|
+| path | -0.2, -0.7 (-0.5) | +0.0, +0.4 (-1.8) | +25.1, -2.5 (+30.9) | +0.4, +1.3 | +0.0, +0.0 | -4.0, -3.7 |
+| names over items | -11.0, -10.6 (-14.9) | -48.4, -47.9 (-49.9) | -14.1, -13.6 (-11.6) | -17.6, -17.8 | -38.7, -38.6 | -16.2, -17.1 |
+| filter + aggregate | -12.8, -12.8 (-16.5) | -23.9, -25.5 (-29.2) | +5.2, -9.6 (+3.6) | -14.7, -14.6 | -16.8, -16.6 | -25.8, -25.7 |
+| group-by | -5.9, -6.9 (-10.1) | -9.6, -10.0 (-14.3) | -8.2, -8.3 (-8.2) | -11.2, -11.3 | -12.3, -12.2 | -8.2, -8.4 |
+| sort + map | -11.7, -12.0 (-12.6) | -13.0, -12.2 (-13.8) | -4.9, -11.6 (-4.2) | -7.8, -7.6 | -7.8, -7.3 | -5.8, -5.6 |
+| strings | -7.1, -6.4 (-7.7) | -10.5, -10.1 (-13.0) | +19.6, -12.4 (+18.1) | -7.0, -6.7 | -8.3, -7.4 | -3.0, -2.9 |
+| regex | -4.2, -3.6 (-2.0) | -5.4, -5.2 (-4.4) | +13.5, -4.5 (+14.8) | -3.3, -3.4 | -2.8, -2.1 | -4.6, -3.5 |
+| number formatting | -3.2, -2.3 (-3.8) | -4.9, -3.2 (-5.4) | -2.1, -3.2 (-3.5) | -1.7, -1.7 | -1.3, -0.7 | -2.3, -1.6 |
+| object constructor | -4.4, -3.6 (-4.5) | -6.8, -4.6 (-5.8) | -7.0, +0.0 (-5.5) | -12.0, -12.1 | -11.7, -11.7 | -12.1, -12.3 |
+| transform | -8.6, -2.4 (-1.7) | -3.1, -2.2 (-2.1) | -6.6, -1.9 (-2.9) | -4.2, -4.4 | -4.7, -4.6 | -3.6, -3.7 |
+| recursion | -42.9, -42.7 (-44.9) | -42.9, -43.0 (-45.1) | -42.2, -42.1 (-44.2) | -35.7, -35.2 | -35.6, -35.4 | -35.4, -35.4 |
+| shipping rule | -10.2, -10.9 (-14.6) | -21.4, -20.9 (-25.3) | -9.7, -8.6 (-11.2) | -16.8, -17.3 | -19.8, -20.0 | -9.9, -9.9 |
+| index into 10,000 items | +2.4, +2.8 (+0.2) | +2.0, +2.0 (-1.0) | +13.7, +1.9 (+14.1) | -7.9, -8.1 | -15.6, -16.1 | -9.4, -8.4 |
+| index in a variable | +0.1, +1.3 (-1.0) | -2.4, -0.3 (-3.2) | +0.2, +0.5 (-1.3) | -11.3, -10.8 | -17.4, -16.6 | -10.5, -9.2 |
+| regex over a long text | +3.5, +3.4 (+0.9) | +2.8, +3.1 (+1.1) | +2.9, +3.9 (+2.1) | -0.5, -0.4 | -0.3, -0.2 | +0.3, +0.1 |
+| distinct items | -1.2, -1.0 (-1.5) | -2.7, -2.6 (-1.3) | +1.5, +1.8 (-0.9) | -0.0, -0.7 | -0.5, +0.1 | -0.1, -0.1 |
+| tuples | -23.9, -23.6 (-24.0) | -26.6, -26.6 (-26.7) | -22.7, -22.5 (-22.7) | -17.9, -18.0 | -19.1, -19.0 | -15.6, -15.6 |
+
+- The plan's gains hold on both machines, and the M1's two comparisons agree within 1 point:
+  `recursion` 35% faster there and 43% on the Ryzen, `names over items` against a `Document` 39
+  and 48%, the shipping rule 10 to 21%, `tuples` 16 to 27%, `filter + aggregate` 13 to 26%.
+- On the M1 nothing is slower: `path` with `evaluate` reads +0.4 and +1.3%, at the floor.
+- On the Ryzen, two cases pass the floor in the plain builds and neither aligned: `regex over a
+  long text`, +2.8 to +3.9% in every mode and +0.9 to +2.1% aligned (its fastest rounds +1.4,
+  +0.7 and -0.1%), the case that read +5% plain and -3% aligned for 0.31; and `index into 10,000
+  items`, +2.0 to +2.8% with `evaluate` and against a `Document`, +0.2 and -1.0% aligned. Both
+  are layout; on the M1 the first is within 0.5% and the second 8 to 16% faster.
+- The Ryzen's `source` mode draws: `path`, `filter + aggregate`, `strings`, `regex` and `index
+  into 10,000 items` read from -12 to +31% from one comparison to the next, with the fastest
+  rounds within 2.1% on `path` and the index and faster on the other three. These five alone, 30
+  rounds, in both orders: `path` +0.2 and +0.6%, the index +0.4 and +1.5%, `filter + aggregate`
+  -10%, `strings` -4.5%, `regex` -3%. It is the Windows heap, which gives a process one of two
+  speeds on a case that allocates for each value read.
+
+### Python
+
+`python.py ab`, two comparisons of five rounds on each machine (the M1: Python 3.14.10; Linux
+under WSL on the Ryzen: Python 3.14.8); the two comparisons, in percent:
+
+| Case | M1 `evaluate` | M1 `document` | Linux `evaluate` | Linux `document` |
+|---|---:|---:|---:|---:|
+| `recursion` | -30.3, -29.5 | -30.4, -30.4 | -27.7, -26.9 | -28.9, -28.5 |
+| `names over items` | -7.6, -9.1 | -32.7, -32.4 | -5.3, -5.7 | -47.5, -47.5 |
+| shipping rule | -8.7, -9.9 | -18.3, -18.6 | -11.4, -10.7 | -25.9, -25.6 |
+| `filter + aggregate` | -9.0, -8.3 | -15.8, -14.6 | -11.3, -10.4 | -27.0, -28.1 |
+| object constructor | -11.7, -12.0 | -13.5, -13.8 | -7.5, -5.4 | -11.9, -10.2 |
+| `tuples` | -6.8, -7.6 | -12.4, -13.3 | -13.9, -13.3 | -17.7, -17.3 |
+| `group-by` | -8.1, -7.1 | -10.3, -10.4 | -9.0, -8.1 | -16.8, -15.5 |
+
+- Every other case is up to 15% faster or within 2.5%, but `distinct items` against a `Document`
+  on the M1, +2.9 and +1.4%, unmarked (10.7 against 11.0 µs, spreads of 1.9 and 2.9%).
+- Under Linux nothing is slower than +1.1% (`path` with Python values, unmarked).
+
+### Java
+
+`cargo xtask java-compare ab`, every part, five rounds, on the M1 (28, 17 and 8 minutes for the
+cases, the documents and the threads). 43 differences marked, all faster.
+
+| Case | converted | JSON text | objects, converted | objects, JSON text |
+|---|---:|---:|---:|---:|
+| `recursion` | -33.7% | -29.7% | -33.2% | -24.6% |
+| `names over items` | -35.0% | -3.4% | -7.1% | -1.9% |
+| object constructor | -24.4% | -15.4% | -16.2% | -10.6% |
+| shipping rule | -20.3% | -12.4% | -9.3% | -6.7% |
+| `filter + aggregate` | -18.9% | -6.9% | -16.1% | -2.9% |
+| `tuples` | -16.6% | -9.9% | -10.1% | -6.4% |
+| `$sum(items.price)`, 1,000 items | -39.8% | -2.7% | -6.9% | -2.3% |
+
+- Unmarked and slower: `path` against a `Document` +3.0% (0.194 against 0.200 µs), and
+  `$count(items)` and `$` over Java objects +1.4 to +2.3%. `$count(items)` against a `Document`,
+  which #7 found 7.6% slower and fixed, reads +0.5%.
+- The threads evaluate 2.8 to 3.5% more a second from JSON text, 0.9 to 2.9% more over Java
+  objects.
+
+### WebAssembly
+
+`compare.mjs --pkg --engines jsonata-js`, four processes a build, alternated, each on a new copy
+of its package; the medians, 0.32.0 against 0.31.0:
+
+| Case | `evaluate` | `evaluateJson` | `evaluateDocument` | jsonata-js, the control |
+|---|---:|---:|---:|---:|
+| path | +0.0% | -0.4% | +7.7% | +0.0% |
+| names over items | -5.4% | -1.8% | -29.8% | -1.7% |
+| filter + aggregate | -0.8% | -1.2% | -5.1% | -2.1% |
+| group-by | -2.7% | -2.2% | -5.7% | -3.0% |
+| sort + map | -3.2% | -2.4% | -3.1% | -0.3% |
+| strings | -0.6% | -0.9% | -2.7% | -0.4% |
+| regex | -1.0% | -1.0% | -2.4% | -0.2% |
+| number formatting | -0.1% | +0.0% | -0.8% | -0.1% |
+| object constructor | -0.7% | -0.7% | -2.0% | -0.2% |
+| transform | -2.7% | -2.0% | -2.9% | -1.3% |
+| recursion | -17.9% | -15.8% | -18.1% | +0.0% |
+| shipping rule | -2.0% | -2.7% | -9.0% | +0.0% |
+| index into 10,000 items | +1.5% | -0.4% | +0.0% | +0.0% |
+| index in a variable | +1.4% | -0.4% | +0.0% | -0.5% |
+| regex over a long text | +0.6% | +0.6% | -0.4% | -0.3% |
+| distinct items | -1.1% | -1.1% | -2.4% | +0.1% |
+| tuples | -7.0% | -5.1% | -11.9% | -0.3% |
+
+`path` against a `Document`, +7.7%, is 0.65 against 0.70 µs, printed to a tenth; nothing else is
+slower than 1.5%.
+
+### The tables
+
+- Natively: `cargo xtask bench-table`, three copies, marked `names over items` (7.0 to 8.5 µs)
+  and `index into 10,000 items` with `evaluate`: the Mac had started 13 minutes before, and a
+  daemon of the system (`duetexpertd`) held a core as the first copy began. Five copies an hour
+  later agree within 2% but for `distinct items` against a `Document` (3.2%), and the page takes
+  them. Against 0.31's table, every case more than 2% away is one that `ab` puts faster.
+- WebAssembly: the four processes of 0.32.0 above, within 4% but `path` against a `Document`
+  (0.6 or 0.7 µs). jsonata-js, the control, is within 3% of its numbers for 0.31.0.
+- Python: three runs of jlens alone, within 5% but the index in a variable (0.9 or 1.0 µs), the
+  first with jsonata-python, the control, within 2.3% of its numbers for 0.31.0.
+- Java: `java-compare` with every engine in one JVM, as for 0.31.0, so the page takes every
+  column from this run. jsonata-java is within 4% of its numbers for 0.31.0, but `path` (8.96 to
+  8.44 µs against converted input) and `recursion` from JSON text (1,023 to 1,127 µs);
+  jsonata-jvm-compiler within 8%, but `names over items` (1.32 to 1.50 µs), and its threads
+  evaluate 8 to 10% more a second.
+- The Mac's display slept through the runs after the first table: its screen saver took 13% of a
+  core. The thermal pressure stayed nominal, checked at each step.

@@ -93,7 +93,10 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    with a sentence that sums up the release. The section becomes the GitHub release notes;
    preview them with `cargo xtask release-notes X.Y.Z`, which points relative links
    (`](docs/...)`) at the files of the tag.
-3. Measure the tables of the [performance page](docs/src/architecture/performance.md) again
+3. Measure the tables of the [performance page](docs/src/architecture/performance.md) again,
+   all on the machine the page names, an Apple M1 (if the plan changed the evaluation without
+   measuring every such change on x86_64, also compare the release with the one before it there,
+   with `cargo xtask ab` and `python.py ab`, into `docs/notes/perf-X.Y.md`),
    and set the new version in the sentence above them (`for jlens X.Y.Z`): the native table
    with `cargo xtask bench-table`, the median of three runs, each on a new copy of the program,
    built without the alignment flags (the [performance page](docs/src/architecture/performance.md#native-criterion) says how to
