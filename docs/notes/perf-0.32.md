@@ -2,7 +2,9 @@
 
 How the measurements of roadmap 0.32 were made: methods, traps and intermediate numbers that the
 [performance page](../src/architecture/performance.md) leaves out. The item numbers are those of
-the plan in [the roadmap](../src/architecture/roadmap.md); the last sections hold what its items
+the plan, whose table the tag keeps in
+[the roadmap](https://github.com/thkprado/jlens/blob/v0.32.0/docs/src/architecture/roadmap.md#032-the-tables-on-the-m1-and-what-each-node-costs);
+[the roadmap's history](../src/architecture/roadmap-history.md#032) sums it up. The last sections hold what its items
 without a measurement found.
 
 ## Where an evaluation's time goes at 0.31.0 (before the plan)
