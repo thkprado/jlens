@@ -44,6 +44,15 @@ All notable changes are recorded here. The format follows
   is converted whole, so that its `T0410` gives it as its `value`, as `evaluate` does. It was
   cut to what the rest of the expression read, and the error had no `value`.
 
+### Documentation
+
+- A page of the book for applications that call jsonata-js today,
+  [Coming from jsonata-js](docs/src/getting-started/from-jsonata-js.md): the API of both side by
+  side, what to check, and what jlens adds. The README shows an explanation and how to install
+  each package.
+- The `Cargo.toml` snippets of the installation page and of the crate guide name the current
+  version; they still said 0.15 and 0.2.
+
 ## [0.31.0]
 
 A small map for objects. Every object, tuple and `$match` result keeps its fields in a vector,

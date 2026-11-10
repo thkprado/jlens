@@ -6,6 +6,7 @@
 
 - [Installation](getting-started/installation.md)
 - [First steps](getting-started/first-steps.md)
+- [Coming from jsonata-js](getting-started/from-jsonata-js.md)
 
 # Language reference
 

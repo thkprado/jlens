@@ -1,6 +1,6 @@
 # Installation
 
-jlens comes in four forms that share one engine. Install the ones you need.
+jlens comes in five forms that share one engine. Install the ones you need.
 
 ## Command line
 
@@ -97,8 +97,8 @@ The [CLI guide](../guides/cli.md) describes every command.
 
 ```toml
 [dependencies]
-jlens-core = "0.15"    # the language: parsing, evaluation, functions, auditing
-jlens-schema = "0.15"  # optional: schema inference and the language service
+jlens-core = "0.31"    # the language: parsing, evaluation, functions, auditing
+jlens-schema = "0.31"  # optional: schema inference and the language service
 serde_json = "1"
 ```
 

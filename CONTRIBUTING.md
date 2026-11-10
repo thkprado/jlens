@@ -67,7 +67,8 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
   limits; warnings use `W` codes (`crates/jlens-core/src/error.rs`).
 - **Documentation is part of the change.** Examples in the book use `jsonata-example` blocks,
   which `cargo xtask doc-check` runs. Rust snippets in the crate guide come from
-  `crates/jlens-core/tests/guide.rs`. Significant design decisions get a record in `docs/adr/`.
+  `crates/jlens-core/tests/guide.rs`. Significant design decisions get a record in
+  `docs/src/adr/`.
 - **Commits** describe why, not only what.
 - **Vulnerabilities** are reported privately, as [SECURITY.md](SECURITY.md) describes, not in
   public issues.
@@ -78,7 +79,8 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    `jlens-lsp` and `regress` (`jlens-regress`) entries of `[workspace.dependencies]`
    (`Cargo.toml`), and the project's `<version>` in `crates/jlens-java/java/pom.xml`
    (`cargo xtask java` fails while they differ). Also the version of the Maven and Gradle snippets of `docs/src/getting-started/installation.md` and
-   `docs/src/guides/java.md`. Before measuring, merge what Dependabot proposes
+   `docs/src/guides/java.md`, and of the `Cargo.toml` snippets of the installation page and of
+   `docs/src/guides/crate.md`. Before measuring, merge what Dependabot proposes
    (`.github/dependabot.yml`) and bring the dependencies to their newest versions, as new
    advisories keep coming: `cargo update`, here and in `fuzz/`; `npm outdated` and
    `npm audit` in `editors/vscode` and `benches/compare`; the versions in both `pom.xml` files,

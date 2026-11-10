@@ -144,7 +144,11 @@ expr.free();                                 // release it (or let the garbage c
   default; a number must be finite, so `NaN` or `Infinity` throws a `TypeError`, as an invalid
   `Date` does.
 - **The result** is a plain value, or `undefined` when the expression evaluates to undefined.
-  Numbers and object key order are the same as in jsonata-js.
+  Numbers are the same as in jsonata-js. An object of the result is a JavaScript object, so its
+  integer-like keys come first, as in jsonata-js. Inside the expression, an object it builds
+  keeps its keys in insertion order, which `$keys`, `$string`, `$each` and `$spread` show, and
+  so does the text `evaluateJson` returns
+  ([compatibility](../language/compatibility.md#evaluation)).
 
 `evaluateJson` takes the input as JSON text and returns the result as JSON text. For large
 documents that you already have as text, such as a `fetch` response body, it avoids converting

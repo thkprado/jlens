@@ -32,6 +32,17 @@ The documentation is at <https://thkprado.github.io/jlens/>, with a
   ```jsonata
   /** @label "Minimum order grand total" */
   $sum(items.(unitPrice * quantity)) > 50000
+  and
+  /** @label "Known customer" */
+  customer.login in ["bob.harrison42"]
+  ```
+
+  Against `fixtures/online-store-order.json`, `--explain` says which condition decided the
+  result, with the values it compared:
+
+  ```text
+  result: false
+  ✘ Known customer — customer.login in ["bob.harrison42"] → false ("alice.walker99" in ["bob.harrison42"])
   ```
 
 - Structural metadata inferred from sample documents (JSON Schema 2020-12), which drives
@@ -49,6 +60,19 @@ jlens eval --ndjson --filter -i fixtures/orders.ndjson '$sum(items.(unitPrice * 
 jlens schema infer fixtures/online-store-order.json -o schema.json
 jlens check --schema schema.json -f fixtures/shipping-rule.jsonata
 ```
+
+The same engine as a library:
+
+| For | Install | Guide |
+|---|---|---|
+| Rust | `cargo add jlens-core` | [Rust crate](docs/src/guides/crate.md) |
+| Browsers, Node.js, Deno | `npm install jlens-wasm` | [WebAssembly](docs/src/guides/wasm.md) |
+| Python 3.10 and later | `pip install jlens` | [Python](docs/src/guides/python.md) |
+| Java 25 and later | `io.github.thkprado:jlens` on Maven Central | [Java](docs/src/guides/java.md) |
+
+The [installation page](docs/src/getting-started/installation.md) has the other ways to get the
+command line (Homebrew, Scoop, npm, a container image). An application that calls jsonata-js
+today can read [Coming from jsonata-js](docs/src/getting-started/from-jsonata-js.md).
 
 ## Repository layout
 
