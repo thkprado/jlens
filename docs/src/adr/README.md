@@ -27,3 +27,4 @@ earlier one instead.
 | [0020](0020-own-regress-fork.md) | `jlens-regress` is jlens's own fork of `regress`: upstream fixes ported, not rebased | Accepted |
 | [0021](0021-java-package.md) | The Java package: a C API called through Panama, for Java 25 | Accepted; amended to ship before the API work, on what the `Sink` allocates, and to write maps with what the expression reads (0.26) |
 | [0022](0022-small-map.md) | Objects keep their fields in a vector, with an index past 8 fields | Accepted |
+| [0023](0023-schema-through-the-c-api.md) | The schema and the language service through the C API and in the Java package: a schema and a service by handle, diagnostics as JSON text; no completion, hover or signature help | Accepted |

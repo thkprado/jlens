@@ -76,3 +76,4 @@
   - [0020 Our own fork of regress](adr/0020-own-regress-fork.md)
   - [0021 A Java package](adr/0021-java-package.md)
   - [0022 A small map for objects](adr/0022-small-map.md)
+  - [0023 The schema through the C API](adr/0023-schema-through-the-c-api.md)
