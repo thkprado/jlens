@@ -6,6 +6,16 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The Java package checks expressions against a schema
+  ([ADR 0023](docs/src/adr/0023-schema-through-the-c-api.md)): `Schema.fromJson` reads a JSON
+  Schema, and a `LanguageService`, built of a schema, the variables and the host functions the
+  expressions are evaluated with, gives the `diagnostics` of an expression's text as `Diagnostic`
+  records, with the codes and messages of the other packages and spans in UTF-16 offsets. Both
+  are shared between threads. Completion, hover, signature help and schema inference stay out
+  of the Java package.
+
 ## [0.32.0]
 
 What each node of an expression costs. One comparison of addresses checks the stack, a lambda's

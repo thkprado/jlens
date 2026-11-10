@@ -283,4 +283,32 @@ class GuideTest {
         }
         // ANCHOR_END: audit
     }
+
+    @Test
+    void diagnostics() {
+        String orderSchema = """
+                {"type": "object", "properties": {
+                    "status": {"type": "string", "enum": ["open", "closed"]},
+                    "total": {"type": "number"}}}""";
+        String customerSchema = """
+                {"type": "object", "properties": {"limit": {"type": "number"}}}""";
+        // ANCHOR: diagnostics
+        try (Schema order = Schema.fromJson(orderSchema);
+                Schema customer = Schema.fromJson(customerSchema);
+                LanguageService service = LanguageService.builder()
+                        .schema(order)                          // the input
+                        .variable("customer", customer)         // $customer, and its fields
+                        .function("discount", "<n:n>")          // $discount, a host function
+                        .build()) {
+            assertEquals(List.of(), service.diagnostics("$discount(total) > $customer.limit"));
+
+            String stored = "status = 'shipped' and totl > 100";
+            List<Diagnostic> found = service.diagnostics(stored);
+            assertEquals(List.of("W0206", "W0201"), found.stream().map(Diagnostic::code).toList());
+            Diagnostic field = found.get(1);
+            assertEquals(Diagnostic.Severity.WARNING, field.severity());
+            assertEquals("totl", stored.substring(field.span().start(), field.span().end()));
+        }
+        // ANCHOR_END: diagnostics
+    }
 }

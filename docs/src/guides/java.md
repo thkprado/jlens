@@ -158,7 +158,7 @@ Evaluations never modify a document.
 
 ## Native objects
 
-`Expression`, `Document` and `Bindings` hold native memory. They are `AutoCloseable`: close them
+`Expression`, `Document`, `Bindings`, `Schema` and `LanguageService` hold native memory. They are `AutoCloseable`: close them
 when done, with `try`-with-resources or when the application stops. One never closed is freed
 once it becomes unreachable, by a `Cleaner`, so forgetting to close costs memory for a while,
 never a crash. Using a closed object throws an `IllegalStateException`.
@@ -274,7 +274,7 @@ that is not a number):
 `getMessage()` is the message. Match on `code()`, never on the message. The
 [error reference](../language/errors.md) lists every code; the package's own are `U2001` (input
 that is not JSON), `U2004` (a failure inside the native library, which never ends the JVM) and
-`U2005` (options or reads not in their form).
+`U2005` (options, reads or a JSON Schema not in their form).
 
 ## The fields an expression reads
 
@@ -366,11 +366,42 @@ error's value is the limit. The header of an audit reports the steps an evaluati
 compares the package's speed and its behaviour at these limits with the other JSONata
 implementations for the JVM.
 
+## Checking expressions against a schema
+
+A `LanguageService` checks the text of an expression without evaluating it, against a `Schema`
+read from a JSON Schema document (the [schema guide](schema.md#diagnostics);
+[ADR 0023](../adr/0023-schema-through-the-c-api.md)). An application that stores expressions
+written against a schema checks them again when a new version of the schema arrives:
+
+```java
+{{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:diagnostics}}
+```
+
+- **`Schema.fromJson`** reads a JSON Schema, as text or as UTF-8 bytes. It throws a
+  `JlensException` with `U2001` for text that is not JSON, and with `U2005` and the token
+  `schema` for a JSON Schema that jlens refuses.
+- **The builder** takes the schema of the input, the variables the expressions are evaluated
+  with, each with the schema of its value or with none, and the host functions, each with its
+  signature or with none. Names are given with or without `$`. `LanguageService.of(schema)` is
+  a service of a schema alone, and `of(null)` checks the syntax and the built-in functions.
+- **`diagnostics(text)`** returns a list of `Diagnostic` records: `severity()` (`ERROR` for a
+  syntax error, `WARNING` for the rest), `code()`, `message()` and `span()`, in UTF-16 offsets
+  as an error's. The codes and the messages are those of the other packages, the language
+  server and `jlens check`; the [error reference](../language/errors.md) lists them. A text
+  with a syntax error does not throw: its errors are in the list.
+- **Variables are checked once one is declared**: a variable that is neither declared nor
+  assigned by the expression then gets `W0204`.
+- **Neither object changes once made**, and both can be shared between threads. A service
+  keeps what it needs of its schemas, which can be closed as soon as it is built; a new version
+  of a schema is a new `Schema` and a new `LanguageService`.
+
 ## What the package leaves out
 
-The language service and schema inference are not in the Java package: editors reach them
-through the [language server](editors.md), and `jlens schema infer` infers a schema from the
-command line. They can be added when a Java application asks for them.
+Completion, hover and signature help, which serve a person typing, are not in the Java package:
+editors reach them through the [language server](editors.md) and the
+[WebAssembly package](wasm.md). Schema inference is not either: `jlens schema infer` writes a
+JSON Schema from sample documents, which `Schema.fromJson` reads. They can be added when a Java
+application asks for them.
 
 ## Building from source
 

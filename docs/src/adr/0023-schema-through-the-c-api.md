@@ -182,3 +182,16 @@ Five exports: `jlens_schema_new`, `jlens_schema_free`, `jlens_service_new`,
   compressed, 7.8%), where the probe had measured 5.2% and 5.9%: the exports read the
   declarations and write the diagnostics as JSON, which the probe did not. Decision 1 stands;
   roadmap 0.33 #10 measures the library and the JAR as released. No evaluation export changed.
+## Results: the Java package (0.33 #4)
+
+`Schema`, `LanguageService` with its builder, and the `Diagnostic` record with its `Severity`.
+
+- **A function is declared by its name and its signature alone.** The C API also takes `params`
+  and `summary`, which only signature help and completion show, and those do not cross
+  (decision 2): the Java builder has no place for them until they do.
+- **The builder writes a variable's schema as its handle**, with `Long.toUnsignedString`, and
+  keeps the schemas reachable until the service is made. A schema closed before `build()` throws
+  an `IllegalStateException`, as any closed object does.
+- **The list of diagnostics cannot be changed**, and a reply that is not in the form of
+  decision 6 is a bug of the library, reported as an `IllegalStateException`.
+- No export changed and the library is the one of #3.

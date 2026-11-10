@@ -81,6 +81,12 @@ final class Native {
             U64, U64, U64, ValueLayout.ADDRESS, U64, U64, U64, U32, U64);
     private static final MethodHandle EVALUATE_AUDITED =
             function("jlens_evaluate_audited", U64, U64, U64, U64, U64, U64);
+    private static final MethodHandle SCHEMA_NEW = function("jlens_schema_new", U64, U64);
+    private static final MethodHandle SCHEMA_FREE = function("jlens_schema_free", U32, U64);
+    private static final MethodHandle SERVICE_NEW = function("jlens_service_new", U64, U64, U64);
+    private static final MethodHandle SERVICE_FREE = function("jlens_service_free", U32, U64);
+    private static final MethodHandle SERVICE_DIAGNOSTICS =
+            function("jlens_service_diagnostics", U64, U64, U64);
 
     /** The function the C API calls back to read Java objects: {@link Reader#read}. */
     static final MemorySegment READER;
@@ -327,6 +333,52 @@ final class Native {
             long audit) {
         try {
             return (long) EVALUATE_AUDITED.invokeExact(expression, input, bindings, options, audit);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /** Reads the JSON Schema text in buffer {@code text}: a reply with the schema's handle. */
+    static long schemaNew(long text) {
+        try {
+            return (long) SCHEMA_NEW.invokeExact(text);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    static void schemaFree(long schema) {
+        try {
+            int _ = (int) SCHEMA_FREE.invokeExact(schema);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /**
+     * Makes a language service of schema {@code schema} (0 for none) and the declarations in
+     * buffer {@code declarations} (JSON text, 0 for none): a reply with the service's handle.
+     */
+    static long serviceNew(long schema, long declarations) {
+        try {
+            return (long) SERVICE_NEW.invokeExact(schema, declarations);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    static void serviceFree(long service) {
+        try {
+            int _ = (int) SERVICE_FREE.invokeExact(service);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /** The diagnostics of the expression in buffer {@code text}: a reply with a JSON array. */
+    static long serviceDiagnostics(long service, long text) {
+        try {
+            return (long) SERVICE_DIAGNOSTICS.invokeExact(service, text);
         } catch (Throwable e) {
             throw failed(e);
         }

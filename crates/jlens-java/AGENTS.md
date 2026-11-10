@@ -61,6 +61,11 @@ The system property `jlens.library` points the package at a library outside the 
   cause), is the result's, never thrown. Spans are UTF-16, converted by the C API. Trees nest as
   deep as the evaluation: build and walk them with a stack or a queue, never by recursion, and
   keep `toString` of a node to the node.
+- **Schemas and language services** (0.33 #4, ADR 0023) are native objects that never change
+  and serve every thread. Diagnostics are records decoded from the C API's JSON reply by `Json`;
+  their spans are UTF-16, converted by the C API. A service's declarations are written as JSON
+  text, a variable's schema as its handle with `Long.toUnsignedString`. Completion, hover and
+  signature help do not cross.
 - **API changes** need the Javadoc, the JUnit suite and the Java chapter of the book
   (`docs/src/guides/java.md`). Its snippets live in `GuideTest.java`, between `ANCHOR`
   comments, so that the suite runs them.
