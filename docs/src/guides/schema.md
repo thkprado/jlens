@@ -40,6 +40,17 @@ complete, or set the values in the overrides (below). You can commit the file, r
 and edit it like any JSON Schema. jlens also reads JSON Schemas written by hand or by other
 tools: it supports `$ref` to local definitions, and it merges `anyOf`, `oneOf` and `allOf`.
 
+A schema may be recursive: a tree whose `children` are `{"$ref": "#"}`, a definition that
+refers to itself, definitions that refer to each other. Completion, hover and the diagnostics
+follow it as deep as the expression goes, so that `children.children.children.nane` is warned
+about as `nane` is. A `$ref` that leads nowhere but to itself says nothing of its place:
+nothing is completed or warned about under it. In the Rust crate such a `$ref` is kept as a
+reference to a definition of the schema
+([ADR 0024](../adr/0024-recursive-schemas.md)): `Schema::shape_at` follows it, and
+`Schema::members` gives the shapes that one stands for. A path of the overrides that goes
+through it changes the definition, and so every place that refers to it: in that tree,
+`children[].label` describes the `label` of every node.
+
 What JSON Schema has no keyword for travels in jlens's own `x-jlens-*` keywords, which other
 tools ignore. jlens writes them and reads them back, so they can also be written by hand:
 
@@ -320,6 +331,12 @@ not (`*`, `**`, `$eval`, a value given to a host function), the value is read wh
 path the schema has under it is listed. `$eval` can also read any variable: the answer then has
 `"everyBinding": true`, and every variable declared with a schema, whole. The host functions
 declared to the service are not values, and are left out of `bindings`.
+
+Under a value read whole, a recursive schema is listed down to where it repeats: what is
+under a definition is listed once, at the place nearest to the value read whole, and another
+value of that definition is the last path on its way. Read whole, a tree whose `children` are
+the document itself gives `$`, its fields, `children` and `children[]`. A change inside the
+definition shows in the paths listed.
 
 The answer depends on nothing else in the schema, and its paths and names are written in order:
 two schemas that give an expression the same text differ in nothing it uses.

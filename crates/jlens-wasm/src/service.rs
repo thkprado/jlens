@@ -120,11 +120,13 @@ impl LanguageService {
                 Some(Value::Object(map)) => {
                     for (name, doc) in map {
                         let name = name.trim_start_matches('$').to_owned();
-                        let shape = match doc {
-                            Value::Null => None,
-                            doc => Some(import_schema(doc, &format!("variable ${name}"))?.root),
+                        inner = match doc {
+                            Value::Null => inner.with_variable(name, None),
+                            doc => {
+                                let schema = import_schema(doc, &format!("variable ${name}"))?;
+                                inner.with_variable_schema(name, schema)
+                            }
                         };
-                        inner = inner.with_variable(name, shape);
                     }
                 }
                 Some(_) => return Err(type_error("variables must be an object")),

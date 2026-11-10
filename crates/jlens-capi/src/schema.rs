@@ -107,8 +107,8 @@ fn service_text(schema: u64, declarations: u64) -> Result<Vec<u8>, Vec<u8>> {
     };
     for (name, value) in declarations.variables.unwrap_or_default() {
         let name = name.trim_start_matches('$');
-        let shape = match &value {
-            Value::Null => None,
+        service = match &value {
+            Value::Null => service.with_variable(name, None),
             value => {
                 let handle = value.as_u64().ok_or_else(|| {
                     invalid(
@@ -119,10 +119,9 @@ fn service_text(schema: u64, declarations: u64) -> Result<Vec<u8>, Vec<u8>> {
                 let schema = SCHEMAS
                     .get(handle)
                     .ok_or_else(|| unknown("schema", handle))?;
-                Some(schema.root.clone())
+                service.with_variable_schema(name, (*schema).clone())
             }
         };
-        service = service.with_variable(name, shape);
     }
     for mut function in declarations.functions.unwrap_or_default() {
         function.name = function.name.trim_start_matches('$').to_owned();

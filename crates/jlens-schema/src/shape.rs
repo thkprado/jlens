@@ -1,6 +1,7 @@
 //! The structural metadata model and its inference from sample documents.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::LazyLock;
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -106,6 +107,13 @@ pub struct Shape {
     /// Hidden values are not suggested by completion.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub hidden: bool,
+    /// The definitions of the schema ([`Schema::definitions`]) the value may also have the
+    /// shape of, by name: what a recursive `$ref` of a JSON Schema becomes, as its shape
+    /// cannot be copied here. The value has the shape of any of them, and this one too when it
+    /// has types of its own; [`Schema::members`] gives them. A name the schema does not
+    /// define leaves the shape unknown.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub references: Vec<String>,
 
     // Inference state.
     #[serde(skip)]
@@ -144,6 +152,133 @@ pub struct Schema {
     /// `x-jlens-samples` and read back from it (0 for a schema imported without it). For
     /// information only: nothing depends on it.
     pub samples: u64,
+    /// The shapes that others refer to by name ([`Shape::references`]): the targets of the
+    /// recursive `$ref`s of a JSON Schema. Empty for an inferred schema.
+    #[serde(skip_serializing_if = "IndexMap::is_empty", default)]
+    pub definitions: Definitions,
+}
+
+/// The definitions of a schema, by name ([`Schema::definitions`]).
+pub type Definitions = IndexMap<String, Shape>;
+
+/// The definitions of a shape that has no schema: none.
+pub(crate) static NO_DEFINITIONS: LazyLock<Definitions> = LazyLock::new(Definitions::new);
+
+/// A shape with the definitions its references are read in.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Sh<'s> {
+    pub shape: &'s Shape,
+    pub defs: &'s Definitions,
+}
+
+impl std::ops::Deref for Sh<'_> {
+    type Target = Shape;
+
+    fn deref(&self) -> &Shape {
+        self.shape
+    }
+}
+
+/// Adds to `out` the shapes `shape` stands for: itself, unless it only refers to definitions,
+/// and those definitions, with the ones they refer to. Returns whether something is unknown: a
+/// reference to a definition that does not exist, or references that lead to no shape.
+pub(crate) fn members<'s>(shape: &'s Shape, defs: &'s Definitions, out: &mut Vec<Sh<'s>>) -> bool {
+    if shape.references.is_empty() {
+        if !out.iter().any(|m| std::ptr::eq(m.shape, shape)) {
+            out.push(Sh { shape, defs });
+        }
+        return false;
+    }
+    let mut found = false;
+    let mut unknown = false;
+    // Iterative, so that a long chain of definitions cannot overflow the stack.
+    let mut seen: HashSet<*const Shape> = HashSet::new();
+    let mut pending = vec![shape];
+    while let Some(shape) = pending.pop() {
+        if !seen.insert(shape as *const Shape) {
+            continue;
+        }
+        if shape.references.is_empty() || !shape.types.is_empty() {
+            found = true;
+            if !out.iter().any(|m| std::ptr::eq(m.shape, shape)) {
+                out.push(Sh { shape, defs });
+            }
+        }
+        for name in shape.references.iter().rev() {
+            match defs.get(name) {
+                Some(definition) => pending.push(definition),
+                None => unknown = true,
+            }
+        }
+    }
+    unknown || !found
+}
+
+/// The shapes `shape` stands for, and whether something is unknown (see [`members`]).
+pub(crate) fn members_of<'s>(shape: &'s Shape, defs: &'s Definitions) -> (Vec<Sh<'s>>, bool) {
+    let mut out = Vec::new();
+    let unknown = members(shape, defs, &mut out);
+    (out, unknown)
+}
+
+/// A short type description of `shape` read through its references, as
+/// [`Shape::type_summary`] gives for a shape without them.
+pub(crate) fn summary(shape: &Shape, defs: &Definitions) -> String {
+    fn parts(shape: &Shape, defs: &Definitions, depth: usize, out: &mut Vec<String>) -> bool {
+        let mut null = false;
+        for member in members_of(shape, defs).0 {
+            for t in &member.types {
+                let part = match t {
+                    JsonType::Null => {
+                        null = true;
+                        continue;
+                    }
+                    JsonType::Array => match member.shape.items.as_deref() {
+                        Some(items) if depth < 8 => {
+                            let mut inner = Vec::new();
+                            if parts(items, member.defs, depth + 1, &mut inner) {
+                                inner.push("null".to_owned());
+                            }
+                            if inner.is_empty() {
+                                "array".to_owned()
+                            } else {
+                                format!("array<{}>", inner.join(" | "))
+                            }
+                        }
+                        _ => "array".to_owned(),
+                    },
+                    other => other.name().to_owned(),
+                };
+                if !out.contains(&part) {
+                    out.push(part);
+                }
+            }
+        }
+        null
+    }
+    let mut out = Vec::new();
+    if parts(shape, defs, 0, &mut out) {
+        out.push("null".to_owned());
+    }
+    if out.is_empty() {
+        "unknown".to_owned()
+    } else {
+        out.join(" | ")
+    }
+}
+
+/// A step of a path: a field, or the items of an array.
+enum Step {
+    Field(String),
+    Items,
+}
+
+/// Where a path leads: the definition it is in (`None` for the root), the steps from there,
+/// none of which goes through a reference, and the steps the schema does not have.
+struct Location {
+    base: Option<String>,
+    steps: Vec<Step>,
+    rest: Vec<Step>,
 }
 
 impl Schema {
@@ -182,29 +317,167 @@ impl Schema {
     }
 
     /// The shape at a path such as `items[].type` (`[]` steps into array items; an empty path or
-    /// `$` is the root).
+    /// `$` is the root). A shape that refers to definitions ([`Shape::references`]) is read
+    /// through them, as deep as the path goes: each step is taken from any of the shapes the
+    /// one before stands for ([`Schema::members`]), and the answer is the first of those the
+    /// last one stands for.
     pub fn shape_at(&self, path: &str) -> Option<&Shape> {
-        let mut shape = &self.root;
+        // The shape a step leads to, as the schema holds it, and the shapes it stands for:
+        // the next step is taken from any of them.
+        let mut raw = &self.root;
+        let mut shapes = members_of(raw, &self.definitions).0;
         for (name, arrays) in parse_path(path)? {
-            if let Some(name) = name {
-                shape = &shape.fields.get(&name)?.shape;
-            }
-            for _ in 0..arrays {
-                shape = shape.items.as_deref()?;
+            let steps = name.as_deref().into_iter().map(Some);
+            for step in steps.chain((0..arrays).map(|_| None)) {
+                let mut next = Vec::new();
+                let mut first = None;
+                for shape in &shapes {
+                    let child = match step {
+                        Some(name) => shape.shape.fields.get(name).map(|f| &f.shape),
+                        None => shape.shape.items.as_deref(),
+                    };
+                    if let Some(child) = child {
+                        first.get_or_insert(child);
+                        members(child, &self.definitions, &mut next);
+                    }
+                }
+                raw = first?;
+                shapes = next;
             }
         }
-        Some(shape)
+        Some(shapes.first().map_or(raw, |m| m.shape))
     }
 
-    fn shape_at_mut(&mut self, path: &str) -> Option<&mut Shape> {
-        let mut shape = &mut self.root;
+    /// The shapes `shape`, one of this schema, stands for: itself when it refers to no
+    /// definition; otherwise the definitions it refers to, with those they refer to, and
+    /// itself first when it has types of its own. Empty when its references lead nowhere.
+    ///
+    /// ```
+    /// use jlens_schema::Schema;
+    /// use serde_json::json;
+    ///
+    /// let schema = Schema::from_json_schema(&json!({
+    ///     "type": "object",
+    ///     "properties": {
+    ///         "name": {"type": "string"},
+    ///         "children": {"type": "array", "items": {"$ref": "#"}}
+    ///     }
+    /// }))
+    /// .unwrap();
+    /// let item = schema.shape_at("children[].children[]").unwrap();
+    /// assert!(item.fields.contains_key("name"));
+    /// let raw = schema.shape_at("children").unwrap().items.as_deref().unwrap();
+    /// assert_eq!(raw.references, ["#"]);
+    /// assert!(std::ptr::eq(schema.members(raw)[0], item));
+    /// ```
+    pub fn members<'a>(&'a self, shape: &'a Shape) -> Vec<&'a Shape> {
+        members_of(shape, &self.definitions)
+            .0
+            .into_iter()
+            .map(|m| m.shape)
+            .collect()
+    }
+
+    /// The shape of field `name` of what `shape` stands for.
+    fn field<'a>(&'a self, shape: &'a Shape, name: &str) -> Option<&'a Shape> {
+        members_of(shape, &self.definitions)
+            .0
+            .iter()
+            .find_map(|m| m.shape.fields.get(name))
+            .map(|f| &f.shape)
+    }
+
+    /// The shape of the items of what `shape` stands for.
+    fn items<'a>(&'a self, shape: &'a Shape) -> Option<&'a Shape> {
+        members_of(shape, &self.definitions)
+            .0
+            .iter()
+            .find_map(|m| m.shape.items.as_deref())
+    }
+
+    /// Where `path` leads, as [`Schema::shape_at`] follows it.
+    fn locate(&self, path: &str) -> Option<Location> {
+        let mut pending: Vec<Step> = Vec::new();
         for (name, arrays) in parse_path(path)? {
-            if let Some(name) = name {
-                shape = &mut shape.fields.get_mut(&name)?.shape;
+            pending.extend(name.map(Step::Field));
+            pending.extend((0..arrays).map(|_| Step::Items));
+        }
+        let mut location = Location {
+            base: None,
+            steps: Vec::new(),
+            rest: Vec::new(),
+        };
+        let mut shape = &self.root;
+        let mut pending = pending.into_iter();
+        loop {
+            // The shape the next step is taken from: this one, or a definition.
+            if !shape.references.is_empty()
+                && let Some(member) = members_of(shape, &self.definitions).0.first()
+                && !std::ptr::eq(member.shape, shape)
+            {
+                let (name, definition) = self
+                    .definitions
+                    .iter()
+                    .find(|(_, d)| std::ptr::eq(*d, member.shape))?;
+                location.base = Some(name.clone());
+                location.steps.clear();
+                shape = definition;
             }
-            for _ in 0..arrays {
-                shape = shape.items.as_deref_mut()?;
+            let Some(step) = pending.next() else {
+                return Some(location);
+            };
+            let next = match &step {
+                Step::Field(name) => shape.fields.get(name).map(|f| &f.shape),
+                Step::Items => shape.items.as_deref(),
+            };
+            match next {
+                Some(next) => {
+                    location.steps.push(step);
+                    shape = next;
+                }
+                None => {
+                    location.rest.push(step);
+                    location.rest.extend(pending);
+                    return Some(location);
+                }
             }
+        }
+    }
+
+    /// The shape at `location`, with what the schema does not have of it created.
+    fn shape_mut(&mut self, location: Location) -> Option<&mut Shape> {
+        let mut shape = match &location.base {
+            None => &mut self.root,
+            Some(name) => self.definitions.get_mut(name)?,
+        };
+        for step in location.steps {
+            shape = match step {
+                Step::Field(name) => &mut shape.fields.get_mut(&name)?.shape,
+                Step::Items => shape.items.as_deref_mut()?,
+            };
+        }
+        for step in location.rest {
+            shape = match step {
+                Step::Field(name) => {
+                    if !shape.types.contains(&JsonType::Object) {
+                        shape.types.push(JsonType::Object);
+                    }
+                    &mut shape
+                        .fields
+                        .entry(name)
+                        .or_insert_with(|| Field {
+                            presence: 0.0,
+                            ..Field::default()
+                        })
+                        .shape
+                }
+                Step::Items => {
+                    if !shape.types.contains(&JsonType::Array) {
+                        shape.types.push(JsonType::Array);
+                    }
+                    shape.items.get_or_insert_with(Default::default)
+                }
+            };
         }
         Some(shape)
     }
@@ -212,7 +485,8 @@ impl Schema {
     /// Applies overrides: a map from paths (see [`Schema::shape_at`]) to settings. Unknown
     /// paths are created, so overrides can also declare fields the samples did not contain
     /// ([`Schema::missing_override_paths`] lists them first, to catch misspelt paths).
-    /// Returns the paths that could not be applied.
+    /// Returns the paths that could not be applied. A path that goes through a reference to a
+    /// definition changes the definition, and so every place that refers to it.
     ///
     /// ```
     /// use jlens_schema::{Override, Schema};
@@ -230,11 +504,10 @@ impl Schema {
     pub fn apply_overrides(&mut self, overrides: &BTreeMap<String, Override>) -> Vec<String> {
         let mut failed = Vec::new();
         for (path, o) in overrides {
-            if self.shape_at(path).is_none() && !self.create_path(path) {
-                failed.push(path.clone());
-                continue;
-            }
-            let Some(shape) = self.shape_at_mut(path) else {
+            let Some(shape) = self
+                .locate(path)
+                .and_then(|location| self.shape_mut(location))
+            else {
                 failed.push(path.clone());
                 continue;
             };
@@ -316,10 +589,10 @@ impl Schema {
         let mut shape = &self.root;
         for (i, (name, arrays)) in steps.iter().enumerate() {
             if let Some(name) = name {
-                let Some(field) = shape.fields.get(name) else {
+                let Some(field) = self.field(shape, name) else {
                     let mut candidates = Vec::new();
                     // A field of the array items, reached without `[]`.
-                    if shape.items.is_some() {
+                    if self.items(shape).is_some() {
                         let mut fixed: Vec<String> =
                             segments.iter().map(|s| (*s).to_owned()).collect();
                         match i.checked_sub(1) {
@@ -329,7 +602,12 @@ impl Schema {
                         candidates.push(fixed.join("."));
                     }
                     // A misspelt field name.
-                    let names: Vec<&str> = shape.fields.keys().map(String::as_str).collect();
+                    let names: Vec<&str> = members_of(shape, &self.definitions)
+                        .0
+                        .iter()
+                        .flat_map(|m| m.shape.fields.keys())
+                        .map(String::as_str)
+                        .collect();
                     if let Some(near) = crate::service::closest(name, &names) {
                         let quoted = segments[i].starts_with('`');
                         let near = if quoted {
@@ -344,42 +622,13 @@ impl Schema {
                     }
                     return candidates.into_iter().find(|c| self.shape_at(c).is_some());
                 };
-                shape = &field.shape;
+                shape = field;
             }
             for _ in 0..*arrays {
-                shape = shape.items.as_deref()?;
+                shape = self.items(shape)?;
             }
         }
         None
-    }
-
-    fn create_path(&mut self, path: &str) -> bool {
-        let Some(steps) = parse_path(path) else {
-            return false;
-        };
-        let mut shape = &mut self.root;
-        for (name, arrays) in steps {
-            if let Some(name) = name {
-                if !shape.types.contains(&JsonType::Object) {
-                    shape.types.push(JsonType::Object);
-                }
-                shape = &mut shape
-                    .fields
-                    .entry(name)
-                    .or_insert_with(|| Field {
-                        presence: 0.0,
-                        ..Field::default()
-                    })
-                    .shape;
-            }
-            for _ in 0..arrays {
-                if !shape.types.contains(&JsonType::Array) {
-                    shape.types.push(JsonType::Array);
-                }
-                shape = shape.items.get_or_insert_with(Default::default);
-            }
-        }
-        true
     }
 }
 

@@ -5,14 +5,14 @@
 //! that stores the answer beside an expression can tell, when a new version of the schema
 //! arrives, whether anything the expression uses changed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use jlens_core::reads::{Read, Reads};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::service::{LanguageService, field_insert};
-use crate::shape::{JsonType, Shape};
+use crate::shape::{Definitions, JsonType, Schema, Sh, Shape, members, members_of};
 
 /// The path of a value itself: the input, or a variable.
 const ROOT: &str = "$";
@@ -120,28 +120,116 @@ fn is_false(b: &bool) -> bool {
 }
 
 impl Use {
-    fn of(shape: &Shape, required: Option<bool>) -> Use {
+    /// What the schema says of a value that may have any of `shapes`: the types of all, the
+    /// values any lists, and the first domain and format.
+    fn of(shapes: &[Sh], required: Option<bool>) -> Use {
+        let mut types: Vec<JsonType> = Vec::new();
+        let mut enumeration: Option<Vec<JsonValue>> = None;
+        for shape in shapes {
+            for t in &shape.types {
+                if !types.contains(t) {
+                    types.push(*t);
+                }
+            }
+            if let Some(listed) = &shape.enumeration {
+                // One shape's values are given as it lists them; another's add the new ones.
+                let values = enumeration.get_or_insert_with(Vec::new);
+                for value in listed {
+                    if shapes.len() == 1 || !values.contains(value) {
+                        values.push(value.clone());
+                    }
+                }
+            }
+        }
+        if shapes.len() > 1 {
+            types.sort();
+        }
         Use {
             unknown: false,
             whole: false,
-            types: shape.types.clone(),
-            enumeration: shape.enumeration.clone(),
-            closed: shape.enumeration.is_some()
-                && !shape.enumeration_inferred
-                && shape.domain.is_none(),
-            domain: shape.domain.clone(),
-            format: shape.format.clone(),
+            types,
+            enumeration,
+            closed: !shapes.is_empty()
+                && shapes.iter().all(|shape| {
+                    shape.enumeration.is_some()
+                        && !shape.enumeration_inferred
+                        && shape.domain.is_none()
+                }),
+            domain: shapes.iter().find_map(|shape| shape.domain.clone()),
+            format: shapes.iter().find_map(|shape| shape.format.clone()),
             required,
         }
     }
 }
 
-/// One value to describe: its shape, if the schema has one, whether it is a required field, its
-/// path, and what is read of it; `None` under a value read whole, where everything is.
-type Pending<'a> = (Option<&'a Shape>, Option<bool>, String, Option<&'a Read>);
+/// One value to describe.
+struct Pending<'a> {
+    /// The shapes the schema gives it; `None` when it says nothing of it.
+    shapes: Option<Vec<Sh<'a>>>,
+    /// Whether it is a required field.
+    required: Option<bool>,
+    path: String,
+    /// What is read of it; `None` under a value read whole, where everything is.
+    read: Option<&'a Read>,
+    /// The arrays whose items led here with the same fields to read: an array that holds
+    /// itself leads back to them.
+    arrays: Vec<*const Shape>,
+}
 
-/// The paths `read` reaches in a value of `shape`, each with what the schema says there.
-fn collect(shape: Option<&Shape>, read: &Read) -> BTreeMap<String, Use> {
+/// The values under those read whole, still to describe: the nearest to the value read whole
+/// first, then in the order of their paths, so that where the listing of a recursive schema
+/// stops does not depend on the order the schema is written in.
+type Below<'a> = BTreeMap<(usize, usize, String), (Option<Vec<Sh<'a>>>, Option<bool>)>;
+
+/// The shapes a value of `shape` may have; `None` when a reference leaves them unknown.
+fn shapes_of<'a>(shape: &'a Shape, defs: &'a Definitions) -> Option<Vec<Sh<'a>>> {
+    match members_of(shape, defs) {
+        (shapes, false) => Some(shapes),
+        _ => None,
+    }
+}
+
+/// The field `name` of a value that may have any of `shapes`: its shapes, and whether every
+/// shape that has it requires it. `None` when none has it.
+fn field_of<'a>(shapes: &[Sh<'a>], name: &str) -> Option<(Option<Vec<Sh<'a>>>, bool)> {
+    let mut found: Option<(Option<Vec<Sh<'a>>>, bool)> = None;
+    for shape in shapes {
+        let Some(field) = shape.shape.fields.get(name) else {
+            continue;
+        };
+        let (all, required) = found.get_or_insert((Some(Vec::new()), true));
+        *required &= field.required;
+        if all
+            .as_mut()
+            .is_none_or(|all| members(&field.shape, shape.defs, all))
+        {
+            *all = None;
+        }
+    }
+    found
+}
+
+/// The items of a value that may have any of `shapes`; `None` when none is an array of known
+/// items.
+fn items_of<'a>(shapes: &[Sh<'a>]) -> Option<Option<Vec<Sh<'a>>>> {
+    let mut found: Option<Option<Vec<Sh<'a>>>> = None;
+    for shape in shapes {
+        let Some(items) = shape.shape.items.as_deref() else {
+            continue;
+        };
+        let all = found.get_or_insert(Some(Vec::new()));
+        if all
+            .as_mut()
+            .is_none_or(|all| members(items, shape.defs, all))
+        {
+            *all = None;
+        }
+    }
+    found
+}
+
+/// The paths `read` reaches in a value described by `schema`, each with what it says there.
+fn collect(schema: Option<&Schema>, read: &Read) -> BTreeMap<String, Use> {
     fn join(path: &str, name: &str) -> String {
         let name = field_insert(name);
         if path.is_empty() {
@@ -152,52 +240,128 @@ fn collect(shape: Option<&Shape>, read: &Read) -> BTreeMap<String, Use> {
     }
     let mut out = BTreeMap::new();
     // Iterative, so that a deep schema cannot overflow the stack.
-    let mut pending: Vec<Pending> = vec![(shape, None, String::new(), Some(read))];
-    while let Some((shape, required, path, read)) = pending.pop() {
-        let mut entry = match shape {
-            Some(shape) => Use::of(shape, required),
+    let mut pending: Vec<Pending> = vec![Pending {
+        shapes: schema.and_then(|s| shapes_of(&s.root, &s.definitions)),
+        required: None,
+        path: String::new(),
+        read: Some(read),
+        arrays: Vec::new(),
+    }];
+    let mut below: Below = BTreeMap::new();
+    // The values read whole so far, and the shapes listed under each: a recursive schema
+    // leads back to them, and what is under a shape is listed once.
+    let mut wholes = 0;
+    let mut listed: HashSet<(usize, *const Shape)> = HashSet::new();
+    loop {
+        let (next, level) = match pending.pop() {
+            Some(next) => (next, None),
+            None => match below.pop_first() {
+                Some(((whole, depth, path), (shapes, required))) => (
+                    Pending {
+                        shapes,
+                        required,
+                        path,
+                        read: None,
+                        arrays: Vec::new(),
+                    },
+                    Some((whole, depth)),
+                ),
+                None => break,
+            },
+        };
+        let Pending {
+            shapes,
+            required,
+            path,
+            read,
+            arrays,
+        } = next;
+        let mut entry = match &shapes {
+            Some(shapes) => Use::of(shapes, required),
             None => Use {
                 unknown: true,
                 ..Use::default()
             },
         };
         entry.whole = matches!(read, Some(Read::Whole));
-        match (read, shape) {
-            (Some(Read::Fields(fields)), Some(shape)) => {
+        match (read, &shapes) {
+            (Some(Read::Fields(fields)), Some(shapes)) => {
                 for (name, read) in fields {
-                    match shape.fields.get(name) {
-                        Some(field) => pending.push((
-                            Some(&field.shape),
-                            Some(field.required),
-                            join(&path, name),
-                            Some(read),
-                        )),
+                    match field_of(shapes, name) {
+                        Some((shapes, required)) => pending.push(Pending {
+                            shapes,
+                            required: Some(required),
+                            path: join(&path, name),
+                            read: Some(read),
+                            arrays: Vec::new(),
+                        }),
                         // A field of an array's items is looked for there.
-                        None if shape.items.is_some() => {}
-                        None => pending.push((None, None, join(&path, name), Some(read))),
+                        None if shapes.iter().any(|s| s.items.is_some()) => {}
+                        None => pending.push(Pending {
+                            shapes: None,
+                            required: None,
+                            path: join(&path, name),
+                            read: Some(read),
+                            arrays: Vec::new(),
+                        }),
                     }
                 }
                 // A path step maps over arrays: the same fields are read of the items.
-                if let Some(items) = shape.items.as_deref().filter(|_| !fields.is_empty()) {
-                    pending.push((Some(items), None, format!("{path}[]"), read));
+                let mut arrays = arrays;
+                let again = shapes
+                    .iter()
+                    .any(|s| arrays.contains(&(s.shape as *const Shape)));
+                if !again && let Some(items) = items_of(shapes).filter(|_| !fields.is_empty()) {
+                    arrays.extend(shapes.iter().map(|s| s.shape as *const Shape));
+                    pending.push(Pending {
+                        shapes: items,
+                        required: None,
+                        path: format!("{path}[]"),
+                        read,
+                        arrays,
+                    });
                 }
             }
             (Some(Read::Fields(fields)), None) => {
                 for (name, read) in fields {
-                    pending.push((None, None, join(&path, name), Some(read)));
+                    pending.push(Pending {
+                        shapes: None,
+                        required: None,
+                        path: join(&path, name),
+                        read: Some(read),
+                        arrays: Vec::new(),
+                    });
                 }
             }
-            (Some(Read::Whole) | None, Some(shape)) => {
-                for (name, field) in &shape.fields {
-                    pending.push((
-                        Some(&field.shape),
-                        Some(field.required),
-                        join(&path, name),
-                        None,
-                    ));
+            (Some(Read::Whole) | None, Some(shapes)) => {
+                let (whole, depth) = level.unwrap_or_else(|| {
+                    wholes += 1;
+                    (wholes, 0)
+                });
+                // Where the schema repeats, what is under the value is listed already.
+                let shapes: Vec<Sh> = shapes
+                    .iter()
+                    .copied()
+                    .filter(|s| listed.insert((whole, s.shape)))
+                    .collect();
+                let mut names: Vec<&str> = Vec::new();
+                for shape in &shapes {
+                    for name in shape.shape.fields.keys() {
+                        if !names.contains(&name.as_str()) {
+                            names.push(name);
+                        }
+                    }
                 }
-                if let Some(items) = &shape.items {
-                    pending.push((Some(items), None, format!("{path}[]"), None));
+                for name in names {
+                    if let Some((shapes, required)) = field_of(&shapes, name) {
+                        below.insert(
+                            (whole, depth + 1, join(&path, name)),
+                            (shapes, Some(required)),
+                        );
+                    }
+                }
+                if let Some(items) = items_of(&shapes) {
+                    below.insert((whole, depth + 1, format!("{path}[]")), (items, None));
                 }
             }
             (Some(Read::Whole) | None, None) => {}
@@ -222,6 +386,10 @@ impl LanguageService {
     /// cannot follow it (`*`, `**`, `$eval`, a value given to a host function), with every
     /// path the schema has under it. It does not depend on the rest of the schema: two schemas
     /// that give equal answers differ in nothing the expression uses.
+    ///
+    /// Under a value read whole, a recursive schema is listed down to where it repeats: what
+    /// is under a definition is listed once, at the place nearest to the value read whole, and
+    /// the path of another value of that definition is the last on its way.
     ///
     /// ```
     /// use jlens_core::Expression;
@@ -269,7 +437,7 @@ impl LanguageService {
             self.variables
                 .iter()
                 .find(|(n, _)| n == name)
-                .map(|(_, shape)| shape.as_ref())
+                .map(|(_, schema)| schema.as_ref())
         };
         let mut bindings: BTreeMap<String, BTreeMap<String, Use>> = reads
             .bindings()
@@ -281,18 +449,18 @@ impl LanguageService {
             .map(|(name, read)| (name.clone(), collect(declared(name).flatten(), read)))
             .collect();
         if reads.every_binding() {
-            for (name, shape) in &self.variables {
-                if let Some(shape) = shape {
+            for (name, schema) in &self.variables {
+                if let Some(schema) = schema {
                     bindings
                         .entry(name.clone())
-                        .or_insert_with(|| collect(Some(shape), &Read::Whole));
+                        .or_insert_with(|| collect(Some(schema), &Read::Whole));
                 }
             }
         }
         Uses {
             input: reads
                 .input()
-                .map(|read| collect(self.schema.as_ref().map(|s| &s.root), read)),
+                .map(|read| collect(self.schema.as_ref(), read)),
             bindings,
             every_binding: reads.every_binding(),
         }

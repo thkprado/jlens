@@ -40,8 +40,24 @@ All notable changes are recorded here. The format follows
   - the Java package: `LanguageService.uses(expression)` returns a `Uses` record, and
     `Uses.changes` a `UsesChanges` record; both read and write the JSON form.
 
+- A recursive JSON Schema loads ([ADR 0024](docs/src/adr/0024-recursive-schemas.md)): one
+  whose `$ref` leads back to itself, as `"$ref": "#"` in a tree, a definition that refers to
+  itself or two that refer to each other. It failed with `$ref nesting is too deep` before.
+  Completion, hover and the diagnostics follow it as deep as the expression goes, and under a
+  value read whole, what an expression uses lists what is under each definition once. In
+  `jlens-schema`, such a `$ref` is a reference by name (`Shape::references`) to a definition
+  of the schema (`Schema::definitions`), which `Schema::shape_at`, the overrides and
+  `Schema::to_json_schema` follow; `Schema::members` gives the shapes one stands for, and
+  `LanguageService::with_variable_schema` declares a variable with its schema, definitions
+  included. Every package that reads a JSON Schema gains it: the CLI, the language server, the
+  WebAssembly package and the Java package.
+
 ### Changed
 
+- `jlens-schema`: `Shape` has the public field `references` and `Schema` the public field
+  `definitions`, so a `Schema` built field by field must give it (`..Schema::default()`). A
+  schema nested more than 64 levels without recursion fails with `the schema is nested too
+  deep`.
 - `jlens-schema`: a path of `Schema::shape_at` and of the overrides takes a field name that
   holds a dot, between backquotes (`` customer.`odd.name` ``), and the empty name as ` `` `.
   Such a path was split at the dot before, and found nothing.

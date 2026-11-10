@@ -6,16 +6,19 @@
 //! types are sets of schema shapes; `partial` marks that something unknown contributed, in
 //! which case no "missing field" warnings are produced.
 
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use jlens_core::ast::{BinaryOp, LambdaDef, Node, NodeKind, Span, Stage};
 
-use crate::shape::{Field, JsonType, Shape};
+use crate::shape::{Definitions, Field, JsonType, NO_DEFINITIONS, Sh, Shape, members, members_of};
 
 /// The type of a value: the shapes it may have.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Ty<'s> {
-    pub shapes: Vec<&'s Shape>,
+    /// The shapes, each read through its references already: one that refers to definitions
+    /// is replaced by those it stands for.
+    pub shapes: Vec<Sh<'s>>,
     /// Something unknown contributed (a user function, an object constructor, no schema...).
     pub partial: bool,
 }
@@ -48,21 +51,23 @@ impl<'s> Ty<'s> {
             })
         });
         match SHAPES.iter().find(|s| s.types[0] == ty) {
-            Some(shape) => Ty::of(shape),
+            Some(shape) => Ty::of(shape, &NO_DEFINITIONS),
             None => Ty::scalar(),
         }
     }
 
-    pub fn of(shape: &'s Shape) -> Self {
+    /// The type of a value of `shape`, a shape of the schema whose definitions are `defs`.
+    pub fn of(shape: &'s Shape, defs: &'s Definitions) -> Self {
+        let (shapes, unknown) = members_of(shape, defs);
         Ty {
-            shapes: vec![shape],
-            partial: shape.types.is_empty(),
+            partial: unknown || shapes.iter().any(|s| s.types.is_empty()),
+            shapes,
         }
     }
 
     pub fn union(mut self, other: Ty<'s>) -> Self {
         for s in other.shapes {
-            if !self.shapes.iter().any(|t| std::ptr::eq(*t, s)) {
+            if !self.shapes.iter().any(|t| std::ptr::eq(t.shape, s.shape)) {
                 self.shapes.push(s);
             }
         }
@@ -72,19 +77,32 @@ impl<'s> Ty<'s> {
 
     /// The items a path step iterates over: arrays are replaced by their items, recursively.
     pub fn elements(&self) -> Ty<'s> {
-        fn push<'s>(shape: &'s Shape, out: &mut Ty<'s>, depth: usize) {
+        // `arrays` holds the arrays already entered: a recursive schema leads back to them.
+        fn push<'s>(shape: Sh<'s>, out: &mut Ty<'s>, arrays: &mut Vec<*const Shape>) {
             if shape.types.is_empty() {
                 out.partial = true;
                 return;
             }
-            if shape.types.contains(&JsonType::Array) {
-                match &shape.items {
-                    Some(items) if depth < 32 => push(items, out, depth + 1),
+            if shape.types.contains(&JsonType::Array)
+                && !arrays.contains(&(shape.shape as *const Shape))
+            {
+                match &shape.shape.items {
+                    Some(items) if arrays.len() < 32 => {
+                        arrays.push(shape.shape);
+                        let (items, unknown) = members_of(items, shape.defs);
+                        out.partial |= unknown;
+                        for item in items {
+                            push(item, out, arrays);
+                        }
+                    }
                     _ => out.partial = true,
                 }
             }
             if shape.types.iter().any(|t| *t != JsonType::Array)
-                && !out.shapes.iter().any(|s| std::ptr::eq(*s, shape))
+                && !out
+                    .shapes
+                    .iter()
+                    .any(|s| std::ptr::eq(s.shape, shape.shape))
             {
                 out.shapes.push(shape);
             }
@@ -93,21 +111,23 @@ impl<'s> Ty<'s> {
             shapes: Vec::new(),
             partial: self.partial,
         };
+        let mut arrays = Vec::new();
         for shape in &self.shapes {
-            push(shape, &mut out, 0);
+            push(*shape, &mut out, &mut arrays);
         }
         out
     }
 
-    /// The fields available on the (element) shapes, merged by name in first-seen order.
-    pub fn fields(&self) -> Vec<(&'s str, &'s Field)> {
+    /// The fields available on the (element) shapes, merged by name in first-seen order, each
+    /// with the definitions its shape is read in.
+    pub fn fields(&self) -> Vec<(&'s str, &'s Field, &'s Definitions)> {
         let shapes = self.elements().shapes;
-        let mut out: Vec<(&'s str, &'s Field)> = Vec::new();
+        let mut out: Vec<(&'s str, &'s Field, &'s Definitions)> = Vec::new();
         for (index, shape) in shapes.iter().enumerate() {
-            for (name, field) in &shape.fields {
+            for (name, field) in &shape.shape.fields {
                 // A shape has each name once: only an earlier shape can have given it already.
                 if !shapes[..index].iter().any(|s| s.fields.contains_key(name)) {
-                    out.push((name, field));
+                    out.push((name, field, shape.defs));
                 }
             }
         }
@@ -130,8 +150,8 @@ impl<'s> Ty<'s> {
             partial: elements.partial,
         };
         for shape in &elements.shapes {
-            if let Some(f) = shape.fields.get(name) {
-                out = out.union(Ty::of(&f.shape));
+            if let Some(f) = shape.shape.fields.get(name) {
+                out = out.union(Ty::of(&f.shape, shape.defs));
             }
         }
         out
@@ -169,8 +189,11 @@ impl<'s> Ty<'s> {
             for &t in &shape.types {
                 add(&mut out.values, symbol(t));
                 if t == JsonType::Array {
-                    let items = shape.items.as_deref().filter(|i| !i.types.is_empty())?;
-                    for &i in &items.types {
+                    let (items, unknown) = members_of(shape.shape.items.as_deref()?, shape.defs);
+                    if unknown || items.iter().any(|i| i.types.is_empty()) {
+                        return None;
+                    }
+                    for &i in items.iter().flat_map(|i| &i.types) {
                         add(&mut out.items, symbol(i));
                     }
                 }
@@ -184,32 +207,34 @@ impl<'s> Ty<'s> {
             shapes: Vec::new(),
             partial: self.elements().partial,
         };
-        for (_, f) in self.fields() {
-            out = out.union(Ty::of(&f.shape));
+        for (_, f, defs) in self.fields() {
+            out = out.union(Ty::of(&f.shape, defs));
         }
         out
     }
 
     fn descendants(&self) -> Ty<'s> {
-        fn collect<'s>(shape: &'s Shape, out: &mut Ty<'s>, depth: usize) {
-            if depth > 32 {
-                out.partial = true;
-                return;
-            }
-            *out = std::mem::take(out).union(Ty::of(shape));
-            for f in shape.fields.values() {
-                collect(&f.shape, out, depth + 1);
-            }
-            if let Some(items) = &shape.items {
-                collect(items, out, depth + 1);
-            }
-        }
         let mut out = Ty {
             shapes: Vec::new(),
             partial: self.partial,
         };
-        for shape in self.elements().shapes {
-            collect(shape, &mut out, 0);
+        // Iterative, so that a deep schema cannot overflow the stack. `seen` holds the shapes
+        // already collected: a recursive schema leads back to them.
+        let mut seen: HashSet<*const Shape> = HashSet::new();
+        let mut pending = self.elements().shapes;
+        pending.reverse();
+        while let Some(shape) = pending.pop() {
+            if !seen.insert(shape.shape) {
+                continue;
+            }
+            out.partial |= shape.types.is_empty();
+            out.shapes.push(shape);
+            let mut below = Vec::new();
+            let children = shape.shape.fields.values().map(|f| &f.shape);
+            for child in children.chain(shape.shape.items.as_deref()) {
+                out.partial |= members(child, shape.defs, &mut below);
+            }
+            pending.extend(below.into_iter().rev());
         }
         out
     }

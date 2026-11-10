@@ -9,8 +9,10 @@ use serde_json::Value;
 fn service(schema: &Value, variables: &Value, functions: &Value) -> LanguageService {
     let mut service = LanguageService::new(Some(Schema::from_json_schema(schema).unwrap()));
     for (name, schema) in variables.as_object().unwrap() {
-        let shape = (!schema.is_null()).then(|| Schema::from_json_schema(schema).unwrap().root);
-        service = service.with_variable(name, shape);
+        service = match schema {
+            Value::Null => service.with_variable(name, None),
+            schema => service.with_variable_schema(name, Schema::from_json_schema(schema).unwrap()),
+        };
     }
     let functions: Vec<FunctionDecl> = serde_json::from_value(functions.clone()).unwrap();
     functions

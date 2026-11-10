@@ -86,17 +86,16 @@ impl Settings {
         let mut problems = Vec::new();
         for (name, doc) in &self.variables {
             let name = name.trim_start_matches('$');
-            let shape = match doc {
-                Value::Null => None,
+            service = match doc {
+                Value::Null => service.with_variable(name, None),
                 doc => match Schema::from_json_schema(doc) {
-                    Ok(schema) => Some(schema.root),
+                    Ok(schema) => service.with_variable_schema(name, schema),
                     Err(e) => {
                         problems.push(format!("variable ${name}: {e}"));
-                        None
+                        service.with_variable(name, None)
                     }
                 },
             };
-            service = service.with_variable(name, shape);
         }
         for decl in &self.functions {
             let mut decl = decl.clone();

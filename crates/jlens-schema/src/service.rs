@@ -10,7 +10,9 @@ use jlens_core::{Diagnostic, Severity, parse_recover};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-use crate::shape::{Field, JsonType, Schema, Shape};
+use std::collections::HashSet;
+
+use crate::shape::{Definitions, Field, JsonType, Schema, Sh, Shape, members_of, summary};
 use crate::typing::{Event, Scope, Symbols, Ty, Walker};
 
 /// The identifier substituted for the word under the cursor before parsing.
@@ -242,7 +244,7 @@ struct CallSite {
 #[derive(Debug, Clone, Default)]
 pub struct LanguageService {
     pub(crate) schema: Option<Schema>,
-    pub(crate) variables: Vec<(String, Option<Shape>)>,
+    pub(crate) variables: Vec<(String, Option<Schema>)>,
     pub(crate) functions: Vec<FunctionDecl>,
 }
 
@@ -315,14 +317,22 @@ pub(crate) fn field_insert(name: &str) -> String {
     }
 }
 
-fn shape_docs(shape: &Shape, field: Option<&Field>) -> Option<String> {
+fn shape_docs(shape: &Shape, defs: &Definitions, field: Option<&Field>) -> Option<String> {
     let mut parts = Vec::new();
-    if let Some(label) = &shape.label {
+    // A shape that refers to a definition is described by its own label and description, or
+    // by the definition's; the rest is the definition's.
+    let first = members_of(shape, defs)
+        .0
+        .iter()
+        .find(|m| !std::ptr::eq(m.shape, shape))
+        .map_or(shape, |m| m.shape);
+    if let Some(label) = shape.label.as_ref().or(first.label.as_ref()) {
         parts.push(format!("**{label}**"));
     }
-    if let Some(d) = &shape.description {
+    if let Some(d) = shape.description.as_ref().or(first.description.as_ref()) {
         parts.push(d.clone());
     }
+    let shape = first;
     if let Some(f) = field
         && !f.required
         && f.presence > 0.0
@@ -485,7 +495,7 @@ fn literal_value(node: &Node) -> Option<JsonValue> {
 fn enumeration<'s>(ty: &Ty<'s>) -> Vec<&'s JsonValue> {
     let mut out: Vec<&'s JsonValue> = Vec::new();
     for shape in ty.shapes.iter().copied().chain(ty.elements().shapes) {
-        for value in shape.enumeration.iter().flatten() {
+        for value in shape.shape.enumeration.iter().flatten() {
             if !out.contains(&value) {
                 out.push(value);
             }
@@ -501,26 +511,38 @@ fn domain_shape<'s>(ty: &Ty<'s>) -> Option<&'s Shape> {
         .copied()
         .chain(ty.elements().shapes)
         .find(|shape| shape.domain.is_some())
+        .map(|shape| shape.shape)
 }
 
-/// The path of `target`, found by identity, in the tree of shapes under `root`: `a.b[].c`.
-fn shape_path(root: &Shape, target: &Shape) -> Option<String> {
-    // Iterative, so that a deep schema cannot overflow the stack.
-    let mut pending = vec![(root, String::new())];
+/// The path of `target`, found by identity, among the shapes of `schema`: `a.b[].c`. A shape
+/// of a definition is found through the first place that refers to it.
+fn shape_path(schema: &Schema, target: &Shape) -> Option<String> {
+    // Iterative, so that a deep schema cannot overflow the stack; a recursive one leads back
+    // to shapes already seen.
+    let mut seen: HashSet<*const Shape> = HashSet::new();
+    let mut pending = vec![(&schema.root, String::new())];
     while let Some((shape, path)) = pending.pop() {
         if std::ptr::eq(shape, target) {
             return Some(path);
         }
-        if let Some(items) = &shape.items {
-            pending.push((items, format!("{path}[]")));
-        }
-        for (name, field) in shape.fields.iter().rev() {
-            let path = if path.is_empty() {
-                name.clone()
-            } else {
-                format!("{path}.{name}")
-            };
-            pending.push((&field.shape, path));
+        for member in members_of(shape, &schema.definitions).0.into_iter().rev() {
+            if std::ptr::eq(member.shape, target) {
+                return Some(path);
+            }
+            if !seen.insert(member.shape) {
+                continue;
+            }
+            if let Some(items) = &member.shape.items {
+                pending.push((items, format!("{path}[]")));
+            }
+            for (name, field) in member.shape.fields.iter().rev() {
+                let path = if path.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{path}.{name}")
+                };
+                pending.push((&field.shape, path));
+            }
         }
     }
     None
@@ -540,11 +562,11 @@ fn same_value(a: &JsonValue, b: &JsonValue) -> bool {
 /// when any value is possible, or when an enumeration holds an array or an object, which a
 /// literal is not compared with here. An open domain takes values no list holds: `None` too.
 fn declared_values<'s>(ty: &Ty<'s>) -> Option<Vec<&'s JsonValue>> {
-    fn collect<'s>(shape: &'s Shape, out: &mut Vec<&'s JsonValue>, depth: usize) -> Option<()> {
+    fn collect<'s>(shape: Sh<'s>, out: &mut Vec<&'s JsonValue>, depth: usize) -> Option<()> {
         if shape.domain.is_some() {
             return None;
         }
-        match &shape.enumeration {
+        match &shape.shape.enumeration {
             Some(values) if !shape.enumeration_inferred => {
                 for value in values {
                     if value.is_array() || value.is_object() {
@@ -558,7 +580,11 @@ fn declared_values<'s>(ty: &Ty<'s>) -> Option<Vec<&'s JsonValue>> {
             }
             Some(_) => None,
             None if depth < 32 && shape.types == [JsonType::Array] => {
-                collect(shape.items.as_deref()?, out, depth + 1)
+                // One shape for the items: a recursive schema cannot branch on the way down.
+                match members_of(shape.shape.items.as_deref()?, shape.defs) {
+                    (items, false) if items.len() == 1 => collect(items[0], out, depth + 1),
+                    _ => None,
+                }
             }
             None => None,
         }
@@ -570,7 +596,7 @@ fn declared_values<'s>(ty: &Ty<'s>) -> Option<Vec<&'s JsonValue>> {
     }
     let mut out = Vec::new();
     for shape in &ty.shapes {
-        collect(shape, &mut out, 0)?;
+        collect(*shape, &mut out, 0)?;
     }
     Some(out)
 }
@@ -693,9 +719,22 @@ impl LanguageService {
     }
 
     /// Declares a variable the expression is evaluated with (a binding), optionally with the
-    /// shape of its value.
+    /// shape of its value. A shape that refers to the definitions of a schema
+    /// ([`Shape::references`]), as a recursive one does, is declared with that schema by
+    /// [`LanguageService::with_variable_schema`]: here its references are unknown.
     pub fn with_variable(mut self, name: impl Into<String>, shape: Option<Shape>) -> Self {
-        self.variables.push((name.into(), shape));
+        let schema = shape.map(|root| Schema {
+            root,
+            ..Schema::default()
+        });
+        self.variables.push((name.into(), schema));
+        self
+    }
+
+    /// Declares a variable the expression is evaluated with (a binding), whose value `schema`
+    /// describes.
+    pub fn with_variable_schema(mut self, name: impl Into<String>, schema: Schema) -> Self {
+        self.variables.push((name.into(), Some(schema)));
         self
     }
 
@@ -734,7 +773,7 @@ impl LanguageService {
 
     fn root_ty(&self) -> Ty<'_> {
         match &self.schema {
-            Some(s) => Ty::of(&s.root),
+            Some(s) => Ty::of(&s.root, &s.definitions),
             None => Ty::unknown(),
         }
     }
@@ -742,7 +781,12 @@ impl LanguageService {
     fn externals(&self) -> Vec<(String, Ty<'_>)> {
         self.variables
             .iter()
-            .map(|(n, s)| (n.clone(), s.as_ref().map_or_else(Ty::unknown, Ty::of)))
+            .map(|(n, s)| {
+                let ty = s
+                    .as_ref()
+                    .map_or_else(Ty::unknown, |s| Ty::of(&s.root, &s.definitions));
+                (n.clone(), ty)
+            })
             .collect()
     }
 
@@ -939,7 +983,7 @@ impl LanguageService {
             path: self
                 .schema
                 .as_ref()
-                .and_then(|schema| shape_path(&schema.root, shape)),
+                .and_then(|schema| shape_path(schema, shape)),
             prefix: prefix.to_owned(),
             range,
             quote,
@@ -963,13 +1007,13 @@ impl LanguageService {
         if values.is_empty() {
             return None;
         }
-        let root = &self.schema.as_ref()?.root;
+        let schema = self.schema.as_ref()?;
         let path = lhs
             .shapes
             .iter()
             .copied()
             .chain(lhs.elements().shapes)
-            .find_map(|shape| shape_path(root, shape))?;
+            .find_map(|shape| shape_path(schema, shape.shape))?;
         Some(ValueCondition { path, values })
     }
 
@@ -1031,10 +1075,10 @@ impl LanguageService {
             return Vec::new();
         };
         let lower = prefix.to_lowercase();
-        let mut fields: Vec<(&str, &Field)> = ctx
+        let mut fields: Vec<(&str, &Field, &Definitions)> = ctx
             .fields()
             .into_iter()
-            .filter(|(name, f)| !f.shape.hidden && name.to_lowercase().starts_with(&lower))
+            .filter(|(name, f, _)| !f.shape.hidden && name.to_lowercase().starts_with(&lower))
             .collect();
         // Required fields first, then by how often they occur; ties keep schema order.
         fields.sort_by(|a, b| {
@@ -1044,11 +1088,11 @@ impl LanguageService {
         });
         fields
             .into_iter()
-            .map(|(name, f)| CompletionItem {
+            .map(|(name, f, defs)| CompletionItem {
                 label: name.to_owned(),
                 kind: CompletionKind::Field,
-                detail: Some(f.shape.type_summary()),
-                documentation: shape_docs(&f.shape, Some(f)),
+                detail: Some(summary(&f.shape, defs)),
+                documentation: shape_docs(&f.shape, defs, Some(f)),
                 insert_text: field_insert(name),
             })
             .collect()
@@ -1066,7 +1110,7 @@ impl LanguageService {
         for (name, ty) in candidates {
             if name.starts_with(prefix) && !seen.contains(&name) && !name.is_empty() {
                 let detail = match ty.shapes.as_slice() {
-                    [shape] => Some(shape.type_summary()),
+                    [shape] => Some(summary(shape.shape, shape.defs)),
                     _ => None,
                 };
                 items.push(CompletionItem {
@@ -1123,7 +1167,7 @@ impl LanguageService {
             Event::Field {
                 node, name, ctx, ..
             } if self.schema.is_some() && ctx.is_known_objects() && !ctx.has_field(name) => {
-                let known: Vec<&str> = ctx.fields().iter().map(|(n, _)| *n).collect();
+                let known: Vec<&str> = ctx.fields().iter().map(|(n, ..)| *n).collect();
                 let quoted = text[node.span.start..].starts_with('`');
                 let len = name.len() + if quoted { 2 } else { 0 };
                 let span = Span::new(node.span.start, (node.span.start + len).min(node.span.end));
@@ -1297,12 +1341,12 @@ impl LanguageService {
                 let field = ctx
                     .fields()
                     .into_iter()
-                    .find(|(n, _)| *n == name)
-                    .map(|(_, f)| f);
+                    .find(|(n, ..)| *n == name)
+                    .map(|(_, f, defs)| (f, defs));
                 let contents = match field {
-                    Some(f) => {
-                        let mut s = format!("`{name}`: {}", f.shape.type_summary());
-                        if let Some(docs) = shape_docs(&f.shape, Some(f)) {
+                    Some((f, defs)) => {
+                        let mut s = format!("`{name}`: {}", summary(&f.shape, defs));
+                        if let Some(docs) = shape_docs(&f.shape, defs, Some(f)) {
                             s.push_str("\n\n");
                             s.push_str(&docs);
                         }
@@ -1317,7 +1361,7 @@ impl LanguageService {
                 let contents = match self.function(name) {
                     Some(f) => format!("`${}{}`\n\n{}", f.name, f.signature, f.summary),
                     None => match ty.shapes.as_slice() {
-                        [shape] => format!("`${name}`: {}", shape.type_summary()),
+                        [shape] => format!("`${name}`: {}", summary(shape.shape, shape.defs)),
                         _ => format!("`${name}`"),
                     },
                 };

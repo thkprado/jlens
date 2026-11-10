@@ -34,7 +34,11 @@ documents in constant memory per distinct field.
 ## Static typing
 
 A type `Ty` is a set of shapes plus a `partial` flag. The flag means that something unknown
-contributed: a user function, an object constructor, or a missing schema. `Walker::walk`
+contributed: a user function, an object constructor, or a missing schema. A shape that refers
+to definitions of its schema, as the recursive `$ref`s of a JSON Schema do
+([ADR 0024](../adr/0024-recursive-schemas.md)), is replaced in the set by the shapes it stands
+for when a type is made of it, so each shape of a type is read with the definitions of its
+schema, and a walk over every shape below (`**`) visits each once. `Walker::walk`
 computes the type of each node and applies the evaluator's context rules:
 
 - A **path** evaluates each step against the *elements* of the previous step's result. Elements
