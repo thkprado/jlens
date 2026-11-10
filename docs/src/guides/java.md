@@ -395,6 +395,36 @@ written against a schema checks them again when a new version of the schema arri
   keeps what it needs of its schemas, which can be closed as soon as it is built; a new version
   of a schema is a new `Schema` and a new `LanguageService`.
 
+## What an expression uses of its schema
+
+Diagnostics tell whether a stored expression still passes with a new version of its schema.
+They do not tell whether something it uses changed: a field that went from a boolean to a
+string leaves `active = true` valid, and always false. `uses` tells what the schema says of
+each field an expression reads, and `changes` compares two such answers (the
+[schema guide](schema.md#what-an-expression-uses-of-its-schema) describes both):
+
+```java
+{{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:uses}}
+```
+
+- **`service.uses(expression)`** returns a `Uses` record: `input()`, a map from each path the
+  expression reads of its input to a `Use`, `null` when it does not read it; `bindings()`, the
+  same for each variable; and `everyBinding()`. A `Use` has what the schema says of the path:
+  `types()`, `enumeration()` and `closed()`, `domain()`, `format()`, `required()`, and
+  `unknown()` for a field the schema does not declare. The values of an enumeration are JSON
+  values: a `String`, a `BigDecimal`, a `Boolean`, `null`, a `List` or a `Map`.
+- **`toJson()` and `Uses.fromJson`** write and read the JSON form, the one every jlens package
+  gives: keep it beside the expression. Compare two answers with `changes` or `equals`, not by
+  their text.
+- **`old.changes(current)`** returns a `UsesChanges` record, and needs neither schema nor
+  service. `isEmpty()` says that nothing the expression uses changed. `input()` and each entry
+  of `bindings()` are `PathChanges`: the paths `added()` and `removed()`, each with its `Use`,
+  and the paths `changed()`, each with a `UseChanges` whose components are `null` where
+  nothing changed and a `Change` with `before()` and `after()` where something did; an
+  enumeration also gives the values `added()` and `removed()`. `toJson()` writes the form of
+  the other packages, in which the two sides are `old` and `new`.
+- **The records cannot be changed**, and none holds native memory.
+
 ## What the package leaves out
 
 Completion, hover and signature help, which serve a person typing, are not in the Java package:

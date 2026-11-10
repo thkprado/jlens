@@ -377,3 +377,42 @@ The types and the values of an enumeration are compared as sets: their order is 
 An enumeration that changed also has `added` and `removed`, the values that only one side
 lists, so that an application can tell a value that was added, which leaves the expression's
 comparisons as they were, from one that was removed.
+
+### In the CLI and the other packages
+
+Every place that has the schema gives the two answers, as the same JSON:
+
+| Where | What an expression uses | What changed |
+|---|---|---|
+| Rust | `LanguageService::uses(&reads)` | `Uses::changes(&new)` |
+| CLI | `jlens schema uses <EXPR>` | `jlens schema changes OLD NEW` |
+| [WebAssembly](wasm.md#what-an-expression-uses-of-its-schema) | `service.uses(expression.reads())` | `usesChanges(old, current)` |
+| [Java](java.md#what-an-expression-uses-of-its-schema) | `service.uses(expression)` | `uses.changes(current)` |
+
+The comparison takes the two answers and nothing else, so the answer kept beside an expression
+is compared when its schema is gone. In Rust, `Uses::from_json` reads an answer kept as JSON; it
+refuses what is not in the form above, where the derived `Deserialize` would take an array for
+an object.
+
+`jlens schema uses` prints the answer of an expression, given as an argument or with `-f`. It
+takes its schema, variables and host functions as [`jlens check`](cli.md#jlens-check) does:
+from `--schema`, and from the `jlens.json` of the current directory or of `--config`, which
+`--path` applies to an expression given as an argument. `jlens schema changes` compares two
+files it wrote:
+
+```sh
+jlens schema uses -f rules/books.jsonata --schema order-v1.schema.json > books.uses.json
+jlens schema uses -f rules/books.jsonata --schema order-v2.schema.json > books.new.json
+jlens schema changes books.uses.json books.new.json
+```
+
+```text
+input
+  added    items[].weight: number, optional
+  changed  items[].price: types number -> integer | string
+  changed  items[].type: enum added "game"; required true -> false
+```
+
+It prints `no change` when nothing the expression uses changed, and with `--json` the JSON form,
+`{}` then. Both commands exit with 0 whether something changed or not; a file that is not an
+answer is a usage problem, 2.

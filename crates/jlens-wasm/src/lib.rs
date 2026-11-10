@@ -10,7 +10,8 @@
 //!   and [`union_reads`] unites what several expressions read (ADR 0016).
 //! * [`parse_recover`] parses with error recovery, for tooling.
 //! * [`LanguageService`] offers completion, diagnostics, hover and signature help over a
-//!   JSON Schema, and [`infer_schema`] infers one from sample documents.
+//!   JSON Schema, and [`infer_schema`] infers one from sample documents. Its `uses` tells what
+//!   an expression uses of the schema, and `usesChanges` what changed between two such answers.
 //! * [`functions`] lists the built-in functions.
 //!
 //! Every offset that crosses the boundary (error positions, spans, completion ranges, cursor

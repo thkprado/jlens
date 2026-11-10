@@ -24,7 +24,7 @@ use crate::{REPLY_ERROR, REPLY_HANDLE, REPLY_JSON, REPLY_UNDEFINED, REPLY_VALUES
 pub(crate) struct Compiled {
     pub(crate) expression: Expression,
     pub(crate) source: String,
-    reads: Reads,
+    pub(crate) reads: Reads,
     read: Read,
 }
 

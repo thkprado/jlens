@@ -660,7 +660,7 @@ public final class Expression implements AutoCloseable {
         cleanable.clean();
     }
 
-    private long live() {
+    long live() {
         if (closed) throw new IllegalStateException("jlens: the expression was closed");
         return handle;
     }

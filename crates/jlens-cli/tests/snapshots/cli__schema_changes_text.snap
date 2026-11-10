@@ -1,0 +1,66 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: text
+---
+$sum(items[type = "book"].price)
+input
+  changed  items[].price: types number -> integer | string
+  changed  items[].type: required true -> false
+
+active = true and status = "open"
+input
+  changed  active: types boolean -> string
+  changed  status: enum added "held"
+
+customer.login & customer.country & customer.`odd.name`
+input
+  changed  customer: required true -> false
+  changed  customer.`odd.name`: types null | string -> string
+  changed  customer.country: unknown false -> true; types string -> (none); domain countries -> (none); required false -> (none)
+  changed  customer.login: format email -> (none); required true -> false
+
+customer.*
+input
+  added    customer.since: string, format date, optional
+  removed  customer.country: string, domain countries, optional
+  changed  customer: required true -> false
+  changed  customer.`odd.name`: types null | string -> string
+  changed  customer.login: format email -> (none); required true -> false
+
+items.missing & "é"
+no change
+
+$limits.max > $free.x and $other
+$limits
+  changed  max: types integer -> number; required false -> true
+
+$rate(1)
+input
+  added    customer.since: string, format date, optional
+  added    items[].weight: number, optional
+  removed  customer.country: string, domain countries, optional
+  changed  active: types boolean -> string
+  changed  customer: required true -> false
+  changed  customer.`odd.name`: types null | string -> string
+  changed  customer.login: format email -> (none); required true -> false
+  changed  items[].price: types number -> integer | string
+  changed  items[].type: required true -> false
+  changed  status: enum added "held"
+
+$eval("1")
+input
+  added    customer.since: string, format date, optional
+  added    items[].weight: number, optional
+  removed  customer.country: string, domain countries, optional
+  changed  active: types boolean -> string
+  changed  customer: required true -> false
+  changed  customer.`odd.name`: types null | string -> string
+  changed  customer.login: format email -> (none); required true -> false
+  changed  items[].price: types number -> integer | string
+  changed  items[].type: required true -> false
+  changed  status: enum added "held"
+$limits
+  changed  max: types integer -> number; required false -> true
+
+1 + 1
+no change

@@ -1,6 +1,7 @@
 package io.github.thkprado.jlens;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -310,5 +311,45 @@ class GuideTest {
             assertEquals("totl", stored.substring(field.span().start(), field.span().end()));
         }
         // ANCHOR_END: diagnostics
+    }
+
+    @Test
+    void uses() {
+        String orderSchema = """
+                {"type": "object", "required": ["active"], "properties": {
+                    "active": {"type": "boolean"},
+                    "status": {"type": "string", "enum": ["open", "closed"]}}}""";
+        String newOrderSchema = orderSchema
+                .replace("\"boolean\"", "\"string\"")
+                .replace("[\"open\", \"closed\"]", "[\"open\", \"held\", \"closed\"]");
+        // ANCHOR: uses
+        String stored;   // kept beside the expression
+        try (Schema order = Schema.fromJson(orderSchema);
+                LanguageService service = LanguageService.of(order);
+                Expression expression = Expression.compile("active = true and status = 'open'")) {
+            Uses uses = service.uses(expression);
+            Use active = uses.input().get("active");
+            assertEquals(List.of("boolean"), active.types());
+            assertEquals(true, active.required());
+            assertEquals(List.of("open", "closed"), uses.input().get("status").enumeration());
+            stored = uses.toJson();
+        }
+
+        // Later, with the new version of the schema: the expression still passes the diagnostics.
+        try (Schema order = Schema.fromJson(newOrderSchema);
+                LanguageService service = LanguageService.of(order);
+                Expression expression = Expression.compile("active = true and status = 'open'")) {
+            assertEquals(List.of(), service.diagnostics("active = true and status = 'open'"));
+
+            UsesChanges changes = Uses.fromJson(stored).changes(service.uses(expression));
+            assertFalse(changes.isEmpty());
+            UsesChanges.UseChanges active = changes.input().changed().get("active");
+            assertEquals(List.of("boolean"), active.types().before());
+            assertEquals(List.of("string"), active.types().after());
+            UsesChanges.EnumChange status = changes.input().changed().get("status").enumeration();
+            assertEquals(List.of("held"), status.added());
+            assertEquals(List.of(), status.removed());
+        }
+        // ANCHOR_END: uses
     }
 }

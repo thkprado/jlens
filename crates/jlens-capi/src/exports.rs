@@ -90,4 +90,10 @@ export! {
     /// The diagnostics of the UTF-8 expression in buffer `text`, as service `service` gives
     /// them: a reply with a JSON array, its spans in UTF-16 offsets, or the error.
     jlens_service_diagnostics(service: u64, text: u64) -> u64 = crate::schema::service_diagnostics, crate::api::panicked;
+    /// What expression `expression` uses of the schemas of service `service`: a reply with
+    /// the JSON object of roadmap 0.33 #5, or the error.
+    jlens_service_uses(service: u64, expression: u64) -> u64 = crate::schema::service_uses, crate::api::panicked;
+    /// What changed between the two answers of `jlens_service_uses` in buffers `old` and
+    /// `new`: a reply with the changes as JSON text, `{}` for none, or the error.
+    jlens_uses_changes(old: u64, new: u64) -> u64 = crate::schema::uses_changes, crate::api::panicked;
 }

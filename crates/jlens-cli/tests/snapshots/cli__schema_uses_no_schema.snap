@@ -1,0 +1,22 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"schema\", \"uses\", \"a.b\"], None)"
+---
+exit: 0
+--- stdout
+{
+  "input": {
+    "$": {
+      "unknown": true
+    },
+    "a": {
+      "unknown": true
+    },
+    "a.b": {
+      "unknown": true,
+      "whole": true
+    }
+  },
+  "bindings": {}
+}
+--- stderr

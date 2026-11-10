@@ -1,0 +1,19 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens_in(\"fixtures/workspace\",\n&[\"schema\", \"uses\", \"--path\", \"rules/new.jsonata\", \"$minimum\"], None)"
+---
+exit: 0
+--- stdout
+{
+  "bindings": {
+    "minimum": {
+      "$": {
+        "whole": true,
+        "types": [
+          "number"
+        ]
+      }
+    }
+  }
+}
+--- stderr

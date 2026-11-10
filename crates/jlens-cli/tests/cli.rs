@@ -630,3 +630,132 @@ fn lsp_runs_a_language_server_session() {
         "diagnostics: {stdout}"
     );
 }
+
+/// The standard output of a run that must succeed, with nothing on standard error.
+fn stdout(dir: &Path, args: &[&str]) -> String {
+    let out = Command::cargo_bin("jlens")
+        .unwrap()
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success() && out.stderr.is_empty(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// The cases every package answers with the same JSON (roadmap 0.33 #7), through a
+/// configuration that declares the variables and the host functions.
+#[test]
+fn schema_uses_and_changes_of_the_shared_cases() {
+    use serde_json::{Value, json};
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixture: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("fixtures/uses/cases.json")).unwrap(),
+    )
+    .unwrap();
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("uses");
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, value: &Value| {
+        std::fs::write(dir.join(name), value.to_string()).unwrap();
+    };
+    for (version, schema, variables) in [
+        ("old", "schema", "variables"),
+        ("new", "newSchema", "newVariables"),
+    ] {
+        write(&format!("{version}.schema.json"), &fixture[schema]);
+        write(
+            &format!("{version}.jlens.json"),
+            &json!({"rules/*.jsonata": {
+                "schema": format!("{version}.schema.json"),
+                "variables": fixture[variables],
+                "functions": fixture["functions"],
+            }}),
+        );
+    }
+    let mut text = String::new();
+    for case in fixture["cases"].as_array().unwrap() {
+        let expression = case["expression"].as_str().unwrap();
+        // The configuration applies to the files of `rules/`.
+        std::fs::create_dir_all(dir.join("rules")).unwrap();
+        std::fs::write(dir.join("rules/case.jsonata"), expression).unwrap();
+        for version in ["old", "new"] {
+            let config = format!("{version}.jlens.json");
+            let uses = stdout(
+                &dir,
+                &[
+                    "schema",
+                    "uses",
+                    "-f",
+                    "rules/case.jsonata",
+                    "--config",
+                    &config,
+                ],
+            );
+            std::fs::write(dir.join(format!("{version}.uses.json")), &uses).unwrap();
+            if version == "old" {
+                let uses: Value = serde_json::from_str(&uses).unwrap();
+                assert_eq!(uses, case["uses"], "{expression}");
+            }
+        }
+        let args = ["schema", "changes", "old.uses.json", "new.uses.json"];
+        let changes: Value =
+            serde_json::from_str(&stdout(&dir, &[&args[..], &["--json"]].concat())).unwrap();
+        assert_eq!(changes, case["changes"], "{expression}");
+        text.push_str(&format!("{expression}\n{}\n", stdout(&dir, &args)));
+    }
+    // The changes as text, for a person.
+    insta::assert_snapshot!("schema_changes_text", text);
+}
+
+#[test]
+fn schema_uses() {
+    // The schema, the variables and the host functions of the configuration.
+    insta::assert_snapshot!(
+        "schema_uses_config",
+        jlens_in(
+            "fixtures/workspace",
+            &["schema", "uses", "-f", "rules/discount.jsonata"],
+            None
+        )
+    );
+    // `--schema` alone, and `--path` for an expression given as an argument.
+    snapshot!(
+        "schema_uses_schema",
+        &[
+            "schema",
+            "uses",
+            "--schema",
+            "fixtures/cli/order.schema.json",
+            "customer.login & nope"
+        ]
+    );
+    insta::assert_snapshot!(
+        "schema_uses_path",
+        jlens_in(
+            "fixtures/workspace",
+            &["schema", "uses", "--path", "rules/new.jsonata", "$minimum"],
+            None
+        )
+    );
+    snapshot!("schema_uses_no_schema", &["schema", "uses", "a.b"]);
+    snapshot!("schema_uses_syntax_error", &["schema", "uses", "a +"]);
+    // A file that is not an answer of `schema uses`.
+    snapshot!(
+        "schema_changes_not_an_answer",
+        &[
+            "schema",
+            "changes",
+            "fixtures/cli/bindings.json",
+            "fixtures/cli/bindings.json"
+        ]
+    );
+    snapshot!(
+        "schema_changes_missing_file",
+        &["schema", "changes", "nope.json", "nope.json"]
+    );
+}

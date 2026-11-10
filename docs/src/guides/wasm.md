@@ -525,6 +525,36 @@ monaco.languages.registerCompletionItemProvider("jsonata", {
 // Diagnostics: monaco.editor.setModelMarkers(model, "jlens", ...) with the same conversion.
 ```
 
+### What an expression uses of its schema
+
+An application that stores expressions written against a schema that changes keeps, beside each
+one, what it uses of the schema, and compares it when a new version arrives (the
+[schema guide](schema.md#what-an-expression-uses-of-its-schema) describes both answers):
+
+```js
+const expression = new Expression('$sum(items[type = "book"].price)');
+const uses = new LanguageService(schema).uses(expression.reads());
+// { input: { "$": { types: ["object"] },
+//            "items": { types: ["array"], required: true },
+//            "items[]": { types: ["object"] },
+//            "items[].price": { whole: true, types: ["number"], required: false },
+//            "items[].type": { whole: true, types: ["string"], enum: ["book", "toy"],
+//                              closed: true, required: true } },
+//   bindings: {} }
+const kept = JSON.stringify(uses);
+
+// Later, with the new version of the schema:
+const changes = usesChanges(JSON.parse(kept), new LanguageService(newSchema).uses(expression.reads()));
+// { input: { changed: { "items[].price": { types: { old: ["number"], new: ["integer", "string"] } } } } }
+// {} when nothing the expression uses changed
+```
+
+`uses` takes [the fields the expression reads](#the-fields-an-expression-reads), so that the
+application chooses them: `expression.reads(bindings)` knows that the JavaScript functions of
+the bindings do not read their context, where `reads()` alone takes the input as read whole by
+a function it does not know. `usesChanges` needs no service and no schema. Both throw a
+`TypeError` for an argument that is not in the form `reads()` or `uses()` returns.
+
 ## Limits and memory
 
 | Limit | Default | Error |

@@ -190,3 +190,36 @@ impl LanguageService {
         }
     }
 }
+
+#[wasm_bindgen]
+impl LanguageService {
+    /// What an expression uses of the service's schemas, from its `reads()`: for each field
+    /// it reads of its input and of the variables declared, what the schema says there.
+    /// Throws a `TypeError` when `reads` is not in the form `reads()` returns.
+    #[wasm_bindgen(skip_typescript)]
+    pub fn uses(&self, reads: JsValue) -> Result<JsValue, JsValue> {
+        let reads = match from_js(&reads, "reads")? {
+            // A derived `Deserialize` would take an array for its fields in order.
+            Some(reads @ Value::Object(_)) => {
+                serde_json::from_value::<jlens_core::reads::Reads>(reads)
+                    .map_err(|e| type_error(&format!("invalid reads: {e}")))?
+            }
+            _ => return Err(type_error("reads must be an object")),
+        };
+        Ok(ser_to_js(&self.inner.uses(&reads)))
+    }
+}
+
+/// What changed between two answers of `LanguageService.uses`, that of the schema an
+/// expression was written against and that of a new version: `{}` when nothing the expression
+/// uses changed. Throws a `TypeError` when one is not in the form `uses()` returns.
+#[wasm_bindgen(js_name = usesChanges, skip_typescript)]
+pub fn uses_changes(old: JsValue, new: JsValue) -> Result<JsValue, JsValue> {
+    crate::convert::install_hooks();
+    let read = |value: &JsValue, what: &str| {
+        let json = from_js(value, what)?.unwrap_or_default();
+        jlens_schema::Uses::from_json(&json)
+            .map_err(|e| type_error(&format!("invalid {what}: {e}")))
+    };
+    Ok(ser_to_js(&read(&old, "old")?.changes(&read(&new, "new")?)))
+}

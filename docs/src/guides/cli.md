@@ -17,6 +17,8 @@ jlens functions [NAME] [--json]
 jlens errors    [CODE] [--json]
 jlens schema infer    SAMPLES...  [--each] [--overrides FILE] [-o SCHEMA]
 jlens schema complete <EXPR> | -f FILE  [--schema SCHEMA] [--cursor N] [--json]
+jlens schema uses     <EXPR> | -f FILE  [--schema SCHEMA] [--config FILE] [--path FILE]
+jlens schema changes  OLD NEW  [--json]
 jlens ast       <EXPR> | -f FILE  [--tokens | --raw] [--recover]
 ```
 
@@ -410,8 +412,11 @@ The [error reference](../language/errors.md) is generated from the same catalog.
 |---|---|
 | `jlens schema infer SAMPLES… [--each] [--overrides FILE] [-o SCHEMA]` | Infer a JSON Schema from sample documents |
 | `jlens schema complete <EXPR> --schema SCHEMA [--cursor N] [--json]` | List completions at a cursor position, given in characters (default: the end) |
+| `jlens schema uses <EXPR> [--schema SCHEMA] [--config FILE] [--path FILE]` | Print what an expression uses of its schema, as JSON: what the schema says of each field it reads. The schema, the variables and the host functions are found as `jlens check` finds them |
+| `jlens schema changes OLD NEW [--json]` | Print what changed between two answers of `jlens schema uses` for one expression, that of the schema it was written against and that of a new version; `no change`, or `{}` with `--json`, when nothing did |
 
-Both are described in the [schema guide](schema.md).
+All are described in the [schema guide](schema.md); the last two in
+[What an expression uses of its schema](schema.md#what-an-expression-uses-of-its-schema).
 
 ## `jlens lsp`
 

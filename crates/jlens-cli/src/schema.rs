@@ -7,10 +7,14 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
-use jlens_schema::{LanguageService, Override, Schema};
+use jlens_core::{Diagnostic, Expression};
+use jlens_schema::{
+    Change, EnumChange, JsonType, LanguageService, Override, PathChanges, Schema, Use, UseChanges,
+    Uses,
+};
 use serde_json::Value;
 
-use crate::{ExprSource, output, print_json, read_json};
+use crate::{ExprSource, output, print_json, read_json, report};
 
 #[derive(Subcommand)]
 pub enum SchemaCommand {
@@ -18,6 +22,12 @@ pub enum SchemaCommand {
     Infer(InferArgs),
     /// List completions for an expression at a cursor position.
     Complete(CompleteArgs),
+    /// Print what an expression uses of its schema, as JSON: what the schema says of each
+    /// field the expression reads. Keep it to compare when the schema changes.
+    Uses(UsesArgs),
+    /// Print what changed between two answers of `schema uses` for one expression: that of
+    /// the schema it was written against, and that of a new version.
+    Changes(ChangesArgs),
 }
 
 #[derive(Args)]
@@ -51,10 +61,43 @@ pub struct CompleteArgs {
     json: bool,
 }
 
+#[derive(Args)]
+pub struct UsesArgs {
+    #[command(flatten)]
+    source: ExprSource,
+    /// The schema of the input (JSON Schema, e.g. from `jlens schema infer`). It replaces the
+    /// schema that the configuration gives the file.
+    #[arg(long, value_name = "FILE")]
+    schema: Option<PathBuf>,
+    /// The configuration that gives files a schema, variables and host functions, as for
+    /// `jlens check` [default: the `jlens.json` of the current directory, if there is one].
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
+    /// Give the expression of the argument the configuration of this file, as if it were its
+    /// contents. The file need not exist.
+    #[arg(long, value_name = "FILE", conflicts_with = "file")]
+    path: Option<PathBuf>,
+}
+
+#[derive(Args)]
+pub struct ChangesArgs {
+    /// The answer of `jlens schema uses` with the schema the expression was written against.
+    #[arg(value_name = "OLD")]
+    old: PathBuf,
+    /// The answer of `jlens schema uses` for the same expression with the new schema.
+    #[arg(value_name = "NEW")]
+    new: PathBuf,
+    /// Print the changes as JSON: `{}` when nothing the expression uses changed.
+    #[arg(long)]
+    json: bool,
+}
+
 pub fn run(cmd: SchemaCommand) -> Result<ExitCode> {
     match cmd {
         SchemaCommand::Infer(args) => infer(args),
         SchemaCommand::Complete(args) => complete(args),
+        SchemaCommand::Uses(args) => uses(args),
+        SchemaCommand::Changes(args) => changes(args),
     }
 }
 
@@ -151,4 +194,165 @@ fn complete(args: CompleteArgs) -> Result<ExitCode> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn uses(args: UsesArgs) -> Result<ExitCode> {
+    let (source, name) = args.source.read()?;
+    let file = args.source.file.as_deref().or(args.path.as_deref());
+    let service = crate::service_for(file, args.schema.as_ref(), args.config.as_ref())?;
+    match Expression::compile(&source) {
+        Ok(expression) => {
+            print_json(&service.uses(&expression.reads()))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(err) => {
+            eprint!(
+                "{}",
+                report::render(&source, &name, &Diagnostic::from(&err))
+            );
+            Ok(ExitCode::from(1))
+        }
+    }
+}
+
+fn changes(args: ChangesArgs) -> Result<ExitCode> {
+    let read = |path: &PathBuf| {
+        Uses::from_json(&read_json(path)?).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))
+    };
+    let changes = read(&args.old)?.changes(&read(&args.new)?);
+    if args.json {
+        print_json(&changes)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if changes.is_empty() {
+        output::line("no change")?;
+    }
+    paths("input", &changes.input)?;
+    for (name, changes) in &changes.bindings {
+        paths(&format!("${name}"), changes)?;
+    }
+    if let Some(change) = &changes.every_binding {
+        output::line(&format!("everyBinding: {}", sides(change, bool::to_string)))?;
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Prints the changes of one value: a line for each path added, removed and changed.
+fn paths(value: &str, changes: &PathChanges) -> Result<()> {
+    if changes.is_empty() {
+        return Ok(());
+    }
+    output::line(value)?;
+    for (path, entry) in &changes.added {
+        output::line(&format!("  added    {path}: {}", said(entry)))?;
+    }
+    for (path, entry) in &changes.removed {
+        output::line(&format!("  removed  {path}: {}", said(entry)))?;
+    }
+    for (path, change) in &changes.changed {
+        output::line(&format!("  changed  {path}: {}", members(change)))?;
+    }
+    Ok(())
+}
+
+/// What a schema says of a path, on one line.
+fn said(entry: &Use) -> String {
+    let mut parts = Vec::new();
+    if entry.unknown {
+        parts.push("unknown".to_owned());
+    }
+    if !entry.types.is_empty() {
+        parts.push(types(&entry.types));
+    }
+    if let Some(values) = &entry.enumeration {
+        parts.push(format!("enum {}", list(values)));
+    }
+    if let Some(domain) = &entry.domain {
+        parts.push(format!("domain {domain}"));
+    }
+    if let Some(format) = &entry.format {
+        parts.push(format!("format {format}"));
+    }
+    match entry.required {
+        Some(true) => parts.push("required".to_owned()),
+        Some(false) => parts.push("optional".to_owned()),
+        None => {}
+    }
+    parts.join(", ")
+}
+
+/// The members of a path that changed, on one line.
+fn members(change: &UseChanges) -> String {
+    let flag = |name: &str, change: &Option<Change<bool>>| {
+        change
+            .as_ref()
+            .map(|change| format!("{name} {}", sides(change, bool::to_string)))
+    };
+    let text = |name: &str, change: &Option<Change<String>>| {
+        change
+            .as_ref()
+            .map(|change| format!("{name} {}", sides(change, String::clone)))
+    };
+    [
+        flag("unknown", &change.unknown),
+        flag("whole", &change.whole),
+        change
+            .types
+            .as_ref()
+            .map(|change| format!("types {}", sides(change, |t| types(t)))),
+        change.enumeration.as_ref().map(enumeration),
+        flag("closed", &change.closed),
+        text("domain", &change.domain),
+        text("format", &change.format),
+        flag("required", &change.required),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("; ")
+}
+
+/// `old -> new`, a side that said nothing as `(none)`.
+fn sides<T>(change: &Change<T>, show: impl Fn(&T) -> String) -> String {
+    let side = |side: &Option<T>| side.as_ref().map_or_else(|| "(none)".to_owned(), &show);
+    format!("{} -> {}", side(&change.old), side(&change.new))
+}
+
+fn types(types: &[JsonType]) -> String {
+    let names: Vec<&str> = types.iter().map(|t| t.name()).collect();
+    names.join(" | ")
+}
+
+fn list(values: &[Value]) -> String {
+    values
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// An enumeration that changed: the values added and removed, or the whole of it when the
+/// schema started or stopped declaring one.
+fn enumeration(change: &EnumChange) -> String {
+    match (&change.old, &change.new) {
+        (Some(_), Some(_)) => {
+            let mut parts = Vec::new();
+            if !change.added.is_empty() {
+                parts.push(format!("added {}", list(&change.added)));
+            }
+            if !change.removed.is_empty() {
+                parts.push(format!("removed {}", list(&change.removed)));
+            }
+            format!("enum {}", parts.join(", "))
+        }
+        (old, new) => {
+            let side = |side: &Option<Vec<Value>>| {
+                side.as_ref().map_or_else(
+                    || "(none)".to_owned(),
+                    |values| format!("[{}]", list(values)),
+                )
+            };
+            format!("enum {} -> {}", side(old), side(new))
+        }
+    }
 }

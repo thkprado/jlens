@@ -13,7 +13,8 @@ import java.util.StringJoiner;
 /**
  * Checks the text of expressions without evaluating them (ADR 0023): their syntax, the fields
  * they name against a {@link Schema}, and the functions and variables they use against what the
- * application declares.
+ * application declares. It also tells what an expression uses of its schemas ({@link
+ * #uses(Expression)}), to compare when a schema changes.
  *
  * {@snippet :
  * try (Schema order = Schema.fromJson(orderSchema);
@@ -95,6 +96,32 @@ public final class LanguageService implements AutoCloseable {
             Reference.reachabilityFence(this);
         }
         return decode(json);
+    }
+
+    /**
+     * What an expression uses of the schemas of this service: for each field it reads of its
+     * input and of the variables declared, what the schema says there ({@link Use}). An
+     * application keeps the answer beside the expression, as {@link Uses#toJson()} writes it,
+     * and when a new version of the schema arrives compares it with the answer of the new
+     * service ({@link Uses#changes(Uses)}).
+     *
+     * <p>The answer follows the fields the expression reads ({@link Expression#reads()}), an
+     * upper bound: the fields it names, those of a predicate included, and the whole value
+     * where the analysis cannot follow it ({@code *}, {@code **}, {@code $eval}, the call of a
+     * host function), with every path the schema has under it.
+     *
+     * @param expression the expression
+     * @return what it uses
+     * @throws IllegalStateException when the service or the expression was closed
+     */
+    public Uses uses(Expression expression) {
+        long service = live();
+        try {
+            return Uses.fromJson(Native.json(Native.serviceUses(service, expression.live())));
+        } finally {
+            Reference.reachabilityFence(expression);
+            Reference.reachabilityFence(this);
+        }
     }
 
     /** The diagnostics of the JSON array the C API replies with. */

@@ -1,0 +1,62 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens_in(\"fixtures/workspace\",\n&[\"schema\", \"uses\", \"-f\", \"rules/discount.jsonata\"], None)"
+---
+exit: 0
+--- stdout
+{
+  "input": {
+    "$": {
+      "types": [
+        "object"
+      ]
+    },
+    "items": {
+      "whole": true,
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "items[]": {
+      "types": [
+        "object"
+      ]
+    },
+    "items[].code": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "items[].quantity": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "items[].type": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "items[].unitPrice": {
+      "types": [
+        "number"
+      ],
+      "required": false
+    }
+  },
+  "bindings": {
+    "minimum": {
+      "$": {
+        "whole": true,
+        "types": [
+          "number"
+        ]
+      }
+    }
+  }
+}
+--- stderr

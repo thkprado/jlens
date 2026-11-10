@@ -7,7 +7,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The JSON the package reads and writes itself: error envelopes, reads and options. Results are
+ * The JSON the package reads and writes itself: error envelopes, reads, options, diagnostics
+ * and what an expression uses of its schema. Results are
  * the caller's JSON text, which this class never parses, or values ({@link Values}). The text comes from the C API, so a
  * malformed one is a bug, reported as an {@link IllegalStateException}.
  */
@@ -55,6 +56,91 @@ final class Json {
         json.at--;
         json.expect('}');
         return members;
+    }
+
+    /**
+     * Parses {@code text}, which the application gives: text that is not JSON is its mistake, an
+     * {@link IllegalArgumentException}.
+     */
+    static Object given(String text) {
+        try {
+            return parse(text);
+        } catch (IllegalStateException e) {
+            throw new IllegalArgumentException("not JSON: " + text, e);
+        }
+    }
+
+    /** {@code value}, which must be an object, as a map; {@code what} names it in the failure. */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> object(Object value, String what) {
+        if (value instanceof Map<?, ?> map) return (Map<String, Object>) map;
+        throw new IllegalArgumentException(what + " must be an object, not " + value);
+    }
+
+    /** Fails when {@code object} has a member that is not one of {@code names}. */
+    static void only(Map<String, Object> object, String what, String... names) {
+        for (String name : object.keySet()) {
+            if (!List.of(names).contains(name)) {
+                throw new IllegalArgumentException(what + " has no member " + name);
+            }
+        }
+    }
+
+    /** Member {@code name} of {@code object}, a boolean; false when it is absent. */
+    static boolean flag(Map<String, Object> object, String name) {
+        Boolean flag = member(object, name, Boolean.class);
+        return flag != null && flag;
+    }
+
+    /**
+     * Member {@code name} of {@code object} as a {@code type}, {@code null} when it is absent.
+     */
+    static <T> T member(Map<String, Object> object, String name, Class<T> type) {
+        if (!object.containsKey(name)) return null;
+        Object value = object.get(name);
+        if (!type.isInstance(value)) {
+            throw new IllegalArgumentException(name + " has the wrong type: " + value);
+        }
+        return type.cast(value);
+    }
+
+    /**
+     * A value as {@link #parse(String)} gives it, as compact JSON text; a map's members in its
+     * order.
+     */
+    static String write(Object value) {
+        StringBuilder out = new StringBuilder();
+        write(value, out);
+        return out.toString();
+    }
+
+    private static void write(Object value, StringBuilder out) {
+        switch (value) {
+            case null -> out.append("null");
+            case String text -> out.append(quote(text));
+            case Boolean flag -> out.append(flag);
+            case Number number -> out.append(number);
+            case Map<?, ?> map -> {
+                out.append('{');
+                boolean first = true;
+                for (Map.Entry<?, ?> member : map.entrySet()) {
+                    if (!first) out.append(',');
+                    first = false;
+                    out.append(quote(String.valueOf(member.getKey()))).append(':');
+                    write(member.getValue(), out);
+                }
+                out.append('}');
+            }
+            case List<?> list -> {
+                out.append('[');
+                for (int i = 0; i < list.size(); i++) {
+                    if (i > 0) out.append(',');
+                    write(list.get(i), out);
+                }
+                out.append(']');
+            }
+            default -> throw new IllegalArgumentException("not a JSON value: " + value);
+        }
     }
 
     /** {@code value} as a JSON string. */

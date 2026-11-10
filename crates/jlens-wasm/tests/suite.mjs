@@ -857,6 +857,50 @@ export const cases = [
     throws(() => new j.LanguageService(null, null, {}), (e) => ok(e instanceof TypeError, "not an array"));
   }],
 
+  ["uses and usesChanges: the cases every package answers the same", async (j, env) => {
+    const fixture = JSON.parse(await env.load("../../../fixtures/uses/cases.json"));
+    const old = new j.LanguageService(fixture.schema, fixture.variables, fixture.functions);
+    const current = new j.LanguageService(fixture.newSchema, fixture.newVariables, fixture.functions);
+    for (const { expression, uses, changes } of fixture.cases) {
+      const reads = new j.Expression(expression).reads();
+      const answer = old.uses(reads);
+      equal(answer, uses, `uses of ${expression}`);
+      equal(j.usesChanges(answer, current.uses(reads)), changes, `changes of ${expression}`);
+      // An answer kept as JSON text is compared with no service.
+      equal(j.usesChanges(JSON.parse(JSON.stringify(answer)), answer), {}, "no change");
+    }
+  }],
+
+  ["uses and usesChanges", (j) => {
+    const schema = (active) => ({
+      type: "object",
+      required: ["active"],
+      properties: { active: { type: active }, "odd name": { enum: ["é", null, 1.5] } },
+    });
+    const expression = new j.Expression("active = true and `odd name` = 'é' and $rate(1) > $limit.max");
+    const service = (active) => new j.LanguageService(schema(active), { limit: null }, [{ name: "rate" }]);
+    const uses = service("boolean").uses(expression.reads());
+    equal(uses.input.$, { whole: true, types: ["object"] }, "a host function reads its context");
+    equal(uses.input["`odd name`"], { enum: ["é", null, 1.5], closed: true, required: false });
+    equal(uses.bindings, { limit: { $: { unknown: true }, max: { unknown: true, whole: true } } });
+    // A JavaScript function cannot read its context: with the bindings, the input is not whole.
+    const narrow = service("boolean").uses(expression.reads({ rate: (n) => n }));
+    equal(narrow.input.$, { types: ["object"] }, "the reads given");
+    equal(narrow.input["`odd name`"].whole, true, "a field read by name");
+    equal(narrow.bindings, uses.bindings, "the same variables");
+    equal(j.usesChanges(uses, service("string").uses(expression.reads())), {
+      input: { changed: { active: { types: { old: ["boolean"], new: ["string"] } } } },
+    });
+    equal(new j.LanguageService().uses(new j.Expression("1").reads()), { bindings: {} });
+    for (const reads of [undefined, null, [], 1, { input: 1 }, { inputs: {} }]) {
+      throws(() => service("boolean").uses(reads), (e) => ok(e instanceof TypeError, `reads ${JSON.stringify(reads)}`));
+    }
+    for (const answer of [undefined, null, [], { input: [] }, { input: { a: [] } }, { input: { a: { types: ["text"] } } }]) {
+      throws(() => j.usesChanges(answer, uses), (e) => ok(e instanceof TypeError, `old ${JSON.stringify(answer)}`));
+      throws(() => j.usesChanges(uses, answer), (e) => ok(e instanceof TypeError, `new ${JSON.stringify(answer)}`));
+    }
+  }],
+
   ["function catalog", (j) => {
     const sum = j.functions().find((f) => f.name === "sum");
     equal([sum.category, sum.signature, sum.params], ["aggregation", "<a<n>:n>", ["array"]]);

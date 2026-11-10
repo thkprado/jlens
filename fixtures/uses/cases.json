@@ -1,0 +1,968 @@
+{
+  "schema": {
+    "type": "object",
+    "required": [
+      "customer",
+      "items"
+    ],
+    "properties": {
+      "customer": {
+        "type": "object",
+        "required": [
+          "login"
+        ],
+        "properties": {
+          "login": {
+            "type": "string",
+            "format": "email"
+          },
+          "country": {
+            "type": "string",
+            "x-jlens-domain": "countries"
+          },
+          "odd.name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "open",
+          "closed"
+        ]
+      },
+      "active": {
+        "type": "boolean"
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "book",
+                "toy"
+              ]
+            },
+            "price": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  },
+  "newSchema": {
+    "type": "object",
+    "required": [
+      "items"
+    ],
+    "properties": {
+      "customer": {
+        "type": "object",
+        "properties": {
+          "login": {
+            "type": "string"
+          },
+          "odd.name": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string",
+            "format": "date"
+          }
+        }
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "closed",
+          "held",
+          "open"
+        ]
+      },
+      "active": {
+        "type": "string"
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "toy",
+                "book"
+              ]
+            },
+            "price": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            },
+            "weight": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  },
+  "variables": {
+    "limits": {
+      "type": "object",
+      "properties": {
+        "max": {
+          "type": "integer"
+        }
+      }
+    },
+    "free": null
+  },
+  "newVariables": {
+    "limits": {
+      "type": "object",
+      "required": [
+        "max"
+      ],
+      "properties": {
+        "max": {
+          "type": "number"
+        }
+      }
+    },
+    "free": null
+  },
+  "functions": [
+    {
+      "name": "rate",
+      "signature": "<n:n>"
+    }
+  ],
+  "cases": [
+    {
+      "expression": "$sum(items[type = \"book\"].price)",
+      "uses": {
+        "input": {
+          "$": {
+            "types": [
+              "object"
+            ]
+          },
+          "items": {
+            "types": [
+              "array"
+            ],
+            "required": true
+          },
+          "items[]": {
+            "types": [
+              "object"
+            ]
+          },
+          "items[].price": {
+            "whole": true,
+            "types": [
+              "number"
+            ],
+            "required": false
+          },
+          "items[].type": {
+            "whole": true,
+            "types": [
+              "string"
+            ],
+            "enum": [
+              "book",
+              "toy"
+            ],
+            "closed": true,
+            "required": true
+          }
+        },
+        "bindings": {}
+      },
+      "changes": {
+        "input": {
+          "changed": {
+            "items[].price": {
+              "types": {
+                "old": [
+                  "number"
+                ],
+                "new": [
+                  "integer",
+                  "string"
+                ]
+              }
+            },
+            "items[].type": {
+              "required": {
+                "old": true,
+                "new": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "expression": "active = true and status = \"open\"",
+      "uses": {
+        "input": {
+          "$": {
+            "types": [
+              "object"
+            ]
+          },
+          "active": {
+            "whole": true,
+            "types": [
+              "boolean"
+            ],
+            "required": false
+          },
+          "status": {
+            "whole": true,
+            "types": [
+              "string"
+            ],
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "closed": true,
+            "required": false
+          }
+        },
+        "bindings": {}
+      },
+      "changes": {
+        "input": {
+          "changed": {
+            "active": {
+              "types": {
+                "old": [
+                  "boolean"
+                ],
+                "new": [
+                  "string"
+                ]
+              }
+            },
+            "status": {
+              "enum": {
+                "old": [
+                  "open",
+                  "closed"
+                ],
+                "new": [
+                  "closed",
+                  "held",
+                  "open"
+                ],
+                "added": [
+                  "held"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "expression": "customer.login & customer.country & customer.`odd.name`",
+      "uses": {
+        "input": {
+          "$": {
+            "types": [
+              "object"
+            ]
+          },
+          "customer": {
+            "types": [
+              "object"
+            ],
+            "required": true
+          },
+          "customer.`odd.name`": {
+            "whole": true,
+            "types": [
+              "null",
+              "string"
+            ],
+            "required": false
+          },
+          "customer.country": {
+            "whole": true,
+            "types": [
+              "string"
+            ],
+            "domain": "countries",
+            "required": false
+          },
+          "customer.login": {
+            "whole": true,
+            "types": [
+              "string"
+            ],
+            "format": "email",
+            "required": true
+          }
+        },
+        "bindings": {}
+      },
+      "changes": {
+        "input": {
+          "changed": {
+            "customer": {
+              "required": {
+                "old": true,
+                "new": false
+              }
+            },
+            "customer.`odd.name`": {
+              "types": {
+                "old": [
+                  "null",
+                  "string"
+                ],
+                "new": [
+                  "string"
+                ]
+              }
+            },
+            "customer.country": {
+              "unknown": {
+                "old": false,
+                "new": true
+              },
+              "types": {
+                "old": [
+                  "string"
+                ]
+              },
+              "domain": {
+                "old": "countries"
+              },
+              "required": {
+                "old": false
+              }
+            },
+            "customer.login": {
+              "format": {
+                "old": "email"
+              },
+              "required": {
+                "old": true,
+                "new": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "expression": "customer.*",
+      "uses": {
+        "input": {
+          "$": {
+            "types": [
+              "object"
+            ]
+          },
+          "customer": {
+            "whole": true,
+            "types": [
+              "object"
+            ],
+            "required": true
+          },
+          "customer.`odd.name`": {
+            "types": [
+              "null",
+              "string"
+            ],
+            "required": false
+          },
+          "customer.country": {
+            "types": [
+              "string"
+            ],
+            "domain": "countries",
+            "required": false
+          },
+          "customer.login": {
+            "types": [
+              "string"
+            ],
+            "format": "email",
+            "required": true
+          }
+        },
+        "bindings": {}
+      },
+      "changes": {
+        "input": {
+          "added": {
+            "customer.since": {
+              "types": [
+                "string"
+              ],
+              "format": "date",
+              "required": false
+            }
+          },
+          "removed": {
+            "customer.country": {
+              "types": [
+                "string"
+              ],
+              "domain": "countries",
+              "required": false
+            }
+          },
+          "changed": {
+            "customer": {
+              "required": {
+                "old": true,
+                "new": false
+              }
+            },
+            "customer.`odd.name`": {
+              "types": {
+                "old": [
+                  "null",
+                  "string"
+                ],
+                "new": [
+                  "string"
+                ]
+              }
+            },
+            "customer.login": {
+              "format": {
+                "old": "email"
+              },
+              "required": {
+                "old": true,
+                "new": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "expression": "items.missing & \"é\"",
+      "uses": {
+        "input": {
+          "$": {
+            "types": [
+              "object"
+            ]
+          },
+          "items": {
+            "types": [
+              "array"
+            ],
+            "required": true
+          },
+          "items[]": {
+            "types": [
+              "object"
+            ]
+          },
+          "items[].missing": {
+            "unknown": true,
+            "whole": true
+          }
+        },
+        "bindings": {}
+      },
+      "changes": {}
+    },
+    {
+      "expression": "$limits.max > $free.x and $other",
+      "uses": {
+        "bindings": {
+          "free": {
+            "$": {
+              "unknown": true
+            },
+            "x": {
+              "unknown": true,
+              "whole": true
+            }
+          },
+          "limits": {
+            "$": {
+              "types": [
+                "object"
+              ]
+            },
+            "max": {
+              "whole": true,
+              "types": [
+                "integer"
+              ],
+              "required": false
+            }
+          },
+          "other": {
+            "$": {
+              "unknown": true,
+              "whole": true
+            }
+          }
+        }
+      },
+      "changes": {
+        "bindings": {
+          "limits": {
+            "changed": {
+              "max": {
+                "types": {
+                  "old": [
+                    "integer"
+                  ],
+                  "new": [
+                    "number"
+                  ]
+                },
+                "required": {
+                  "old": false,
+                  "new": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "expression": "$rate(1)",
+      "uses": {
+        "input": {
+          "$": {
+            "whole": true,
+            "types": [
+              "object"
+            ]
+          },
+          "active": {
+            "types": [
+              "boolean"
+            ],
+            "required": false
+          },
+          "customer": {
+            "types": [
+              "object"
+            ],
+            "required": true
+          },
+          "customer.`odd.name`": {
+            "types": [
+              "null",
+              "string"
+            ],
+            "required": false
+          },
+          "customer.country": {
+            "types": [
+              "string"
+            ],
+            "domain": "countries",
+            "required": false
+          },
+          "customer.login": {
+            "types": [
+              "string"
+            ],
+            "format": "email",
+            "required": true
+          },
+          "items": {
+            "types": [
+              "array"
+            ],
+            "required": true
+          },
+          "items[]": {
+            "types": [
+              "object"
+            ]
+          },
+          "items[].price": {
+            "types": [
+              "number"
+            ],
+            "required": false
+          },
+          "items[].type": {
+            "types": [
+              "string"
+            ],
+            "enum": [
+              "book",
+              "toy"
+            ],
+            "closed": true,
+            "required": true
+          },
+          "status": {
+            "types": [
+              "string"
+            ],
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "closed": true,
+            "required": false
+          }
+        },
+        "bindings": {}
+      },
+      "changes": {
+        "input": {
+          "added": {
+            "customer.since": {
+              "types": [
+                "string"
+              ],
+              "format": "date",
+              "required": false
+            },
+            "items[].weight": {
+              "types": [
+                "number"
+              ],
+              "required": false
+            }
+          },
+          "removed": {
+            "customer.country": {
+              "types": [
+                "string"
+              ],
+              "domain": "countries",
+              "required": false
+            }
+          },
+          "changed": {
+            "active": {
+              "types": {
+                "old": [
+                  "boolean"
+                ],
+                "new": [
+                  "string"
+                ]
+              }
+            },
+            "customer": {
+              "required": {
+                "old": true,
+                "new": false
+              }
+            },
+            "customer.`odd.name`": {
+              "types": {
+                "old": [
+                  "null",
+                  "string"
+                ],
+                "new": [
+                  "string"
+                ]
+              }
+            },
+            "customer.login": {
+              "format": {
+                "old": "email"
+              },
+              "required": {
+                "old": true,
+                "new": false
+              }
+            },
+            "items[].price": {
+              "types": {
+                "old": [
+                  "number"
+                ],
+                "new": [
+                  "integer",
+                  "string"
+                ]
+              }
+            },
+            "items[].type": {
+              "required": {
+                "old": true,
+                "new": false
+              }
+            },
+            "status": {
+              "enum": {
+                "old": [
+                  "open",
+                  "closed"
+                ],
+                "new": [
+                  "closed",
+                  "held",
+                  "open"
+                ],
+                "added": [
+                  "held"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "expression": "$eval(\"1\")",
+      "uses": {
+        "input": {
+          "$": {
+            "whole": true,
+            "types": [
+              "object"
+            ]
+          },
+          "active": {
+            "types": [
+              "boolean"
+            ],
+            "required": false
+          },
+          "customer": {
+            "types": [
+              "object"
+            ],
+            "required": true
+          },
+          "customer.`odd.name`": {
+            "types": [
+              "null",
+              "string"
+            ],
+            "required": false
+          },
+          "customer.country": {
+            "types": [
+              "string"
+            ],
+            "domain": "countries",
+            "required": false
+          },
+          "customer.login": {
+            "types": [
+              "string"
+            ],
+            "format": "email",
+            "required": true
+          },
+          "items": {
+            "types": [
+              "array"
+            ],
+            "required": true
+          },
+          "items[]": {
+            "types": [
+              "object"
+            ]
+          },
+          "items[].price": {
+            "types": [
+              "number"
+            ],
+            "required": false
+          },
+          "items[].type": {
+            "types": [
+              "string"
+            ],
+            "enum": [
+              "book",
+              "toy"
+            ],
+            "closed": true,
+            "required": true
+          },
+          "status": {
+            "types": [
+              "string"
+            ],
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "closed": true,
+            "required": false
+          }
+        },
+        "bindings": {
+          "limits": {
+            "$": {
+              "whole": true,
+              "types": [
+                "object"
+              ]
+            },
+            "max": {
+              "types": [
+                "integer"
+              ],
+              "required": false
+            }
+          }
+        },
+        "everyBinding": true
+      },
+      "changes": {
+        "input": {
+          "added": {
+            "customer.since": {
+              "types": [
+                "string"
+              ],
+              "format": "date",
+              "required": false
+            },
+            "items[].weight": {
+              "types": [
+                "number"
+              ],
+              "required": false
+            }
+          },
+          "removed": {
+            "customer.country": {
+              "types": [
+                "string"
+              ],
+              "domain": "countries",
+              "required": false
+            }
+          },
+          "changed": {
+            "active": {
+              "types": {
+                "old": [
+                  "boolean"
+                ],
+                "new": [
+                  "string"
+                ]
+              }
+            },
+            "customer": {
+              "required": {
+                "old": true,
+                "new": false
+              }
+            },
+            "customer.`odd.name`": {
+              "types": {
+                "old": [
+                  "null",
+                  "string"
+                ],
+                "new": [
+                  "string"
+                ]
+              }
+            },
+            "customer.login": {
+              "format": {
+                "old": "email"
+              },
+              "required": {
+                "old": true,
+                "new": false
+              }
+            },
+            "items[].price": {
+              "types": {
+                "old": [
+                  "number"
+                ],
+                "new": [
+                  "integer",
+                  "string"
+                ]
+              }
+            },
+            "items[].type": {
+              "required": {
+                "old": true,
+                "new": false
+              }
+            },
+            "status": {
+              "enum": {
+                "old": [
+                  "open",
+                  "closed"
+                ],
+                "new": [
+                  "closed",
+                  "held",
+                  "open"
+                ],
+                "added": [
+                  "held"
+                ]
+              }
+            }
+          }
+        },
+        "bindings": {
+          "limits": {
+            "changed": {
+              "max": {
+                "types": {
+                  "old": [
+                    "integer"
+                  ],
+                  "new": [
+                    "number"
+                  ]
+                },
+                "required": {
+                  "old": false,
+                  "new": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "expression": "1 + 1",
+      "uses": {
+        "bindings": {}
+      },
+      "changes": {}
+    }
+  ]
+}

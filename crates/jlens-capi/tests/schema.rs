@@ -306,3 +306,133 @@ fn failures_use_the_codes_of_the_c_api() {
     assert_eq!(jlens_service_free(service), 1);
     assert_eq!(jlens_schema_free(schema), 1);
 }
+
+fn compile(text: &str) -> u64 {
+    handle(with_buffer(text.as_bytes(), |buffer| jlens_compile(buffer)))
+}
+
+fn json(reply: Reply) -> Value {
+    match reply {
+        Reply::Json(value) => value,
+        other => panic!("not JSON: {other:?}"),
+    }
+}
+
+fn changes(old: &Value, new: &Value) -> Reply {
+    let old = buffers::insert(old.to_string().into_bytes());
+    let result = with_buffer(new.to_string().as_bytes(), |new| {
+        jlens_uses_changes(old, new)
+    });
+    assert_eq!(jlens_buffer_free(old), 1);
+    result
+}
+
+/// The cases every package answers with the same JSON (roadmap 0.33 #7).
+#[test]
+fn uses_and_changes_are_those_of_the_shared_cases() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/uses/cases.json"
+    );
+    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let make = |schema_of: &str, variables: &str| {
+        let input = schema(&fixture[schema_of]);
+        let mut schemas = vec![input];
+        let mut declared = serde_json::Map::new();
+        for (name, document) in fixture[variables].as_object().unwrap() {
+            let value = if document.is_null() {
+                Value::Null
+            } else {
+                schemas.push(schema(document));
+                json!(schemas[schemas.len() - 1])
+            };
+            declared.insert(name.clone(), value);
+        }
+        let declarations = json!({"variables": declared, "functions": fixture["functions"]});
+        let service = handle(service(input, Some(&declarations)));
+        for schema in schemas {
+            assert_eq!(jlens_schema_free(schema), 1);
+        }
+        service
+    };
+    let old = make("schema", "variables");
+    let new = make("newSchema", "newVariables");
+    for case in fixture["cases"].as_array().unwrap() {
+        let text = case["expression"].as_str().unwrap();
+        let expression = compile(text);
+        let uses = json(reply(jlens_service_uses(old, expression)));
+        assert_eq!(uses, case["uses"], "{text}");
+        let after = json(reply(jlens_service_uses(new, expression)));
+        assert_eq!(json(changes(&uses, &after)), case["changes"], "{text}");
+        assert_eq!(json(changes(&uses, &uses)), json!({}), "{text}");
+        assert_eq!(jlens_expression_free(expression), 1);
+    }
+    assert_eq!(jlens_service_free(old), 1);
+    assert_eq!(jlens_service_free(new), 1);
+}
+
+#[test]
+fn uses_and_changes_fail_with_the_codes_of_the_c_api() {
+    let service = handle(service(0, None));
+    let expression = compile("a.b");
+    assert_eq!(
+        json(reply(jlens_service_uses(service, expression))),
+        json!({
+            "input": {
+                "$": {"unknown": true},
+                "a": {"unknown": true},
+                "a.b": {"unknown": true, "whole": true}
+            },
+            "bindings": {}
+        })
+    );
+    assert_eq!(
+        error(reply(jlens_service_uses(service ^ (1 << 40), expression))),
+        ("U2002".to_owned(), Some("service".to_owned()))
+    );
+    assert_eq!(
+        error(reply(jlens_service_uses(service, expression ^ (1 << 40)))),
+        ("U2002".to_owned(), Some("expression".to_owned()))
+    );
+    assert_eq!(jlens_expression_free(expression), 1);
+    assert_eq!(jlens_service_free(service), 1);
+
+    let none = json!({"bindings": {}});
+    assert_eq!(json(changes(&none, &json!({}))), json!({}));
+    for (text, code, token) in [
+        (&b"{\"bindings\": "[..], "U2001", None),
+        (&[0xff, 0xfe][..], "U2001", None),
+        (b"[]", "U2005", Some("uses")),
+        (b"{\"inputs\": {}}", "U2005", Some("uses")),
+        (b"{\"input\": {\"a\": []}}", "U2005", Some("uses")),
+        (
+            b"{\"bindings\": {\"x\": {\"a\": []}}}",
+            "U2005",
+            Some("uses"),
+        ),
+        (
+            b"{\"input\": {\"a\": {\"types\": [\"text\"]}}}",
+            "U2005",
+            Some("uses"),
+        ),
+    ] {
+        let other = buffers::insert(none.to_string().into_bytes());
+        for first in [true, false] {
+            let failed = with_buffer(text, |buffer| match first {
+                true => jlens_uses_changes(buffer, other),
+                false => jlens_uses_changes(other, buffer),
+            });
+            assert_eq!(
+                error(failed),
+                (code.to_owned(), token.map(str::to_owned)),
+                "{}",
+                String::from_utf8_lossy(text)
+            );
+        }
+        assert_eq!(jlens_buffer_free(other), 1);
+    }
+    assert_eq!(
+        error(reply(jlens_uses_changes(0, 0))),
+        ("U2002".to_owned(), Some("buffer".to_owned()))
+    );
+}

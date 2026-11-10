@@ -1,0 +1,12 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"schema\", \"uses\", \"a +\"], None)"
+---
+exit: 1
+--- stdout
+--- stderr
+error[S0207]: Unexpected end of expression
+ --> <expr>:1:4
+  |
+1 | a +
+  |    ^

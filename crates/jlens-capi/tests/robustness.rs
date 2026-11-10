@@ -689,6 +689,8 @@ fn schema_bytes() -> impl Strategy<Value = Vec<u8>> {
             "a.nope = \"y\" and $f(1, items.price) ~> $g()",
             "items[price > $x.a].`a` & \"é😀\" & $y",
             "$f(",
+            "{\"input\": {\"$\": {\"types\": [\"object\"]}, \"a\": {\"enum\": [1, [2]], \"required\": true}}, \"bindings\": {}}",
+            "{\"bindings\": {\"x\": {\"$\": {\"unknown\": true, \"whole\": true}}}, \"everyBinding\": true}",
         ])
         .prop_map(|s| s.as_bytes().to_vec()),
         bytes(),
@@ -698,7 +700,7 @@ fn schema_bytes() -> impl Strategy<Value = Vec<u8>> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(1000))]
 
-    /// Schemas, services and diagnostics of any bytes, with handles of any kind in each place,
+    /// Schemas, services, diagnostics, uses and changes of any bytes, with handles of any kind in each place,
     /// are made or fail with an error, never a panic, and every handle made is freed once.
     #[test]
     fn schemas_and_services_of_any_bytes_fail_cleanly(
@@ -745,6 +747,17 @@ proptest! {
                     replied
                 );
             }
+            // What an expression uses, when a text compiles, and its changes against any text.
+            for &text in &buffers {
+                if let Replied::Handle(expression) = reply(jlens_compile(text))? {
+                    prop_assert_eq!(reply(jlens_service_uses(service, expression))?, Replied::Value);
+                    prop_assert_eq!(jlens_expression_free(expression), 1);
+                    prop_assert_eq!(reply(jlens_service_uses(service, expression))?, unknown());
+                }
+                reply(jlens_service_uses(service, text))?;
+                reply(jlens_uses_changes(text, buffer(7)))?;
+            }
+            reply(jlens_uses_changes(service, service))?;
             reply(jlens_service_diagnostics(service, service))?;
             reply(jlens_service_diagnostics(buffer(4), buffer(5)))?;
             reply(jlens_schema_new(service))?;

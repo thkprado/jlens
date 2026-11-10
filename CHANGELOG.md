@@ -28,6 +28,17 @@ All notable changes are recorded here. The format follows
   and changed (`UsesChanges`). A changed path lists each member that changed with its old and
   its new value; types and enumerations are compared as sets, and an enumeration also gives the
   values added and removed. Its JSON form is `{}` when nothing the expression uses changed.
+  `Uses::from_json` reads an answer kept as JSON.
+- What an expression uses of its schema, and what changed between two schemas, wherever the
+  schema is, as the same JSON from each:
+  - the CLI: `jlens schema uses` prints an expression's answer, with the schema, variables and
+    host functions found as `jlens check` finds them, and `jlens schema changes OLD NEW`
+    compares two answers, as text or with `--json`;
+  - the WebAssembly package: `LanguageService.uses(reads)` and `usesChanges(old, current)`,
+    with the types `Uses`, `Use`, `UsesChanges`, `PathChanges`, `UseChanges`, `Change` and
+    `EnumChange`;
+  - the Java package: `LanguageService.uses(expression)` returns a `Uses` record, and
+    `Uses.changes` a `UsesChanges` record; both read and write the JSON form.
 
 ### Changed
 

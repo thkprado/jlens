@@ -87,6 +87,10 @@ final class Native {
     private static final MethodHandle SERVICE_FREE = function("jlens_service_free", U32, U64);
     private static final MethodHandle SERVICE_DIAGNOSTICS =
             function("jlens_service_diagnostics", U64, U64, U64);
+    private static final MethodHandle SERVICE_USES =
+            function("jlens_service_uses", U64, U64, U64);
+    private static final MethodHandle USES_CHANGES =
+            function("jlens_uses_changes", U64, U64, U64);
 
     /** The function the C API calls back to read Java objects: {@link Reader#read}. */
     static final MemorySegment READER;
@@ -379,6 +383,27 @@ final class Native {
     static long serviceDiagnostics(long service, long text) {
         try {
             return (long) SERVICE_DIAGNOSTICS.invokeExact(service, text);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /** What expression {@code expression} uses of the schemas of a service: a reply with JSON. */
+    static long serviceUses(long service, long expression) {
+        try {
+            return (long) SERVICE_USES.invokeExact(service, expression);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /**
+     * What changed between the two answers of {@link #serviceUses} in buffers {@code old} and
+     * {@code current}: a reply with JSON.
+     */
+    static long usesChanges(long old, long current) {
+        try {
+            return (long) USES_CHANGES.invokeExact(old, current);
         } catch (Throwable e) {
             throw failed(e);
         }

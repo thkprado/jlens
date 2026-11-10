@@ -35,8 +35,8 @@
 //! `U2002` for an unknown or freed handle, `U2003` for an expression that is not UTF-8,
 //! `U2004` for a panic, `U2005` for an argument that is not in its form (its `token` says
 //! which: `options`, `read`, `reads`, `result`, `reader`, `functions`, `variables`, `values`,
-//! `function`, `reply`, `audit`, `schema` or `service`), and `U1001` when a table of
-//! handles is full. An unknown handle is reported before anything wrong with what the other
+//! `function`, `reply`, `audit`, `schema`, `service` or `uses`), and `U1001` when a table
+//! of handles is full. An unknown handle is reported before anything wrong with what the other
 //! handles hold. A reply handle of 0 means that no buffer could be made for the reply. A
 //! reader that fails, or writes a level not in its form, fails the evaluation with `U1004`.
 //!
@@ -69,8 +69,10 @@
 //!
 //! A schema, read from JSON Schema text, and a language service, made of a schema and the
 //! variables and host functions declared to it, are objects by handle too. A service replies
-//! with the diagnostics of an expression's text as JSON ([`schema`], ADR 0023). A host that
-//! uses neither pays their size in the library and nothing else.
+//! with the diagnostics of an expression's text and with what a compiled expression uses of
+//! its schemas, both as JSON; two of the latter answers are compared with no service
+//! ([`schema`], ADR 0023). A host that uses neither pays their size in the library and nothing
+//! else.
 //!
 //! # Panics
 //!

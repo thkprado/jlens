@@ -416,6 +416,139 @@ export interface FunctionInfo {
   summary: string;
 }
 
+/**
+ * What a schema says of one value an expression reads: an entry of `Uses`, by its path. A
+ * member that is not set is absent.
+ */
+export interface Use {
+  /**
+   * The schema says nothing of this path: there is no schema for the value, or the field is not
+   * one of those it declares. Nothing else is set then, but `whole`.
+   */
+  unknown?: true;
+  /**
+   * The expression reads the value whole (`*`, `**`, `$eval`, an operand, the result), not only
+   * some of its fields: every path the schema has under this one is in the answer too.
+   */
+  whole?: true;
+  /** The types the schema gives the value. */
+  types?: JsonType[];
+  /** The values the schema lists for it. */
+  enum?: unknown[];
+  /**
+   * The enumeration is closed: declared, not inferred from samples, and with no open domain, so
+   * that a value outside it is warned about (`W0206`).
+   */
+  closed?: true;
+  /** The open domain of the value (`x-jlens-domain`). */
+  domain?: string;
+  /** The string format of the value. */
+  format?: string;
+  /**
+   * Whether the object that holds the field requires it; absent for a path that is not a field:
+   * the value itself, the items of an array. A field is always there only when the fields on
+   * its way, which have their own paths, are required too.
+   */
+  required?: boolean;
+}
+
+/**
+ * What an expression uses of the schema of its input and of each variable, given by
+ * `LanguageService.uses()`: kept beside the expression, it tells with `usesChanges()` whether
+ * anything the expression uses changed in a new version of the schema.
+ *
+ * Each value read is an object from paths to what the schema says there. In a path, `$` is the
+ * value itself, `items[].type` the field `type` of the items of `items`, and a name that is not
+ * a plain one is written between backquotes. Every value on the way to a field read has its own
+ * path, and so do the items of an array. Paths and names are in order, so that two equal answers
+ * have the same JSON text.
+ */
+export interface Uses {
+  /** Absent when the expression does not read its input. */
+  input?: Record<string, Use>;
+  /**
+   * What the expression uses of each variable it reads, by name (without the `$`). The host
+   * functions declared to the service are left out.
+   */
+  bindings: Record<string, Record<string, Use>>;
+  /**
+   * Set when the expression may read any variable whole, as `$eval` can: every variable declared
+   * with a schema is then in `bindings`, whole.
+   */
+  everyBinding?: true;
+}
+
+/**
+ * A member that changed: what the old schema said and what the new one says, each absent when
+ * that schema said nothing.
+ */
+export interface Change<T> {
+  old?: T;
+  new?: T;
+}
+
+/**
+ * An enumeration that changed. The two are compared as sets: the order of the values and a
+ * value listed twice change nothing.
+ */
+export interface EnumChange {
+  /** The values the old schema listed; absent when it had no enumeration. */
+  old?: unknown[];
+  /** The values the new schema lists; absent when it has no enumeration. */
+  new?: unknown[];
+  /** The values that only the new schema lists, in its order. */
+  added?: unknown[];
+  /** The values that only the old schema listed, in its order. */
+  removed?: unknown[];
+}
+
+/**
+ * What changed in what the schemas say of one path: a member for each one of `Use` that
+ * changed. A field that the new schema no longer declares has `unknown` changed, with every
+ * member the old schema gave it.
+ */
+export interface UseChanges {
+  unknown?: Change<boolean>;
+  /** The two answers of one expression do not differ in it. */
+  whole?: Change<boolean>;
+  /** Compared as sets. */
+  types?: Change<JsonType[]>;
+  enum?: EnumChange;
+  closed?: Change<boolean>;
+  domain?: Change<string>;
+  format?: Change<string>;
+  required?: Change<boolean>;
+}
+
+/** What changed in the paths an expression reads of one value. Empty members are absent. */
+export interface PathChanges {
+  /**
+   * The paths that only the new answer has, with what the new schema says there: a field added
+   * under a value the expression reads whole.
+   */
+  added?: Record<string, Use>;
+  /** The paths that only the old answer has, with what the old schema said there. */
+  removed?: Record<string, Use>;
+  /** The paths that both answers have, and of which the schemas do not say the same. */
+  changed?: Record<string, UseChanges>;
+}
+
+/**
+ * What changed in what an expression uses between two schemas, given by `usesChanges()`. Each
+ * member is absent when nothing changed there: `{}` says that nothing the expression uses
+ * changed.
+ */
+export interface UsesChanges {
+  input?: PathChanges;
+  /**
+   * By variable; only the variables with a change. A variable that only one answer has comes
+   * with all its paths added or removed.
+   */
+  bindings?: Record<string, PathChanges>;
+  /** Present when the two answers differ in it, which those of one expression do not. */
+  everyBinding?: Change<boolean>;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Classes and functions with optional arguments (declared here so that the arguments are optional)
 
@@ -516,6 +649,15 @@ export class LanguageService {
   hover(text: string, offset: number): Hover | undefined;
   /** The parameters of the function call around `offset`, if any. */
   signatureHelp(text: string, offset: number): SignatureHelp | undefined;
+  /**
+   * What an expression uses of the schemas of the service, from its `reads()`: for each field it
+   * reads of its input and of the variables declared, what the schema says there. It follows the
+   * reads, an upper bound: the fields the expression names, those of a predicate included, and
+   * the whole value where the analysis cannot follow it (`*`, `**`, `$eval`, a host function
+   * that may read its context), with every path the schema has under it. Throws a `TypeError`
+   * when `reads` is not in the form `reads()` returns.
+   */
+  uses(reads: Reads): Uses;
   free(): void;
   [Symbol.dispose](): void;
 }
@@ -525,6 +667,15 @@ export class LanguageService {
  * result. Throws a `TypeError` when an item is not in the form `reads()` returns.
  */
 export function unionReads(reads: Reads[]): Reads;
+
+/**
+ * What changed between two answers of `LanguageService.uses()` for one expression: that of the
+ * schema it was written against, which may be one kept as JSON, and that of a new version. It
+ * tells the paths added, removed and changed, and what changed in each; `{}` when nothing the
+ * expression uses changed. Types and enumerations are compared as sets. Throws a `TypeError`
+ * when an answer is not in the form `uses()` returns.
+ */
+export function usesChanges(old: Uses, current: Uses): UsesChanges;
 
 /**
  * Infers a JSON Schema (2020-12, with `x-jlens-*` annotations) from sample documents.

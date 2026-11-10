@@ -195,3 +195,37 @@ Five exports: `jlens_schema_new`, `jlens_schema_free`, `jlens_service_new`,
 - **The list of diagnostics cannot be changed**, and a reply that is not in the form of
   decision 6 is a bug of the library, reported as an `IllegalStateException`.
 - No export changed and the library is the one of #3.
+
+## Results: what an expression uses, at every end (0.33 #7)
+
+Two exports: `jlens_service_uses` and `jlens_uses_changes`.
+
+- **`jlens_service_uses` takes the expression's handle**, not its text and not its reads: the
+  C API works an expression's reads out once, when it compiles it, and Java has no bindings
+  that would change them. The WebAssembly package takes the reads, as `reads(bindings)` there
+  knows which functions do not read their context.
+- **`jlens_uses_changes` takes two buffers** and no handle (decision 6). Text that is not JSON
+  fails with `U2001`; JSON that is not an answer with `U2005` and the token `uses`. An array
+  where an object is expected is refused: `Uses::from_json`, in `jlens-schema`, is the one
+  reader of an answer that every end uses, as the derived one takes an array for a struct's
+  fields in order.
+- **In Java the answers are records**: `Uses` and `Use`, and `UsesChanges` with `PathChanges`,
+  `UseChanges`, `Change` and `EnumChange` nested in it. The two sides of a change are
+  `before()` and `after()`, `new` being a word of the language; the JSON form keeps `old` and
+  `new`. A value of an enumeration is what the package's JSON reader gives (a `BigDecimal` for
+  a number). `Uses.changes` writes both answers as JSON and reads the reply, so the comparison
+  is the one of the other packages; an answer made by hand with a type JSON Schema does not
+  have fails there with `U2005`. Java sorts a map's names by UTF-16 code unit and Rust by
+  UTF-8 byte, so the text of an answer written by Java can differ in order from the C API's
+  for names beyond the Basic Multilingual Plane: answers are compared by `changes` or
+  `equals`, not by their text.
+- **The same JSON from each**: `fixtures/uses/cases.json` holds two versions of a schema, of
+  the variables and the host functions, and for nine expressions the answer with the first
+  version and the changes with the second. The Rust crate, the C API, the Java package, the
+  WebAssembly package (in Node.js and in the browser) and the CLI each answer them, and each
+  test compares its answers with the file's.
+- **The size.** The Windows library is 3,507,200 bytes, 12.2% over 0.32.0 (1,321,041
+  compressed, 13.1%), and 4.8% over the library of #3: the answers of #5 and #6, read and
+  written as JSON, add 161 KB, as much as the schema reader and the typing did. Decision 1
+  estimated 5 to 6% before #5 and #6; roadmap 0.33 #10 measures the library and the JAR as
+  released, and looks at what of these 161 KB the JSON forms cost.

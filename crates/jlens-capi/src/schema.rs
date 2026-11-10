@@ -1,6 +1,7 @@
 //! Schemas and language services (ADR 0023): a schema read from JSON Schema text, a service
 //! made of a schema and the declarations of the variables and host functions its expressions
-//! are evaluated with, and the diagnostics of an expression's text.
+//! are evaluated with, the diagnostics of an expression's text, what a compiled expression uses
+//! of the service's schemas, and what changed between two such answers.
 //!
 //! Both are known by handle and never change once made. One serves every thread: a call holds
 //! its table's lock only to find the object, and types the expression with no lock held. A
@@ -8,11 +9,13 @@
 //! costs about a sixth of the schema's load (roadmap 0.33 #3).
 
 use jlens_core::{Error, Offsets};
-use jlens_schema::{FunctionDecl, LanguageService, Schema};
+use jlens_schema::{FunctionDecl, LanguageService, Schema, Uses};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::api::{failure, handle_reply, invalid, json_reply, not_json, reply, unknown};
+use crate::api::{
+    EXPRESSIONS, failure, handle_reply, invalid, json_reply, not_json, reply, unknown,
+};
 use crate::buffers;
 use crate::handles::Table;
 
@@ -168,4 +171,45 @@ fn diagnostics_text(service: u64, text: u64) -> Result<Vec<u8>, Vec<u8>> {
         }
     }
     Ok(json_reply(&diagnostics))
+}
+
+/// Replies with what expression `expression` uses of the schemas of service `service`
+/// (roadmap 0.33 #5), as `LanguageService::uses` gives it for the expression's reads: the JSON
+/// object `{"input": {path: Use}, "bindings": {name: {path: Use}}, "everyBinding": true}`, the
+/// same text for two equal answers. Paths are not offsets: nothing is converted.
+pub fn service_uses(service: u64, expression: u64) -> u64 {
+    reply(uses_text(service, expression))
+}
+
+fn uses_text(service: u64, expression: u64) -> Result<Vec<u8>, Vec<u8>> {
+    let service = SERVICES
+        .get(service)
+        .ok_or_else(|| unknown("service", service))?;
+    let compiled = EXPRESSIONS
+        .get(expression)
+        .ok_or_else(|| unknown("expression", expression))?;
+    let uses = service.uses(&compiled.reads);
+    Ok(json_reply(&serde_json::to_value(uses).unwrap_or_default()))
+}
+
+/// Replies with what changed between two answers of `service_uses`, the JSON texts in buffers
+/// `old` and `new`, which stay the caller's (roadmap 0.33 #6), as `Uses::changes` gives it:
+/// `{}` when nothing the expression uses changed. It takes no schema and no service, so that
+/// an answer kept beside an expression is compared when its schema is gone. Text that is not
+/// JSON fails with `U2001`, and JSON that is not an answer with `U2005` and the token `uses`.
+pub fn uses_changes(old: u64, new: u64) -> u64 {
+    reply(changes_text(old, new))
+}
+
+fn changes_text(old: u64, new: u64) -> Result<Vec<u8>, Vec<u8>> {
+    let read = |buffer: u64| {
+        let value = buffers::with(buffer, |bytes| serde_json::from_slice::<Value>(bytes))
+            .ok_or_else(|| unknown("buffer", buffer))?
+            .map_err(|e| not_json(e.to_string()))?;
+        Uses::from_json(&value).map_err(|message| invalid("uses", message))
+    };
+    let changes = read(old)?.changes(&read(new)?);
+    Ok(json_reply(
+        &serde_json::to_value(changes).unwrap_or_default(),
+    ))
 }

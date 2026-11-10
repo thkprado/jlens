@@ -47,6 +47,39 @@ pub struct Uses {
     pub every_binding: bool,
 }
 
+impl Uses {
+    /// The answer of its JSON form, as an application keeps it beside an expression; the error
+    /// says what is not in the form. Unlike the derived `Deserialize`, which takes an array for
+    /// a struct's fields in order, it takes objects only.
+    ///
+    /// ```
+    /// use jlens_schema::Uses;
+    /// use serde_json::json;
+    ///
+    /// let kept = json!({"input": {"total": {"types": ["number"], "required": true}}});
+    /// let uses = Uses::from_json(&kept).unwrap();
+    /// assert_eq!(uses.input.unwrap()["total"].required, Some(true));
+    /// assert!(Uses::from_json(&json!({"input": {"total": []}})).is_err());
+    /// ```
+    pub fn from_json(json: &JsonValue) -> Result<Uses, String> {
+        fn paths(value: Option<&JsonValue>) -> bool {
+            value
+                .and_then(JsonValue::as_object)
+                .is_none_or(|paths| paths.values().all(JsonValue::is_object))
+        }
+        let Some(members) = json.as_object() else {
+            return Err("an answer must be an object".to_owned());
+        };
+        let bindings = members.get("bindings").and_then(JsonValue::as_object);
+        if !paths(members.get("input"))
+            || !bindings.is_none_or(|bindings| bindings.values().all(|value| paths(Some(value))))
+        {
+            return Err("what the schema says of a path must be an object".to_owned());
+        }
+        Uses::deserialize(json).map_err(|e| e.to_string())
+    }
+}
+
 /// What the schema says of one value an expression reads (see [`Uses`]).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

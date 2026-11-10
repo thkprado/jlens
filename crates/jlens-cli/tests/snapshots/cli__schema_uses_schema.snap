@@ -1,0 +1,34 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"schema\", \"uses\", \"--schema\", \"fixtures/cli/order.schema.json\",\n\"customer.login & nope\"], None)"
+---
+exit: 0
+--- stdout
+{
+  "input": {
+    "$": {
+      "types": [
+        "object"
+      ]
+    },
+    "customer": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "customer.login": {
+      "whole": true,
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "nope": {
+      "unknown": true,
+      "whole": true
+    }
+  },
+  "bindings": {}
+}
+--- stderr

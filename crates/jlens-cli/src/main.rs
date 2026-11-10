@@ -186,6 +186,45 @@ pub fn print_json(value: &impl serde::Serialize) -> Result<()> {
     output::line(&serde_json::to_string_pretty(value)?)
 }
 
+/// The entries of the configuration `config`, or of the `jlens.json` of `cwd`, if there is one.
+fn entries(config: Option<&PathBuf>, cwd: &Path) -> Result<Vec<config::Entry>> {
+    match config {
+        Some(path) => {
+            let root = absolute(cwd, path);
+            let root = root.parent().unwrap_or(cwd);
+            config::parse(&read_json(path)?, root)
+                .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))
+        }
+        None => config::load(cwd).map_err(anyhow::Error::msg),
+    }
+}
+
+/// The language service of one expression, as `check` makes it: of the schema in `schema`, with
+/// the variables and host functions that the configuration declares for `file`, whose schema it
+/// takes when `schema` is none.
+pub fn service_for(
+    file: Option<&Path>,
+    schema: Option<&PathBuf>,
+    config: Option<&PathBuf>,
+) -> Result<LanguageService> {
+    let schema = schema.map(schema::load).transpose()?;
+    let cwd = std::env::current_dir().context("reading the current directory")?;
+    let entries = entries(config, &cwd)?;
+    let entry = file
+        .and_then(|file| config::find(&entries, &absolute(&cwd, file)))
+        .map(|(_, entry)| entry);
+    let (service, problems) = match (entry, schema) {
+        (Some(entry), Some(schema)) => entry.settings.declare(LanguageService::new(Some(schema))),
+        (Some(entry), None) => entry.service(),
+        (None, schema) => (LanguageService::new(schema), Vec::new()),
+    };
+    if !problems.is_empty() {
+        let name = config.map_or(Path::new(config::FILE_NAME), PathBuf::as_path);
+        anyhow::bail!("{}: {}", name.display(), problems.join("; "));
+    }
+    Ok(service)
+}
+
 fn check(args: CheckArgs) -> Result<ExitCode> {
     // Read every expression first, so that an unreadable file prints nothing on stdout.
     let sources = match &args.expr {
@@ -201,15 +240,7 @@ fn check(args: CheckArgs) -> Result<ExitCode> {
     };
     let schema = args.schema.as_ref().map(schema::load).transpose()?;
     let cwd = std::env::current_dir().context("reading the current directory")?;
-    let entries = match &args.config {
-        Some(path) => {
-            let root = absolute(&cwd, path);
-            let root = root.parent().unwrap_or(&cwd);
-            config::parse(&read_json(path)?, root)
-                .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?
-        }
-        None => config::load(&cwd).map_err(anyhow::Error::msg)?,
-    };
+    let entries = entries(args.config.as_ref(), &cwd)?;
     // The entry of each file (none for an inline expression), and one service per entry.
     let keys: Vec<Option<usize>> = sources
         .iter()

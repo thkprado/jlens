@@ -15,6 +15,9 @@ import init, {
   type MissingOverridePath,
   type Read,
   type Reads,
+  type Use,
+  type Uses,
+  type UsesChanges,
   type ValueCondition,
   type ValueRequest,
   Document,
@@ -25,6 +28,7 @@ import init, {
   missingOverridePaths,
   parseRecover,
   unionReads,
+  usesChanges,
   valueLiteral,
   version,
 } from "../pkg/jlens.js";
@@ -98,6 +102,14 @@ export async function check(): Promise<void> {
   const missing: MissingOverridePath[] = missingOverridePaths([{ a: 1 }], { b: { label: "B" } });
   const meant: string | undefined = missing[0]?.suggestion;
   const hover = service.hover("a", 0)?.contents;
+  const uses: Uses = service.uses(new Expression("a = $limit").reads());
+  const use: Use | undefined = uses.input?.["a"];
+  const required: boolean | undefined = use?.required;
+  const usesOfLimit: Use | undefined = uses.bindings["limit"]?.["$"];
+  const changes: UsesChanges = usesChanges(uses, plain.uses(new Expression("a").reads()));
+  const typesBefore: string[] | undefined = changes.input?.changed?.["a"]?.types?.old;
+  const valuesAdded: unknown[] | undefined = changes.input?.changed?.["a"]?.enum?.added;
+  console.log(required, usesOfLimit, typesBefore, valuesAdded);
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();
   console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, every, fields, text, failed, start, type, ast.id, d, kinds, value, request, literal, conditions, several, listed, domain, hover, help, catalog);
