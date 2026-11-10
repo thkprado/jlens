@@ -1,6 +1,9 @@
 # 0024 — A recursive schema keeps its `$ref`s as references to definitions
 
-**Status:** Accepted.
+**Status:** Accepted. Amended by [ADR 0025](0025-references-to-other-documents.md): a target
+that is not recursive is kept as a definition too when its copies would make the load much
+larger than the schema, and a `$ref` that cannot be followed is a reference to a name the
+schema does not define.
 
 ## Context
 
@@ -36,7 +39,9 @@ Three ways to hold a recursive schema were weighed:
 2. **Only what is recursive is a definition.** The load finds the `$ref`s that lead back to
    themselves (the strongly connected components of the graph of references) before it reads a
    shape. Every other `$ref` is copied in place as before: a schema that loaded until 0.32 gives
-   the same shapes. A recursive root is itself a reference to the definition `#`.
+   the same shapes. A recursive root is itself a reference to the definition `#`. (Since
+   [ADR 0025](0025-references-to-other-documents.md), a schema whose copies would pass the
+   load's budget keeps the targets copied most as definitions.)
 3. **The names** are those of `#/$defs/…`, and the text of the `$ref` otherwise.
    `Schema::to_json_schema` writes the definitions under `$defs` and the references as `$ref`
    (one) or `anyOf` (several), and what it writes reads back as the same schema.

@@ -8,7 +8,8 @@
 //! * **Configuration.** [`Schema::apply_overrides`] adds descriptions, labels, allowed values and
 //!   hidden fields. Schemas convert to and from JSON Schema 2020-12
 //!   ([`Schema::to_json_schema`], [`Schema::from_json_schema`]), so they can be versioned and
-//!   edited by hand.
+//!   edited by hand. [`SchemaLoader`] reads one whose `$ref`s lead to other documents, which
+//!   the application gives it, and reports the `$ref`s it could not follow.
 //! * **Language service.** [`LanguageService`] offers completion, diagnostics (including
 //!   references to fields that the schema does not have), hover and signature help for JSONata
 //!   expressions. It types each part of an expression against the schema, following the
@@ -44,11 +45,13 @@ mod jsonschema;
 mod service;
 mod shape;
 mod typing;
+mod uri;
 mod uses;
 
 pub use changes::{Change, EnumChange, PathChanges, UseChanges, UsesChanges};
 pub use uses::{Use, Uses};
 
+pub use jsonschema::{LoadReport, SchemaLoader, UnresolvedRef};
 pub use service::{
     CompletionItem, CompletionKind, Completions, FunctionDecl, Hover, LanguageService,
     SignatureHelp, ValueCondition, ValueRequest, value_literal,

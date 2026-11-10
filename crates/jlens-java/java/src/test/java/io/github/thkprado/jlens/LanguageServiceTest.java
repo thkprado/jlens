@@ -125,7 +125,7 @@ class LanguageServiceTest {
         assertEquals("U2001", assertThrows(JlensException.class,
                 () -> Schema.fromJson(new byte[] {(byte) 0xc3})).code());
         JlensException refused = assertThrows(JlensException.class,
-                () -> Schema.fromJson("{\"$ref\": \"https://example.com/other.json\"}"));
+                () -> Schema.fromJson("[1]"));
         assertEquals("U2005", refused.code());
         assertEquals("schema", refused.token().orElseThrow());
         assertThrows(NullPointerException.class,

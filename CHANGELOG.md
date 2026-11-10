@@ -51,8 +51,34 @@ All notable changes are recorded here. The format follows
   `LanguageService::with_variable_schema` declares a variable with its schema, definitions
   included. Every package that reads a JSON Schema gains it: the CLI, the language server, the
   WebAssembly package and the Java package.
+- A JSON Schema whose `$ref` leads to another document loads
+  ([ADR 0025](docs/src/adr/0025-references-to-other-documents.md)). `jlens-schema` has
+  `SchemaLoader`, which the application gives the other documents, each with its URI, as jlens
+  never fetches one: `SchemaLoader::new().document(uri, &common).load(&order)` returns the
+  schema and a `LoadReport`. A `$ref` is resolved against the `$id` of the schema it is in, or
+  the URI its document was given with (`load_at`), and its fragment is a JSON Pointer or an
+  `$anchor`. One that cannot be followed, to a document that was not given or to a place a
+  document does not have, leaves its place unknown: nothing is completed or warned about
+  under it, what an expression uses marks it `unknown`, and the report lists it
+  (`UnresolvedRef`: its place, its text, the URI it resolves to and the document to give;
+  `LoadReport::documents`). The schema guide has "A schema in several documents".
+
+### Fixed
+
+- A JSON Schema whose definitions each refer several times to the next loads in a time
+  bounded by its size. The target of a `$ref` is copied in the place of each one, so such
+  definitions doubled the load at each level: 20 levels, 1.9 KB, took 2.2 s, and 30 did not
+  end. Past a budget of 16 times the values of the schema (no less than 100,000), the targets
+  copied most are kept once as definitions, as the recursive ones are; the same 20 levels load
+  in 3 ms.
 
 ### Changed
+
+- `Schema::from_json_schema` no longer fails with `cannot resolve $ref`: the place of such a
+  `$ref` is unknown, in every package that reads a JSON Schema. A `$ref` inside a schema that
+  has its own `$id` is resolved against that `$id`, as JSON Schema 2020-12 says, so its
+  pointer starts at that schema, not at the root of the document; and a property named
+  `$ref` or `$id` is read as a property.
 
 - `jlens-schema`: `Shape` has the public field `references` and `Schema` the public field
   `definitions`, so a `Schema` built field by field must give it (`..Schema::default()`). A

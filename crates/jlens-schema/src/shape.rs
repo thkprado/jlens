@@ -111,7 +111,8 @@ pub struct Shape {
     /// shape of, by name: what a recursive `$ref` of a JSON Schema becomes, as its shape
     /// cannot be copied here. The value has the shape of any of them, and this one too when it
     /// has types of its own; [`Schema::members`] gives them. A name the schema does not
-    /// define leaves the shape unknown.
+    /// define leaves the shape unknown: it is what a `$ref` that the load could not follow
+    /// becomes ([`crate::SchemaLoader`]), named by the URI it resolves to.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub references: Vec<String>,
 
@@ -153,7 +154,8 @@ pub struct Schema {
     /// information only: nothing depends on it.
     pub samples: u64,
     /// The shapes that others refer to by name ([`Shape::references`]): the targets of the
-    /// recursive `$ref`s of a JSON Schema. Empty for an inferred schema.
+    /// recursive `$ref`s of a JSON Schema, and those copied too often to be copied in place.
+    /// Empty for an inferred schema.
     #[serde(skip_serializing_if = "IndexMap::is_empty", default)]
     pub definitions: Definitions,
 }

@@ -78,3 +78,4 @@
   - [0022 A small map for objects](adr/0022-small-map.md)
   - [0023 The schema through the C API](adr/0023-schema-through-the-c-api.md)
   - [0024 Recursive schemas](adr/0024-recursive-schemas.md)
+  - [0025 References to other documents](adr/0025-references-to-other-documents.md)

@@ -226,7 +226,6 @@ fn a_service_of_nothing_still_checks_the_syntax_and_the_functions() {
 #[test]
 fn failures_use_the_codes_of_the_c_api() {
     let code = |reply| error(reply).0;
-    let token = |reply| error(reply).1.expect("a token");
 
     // A schema.
     assert_eq!(
@@ -246,10 +245,9 @@ fn failures_use_the_codes_of_the_c_api() {
         error(refused),
         ("U2005".to_owned(), Some("schema".to_owned()))
     );
-    let unresolved = with_buffer(br##"{"$ref": "#/$defs/none"}"##, |buffer| {
-        jlens_schema_new(buffer)
-    });
-    assert_eq!(token(unresolved), "schema");
+    // A `$ref` that leads nowhere leaves its place unknown: the schema loads.
+    let unresolved = schema(&json!({"$ref": "https://example.com/other.json"}));
+    assert_eq!(jlens_schema_free(unresolved), 1);
     assert_eq!(error(reply(jlens_schema_new(0))).0, "U2002");
     assert_eq!(jlens_schema_free(0), 0);
 

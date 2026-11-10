@@ -38,7 +38,8 @@ The result is a standard **JSON Schema 2020-12** document. Fields that are not r
 service completes them but never warns about another one. Remove the keyword once the list is
 complete, or set the values in the overrides (below). You can commit the file, review it,
 and edit it like any JSON Schema. jlens also reads JSON Schemas written by hand or by other
-tools: it supports `$ref` to local definitions, and it merges `anyOf`, `oneOf` and `allOf`.
+tools: it follows `$ref`, by JSON Pointer, `$id` and `$anchor`, and it merges `anyOf`, `oneOf`
+and `allOf`.
 
 A schema may be recursive: a tree whose `children` are `{"$ref": "#"}`, a definition that
 refers to itself, definitions that refer to each other. Completion, hover and the diagnostics
@@ -50,6 +51,39 @@ reference to a definition of the schema
 `Schema::members` gives the shapes that one stands for. A path of the overrides that goes
 through it changes the definition, and so every place that refers to it: in that tree,
 `children[].label` describes the `label` of every node.
+
+### A schema in several documents
+
+A `$ref` may lead to another document (`"$ref": "common.json#/$defs/person"`). jlens never
+fetches one: the application gives the documents, each with its URI, and the load reads only
+those ([ADR 0025](../adr/0025-references-to-other-documents.md)).
+
+```rust
+use jlens_schema::SchemaLoader;
+
+let (schema, report) = SchemaLoader::new()
+    .document("https://example.com/schemas/common.json", &common)
+    .load(&order)?;
+for unresolved in &report.unresolved {
+    eprintln!("{}: {} was not followed", unresolved.place, unresolved.uri);
+}
+```
+
+A `$ref` is resolved against the `$id` of the schema it is in, or the URI its document is given
+with (`load_at`), and a document is known by that URI and by each `$id` in it. With neither, a
+reference is taken as written: `common.json#/$defs/person` is a place of the document given as
+`common.json`.
+
+A `$ref` the load cannot follow does not fail it. Its place is left unknown, so that nothing
+is completed or warned about under it, and the rest of the schema is checked as usual. The
+report beside the schema lists each one: where it is written, what it resolves to, and the
+document that was not given (`report.documents()` lists them, each once). What an expression
+uses marks such a place `unknown`, so a document given later shows as a change. Only a
+document that is not a schema, or one nested more than 64 levels deep, fails to load.
+
+`Schema::from_json_schema` is that load with no other document and without the report. The CLI,
+the language server, the WebAssembly package and the Java package read a schema with it: a
+`$ref` to another document leaves its place unknown there.
 
 What JSON Schema has no keyword for travels in jlens's own `x-jlens-*` keywords, which other
 tools ignore. jlens writes them and reads them back, so they can also be written by hand:
