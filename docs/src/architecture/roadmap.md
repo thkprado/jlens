@@ -69,6 +69,69 @@ there, and the performance page says the interpreter is near its limit.
 | 22 | Two divergences of #20's differential: nested bindings in an object constructor's key and value, and an order-by over a block's result holding `[]` | The cause of each found; jsonata-js's result, or the difference in `compatibility.md` with a rule in `differential.rs` | done: both are jsonata-js quirks already in `compatibility.md`, met in a new place, and jlens keeps its results; both rows widened ([`perf-0.32.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.32.md#14-15-and-22-what-the-differential-found)) |
 | 13 | Release 0.32.0 | The release checklist, with room on Maven Central or the Java package skipping 0.32.0 (#12); the channels checked | planned |
 
+## 0.33: expressions checked again when their schema changes
+
+An application may store expressions written against a schema that another system sends it. When
+a new version of the schema arrives, it has two questions about each expression: does it still
+pass the diagnostics, and did anything it uses change, even if it still passes? A field that
+went from a boolean to a string leaves `active = true` valid, and always false.
+
+Today the first answer needs `jlens check` or the WebAssembly package, as the Java package
+leaves the schema and the language service out. Nothing gives the second: `reads()` tells the
+fields, and only the Rust crate tells what the schema says of each (`Schema::shape_at`).
+
+0.33 brings the schema and the diagnostics to the Java package, through the C API, and adds what
+an expression uses of its schema, in a form that two versions of a schema are compared by. A
+schema that fails to load leaves nothing to check, so the two kinds that jlens refuses whole
+today, a recursive schema and one that refers to another document, load too.
+
+| # | Item | Done when | Status |
+|---|---|---|---|
+| 1 | The dependencies at their newest versions and the upstream watch, before the rest | Step 1 of the release checklist; stacker, `regress` and jsonata-js checked as in 0.32 #9 | planned |
+| 2 | ADR 0023: the schema and the language service through the C API and in the Java package | The ADR accepted: what crosses (a schema, the diagnostics, #5 and #6; whether completion, hover and signature help do), in which form, the objects' lifetimes and threads, and what `jlens-schema` adds to the library's size, measured | planned |
+| 3 | `jlens-capi`: a schema from JSON Schema text, a language service with the variables and host functions declared, and its diagnostics | As ADR 0023 says; the C API's tests; nothing paid by a host that does not use them | planned |
+| 4 | Java: `Schema` and `LanguageService` | Diagnostics as records, their spans in UTF-16 offsets, their codes those of the other packages; JUnit; the Java guide, with "What the package leaves out" updated | planned |
+| 5 | What an expression uses of its schema | For each field the expression reads: its path and what the schema says of it (types, enumeration and whether it is closed, domain, format, whether it and the fields on its way are required). Where the typing follows the value, the fields it names, those of a predicate included; where it does not (`*`, `**`, `$eval`), the value whole, as `reads()` gives it. One JSON form; property tests; the schema guide | planned |
+| 6 | What changed for an expression between two schemas | Two answers of #5 compared: the paths added, removed and changed, and what changed in each. Equal answers mean that nothing the expression uses changed. Tests with a type, an enumeration, a domain and `required` changed | planned |
+| 7 | #5 and #6 wherever the schema is: the Rust crate, the WebAssembly package, the Java package and the CLI | The same JSON from each, pinned by a test; `types.d.ts`; a CLI command with `--json`; the guides | planned |
+| 8 | A recursive schema loads (`"$ref": "#"`, a definition that refers to itself); today `$ref nesting is too deep` | The shapes followed as deep as the expression goes, with no stack overflow and no endless walk: property tests; completion and `W0201` at any depth | planned |
+| 9 | A `$ref` to another document; today `cannot resolve $ref` | jlens never fetches: the application gives the documents by URI. A document it did not give leaves its place unknown, with nothing warned under it, and the load reports it and no longer fails whole. `$id` and `$anchor` resolved, or reported the same way | planned |
+| 10 | The plan's code checked whole, and the release's measure | The fuzz workflow on the final code; the size of the C API's library and of the JAR against 0.32.0; the performance page's tables from the M1 | planned |
+| 11 | Release 0.33.0 | The release checklist; the channels checked | planned |
+
+## 0.34: the types the diagnostics know
+
+The diagnostics check a function's arguments (`W0205`), the fields (`W0201`) and the values
+compared with an enumeration (`W0206`). They do not check the operands of an operator, and they
+do not know the type of an expression's result. With `total` a string in the schema, `total >
+1000` fails with `T2009` when it runs and `total + 1` with `T2001`; with `active` a string,
+`active = true` is always false. None of the three is warned about.
+
+An application whose expressions must give a boolean, as the conditions of a rules engine must,
+learns that one does not only by evaluating it against the right document: `$contains(notes,
+"urgent")` is undefined for the document without `notes`. Most conditions are comparisons joined
+by `and` and `or`, which always give a boolean, so the typing can prove most of them without a
+document.
+
+0.34 makes the typing check operands, know whether a value may be undefined, and compare the
+result with the type the application expects. The other items are the places where the typing
+stops today: the parent operator, an expression that will run as the body of a step, and a
+schema's objects that are open to other fields.
+
+| # | Item | Done when | Status |
+|---|---|---|---|
+| 1 | The dependencies at their newest versions and the upstream watch, before the rest | As 0.33 #1 | planned |
+| 2 | Operands whose types the operator cannot take | New `W02xx` warnings, only where the types are known, as for `W0205`: an order comparison between a string and a number, or with a value that has no order (`T2009`, `T2010`); arithmetic on what is not a number (`T2001`, `T2002`); a field compared by `=`, `!=` or `in` with a literal of another type, which is always false. A field that may be absent passes. No warning on the suite's expressions that evaluate without a type error; `gen-docs`; the schema guide | planned |
+| 3 | A value that may be undefined, in the typing | The typing tells a value that is always there from one that may be undefined: an optional field and what is under it, a filter, a function that gives undefined for an undefined argument (from the catalog). Nothing is warned by this alone; tests | planned |
+| 4 | The type an expression's result is expected to have | Declared to the service (`LanguageService`, `jlens.json` by file pattern, the WebAssembly and Java packages). Three answers: always that type; never, a warning; maybe another type or undefined, a warning that names the operand that causes it. A path that gives one value or an array, as sequences do, told from an array constructor. The result's type also given to the application as a value; tests over the suite; the schema guide | planned |
+| 5 | The parent operator typed | `%.` completes the fields of the parent, and `W0201` is reported under it; where the parent is not known, nothing is warned | planned |
+| 6 | An expression typed as the body of a step | The service takes a context path (`items[]`): the expression is completed and diagnosed with an item as its context and the document as its parent, as when it is evaluated inside `items.( … )`, without the application wrapping the text and shifting every offset. The WebAssembly and Java packages, `jlens.json`; the schema guide | planned |
+| 7 | An object open to other fields | An object with `additionalProperties` or `patternProperties` given as a schema, or with no `properties` at all, gets no `W0201` for a field it does not list, and `additionalProperties` gives such a field its type. An object with `properties` alone is warned about as now; the decision recorded in the schema guide | planned |
+| 8 | A load that says what it did not read | A survey of the JSON Schema keywords jlens does not read (`if`/`then`/`else`, `dependentSchemas`, `not`, `prefixItems`, `nullable`, `$dynamicRef`…): each is read, ignored where that cannot cause a false warning, or reported by the load beside the schema, with its place. `jlens check` prints the report; the schema guide lists the keywords | planned |
+| 9 | #2 to #8 in every place the service is: the language server, the VS Code extension, the WebAssembly package, the Java package and the CLI | The same diagnostics from each, on shared cases; `types.d.ts`; the guides | planned |
+| 10 | The plan's code checked whole, and the release's measure | The robustness properties with `PROPTEST_CASES=100000` and the fuzz workflow on the final code; the time of `diagnostics` on the largest fixtures against 0.33.0, as it runs at each keystroke; the performance page's tables from the M1 | planned |
+| 11 | Release 0.34.0 | The release checklist; the channels checked | planned |
+
 ## In exploration: a regular expression engine of jlens's own
 
 `jlens-regress` is a backtracker. A catastrophic pattern runs within the evaluation's limits
@@ -144,6 +207,11 @@ the exception rethrown in WebAssembly is that of the level that failed; tests in
   function can block. An application can fetch what its functions need before evaluating.
   Should real use call for it, the cheaper way is an `evaluateAsync` that stops at the first
   promise, awaits the pending ones and evaluates again with their results.
+- **Validating documents against a schema.** `jlens-schema` reads a JSON Schema to help people
+  write expressions: completion, hover and diagnostics of the expression. It does not check that
+  a document follows the schema, which JSON Schema validators do. The diagnostics hold for
+  documents that follow their schema; an application that cannot trust its documents validates
+  them first, or checks the type of each result.
 - **Compiling an expression to its host's code.** jsonata-jvm-compiler and jsonata2js translate
   an expression to Java or JavaScript and let the host's JIT compile it, which makes them faster
   where an expression does much work per item. Rust has no compiler at run time: compiling when
