@@ -317,3 +317,32 @@ whole since. The tables were measured on an Apple M1 as well, which ranks the en
 the same and is quieter; from 0.32 they are measured there. How it was measured is in
 [`docs/notes/perf-0.31.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.31.md).
 ([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0310))
+
+## 0.32
+
+*The tables on the M1, and what each node costs.* The engines that compile an expression to
+their host's code are 3 to 5 times faster than jlens where an expression does much work per
+item, and a profile of 0.31.0 put most of that time in what every node costs: the dispatch, the
+check of its result and the guards. 0.32 lowered that cost in `jlens-core`, one measured item at
+a time, each kept only past the floor: the stack checked by one comparison of addresses, and a
+source and a cancellation token by one test; a lambda's call that reuses a frame whose scope
+ended unshared, and the list of arguments a call before it gave back; a variable in a lambda's
+body that carries its parameter's place; a value's tag a word wide, which removed the stall 0.27
+had found in a path step; `$sum`, `$average`, `$max`, `$min` and `$count` over a field of each
+item without the array; and the frames of a tuple stream kept for reuse, after a count showed
+that they, not the copies of the tuples, were most of the allocations of `tuples`. A profile in
+Node explained why WebAssembly gained little at first: there `eval` is now inlined into its
+caller. Against 0.31.0 on the M1, `recursion` is 35% faster natively, 30 and 34% in Python and
+Java and 16 to 18% in WebAssembly, the shipping rule 10 to 20%, `names over items` 16 to 39%,
+and nothing is slower; jsonata-jvm-compiler and jsonata2js stay ahead, and compiling an
+expression to its host's code is not planned. The differential tests run on each item found
+four places where jlens and jsonata-js differ, each now told by a row of the compatibility
+page; one was a jsonata-js quirk copied without a row, and dropped: a position after an
+order-by that follows a tuple step is bound. They also led to a cycle through a
+transform's copy that kept its memory after the evaluation, older than the plan and fixed, and
+the property tests to `T0410`'s `value` cut against a `Document`. `Attrs` gained a private
+field, the release's one breaking change. From this release the performance page's tables are
+measured on the Apple M1 alone, and x86_64 keeps a comparison with the release before, in the
+release's notes. How it was measured is in
+[`docs/notes/perf-0.32.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.32.md).
+([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0320))

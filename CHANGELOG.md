@@ -6,6 +6,18 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.32.0]
+
+What each node of an expression costs. One comparison of addresses checks the stack, a lambda's
+call reuses a frame and a list of arguments, a variable in its body knows which parameter holds
+it, a value's tag takes a word, a tuple stream reuses its frames, and `$sum`, `$count` and the
+other aggregates read a field of each item without building the array. Against 0.31.0, on an
+Apple M1, `recursion` is 35% faster, `names over items` 16 to 39%, the shipping rule 10 to 20%,
+`tuples` 16 to 19% and `filter + aggregate` 15 to 26%; the Python and Java packages gain the
+same, and in WebAssembly `recursion` is 16 to 18% faster. From this release the tables of the
+[performance page](docs/src/architecture/performance.md) are measured on the M1. `jlens-core`
+has one breaking change: `Attrs` is made with `Attrs::default()`.
+
 ### Changed
 
 - Each node checks the stack with one comparison of addresses: the evaluation keeps the floor of
@@ -31,11 +43,24 @@ All notable changes are recorded here. The format follows
   allocating one, and on WebAssembly the evaluation of each node is inlined into its caller.
   In WebAssembly, `recursion` is 13 to 16% faster and the shipping rule 3 to 7%; natively,
   `recursion` is another 4 to 6% faster on the M1.
+- A tuple step, a filter, a sort's key and a group-by give each tuple's frame back when the
+  tuple is done, for the next one to take: `tuples` makes 539 allocations where it made 1,243
+  and is 10 to 13% faster, a sort in a tuple stream 14 to 18%, `$map` over objects 7 to 17%.
+- A position bound right after an order-by that follows a tuple step (`items#$i^(price)#$j`) is
+  the item's place in the sorted order, as in `items^(price)#$j`. jsonata-js never binds it
+  there, and jlens copied that without listing it; the difference is now a row of the
+  [compatibility page](docs/src/language/compatibility.md), whose rows for an order-by in a
+  tuple stream, a group-by that pushes into an empty array and the left side of `?:` name the
+  cases the differential tests found.
 - `jlens-core`: `Attrs` has a private field, so it is made with `Attrs::default()` and no longer
   with a struct expression.
 
 ### Fixed
 
+- A transform whose update stores a function into its copy
+  (`x ~> | $ | {'g': function(){1}} |`) no longer keeps the copy's memory after the evaluation:
+  the function held the copy, which held the function. The fields of such an object are
+  cleared when the evaluation ends, after the result is written.
 - `Expression::reads` leaves out no binding that an assignment of the same name hides after it
   is read: in `$x := $x` the right side reads the binding `x`, which the result now lists whole.
   Evaluations were not affected: against a `Document`, an expression whose analysis gives up
@@ -50,6 +75,10 @@ All notable changes are recorded here. The format follows
   [Coming from jsonata-js](docs/src/getting-started/from-jsonata-js.md): the API of both side by
   side, what to check, and what jlens adds. The README shows an explanation and how to install
   each package.
+- The tables of the [performance page](docs/src/architecture/performance.md) are measured on an
+  Apple M1, which 0.31 found quieter than the Ryzen; x86_64 keeps a comparison with the release
+  before, in the release's notes
+  ([`perf-0.32.md`](docs/notes/perf-0.32.md)).
 - The `Cargo.toml` snippets of the installation page and of the crate guide name the current
   version; they still said 0.15 and 0.2.
 
@@ -1427,7 +1456,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/thkprado/jlens/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/thkprado/jlens/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/thkprado/jlens/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/thkprado/jlens/compare/v0.28.0...v0.29.0
