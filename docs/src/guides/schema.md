@@ -323,3 +323,57 @@ declared to the service are not values, and are left out of `bindings`.
 
 The answer depends on nothing else in the schema, and its paths and names are written in order:
 two schemas that give an expression the same text differ in nothing it uses.
+
+### What changed between two schemas
+
+When the answers differ, `Uses::changes` tells where. It compares the answer kept beside the
+expression with that of the new schema:
+
+```rust
+let old: Uses = serde_json::from_str(&kept)?;
+let new = LanguageService::new(Some(new_schema)).uses(&expression.reads());
+let changes = old.changes(&new);
+if !changes.is_empty() {
+    let json = serde_json::to_string(&changes)?;   // shown to who reviews the expression
+}
+```
+
+With `price` now an integer or a string, `type` no longer required and with one more value, and
+a field `weight` added to the items, an expression that reads the items whole
+(`items[type = "book"]`) gets:
+
+```json
+{
+  "input": {
+    "added": {
+      "items[].weight": {"types": ["number"], "required": false}
+    },
+    "changed": {
+      "items[].price": {"types": {"old": ["number"], "new": ["integer", "string"]}},
+      "items[].type": {
+        "enum": {"old": ["book", "toy"], "new": ["book", "game", "toy"], "added": ["game"]},
+        "required": {"old": true, "new": false}
+      }
+    }
+  }
+}
+```
+
+`input` and `bindings`, by variable, hold the changes as the answers hold the paths, and each is
+left out when nothing changed there: `{}` means that nothing the expression uses changed.
+
+| Member | Meaning |
+|---|---|
+| `added` | The paths that only the new answer has, with what the new schema says of each: a field added under a value the expression reads whole |
+| `removed` | The paths that only the old answer has, with what the old schema said: a field removed under a value read whole |
+| `changed` | The paths of both answers of which the schemas do not say the same. Each has the members that changed, under their names in the answer, as `{"old": …, "new": …}`; a side on which the member was left out is left out here too |
+
+A field that the expression names stays in the answer when the new schema drops it. It is then
+under `changed`, with `"unknown": {"old": false, "new": true}` and what the old schema said of
+it. A path is compared with the same path, so a field that was renamed is one path that became
+unknown, or was removed, and another that was added.
+
+The types and the values of an enumeration are compared as sets: their order is not a change.
+An enumeration that changed also has `added` and `removed`, the values that only one side
+lists, so that an application can tell a value that was added, which leaves the expression's
+comparisons as they were, from one that was removed.

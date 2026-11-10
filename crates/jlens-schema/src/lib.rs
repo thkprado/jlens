@@ -15,7 +15,7 @@
 //!   evaluator's rules for paths, filters and variables.
 //! * **What an expression uses.** [`LanguageService::uses`] tells what the schema says of each
 //!   field an expression reads, in a form ([`Uses`]) that an application keeps and compares when
-//!   the schema changes.
+//!   the schema changes: [`Uses::changes`] tells what changed between two answers.
 //!
 //! ```
 //! use jlens_schema::{LanguageService, Schema};
@@ -39,12 +39,14 @@
 //! assert!(warnings[0].message.contains("did you mean `login`"));
 //! ```
 
+mod changes;
 mod jsonschema;
 mod service;
 mod shape;
 mod typing;
 mod uses;
 
+pub use changes::{Change, EnumChange, PathChanges, UseChanges, UsesChanges};
 pub use uses::{Use, Uses};
 
 pub use service::{

@@ -156,7 +156,8 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(1000))]
 
     /// What an expression uses of its schema: every path is one the schema reads, the JSON
-    /// form reads back, and the answer does not depend on a field it does not list.
+    /// form reads back, and the answer does not depend on a field it does not list. Then what
+    /// changed between two answers.
     #[test]
     fn what_an_expression_uses(text in text()) {
         let Ok(expression) = jlens_core::Expression::compile(&text) else {
@@ -209,6 +210,45 @@ proptest! {
             }
             let (_, cut) = service(&without(&sample, pointer));
             prop_assert_eq!(&cut.uses(&reads), &uses, "without {}", path);
+        }
+        // What changed between two schemas: nothing between equal answers, and each path of
+        // the two answers is added, removed, changed or equal.
+        prop_assert!(uses.changes(&uses).is_empty());
+        for (path, pointer) in SAMPLE_FIELDS {
+            let (_, cut) = service(&without(&sample, pointer));
+            let after = cut.uses(&reads);
+            let changes = uses.changes(&after);
+            prop_assert_eq!(changes.is_empty(), after == uses, "without {}", path);
+            let json = serde_json::to_string(&changes).unwrap();
+            prop_assert_eq!(
+                &serde_json::from_str::<jlens_schema::UsesChanges>(&json).unwrap(),
+                &changes
+            );
+            prop_assert_eq!(json == "{}", changes.is_empty());
+            // The other way, what was added is removed.
+            let back = after.changes(&uses);
+            prop_assert_eq!(&back.input.removed, &changes.input.added);
+            prop_assert_eq!(&back.input.added, &changes.input.removed);
+            prop_assert_eq!(
+                back.input.changed.keys().collect::<Vec<_>>(),
+                changes.input.changed.keys().collect::<Vec<_>>()
+            );
+            let empty = Default::default();
+            let old = uses.input.as_ref().unwrap_or(&empty);
+            let new = after.input.as_ref().unwrap_or(&empty);
+            for (path, entry) in old {
+                let same = new.get(path) == Some(entry);
+                let listed = changes.input.removed.get(path) == Some(entry)
+                    || changes.input.changed.contains_key(path);
+                prop_assert_eq!(same, !listed, "{}", path);
+            }
+            for (path, entry) in new {
+                prop_assert_eq!(
+                    old.contains_key(path),
+                    changes.input.added.get(path) != Some(entry),
+                    "{}", path
+                );
+            }
         }
     }
 }

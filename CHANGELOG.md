@@ -23,6 +23,11 @@ All notable changes are recorded here. The format follows
   (`Uses`) has one JSON form, written in order, which an application keeps beside the expression
   and compares when a new version of the schema arrives. The schema guide has "What an
   expression uses of its schema".
+- `jlens-schema`: `Uses::changes` compares two of those answers, that of the schema an
+  expression was written against and that of a new version, and gives the paths added, removed
+  and changed (`UsesChanges`). A changed path lists each member that changed with its old and
+  its new value; types and enumerations are compared as sets, and an enumeration also gives the
+  values added and removed. Its JSON form is `{}` when nothing the expression uses changed.
 
 ### Changed
 
