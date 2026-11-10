@@ -282,9 +282,11 @@ workspace and of `pom.xml` (CI's Java job fails on each push while those two dif
 the JAR it built is byte for byte the one the JAR workflow tested on the seven targets: the JAR's
 entries have a fixed time (`project.build.outputTimestamp`).
 
-Maven Central limits what a namespace publishes (2026): about seven releases a month, 78 MB and
-1,167 files a release. A release of jlens is about 9 MB in 24 files, so the number of releases
-binds first; going past a limit starts a grace period of 30 days. Before each tag, read the
+Maven Central limits what a namespace publishes. Since November 2026 `io.github.thkprado` has an
+open-source exemption (Sonatype ticket #130375): 24 releases, 250 MB and 1,000 files a month,
+set from the project's past releases; ask Sonatype support to review them if the release pace
+changes. A release of jlens is about 9 MB in 24 files, so the number of releases binds first;
+going past a limit starts a grace period of 30 days. Before each tag, read the
 count in the Portal's **Usage Center**. When it leaves no room, release the other channels and
 **Drop** the Java deployment at step 6: the Java package then skips that version. Say so in the
 version's section of `CHANGELOG.md`, and keep the Maven and Gradle snippets of the installation
