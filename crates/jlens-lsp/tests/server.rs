@@ -507,3 +507,42 @@ fn unknown_and_invalid_requests_fail_cleanly() {
     .is_ok());
     client.shutdown();
 }
+
+/// A `$ref` to a file is followed from the schema's folder, a variable's from the
+/// configuration's, and what is not followed is shown once (roadmap 0.33 #10).
+#[test]
+fn a_schema_follows_the_files_beside_it() {
+    let folder = Folder::new("references");
+    folder.write(
+        "schemas/order.json",
+        r#"{"$id": "https://example.com/s/order.json", "type": "object", "properties": {
+            "customer": {"$ref": "../shared/common.json#/$defs/person"},
+            "carrier": {"$ref": "carrier.json"}}}"#,
+    );
+    folder.write(
+        "shared/common.json",
+        r#"{"$defs": {"person": {"type": "object", "properties": {"name": {"type": "string"}}}}}"#,
+    );
+    folder.write(
+        "jlens.json",
+        r#"{"*.jsonata": {"schema": "schemas/order.json",
+            "variables": {"buyer": {"$ref": "shared/common.json#/$defs/person"}}}}"#,
+    );
+    let (mut client, _) = Client::start(Some(&folder.0), json!({}), Value::Null);
+    let rule = folder.uri("rule.jsonata");
+    client.open(&rule, "customer.nme & $buyer.nme & carrier.anything");
+    let codes: Vec<String> = client.diagnostics(&rule).into_iter().map(|d| d.0).collect();
+    assert_eq!(codes, ["W0201", "W0201"]);
+    let shown: Vec<&str> = client
+        .notifications
+        .iter()
+        .filter(|n| n.method == "window/showMessage")
+        .map(|n| n.params["message"].as_str().unwrap())
+        .collect();
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert!(
+        shown[0].contains("https://example.com/s/carrier.json"),
+        "{shown:?}"
+    );
+    client.shutdown();
+}

@@ -75,3 +75,46 @@ each refer twice to the next double at each level: 20 levels, a document of 1.9 
 - The packages over `jlens-schema` (the CLI, the language server, the WebAssembly and Java
   packages, the C API) load such schemas at once, as they call `Schema::from_json_schema`.
   Giving them the documents and the report is a separate item of the roadmap.
+
+## Results: the documents and the report at every end (0.33 #10)
+
+- **One JSON form of the report**, that of `LoadReport`: `{"unresolved": [{"place",
+  "reference", "uri", "document"}]}`, `document` absent when the document is there without
+  the place, and `{}` when every `$ref` was followed. `fixtures/uses/cases.json` has, under
+  `references`, a schema of two documents, its report with the other document and alone, and
+  for two expressions what each uses and what giving the document changes; the Rust crate,
+  the C API, the Java package, the WebAssembly package and the CLI each answer it.
+- **The C API**: `jlens_schema_new` takes a second buffer, the sources (0 for none): the JSON
+  object `{"uri": …, "documents": {uri: buffer}}`, each document in a buffer of its own, named
+  by its handle as a variable's schema is in a service's declarations
+  ([ADR 0023](0023-schema-through-the-c-api.md)). Inlining the documents in the sources would
+  make the host write one JSON text out of several, and a document that is not JSON would
+  fail as the sources. `jlens_schema_report` replies with the report of a schema, which is
+  kept with it. Sources not in their form fail with `U2005` and the token `sources`.
+- **Java**: `Schema.loader()` with `uri`, `document` and `load`; `Schema.fromJson` is the load
+  with no document. `unresolved()` is a list of `UnresolvedRef` records and
+  `missingDocuments()` the documents to give. The report is read once, when the schema is
+  made: one more call for each schema, and none after, nor after the schema is closed.
+- **The WebAssembly package** has no schema object: `LanguageService` takes the sources as its
+  fourth argument, `{ uri, documents }`, and `schemaReport(schema, sources)` gives the report
+  of one schema. The documents serve the schemas of the variables too; `uri` is that of the
+  input's schema.
+- **The CLI and the language server read files, never the network.** A document is read from
+  the file at the same relative path from the schema's file as between the two URIs: that of
+  the document, and the schema's `$id` or else the URI of its file. So `common.json` beside the
+  schema is found whether the schema has an `$id` on some host or none, and a document on
+  another host, or with a query, is not read. `..` is allowed: the schemas are the user's own
+  files, and what is read is used only as a schema. A variable's schema, written in
+  `jlens.json`, refers to files from that folder. `SchemaLoader::load_asking`, in
+  `jlens-schema`, is the loop behind it: load, ask a function for the documents the report
+  names, load again with those it gave, until none is new; each URI is asked for once and no
+  more than 256, so that links between folders cannot make it endless. A chain of documents
+  more than 64 deep still fails as a schema nested too deep.
+- **What is not followed is a warning, not a failure**: a line on standard error for each
+  document not found, with the number of `$ref`s to it, and one for each `$ref` to a place
+  its document does not have; a message in the language server, once for each service it
+  makes. `--deny-warnings` does not count them: they are about the schema, not the
+  expression checked. A file that is there and is not JSON fails, as the schema's does.
+- **The size.** The Windows library is 3,637,760 bytes, 16.4% over 0.32.0, against 12.2%
+  after 0.33 #7: the recursive schemas (#8), the loader with its URI resolver (#9) and the
+  two exports of this item. Roadmap 0.33 #12 measures the library and the JAR as released.

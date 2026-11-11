@@ -81,9 +81,36 @@ document that was not given (`report.documents()` lists them, each once). What a
 uses marks such a place `unknown`, so a document given later shows as a change. Only a
 document that is not a schema, or one nested more than 64 levels deep, fails to load.
 
-`Schema::from_json_schema` is that load with no other document and without the report. The CLI,
-the language server, the WebAssembly package and the Java package read a schema with it: a
-`$ref` to another document leaves its place unknown there.
+`Schema::from_json_schema` is that load with no other document and without the report.
+
+Every package that reads a schema takes its documents and gives the report, in the same JSON
+form (`{"unresolved": [{"place", "reference", "uri", "document"}]}`, `{}` when every `$ref`
+was followed):
+
+| Where | The documents | The report |
+|---|---|---|
+| Rust | `SchemaLoader::document`, or `load_asking` with a function that gives them | `LoadReport` |
+| [WebAssembly](wasm.md#a-schema-in-several-documents) | `new LanguageService(schema, variables, functions, { uri, documents })` | `schemaReport(schema, { uri, documents })` |
+| [Java](java.md#a-schema-in-several-documents) | `Schema.loader().document(uri, text).load(text)` | `schema.unresolved()`, `schema.missingDocuments()` |
+| CLI and language server | the files beside the schema's | a warning for each document not found |
+
+The CLI and the language server read a document from a file, and never from the network. The
+file is the one at the same relative path from the schema's file as between the two URIs:
+beside `schemas/order.json`, `"$ref": "common.json"` is `schemas/common.json` and
+`"$ref": "../shared/money.json"` is `shared/money.json`, whether the schema has an `$id` (the
+path between `https://example.com/schemas/order.json` and
+`https://example.com/schemas/common.json` is `common.json`) or not. A document on another
+host, or one with no file there, is not read. A variable's schema in `jlens.json` refers to
+files from the folder of `jlens.json`. For each document that was not found, and each `$ref`
+to a place its document does not have, `jlens check`, `jlens schema uses` and
+`jlens schema complete` print a `warning:` line on standard error, and the language server
+shows a message; the exit code does not change, and `--deny-warnings` counts the warnings of
+expressions only. A file that is there and is not JSON fails the command, as a schema that
+is not JSON does.
+
+In the Rust crate, `SchemaLoader::load_asking` is that loop: it asks a function for each
+document the load misses, with its URI and its relative path from the schema, then for the
+documents those refer to, each URI once and no more than 256.
 
 What JSON Schema has no keyword for travels in jlens's own `x-jlens-*` keywords, which other
 tools ignore. jlens writes them and reads them back, so they can also be written by hand:

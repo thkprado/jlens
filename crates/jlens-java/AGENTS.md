@@ -65,10 +65,12 @@ The system property `jlens.library` points the package at a library outside the 
   and serve every thread. Diagnostics are records decoded from the C API's JSON reply by `Json`;
   their spans are UTF-16, converted by the C API. A service's declarations are written as JSON
   text, a variable's schema as its handle with `Long.toUnsignedString`. Completion, hover and
-  signature help do not cross. What an expression uses of its schema and what changed
-  between two schemas (0.33 #7) are records with no native memory, read from and written to
-  the JSON form of the other packages; `fixtures/uses/cases.json`, at the repository's root,
-  pins that form for every package.
+  signature help do not cross. A schema's other documents go each in a buffer of its own,
+  named by handle in the sources (0.33 #10, ADR 0025); the report of a load is read when the
+  `Schema` is made, so that it needs no native call later. What an expression uses of its
+  schema and what changed between two schemas (0.33 #7) are records with no native memory,
+  read from and written to the JSON form of the other packages; `fixtures/uses/cases.json`,
+  at the repository's root, pins that form for every package.
 - **API changes** need the Javadoc, the JUnit suite and the Java chapter of the book
   (`docs/src/guides/java.md`). Its snippets live in `GuideTest.java`, between `ANCHOR`
   comments, so that the suite runs them.

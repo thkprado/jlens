@@ -525,6 +525,33 @@ monaco.languages.registerCompletionItemProvider("jsonata", {
 // Diagnostics: monaco.editor.setModelMarkers(model, "jlens", ...) with the same conversion.
 ```
 
+### A schema in several documents
+
+A `$ref` may lead to another document. jlens never fetches one: the application gives each
+document with its URI, as the fourth argument of `LanguageService` (the
+[schema guide](schema.md#a-schema-in-several-documents)):
+
+```js
+const sources = {
+  uri: "https://example.com/schemas/order.json",   // of the schema, when it has no $id
+  documents: { "https://example.com/schemas/common.json": common },
+};
+const service = new LanguageService(order, null, null, sources);
+
+const report = schemaReport(order, sources);
+// { unresolved: [{ place: "https://example.com/schemas/order.json#/properties/carrier",
+//                  reference: "carrier.json",
+//                  uri: "https://example.com/schemas/carrier.json",
+//                  document: "https://example.com/schemas/carrier.json" }] }
+// {} when every $ref was followed
+```
+
+A `$ref` that is not followed does not fail the service: its place is unknown, and nothing is
+completed or warned about under it. `schemaReport` lists those `$ref`s, each with the
+`document` to add to `documents`; an application that can fetch them does, and makes the
+service again. The documents serve the schemas of the variables too; `uri` is that of the
+input's schema alone. Both throw a `TypeError` for sources that are not in this form.
+
 ### What an expression uses of its schema
 
 An application that stores expressions written against a schema that changes keeps, beside each

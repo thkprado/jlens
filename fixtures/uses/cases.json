@@ -964,5 +964,200 @@
       },
       "changes": {}
     }
-  ]
+  ],
+  "references": {
+    "schema": {
+      "$id": "https://example.com/schemas/order.json",
+      "type": "object",
+      "properties": {
+        "customer": {
+          "$ref": "common.json#/$defs/person"
+        },
+        "carrier": {
+          "$ref": "carrier.json"
+        },
+        "discount": {
+          "$ref": "common.json#/$defs/discount"
+        }
+      }
+    },
+    "documents": {
+      "https://example.com/schemas/common.json": {
+        "$defs": {
+          "person": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "address": {
+                "$ref": "address.json"
+              }
+            }
+          }
+        }
+      }
+    },
+    "report": {
+      "unresolved": [
+        {
+          "place": "https://example.com/schemas/common.json#/$defs/person/properties/address",
+          "reference": "address.json",
+          "uri": "https://example.com/schemas/address.json",
+          "document": "https://example.com/schemas/address.json"
+        },
+        {
+          "place": "#/properties/carrier",
+          "reference": "carrier.json",
+          "uri": "https://example.com/schemas/carrier.json",
+          "document": "https://example.com/schemas/carrier.json"
+        },
+        {
+          "place": "#/properties/discount",
+          "reference": "common.json#/$defs/discount",
+          "uri": "https://example.com/schemas/common.json#/$defs/discount"
+        }
+      ]
+    },
+    "reportAlone": {
+      "unresolved": [
+        {
+          "place": "#/properties/customer",
+          "reference": "common.json#/$defs/person",
+          "uri": "https://example.com/schemas/common.json#/$defs/person",
+          "document": "https://example.com/schemas/common.json"
+        },
+        {
+          "place": "#/properties/carrier",
+          "reference": "carrier.json",
+          "uri": "https://example.com/schemas/carrier.json",
+          "document": "https://example.com/schemas/carrier.json"
+        },
+        {
+          "place": "#/properties/discount",
+          "reference": "common.json#/$defs/discount",
+          "uri": "https://example.com/schemas/common.json#/$defs/discount",
+          "document": "https://example.com/schemas/common.json"
+        }
+      ]
+    },
+    "cases": [
+      {
+        "expression": "customer.name",
+        "uses": {
+          "input": {
+            "$": {
+              "types": [
+                "object"
+              ]
+            },
+            "customer": {
+              "types": [
+                "object"
+              ],
+              "required": false
+            },
+            "customer.name": {
+              "whole": true,
+              "types": [
+                "string"
+              ],
+              "required": true
+            }
+          },
+          "bindings": {}
+        },
+        "changes": {
+          "input": {
+            "changed": {
+              "customer": {
+                "unknown": {
+                  "old": true,
+                  "new": false
+                },
+                "types": {
+                  "new": [
+                    "object"
+                  ]
+                },
+                "required": {
+                  "new": false
+                }
+              },
+              "customer.name": {
+                "unknown": {
+                  "old": true,
+                  "new": false
+                },
+                "types": {
+                  "new": [
+                    "string"
+                  ]
+                },
+                "required": {
+                  "new": true
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "expression": "customer.address.city & carrier.code",
+        "uses": {
+          "input": {
+            "$": {
+              "types": [
+                "object"
+              ]
+            },
+            "carrier": {
+              "unknown": true
+            },
+            "carrier.code": {
+              "unknown": true,
+              "whole": true
+            },
+            "customer": {
+              "types": [
+                "object"
+              ],
+              "required": false
+            },
+            "customer.address": {
+              "unknown": true
+            },
+            "customer.address.city": {
+              "unknown": true,
+              "whole": true
+            }
+          },
+          "bindings": {}
+        },
+        "changes": {
+          "input": {
+            "changed": {
+              "customer": {
+                "unknown": {
+                  "old": true,
+                  "new": false
+                },
+                "types": {
+                  "new": [
+                    "object"
+                  ]
+                },
+                "required": {
+                  "new": false
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
 }

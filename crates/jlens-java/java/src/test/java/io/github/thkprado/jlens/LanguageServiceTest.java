@@ -133,6 +133,64 @@ class LanguageServiceTest {
     }
 
     @Test
+    void aLoaderFollowsTheDocumentsItIsGiven() {
+        String order = """
+                {"type": "object", "properties": {
+                    "customer": {"$ref": "common.json#/$defs/person"},
+                    "carrier": {"$ref": "carrier.json"},
+                    "gone": {"$ref": "#/$defs/gone"}}}""";
+        String common = """
+                {"$defs": {"person": {"type": "object", "properties": {
+                    "name": {"type": "string"}}}}}""";
+        Schema.Loader loader = Schema.loader()
+                .uri("https://example.com/schemas/order.json")
+                .document("https://example.com/schemas/common.json", "{}")
+                .document("https://example.com/schemas/common.json",
+                        common.getBytes(StandardCharsets.UTF_8));
+        Schema schema = loader.load(order);
+        try (LanguageService service = LanguageService.of(schema)) {
+            assertEquals(List.of("W0201"), codes(service.diagnostics("customer.nme")));
+            assertEquals(List.of(), codes(service.diagnostics("carrier.anything & gone.x")));
+        }
+        schema.close();
+        // The report was read with the schema.
+        assertEquals(
+                List.of(
+                        new UnresolvedRef(
+                                "https://example.com/schemas/order.json#/properties/carrier",
+                                "carrier.json",
+                                "https://example.com/schemas/carrier.json",
+                                "https://example.com/schemas/carrier.json"),
+                        new UnresolvedRef(
+                                "https://example.com/schemas/order.json#/properties/gone",
+                                "#/$defs/gone",
+                                "https://example.com/schemas/order.json#/$defs/gone",
+                                null)),
+                schema.unresolved());
+        assertEquals(List.of("https://example.com/schemas/carrier.json"), schema.missingDocuments());
+        assertThrows(UnsupportedOperationException.class, () -> schema.unresolved().clear());
+
+        // The loader serves another load, here with no URI: the references are taken as written.
+        try (Schema again = loader.uri(null).document("common.json", common).load(order)) {
+            assertEquals(List.of("carrier.json"), again.missingDocuments());
+            assertEquals("#/properties/carrier", again.unresolved().getFirst().place());
+        }
+        try (Schema whole = Schema.fromJson(ORDER)) {
+            assertEquals(List.of(), whole.unresolved());
+            assertEquals(List.of(), whole.missingDocuments());
+        }
+
+        JlensException notJson = assertThrows(JlensException.class,
+                () -> Schema.loader().document("a.json", "{\"type\": ").load("{}"));
+        assertEquals("U2001", notJson.code());
+        assertEquals("U2005", assertThrows(JlensException.class,
+                () -> Schema.loader().document("a.json", "{}").load("[1]")).code());
+        assertThrows(NullPointerException.class, () -> Schema.loader().document(null, "{}"));
+        assertThrows(NullPointerException.class,
+                () -> new UnresolvedRef(null, "a", "b", null));
+    }
+
+    @Test
     void closedObjectsThrow() {
         Schema schema = Schema.fromJson(ORDER);
         schema.close();

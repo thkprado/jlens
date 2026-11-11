@@ -541,3 +541,67 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn a_load_asks_for_the_documents_it_misses_and_for_theirs() {
+    let main = json!({"properties": {"a": {"$ref": "a.json"}, "gone": {"$ref": "gone.json"}}});
+    let mut asked = Vec::new();
+    let (schema, report) = SchemaLoader::new()
+        .load_asking("https://example.com/s/main.json", &main, |uri, relative| {
+            asked.push(uri.to_owned());
+            Ok(match relative {
+                Some("a.json") => Some(json!({"properties": {"b": {"$ref": "sub/b.json"}}})),
+                Some("sub/b.json") => Some(json!({
+                    "properties": {
+                        "back": {"$ref": "../a.json"},
+                        "gone": {"$ref": "../gone.json"},
+                        "n": {"type": "number"}
+                    }
+                })),
+                _ => None,
+            })
+        })
+        .unwrap();
+    // Each document once, though two places name `gone.json` and two loads miss it.
+    assert_eq!(
+        asked,
+        [
+            "https://example.com/s/a.json",
+            "https://example.com/s/gone.json",
+            "https://example.com/s/sub/b.json"
+        ]
+    );
+    assert_eq!(report.documents(), ["https://example.com/s/gone.json"]);
+    let service = LanguageService::new(Some(schema));
+    let codes = |text: &str| -> Vec<String> {
+        service
+            .diagnostics(text)
+            .into_iter()
+            .map(|d| d.code)
+            .collect()
+    };
+    assert_eq!(codes("a.b.back.b.m"), ["W0201"]);
+    assert!(codes("a.b.back.b.n").is_empty());
+    assert!(codes("a.b.gone.anything").is_empty());
+}
+
+#[test]
+fn a_load_that_asks_fails_with_the_answer_s_error_and_stops_asking() {
+    let main = json!({"$ref": "a.json"});
+    let failed = SchemaLoader::new().load_asking("", &main, |_, _| Err("unreadable".into()));
+    assert_eq!(failed.unwrap_err(), "unreadable");
+
+    // More documents than a load asks for: it ends, and reports those it did not ask for.
+    let branches: Vec<_> = (0..300)
+        .map(|i| json!({"$ref": format!("d{i}.json")}))
+        .collect();
+    let mut asked = 0;
+    let (_, report) = SchemaLoader::new()
+        .load_asking("", &json!({"anyOf": branches}), |_, _| {
+            asked += 1;
+            Ok(Some(json!({"type": "string"})))
+        })
+        .unwrap();
+    assert_eq!(asked, 256);
+    assert_eq!(report.documents().len(), 44);
+}

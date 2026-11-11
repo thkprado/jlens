@@ -78,6 +78,58 @@ class UsesTest {
         }
     }
 
+    /** The schema of two documents that every package loads (roadmap 0.33 #10). */
+    @Test
+    void theSharedSchemaOfTwoDocuments() throws IOException {
+        Path path = Path.of("..", "..", "..", "fixtures", "uses", "cases.json");
+        Map<String, Object> fixture = Json.object(
+                Json.object(Json.parse(Files.readString(path)), "fixture").get("references"),
+                "references");
+        String text = Json.write(fixture.get("schema"));
+        Schema.Loader loader = Schema.loader();
+        Json.object(fixture.get("documents"), "documents")
+                .forEach((uri, document) -> loader.document(uri, Json.write(document)));
+        try (Schema schema = loader.load(text);
+                Schema alone = Schema.fromJson(text);
+                LanguageService service = LanguageService.of(schema);
+                LanguageService serviceAlone = LanguageService.of(alone)) {
+            assertEquals(fixture.get("report"), report(schema));
+            assertEquals(fixture.get("reportAlone"), report(alone));
+            assertEquals(
+                    List.of("https://example.com/schemas/address.json",
+                            "https://example.com/schemas/carrier.json"),
+                    schema.missingDocuments());
+            assertEquals(
+                    List.of("https://example.com/schemas/common.json",
+                            "https://example.com/schemas/carrier.json"),
+                    alone.missingDocuments());
+            for (Object item : (List<?>) fixture.get("cases")) {
+                Map<String, Object> expected = Json.object(item, "case");
+                String source = (String) expected.get("expression");
+                try (Expression expression = Expression.compile(source)) {
+                    Uses uses = service.uses(expression);
+                    assertEquals(expected.get("uses"), Json.parse(uses.toJson()), source);
+                    UsesChanges changes = serviceAlone.uses(expression).changes(uses);
+                    assertEquals(expected.get("changes"), Json.parse(changes.toJson()), source);
+                }
+            }
+        }
+    }
+
+    /** The references a schema did not follow, in the JSON form of the other packages. */
+    private static Map<String, Object> report(Schema schema) {
+        List<Object> unresolved = new ArrayList<>();
+        for (UnresolvedRef reference : schema.unresolved()) {
+            Map<String, Object> members = new java.util.LinkedHashMap<>();
+            members.put("place", reference.place());
+            members.put("reference", reference.reference());
+            members.put("uri", reference.uri());
+            if (reference.document() != null) members.put("document", reference.document());
+            unresolved.add(members);
+        }
+        return unresolved.isEmpty() ? Map.of() : Map.of("unresolved", unresolved);
+    }
+
     @Test
     void whatTheSchemaSaysOfEachPath() {
         try (Schema schema = Schema.fromJson(ORDER);

@@ -166,6 +166,45 @@ pub(crate) fn percent_decode(text: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// The path of the document `uri` from the folder of the document `base`, with `/` between
+/// its names and `..` for each folder to leave, its escapes read: where the document is, for
+/// an application that keeps the two beside each other. `None` when the two differ in more
+/// than their paths (another scheme or host), when `uri` has a query or names `base` itself,
+/// or when a name of the path is not one a file can have.
+pub(crate) fn relative(base: &str, uri: &str) -> Option<String> {
+    let b = parse(base);
+    let u = parse(uri);
+    if b.scheme != u.scheme || b.authority != u.authority || u.query.is_some() {
+        return None;
+    }
+    if b.path.starts_with('/') != u.path.starts_with('/') || b.path == u.path {
+        return None;
+    }
+    let folders: Vec<&str> = match b.path.rfind('/') {
+        Some(end) => b.path[..end].split('/').collect(),
+        None => Vec::new(),
+    };
+    let mut names: Vec<&str> = u.path.split('/').collect();
+    let file = names.pop()?;
+    let common = folders
+        .iter()
+        .zip(&names)
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut out = "../".repeat(folders.len() - common);
+    for name in names[common..].iter().chain([&file]) {
+        let name = percent_decode(name)?;
+        if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
+            return None;
+        }
+        if !out.is_empty() && !out.ends_with('/') {
+            out.push('/');
+        }
+        out.push_str(&name);
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +280,48 @@ mod tests {
         assert_eq!(percent_decode("100%").as_deref(), Some("100%"));
         assert_eq!(percent_decode("%zz").as_deref(), Some("%zz"));
         assert_eq!(percent_decode("%FF"), None);
+    }
+
+    #[test]
+    fn a_document_beside_another_has_a_relative_path() {
+        let base = "https://example.com/schemas/v1/order.json";
+        for (uri, expected) in [
+            (
+                "https://example.com/schemas/v1/common.json",
+                Some("common.json"),
+            ),
+            (
+                "https://example.com/schemas/v1/parts/a%20b.json",
+                Some("parts/a b.json"),
+            ),
+            (
+                "https://example.com/schemas/common.json",
+                Some("../common.json"),
+            ),
+            (
+                "https://example.com/other/common.json",
+                Some("../../other/common.json"),
+            ),
+            ("https://example.com/schemas/v1/order.json", None),
+            ("https://example.org/schemas/v1/common.json", None),
+            ("http://example.com/schemas/v1/common.json", None),
+            ("https://example.com/schemas/v1/common.json?v=2", None),
+            ("https://example.com/schemas/v1/a%2Fb.json", None),
+            ("https://example.com/schemas/v1/%2E%2E/b.json", None),
+            ("https://example.com/schemas/v1/", None),
+            ("urn:example:common", None),
+        ] {
+            assert_eq!(relative(base, uri).as_deref(), expected, "{uri}");
+        }
+        assert_eq!(
+            relative("file:///D:/work/", "file:///D:/work/schemas/limits.json").as_deref(),
+            Some("schemas/limits.json")
+        );
+        assert_eq!(relative("", "common.json").as_deref(), Some("common.json"));
+        assert_eq!(
+            relative("schemas/order.json", "schemas/common.json").as_deref(),
+            Some("common.json")
+        );
+        assert_eq!(relative("order.json", "/common.json"), None);
     }
 }

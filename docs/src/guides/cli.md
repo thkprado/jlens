@@ -257,6 +257,12 @@ jlens check --path rules/discount.jsonata '$rate(type) * unitPrice'
 file, and keeps its variables and functions. A configuration that cannot be read, or whose
 schema cannot be, ends with exit code 2.
 
+A schema whose `$ref`s lead to other files is read with them, when they are at the same
+relative paths from the schema's file; nothing is read from the network. A `$ref` that is not
+followed prints a `warning:` line on standard error and leaves its place unknown, so nothing
+is reported under it; the exit code does not change. See
+[A schema in several documents](schema.md#a-schema-in-several-documents).
+
 To validate a directory of rules in CI, warnings included:
 
 ```sh

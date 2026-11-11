@@ -2,12 +2,13 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use jlens_core::{Diagnostic, Expression};
+use jlens_lsp::config;
 use jlens_schema::{
     Change, EnumChange, JsonType, LanguageService, Override, PathChanges, Schema, Use, UseChanges,
     Uses,
@@ -101,10 +102,24 @@ pub fn run(cmd: SchemaCommand) -> Result<ExitCode> {
     }
 }
 
-/// Reads a schema written as JSON Schema.
-pub fn load(path: &PathBuf) -> Result<Schema> {
-    let doc = read_json(path)?;
-    Schema::from_json_schema(&doc).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))
+/// Reads a schema written as JSON Schema, following its `$ref`s into the files beside it, and
+/// prints on stderr those it did not follow.
+pub fn load(path: &Path) -> Result<Schema> {
+    let cwd = std::env::current_dir().context("reading the current directory")?;
+    let (schema, report) =
+        config::load_schema(&crate::absolute(&cwd, path)).map_err(anyhow::Error::msg)?;
+    warn(&config::notes(
+        &format!("schema {}", path.display()),
+        &report,
+    ));
+    Ok(schema)
+}
+
+/// Prints on stderr what the schemas of a service did not follow.
+pub fn warn(notes: &[String]) {
+    for note in notes {
+        eprintln!("warning: {note}");
+    }
 }
 
 /// Expands glob patterns (Windows shells do not do it).
@@ -172,7 +187,7 @@ fn infer(args: InferArgs) -> Result<ExitCode> {
 
 fn complete(args: CompleteArgs) -> Result<ExitCode> {
     let (source, _) = args.source.read()?;
-    let schema = args.schema.as_ref().map(load).transpose()?;
+    let schema = args.schema.as_deref().map(load).transpose()?;
     let offset = match args.cursor {
         Some(chars) => source
             .char_indices()

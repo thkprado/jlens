@@ -5,9 +5,11 @@
 use std::path::{Path, PathBuf};
 
 use glob::{MatchOptions, Pattern};
-use jlens_schema::{FunctionDecl, LanguageService, Schema};
+use jlens_schema::{FunctionDecl, LanguageService, LoadReport, Schema, SchemaLoader};
 use serde::Deserialize;
 use serde_json::Value;
+
+use crate::uri::uri_of;
 
 /// The name of the configuration file, at the root of a workspace folder.
 pub const FILE_NAME: &str = "jlens.json";
@@ -54,42 +56,140 @@ impl Entry {
 
     /// The language service of these settings. Problems (a missing schema, an invalid variable
     /// schema) are returned alongside, and leave the corresponding part out.
-    pub fn service(&self) -> (LanguageService, Vec<String>) {
+    pub fn service(&self) -> Made {
         self.settings.service(&self.root)
     }
+
+    /// Declares the variables and host functions of these settings to `service`, whatever its
+    /// schema.
+    pub fn declare(&self, service: LanguageService) -> Made {
+        self.settings.declare(service, &self.root)
+    }
+}
+
+/// A language service made of some settings, with what was found on the way.
+#[derive(Debug)]
+pub struct Made {
+    /// The service.
+    pub service: LanguageService,
+    /// What could not be read, which left a part of the settings out: a missing schema, an
+    /// invalid variable schema.
+    pub problems: Vec<String>,
+    /// What the schemas did not follow ([`notes`]): the service leaves those places unknown.
+    pub notes: Vec<String>,
+}
+
+/// Reads the JSON Schema in the file `path`. A `$ref` to another document is followed into the
+/// file at the same relative path from this one as between the two URIs (`common.json`,
+/// `../shared/common.json`), when there is one, and never anywhere else: nothing is fetched.
+/// The report names the `$ref`s that were not followed.
+pub fn load_schema(path: &Path) -> Result<(Schema, LoadReport), String> {
+    let document = read(path)?;
+    let uri = uri_of(path).unwrap_or_default();
+    let folder = path.parent().unwrap_or(Path::new(""));
+    SchemaLoader::new()
+        .load_asking(&uri, &document, beside(folder))
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Reads the JSON Schema `document`, written in a file of `folder`, as [`load_schema`] reads
+/// one: its `$ref`s to files are relative to `folder`.
+pub fn load_schema_in(folder: &Path, document: &Value) -> Result<(Schema, LoadReport), String> {
+    // A folder's URI ends with a slash, so that a reference is resolved inside it.
+    let uri = uri_of(folder).map_or_else(String::new, |uri| format!("{uri}/"));
+    SchemaLoader::new().load_asking(&uri, document, beside(folder))
+}
+
+/// Gives a load the documents that are files at their relative paths from `folder`.
+fn beside(folder: &Path) -> impl FnMut(&str, Option<&str>) -> Result<Option<Value>, String> + '_ {
+    move |_, relative| {
+        let Some(relative) = relative else {
+            return Ok(None);
+        };
+        let path = folder.join(relative);
+        if !path.is_file() {
+            return Ok(None);
+        }
+        read(&path).map(Some)
+    }
+}
+
+fn read(path: &Path) -> Result<Value, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// What a load did not follow, for a person: a line for each document that was not found, and
+/// one for each `$ref` to a place its document does not have. `what` names the schema.
+pub fn notes(what: &str, report: &LoadReport) -> Vec<String> {
+    let mut notes = Vec::new();
+    for document in report.documents() {
+        let references = report
+            .unresolved
+            .iter()
+            .filter(|u| u.document.as_deref() == Some(document))
+            .count();
+        notes.push(format!(
+            "{what}: {references} $ref(s) to {document} not followed, as the document was not \
+             found: nothing is checked under them"
+        ));
+    }
+    for unresolved in report.unresolved.iter().filter(|u| u.document.is_none()) {
+        notes.push(format!(
+            "{what}: $ref {:?} at {} not followed, as {} is not in its document: nothing is \
+             checked under it",
+            unresolved.reference, unresolved.place, unresolved.uri
+        ));
+    }
+    notes
 }
 
 impl Settings {
     /// The language service of these settings, whose schema path is relative to `root`.
     /// Problems (a missing schema, an invalid variable schema) are returned alongside, and leave
-    /// the corresponding part out.
-    pub fn service(&self, root: &Path) -> (LanguageService, Vec<String>) {
+    /// the corresponding part out. The schema is read as [`load_schema`] reads it.
+    pub fn service(&self, root: &Path) -> Made {
         let mut problems = Vec::new();
+        let mut notes = Vec::new();
         let schema = self.schema.as_ref().and_then(|path| {
             let path = root.join(path);
-            let loaded = std::fs::read_to_string(&path)
-                .map_err(|e| e.to_string())
-                .and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
-                .and_then(|doc| Schema::from_json_schema(&doc).map_err(|e| e.to_string()));
-            loaded
-                .map_err(|e| problems.push(format!("schema {}: {e}", path.display())))
-                .ok()
+            match load_schema(&path) {
+                Ok((schema, report)) => {
+                    notes = self::notes(&format!("schema {}", path.display()), &report);
+                    Some(schema)
+                }
+                Err(e) => {
+                    problems.push(format!("schema {e}"));
+                    None
+                }
+            }
         });
-        let (service, more) = self.declare(LanguageService::new(schema));
-        problems.extend(more);
-        (service, problems)
+        let mut made = self.declare(LanguageService::new(schema), root);
+        problems.append(&mut made.problems);
+        notes.append(&mut made.notes);
+        Made {
+            service: made.service,
+            problems,
+            notes,
+        }
     }
 
     /// Declares the variables and host functions of these settings to `service`, whatever its
-    /// schema. Problems (an invalid variable schema) are returned alongside.
-    pub fn declare(&self, mut service: LanguageService) -> (LanguageService, Vec<String>) {
+    /// schema. A `$ref` to a file in a variable's schema is relative to `root`, the
+    /// configuration's folder ([`load_schema_in`]). Problems (an invalid variable schema) are
+    /// returned alongside.
+    pub fn declare(&self, mut service: LanguageService, root: &Path) -> Made {
         let mut problems = Vec::new();
+        let mut notes = Vec::new();
         for (name, doc) in &self.variables {
             let name = name.trim_start_matches('$');
             service = match doc {
                 Value::Null => service.with_variable(name, None),
-                doc => match Schema::from_json_schema(doc) {
-                    Ok(schema) => service.with_variable_schema(name, schema),
+                doc => match load_schema_in(root, doc) {
+                    Ok((schema, report)) => {
+                        notes.extend(self::notes(&format!("variable ${name}"), &report));
+                        service.with_variable_schema(name, schema)
+                    }
                     Err(e) => {
                         problems.push(format!("variable ${name}: {e}"));
                         service.with_variable(name, None)
@@ -102,7 +202,11 @@ impl Settings {
             decl.name = decl.name.trim_start_matches('$').to_owned();
             service = service.with_function(decl);
         }
-        (service, problems)
+        Made {
+            service,
+            problems,
+            notes,
+        }
     }
 }
 
@@ -188,8 +292,13 @@ mod tests {
             Path::new("/work"),
         )
         .unwrap();
-        let (service, problems) = entries[0].service();
+        let Made {
+            service,
+            problems,
+            notes,
+        } = entries[0].service();
         assert_eq!(problems.len(), 2, "{problems:?}");
+        assert_eq!(notes, [""; 0]);
         let labels: Vec<String> = service
             .complete("$", 1)
             .items

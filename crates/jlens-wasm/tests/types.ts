@@ -18,6 +18,9 @@ import init, {
   type Use,
   type Uses,
   type UsesChanges,
+  type SchemaSources,
+  type LoadReport,
+  type UnresolvedRef,
   type ValueCondition,
   type ValueRequest,
   Document,
@@ -29,6 +32,7 @@ import init, {
   parseRecover,
   unionReads,
   usesChanges,
+  schemaReport,
   valueLiteral,
   version,
 } from "../pkg/jlens.js";
@@ -109,7 +113,12 @@ export async function check(): Promise<void> {
   const changes: UsesChanges = usesChanges(uses, plain.uses(new Expression("a").reads()));
   const typesBefore: string[] | undefined = changes.input?.changed?.["a"]?.types?.old;
   const valuesAdded: unknown[] | undefined = changes.input?.changed?.["a"]?.enum?.added;
-  console.log(required, usesOfLimit, typesBefore, valuesAdded);
+  const sources: SchemaSources = { uri: "https://example.com/a.json", documents: { "b.json": {} } };
+  const located = new LanguageService({ $ref: "b.json" }, null, null, sources);
+  const report: LoadReport = schemaReport({ $ref: "c.json" }, sources);
+  const unresolved: UnresolvedRef | undefined = report.unresolved?.[0];
+  const missingDocument: string | undefined = unresolved?.document;
+  console.log(required, usesOfLimit, typesBefore, valuesAdded, located, missingDocument);
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();
   console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, every, fields, text, failed, start, type, ast.id, d, kinds, value, request, literal, conditions, several, listed, domain, hover, help, catalog);

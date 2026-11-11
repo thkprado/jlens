@@ -9,10 +9,12 @@ repository-wide rules are in the root [AGENTS.md](../../AGENTS.md).
 - The host's own values are read through a reader it calls back (`src/source.rs`); host
   functions are called back too (`src/host.rs`).
 - Audits are replied as values (`src/audit.rs`); replies carry a status byte.
-- Schemas and language services are known by handle too. A service's diagnostics and what an
-  expression uses of its schemas are replied as JSON text, and two of the latter answers are
-  compared from two buffers, with no handle (`src/schema.rs`, ADR 0023); completion, hover and
-  signature help do not cross.
+- Schemas and language services are known by handle too. A schema is made from its text and,
+  optionally, its sources: its own URI and its other documents, each a buffer's handle by
+  URI (ADR 0025); the report of its load is replied as JSON text. A service's diagnostics and
+  what an expression uses of its schemas are replied as JSON text, and two of the latter
+  answers are compared from two buffers, with no handle (`src/schema.rs`, ADR 0023);
+  completion, hover and signature help do not cross.
 - mimalloc is its allocator.
 
 ## Rules

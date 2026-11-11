@@ -759,3 +759,137 @@ fn schema_uses() {
         &["schema", "changes", "nope.json", "nope.json"]
     );
 }
+
+/// The schema of two documents that every package loads (roadmap 0.33 #10): the other document
+/// is the file beside the schema's, and the `$ref`s that are not followed are warned about.
+#[test]
+fn a_schema_follows_the_files_beside_it() {
+    use serde_json::{Value, json};
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixture: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("fixtures/uses/cases.json")).unwrap(),
+    )
+    .unwrap();
+    let fixture = &fixture["references"];
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("references");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("schemas")).unwrap();
+    std::fs::create_dir_all(dir.join("alone")).unwrap();
+    let write = |name: &str, value: &Value| {
+        std::fs::write(dir.join(name), value.to_string()).unwrap();
+    };
+    // The schema's `$id` is in another folder of another host: the file is still beside it.
+    write("schemas/order.json", &fixture["schema"]);
+    write("alone/order.json", &fixture["schema"]);
+    for (uri, document) in fixture["documents"].as_object().unwrap() {
+        let name = uri.rsplit('/').next().unwrap();
+        write(&format!("schemas/{name}"), document);
+    }
+    let run = |args: &[&str]| {
+        let out = Command::cargo_bin("jlens")
+            .unwrap()
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .unwrap();
+        (
+            out.status.code(),
+            String::from_utf8(out.stdout).unwrap(),
+            String::from_utf8(out.stderr).unwrap(),
+        )
+    };
+    for case in fixture["cases"].as_array().unwrap() {
+        let expression = case["expression"].as_str().unwrap();
+        for folder in ["schemas", "alone"] {
+            let schema = format!("{folder}/order.json");
+            let (code, uses, warned) = run(&["schema", "uses", "--schema", &schema, expression]);
+            assert_eq!(code, Some(0), "{warned}");
+            // One line for each document that was not found, and one for the place that the
+            // document found does not have.
+            let missing: &[&str] = match folder {
+                "schemas" => &[
+                    "address.json",
+                    "carrier.json",
+                    "common.json#/$defs/discount",
+                ],
+                _ => &["common.json", "carrier.json"],
+            };
+            assert_eq!(warned.lines().count(), missing.len(), "{warned}");
+            for (line, name) in warned.lines().zip(missing) {
+                assert!(line.starts_with("warning: schema "), "{line}");
+                assert!(
+                    line.contains(&format!("https://example.com/schemas/{name}")),
+                    "{name} in {line}"
+                );
+            }
+            std::fs::write(dir.join(format!("{folder}.uses.json")), &uses).unwrap();
+            if folder == "schemas" {
+                let uses: Value = serde_json::from_str(&uses).unwrap();
+                assert_eq!(uses, case["uses"], "{expression}");
+            }
+        }
+        let (_, changes, _) = run(&[
+            "schema",
+            "changes",
+            "alone.uses.json",
+            "schemas.uses.json",
+            "--json",
+        ]);
+        let changes: Value = serde_json::from_str(&changes).unwrap();
+        assert_eq!(changes, case["changes"], "{expression}");
+    }
+
+    // `check` reads them the same way, through a configuration too, whose variables' schemas
+    // refer to files from its folder; the warnings of a schema do not fail the check.
+    write(
+        "jlens.json",
+        &json!({"rules/*.jsonata": {
+            "schema": "schemas/order.json",
+            "variables": {
+                "buyer": {"$ref": "schemas/common.json#/$defs/person"},
+                "seller": {"$ref": "../outside.json"}
+            }
+        }}),
+    );
+    std::fs::create_dir_all(dir.join("rules")).unwrap();
+    std::fs::write(
+        dir.join("rules/a.jsonata"),
+        "customer.nme & $buyer.nme & $seller.x & carrier.x",
+    )
+    .unwrap();
+    let (code, _, warned) = run(&[
+        "check",
+        "--deny-warnings",
+        "--json",
+        "-f",
+        "rules/a.jsonata",
+    ]);
+    assert_eq!(code, Some(1), "two unknown fields: {warned}");
+    assert_eq!(warned.lines().count(), 5, "{warned}");
+    assert!(warned.contains("warning: variable $seller: "), "{warned}");
+    assert!(warned.contains("warning: variable $buyer: "), "{warned}");
+    let (code, found, _) = run(&["check", "--json", "-f", "rules/a.jsonata"]);
+    assert_eq!(code, Some(0));
+    let found: Value = serde_json::from_str(&found).unwrap();
+    let codes: Vec<&str> = found
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(codes, ["W0201", "W0201"]);
+    let (code, _, warned) = run(&["check", "--schema", "schemas/order.json", "customer.name"]);
+    assert_eq!(code, Some(0), "{warned}");
+    assert_eq!(
+        warned.lines().count(),
+        4,
+        "three warnings and `ok`: {warned}"
+    );
+
+    // A file beside the schema that is not JSON fails the command.
+    std::fs::write(dir.join("schemas/carrier.json"), "{").unwrap();
+    let (code, _, failed) = run(&["check", "--schema", "schemas/order.json", "customer.name"]);
+    assert_eq!(code, Some(2), "{failed}");
+    assert!(failed.contains("carrier.json"), "{failed}");
+}

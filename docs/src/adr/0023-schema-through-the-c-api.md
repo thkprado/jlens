@@ -61,8 +61,10 @@ these numbers; roadmap 0.33 #11 measures the library and the JAR as released.
      a JSON Schema from samples, and that file is what a Java application loads.
 
 3. **Two new kinds of object, known by handle** as the others are: a schema and a service.
-   - **A schema** is made from the JSON Schema text in a buffer (`jlens_schema_new`) and freed
-     by its own export. It is a kind of its own, not an argument of the service, because a
+   - **A schema** is made from the JSON Schema text in a buffer (`jlens_schema_new`; since
+     0.33 #10 with a second buffer, its sources, as
+     [ADR 0025](0025-references-to-other-documents.md#results-the-documents-and-the-report-at-every-end-033-10)
+     describes) and freed by its own export. It is a kind of its own, not an argument of the service, because a
      load has results of its own, which later items give by its handle: the documents a `$ref`
      named and the application did not give (#9), the keywords the load did not read (0.34 #8).
      Those items also change what a schema is made from (other documents, by URI), which then

@@ -871,6 +871,51 @@ export const cases = [
     }
   }],
 
+  ["a schema of two documents: the case every package answers the same", async (j, env) => {
+    const { schema, documents, report, reportAlone, cases } =
+      JSON.parse(await env.load("../../../fixtures/uses/cases.json")).references;
+    equal(j.schemaReport(schema, { documents }), report, "the report with the document");
+    equal(j.schemaReport(schema), reportAlone, "the report alone");
+    const service = new j.LanguageService(schema, null, null, { documents });
+    const alone = new j.LanguageService(schema);
+    for (const { expression, uses, changes } of cases) {
+      const reads = new j.Expression(expression).reads();
+      equal(service.uses(reads), uses, `uses of ${expression}`);
+      equal(j.usesChanges(alone.uses(reads), service.uses(reads)), changes, `changes of ${expression}`);
+    }
+  }],
+
+  ["schema sources and schemaReport", (j) => {
+    const person = { type: "object", properties: { name: { type: "string" } } };
+    const documents = { "https://example.com/s/common.json": { $defs: { person } } };
+    const schema = { properties: { customer: { $ref: "common.json#/$defs/person" }, carrier: { $ref: "carrier.json" } } };
+    const sources = { uri: "https://example.com/s/order.json", documents };
+    const codes = (service, text) => service.diagnostics(text).map((d) => d.code);
+    // The URI is that of the input's schema; the documents serve the variables' schemas too.
+    const service = new j.LanguageService(schema, { buyer: { $ref: "https://example.com/s/common.json#/$defs/person" } }, null, sources);
+    equal(codes(service, "customer.nme"), ["W0201"]);
+    equal(codes(service, "$buyer.nme"), ["W0201"]);
+    equal(codes(service, "carrier.anything & customer.name & $buyer.name"), []);
+    equal(codes(new j.LanguageService(schema), "customer.nme"), [], "unknown without the document");
+    equal(j.schemaReport(schema, sources), {
+      unresolved: [{
+        place: "https://example.com/s/order.json#/properties/carrier",
+        reference: "carrier.json",
+        uri: "https://example.com/s/carrier.json",
+        document: "https://example.com/s/carrier.json",
+      }],
+    });
+    equal(j.schemaReport(person), {}, "everything read");
+    equal(j.schemaReport(person, null), {});
+    equal(j.schemaReport(person, { uri: null, documents: null }), {});
+    for (const bad of [[], 1, { url: "a" }, { uri: 1 }, { documents: [] }]) {
+      throws(() => j.schemaReport(person, bad), (e) => ok(e instanceof TypeError, `sources ${JSON.stringify(bad)}`));
+      throws(() => new j.LanguageService(person, null, null, bad), (e) => ok(e instanceof TypeError, `sources ${JSON.stringify(bad)}`));
+    }
+    throws(() => j.schemaReport([1]), (e) => ok(e instanceof TypeError, "not a schema"));
+    throws(() => j.schemaReport(undefined), (e) => ok(e instanceof TypeError, "no schema"));
+  }],
+
   ["uses and usesChanges", (j) => {
     const schema = (active) => ({
       type: "object",

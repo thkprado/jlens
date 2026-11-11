@@ -3,7 +3,7 @@
 //! with the second.
 
 use jlens_core::Expression;
-use jlens_schema::{FunctionDecl, LanguageService, Schema, Uses, UsesChanges};
+use jlens_schema::{FunctionDecl, LanguageService, Schema, SchemaLoader, Uses, UsesChanges};
 use serde_json::Value;
 
 fn service(schema: &Value, variables: &Value, functions: &Value) -> LanguageService {
@@ -53,5 +53,45 @@ fn the_shared_cases() {
         assert_eq!(kept.changes(&new.uses(&reads)), changes, "{text}");
         let read: UsesChanges = serde_json::from_value(case["changes"].clone()).unwrap();
         assert_eq!(read, changes, "{text}");
+    }
+}
+
+/// A schema of two documents (roadmap 0.33 #10): what its load reports with the other
+/// document and alone, what each expression uses of it, and what giving the document changes.
+#[test]
+fn the_shared_schema_of_two_documents() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/uses/cases.json"
+    );
+    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let fixture = &fixture["references"];
+    let loader = fixture["documents"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .fold(SchemaLoader::new(), |loader, (uri, document)| {
+            loader.document(uri, document)
+        });
+    let (schema, report) = loader.load(&fixture["schema"]).unwrap();
+    let (alone, report_alone) = SchemaLoader::new().load(&fixture["schema"]).unwrap();
+    assert_eq!(serde_json::to_value(&report).unwrap(), fixture["report"]);
+    assert_eq!(
+        serde_json::to_value(&report_alone).unwrap(),
+        fixture["reportAlone"]
+    );
+    let service = LanguageService::new(Some(schema));
+    let alone = LanguageService::new(Some(alone));
+    for case in fixture["cases"].as_array().unwrap() {
+        let text = case["expression"].as_str().unwrap();
+        let reads = Expression::compile(text).unwrap().reads();
+        let uses = service.uses(&reads);
+        assert_eq!(serde_json::to_value(&uses).unwrap(), case["uses"], "{text}");
+        let changes = alone.uses(&reads).changes(&uses);
+        assert_eq!(
+            serde_json::to_value(&changes).unwrap(),
+            case["changes"],
+            "{text}"
+        );
     }
 }

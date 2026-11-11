@@ -62,6 +62,23 @@ All notable changes are recorded here. The format follows
   under it, what an expression uses marks it `unknown`, and the report lists it
   (`UnresolvedRef`: its place, its text, the URI it resolves to and the document to give;
   `LoadReport::documents`). The schema guide has "A schema in several documents".
+- The documents of a schema and the report of its load, wherever a schema is read, the report
+  as the same JSON from each:
+  - the CLI and the language server follow a `$ref` to a file, when it is at the same relative
+    path from the schema's file as between the two URIs, and never read from the network; a
+    variable's schema in `jlens.json` refers to files from the folder of `jlens.json`. Each
+    document that was not found, and each `$ref` to a place its document does not have, is a
+    `warning:` line on standard error of `jlens check`, `jlens schema uses` and
+    `jlens schema complete`, and a message of the language server;
+  - the WebAssembly package: `new LanguageService(schema, variables, functions, sources)`
+    takes `{ uri, documents }`, and `schemaReport(schema, sources)` gives the report, with the
+    types `SchemaSources`, `LoadReport` and `UnresolvedRef`;
+  - the Java package: `Schema.loader().uri(…).document(uri, text).load(text)`, and
+    `schema.unresolved()`, a list of `UnresolvedRef` records, with `schema.missingDocuments()`;
+  - `jlens-schema`: `SchemaLoader::load_asking` asks a function for each document a load
+    misses, and for those they refer to;
+  - `jlens-lsp`: `config::load_schema` reads a schema file with the files beside it, and
+    `config::notes` writes a report for a person.
 
 ### Fixed
 
@@ -80,6 +97,9 @@ All notable changes are recorded here. The format follows
   pointer starts at that schema, not at the root of the document; and a property named
   `$ref` or `$id` is read as a property.
 
+- `jlens-lsp`: `config::Entry::service` and `config::Settings::service` return a `Made`
+  (the service, its problems and the notes of its schemas) where they returned a pair, and
+  `Settings::declare` takes the configuration's folder.
 - `jlens-schema`: `Shape` has the public field `references` and `Schema` the public field
   `definitions`, so a `Schema` built field by field must give it (`..Schema::default()`). A
   schema nested more than 64 levels without recursion fails with `the schema is nested too

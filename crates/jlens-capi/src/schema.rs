@@ -9,7 +9,7 @@
 //! costs about a sixth of the schema's load (roadmap 0.33 #3).
 
 use jlens_core::{Error, Offsets};
-use jlens_schema::{FunctionDecl, LanguageService, Schema, Uses};
+use jlens_schema::{FunctionDecl, LanguageService, LoadReport, Schema, SchemaLoader, Uses};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -19,25 +19,109 @@ use crate::api::{
 use crate::buffers;
 use crate::handles::Table;
 
-/// The live schemas. `Schema` is `Send` and `Sync`: one serves every thread.
-static SCHEMAS: Table<Schema> = Table::new();
+/// A schema with what its load did not read.
+struct Loaded {
+    schema: Schema,
+    report: LoadReport,
+}
+
+/// The live schemas. `Schema` and its report are `Send` and `Sync`: one serves every thread.
+static SCHEMAS: Table<Loaded> = Table::new();
 
 /// The live services. `LanguageService` is `Send` and `Sync`: one serves every thread.
 static SERVICES: Table<LanguageService> = Table::new();
 
-/// Reads the JSON Schema text in buffer `text`, which stays the caller's, and replies with the
-/// schema's handle or the error: `U2001` for text that is not JSON, `U2005` with the token
-/// `schema` for a JSON Schema that jlens refuses.
-pub fn schema_new(text: u64) -> u64 {
-    reply(schema_text(text))
+/// Where the `$ref`s of a schema lead, as JSON text gives it. A member that is absent or
+/// `null` gives nothing; an unknown one is an error.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Sources {
+    /// The URI of the schema itself, which its `$ref`s are resolved against where no `$id`
+    /// says otherwise.
+    #[serde(default)]
+    uri: Option<String>,
+    /// From the URI of each other document to the handle of the buffer holding its JSON text.
+    #[serde(default)]
+    documents: Option<Map<String, Value>>,
 }
 
-fn schema_text(text: u64) -> Result<Vec<u8>, Vec<u8>> {
-    let document = buffers::with(text, |bytes| serde_json::from_slice::<Value>(bytes))
-        .ok_or_else(|| unknown("buffer", text))?
-        .map_err(|e| not_json(e.to_string()))?;
-    let schema = Schema::from_json_schema(&document).map_err(|e| invalid("schema", e))?;
-    handle_reply(SCHEMAS.insert(schema))
+/// Reads the JSON Schema text in buffer `text`, with the other documents its `$ref`s lead to
+/// as buffer `sources` gives them (JSON text, 0 for none), and replies with the schema's
+/// handle or the error. Every buffer stays the caller's.
+///
+/// The sources are an object with `uri`, the URI of the schema itself, and `documents`, an
+/// object from the URI of each other document to the handle of the buffer holding its JSON
+/// text, a number. Nothing is fetched: a `$ref` to a document that is not given leaves its
+/// place unknown, and `schema_report` names it (ADR 0025).
+///
+/// Text that is not JSON fails with `U2001`, a document's included; a JSON Schema that jlens
+/// refuses with `U2005` and the token `schema`; sources not in this form with `U2005` and the
+/// token `sources`; a document's handle that names no live buffer with `U2002`.
+pub fn schema_new(text: u64, sources: u64) -> u64 {
+    reply(schema_text(text, sources))
+}
+
+fn schema_text(text: u64, sources: u64) -> Result<Vec<u8>, Vec<u8>> {
+    let json = |buffer: u64| {
+        buffers::with(buffer, |bytes| serde_json::from_slice::<Value>(bytes))
+            .ok_or_else(|| unknown("buffer", buffer))
+    };
+    let document = json(text)?.map_err(|e| not_json(e.to_string()))?;
+    let sources = match sources {
+        0 => None,
+        sources => Some(json(sources)?.map_err(|e| not_json(e.to_string()))?),
+    };
+    let sources = match sources {
+        // A derived `Deserialize` would take an array for its fields in order.
+        Some(sources @ Value::Object(_)) => {
+            serde_json::from_value::<Sources>(sources).map_err(|e| e.to_string())
+        }
+        Some(_) => Err("the sources must be an object".to_owned()),
+        None => Ok(Sources {
+            uri: None,
+            documents: None,
+        }),
+    }
+    .map_err(|message| invalid("sources", message))?;
+    let mut documents = Vec::new();
+    for (uri, buffer) in sources.documents.unwrap_or_default() {
+        let buffer = buffer.as_u64().ok_or_else(|| {
+            invalid(
+                "sources",
+                format!("document {uri} must be a buffer's handle"),
+            )
+        })?;
+        let document = json(buffer)?.map_err(|e| not_json(format!("document {uri}: {e}")))?;
+        documents.push((uri, document));
+    }
+    let loader = documents
+        .iter()
+        .fold(SchemaLoader::new(), |loader, (uri, document)| {
+            loader.document(uri, document)
+        });
+    let (schema, report) = loader
+        .load_at(sources.uri.as_deref().unwrap_or(""), &document)
+        .map_err(|e| invalid("schema", e))?;
+    handle_reply(SCHEMAS.insert(Loaded { schema, report }))
+}
+
+/// Replies with what the load of schema `schema` did not read (ADR 0025), as JSON text: an
+/// object whose `unresolved` lists the `$ref`s that were not followed, in the order the load
+/// met them, each with `place` (where it is written: its document's URI and a JSON Pointer),
+/// `reference` (its text), `uri` (what it resolves to) and `document`, the URI of the document
+/// that was not given, absent when the document is there without that place. `{}` when
+/// everything was read.
+pub fn schema_report(schema: u64) -> u64 {
+    reply(report_text(schema))
+}
+
+fn report_text(schema: u64) -> Result<Vec<u8>, Vec<u8>> {
+    let loaded = SCHEMAS
+        .get(schema)
+        .ok_or_else(|| unknown("schema", schema))?;
+    Ok(json_reply(
+        &serde_json::to_value(&loaded.report).unwrap_or_default(),
+    ))
 }
 
 /// Frees a schema: 1 when it was live, 0 for an unknown or freed handle. The services made
@@ -101,7 +185,7 @@ fn service_text(schema: u64, declarations: u64) -> Result<Vec<u8>, Vec<u8>> {
         })
         .transpose()
         .map_err(|message| invalid("service", message))?;
-    let mut service = LanguageService::new(schema.map(|schema| Schema::clone(&schema)));
+    let mut service = LanguageService::new(schema.map(|loaded| loaded.schema.clone()));
     let Some(declarations) = declarations else {
         return handle_reply(SERVICES.insert(service));
     };
@@ -119,7 +203,7 @@ fn service_text(schema: u64, declarations: u64) -> Result<Vec<u8>, Vec<u8>> {
                 let schema = SCHEMAS
                     .get(handle)
                     .ok_or_else(|| unknown("schema", handle))?;
-                service.with_variable_schema(name, (*schema).clone())
+                service.with_variable_schema(name, schema.schema.clone())
             }
         };
     }

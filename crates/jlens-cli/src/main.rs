@@ -207,22 +207,23 @@ pub fn service_for(
     schema: Option<&PathBuf>,
     config: Option<&PathBuf>,
 ) -> Result<LanguageService> {
-    let schema = schema.map(schema::load).transpose()?;
+    let schema = schema.map(|path| schema::load(path)).transpose()?;
     let cwd = std::env::current_dir().context("reading the current directory")?;
     let entries = entries(config, &cwd)?;
     let entry = file
         .and_then(|file| config::find(&entries, &absolute(&cwd, file)))
         .map(|(_, entry)| entry);
-    let (service, problems) = match (entry, schema) {
-        (Some(entry), Some(schema)) => entry.settings.declare(LanguageService::new(Some(schema))),
+    let made = match (entry, schema) {
+        (Some(entry), Some(schema)) => entry.declare(LanguageService::new(Some(schema))),
         (Some(entry), None) => entry.service(),
-        (None, schema) => (LanguageService::new(schema), Vec::new()),
+        (None, schema) => return Ok(LanguageService::new(schema)),
     };
-    if !problems.is_empty() {
+    if !made.problems.is_empty() {
         let name = config.map_or(Path::new(config::FILE_NAME), PathBuf::as_path);
-        anyhow::bail!("{}: {}", name.display(), problems.join("; "));
+        anyhow::bail!("{}: {}", name.display(), made.problems.join("; "));
     }
-    Ok(service)
+    schema::warn(&made.notes);
+    Ok(made.service)
 }
 
 fn check(args: CheckArgs) -> Result<ExitCode> {
@@ -238,7 +239,7 @@ fn check(args: CheckArgs) -> Result<ExitCode> {
             })
             .collect::<Result<Vec<_>>>()?,
     };
-    let schema = args.schema.as_ref().map(schema::load).transpose()?;
+    let schema = args.schema.as_deref().map(schema::load).transpose()?;
     let cwd = std::env::current_dir().context("reading the current directory")?;
     let entries = entries(args.config.as_ref(), &cwd)?;
     // The entry of each file (none for an inline expression), and one service per entry.
@@ -254,21 +255,25 @@ fn check(args: CheckArgs) -> Result<ExitCode> {
         if services.contains_key(&key) {
             continue;
         }
-        let (service, problems) = match (key, &schema) {
-            (Some(i), Some(schema)) => entries[i]
-                .settings
-                .declare(LanguageService::new(Some(schema.clone()))),
+        let made = match (key, &schema) {
+            (Some(i), Some(schema)) => {
+                entries[i].declare(LanguageService::new(Some(schema.clone())))
+            }
             (Some(i), None) => entries[i].service(),
-            (None, schema) => (LanguageService::new(schema.clone()), Vec::new()),
+            (None, schema) => {
+                services.insert(key, LanguageService::new(schema.clone()));
+                continue;
+            }
         };
-        if !problems.is_empty() {
+        if !made.problems.is_empty() {
             let name = args
                 .config
                 .as_deref()
                 .unwrap_or(Path::new(config::FILE_NAME));
-            anyhow::bail!("{}: {}", name.display(), problems.join("; "));
+            anyhow::bail!("{}: {}", name.display(), made.problems.join("; "));
         }
-        services.insert(key, service);
+        schema::warn(&made.notes);
+        services.insert(key, made.service);
     }
     let (mut errors, mut warnings) = (0, 0);
     let mut json = Vec::new();

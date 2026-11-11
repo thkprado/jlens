@@ -35,8 +35,8 @@
 //! `U2002` for an unknown or freed handle, `U2003` for an expression that is not UTF-8,
 //! `U2004` for a panic, `U2005` for an argument that is not in its form (its `token` says
 //! which: `options`, `read`, `reads`, `result`, `reader`, `functions`, `variables`, `values`,
-//! `function`, `reply`, `audit`, `schema`, `service` or `uses`), and `U1001` when a table
-//! of handles is full. An unknown handle is reported before anything wrong with what the other
+//! `function`, `reply`, `audit`, `schema`, `sources`, `service` or `uses`), and `U1001` when a
+//! table of handles is full. An unknown handle is reported before anything wrong with what the other
 //! handles hold. A reply handle of 0 means that no buffer could be made for the reply. A
 //! reader that fails, or writes a level not in its form, fails the evaluation with `U1004`.
 //!

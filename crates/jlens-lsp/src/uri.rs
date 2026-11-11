@@ -1,6 +1,54 @@
-//! File system paths of `file:` URIs.
+//! File system paths of `file:` URIs, and the URIs of paths.
 
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf, Prefix};
+
+/// The `file:` URI of an absolute path, as [`path_of`] reads it back: `None` for a relative
+/// path, one that is not Unicode, or a Windows path that is neither on a drive nor on a share.
+pub fn uri_of(path: &Path) -> Option<String> {
+    let mut uri = String::from("file://");
+    let mut rooted = false;
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => match prefix.kind() {
+                Prefix::Disk(drive) => {
+                    uri.push('/');
+                    uri.push(char::from(drive));
+                    uri.push(':');
+                }
+                Prefix::UNC(server, share) => {
+                    encode(server.to_str()?, &mut uri);
+                    uri.push('/');
+                    encode(share.to_str()?, &mut uri);
+                }
+                _ => return None,
+            },
+            Component::RootDir => rooted = true,
+            Component::Normal(name) => {
+                uri.push('/');
+                encode(name.to_str()?, &mut uri);
+            }
+            Component::CurDir | Component::ParentDir => return None,
+        }
+    }
+    if !rooted {
+        return None;
+    }
+    if uri == "file://" {
+        uri.push('/');
+    }
+    Some(uri)
+}
+
+/// Percent-encodes what is not an unreserved character of a URI.
+fn encode(text: &str, out: &mut String) {
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+}
 
 /// The path of a `file:` URI: `file:///home/a/b.jsonata`, `file:///c%3A/a/b.jsonata`, or a UNC
 /// path such as `file://server/share/b.jsonata` on Windows. Other URIs (`untitled:`) have none.
@@ -96,7 +144,21 @@ mod tests {
                 Some(std::path::Path::new(path)),
                 "{uri}"
             );
+            // The URI of a path reads back as the path, and resolves as the `url` crate's.
+            let own = uri_of(Path::new(path)).expect(path);
+            assert_eq!(path_of(&own).as_deref(), Some(Path::new(path)), "{own}");
+            assert_eq!(
+                url::Url::parse(&own)
+                    .unwrap()
+                    .to_file_path()
+                    .ok()
+                    .as_deref(),
+                Some(Path::new(path)),
+                "{own}"
+            );
         }
+        assert_eq!(uri_of(Path::new("rules/a.jsonata")), None);
+        assert_eq!(uri_of(Path::new("")), None);
     }
 
     #[cfg(windows)]

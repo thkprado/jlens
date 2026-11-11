@@ -20,7 +20,7 @@ use serde::Serialize;
 use serde_json::{Map, Value as JsonValue, json};
 
 use crate::shape::{Definitions, Field, JsonType, Schema, Shape};
-use crate::uri::{percent_decode, resolve, split_fragment};
+use crate::uri::{percent_decode, relative, resolve, split_fragment};
 
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 
@@ -190,6 +190,79 @@ impl<'d> SchemaLoader<'d> {
             definitions: importer.definitions,
         };
         Ok((schema, report))
+    }
+
+    /// Reads `document` as [`SchemaLoader::load_at`] does, asking `give` for each document a
+    /// `$ref` leads to that the loader was not given, and then for those that these refer to.
+    /// jlens still fetches nothing: `give` decides where a document is read from.
+    ///
+    /// `give` gets the document's URI and, when it differs from the URI of `document` (its
+    /// `$id`, or else `uri`) only in its path, the path from the folder of the one to the
+    /// other (`common.json`, `../shared/common.json`), which is where a file kept beside the
+    /// schema's is. It answers with the document, `None` for one it does not have, which the
+    /// report then names, or an error, which fails the load. Each URI is asked for once, and no
+    /// more than 256 of them.
+    ///
+    /// ```
+    /// use jlens_schema::SchemaLoader;
+    /// use serde_json::json;
+    ///
+    /// let order = json!({
+    ///     "$id": "https://example.com/schemas/order.json",
+    ///     "properties": {
+    ///         "customer": {"$ref": "common.json#/$defs/person"},
+    ///         "carrier": {"$ref": "https://example.org/carrier.json"}
+    ///     }
+    /// });
+    /// let mut asked = Vec::new();
+    /// let (schema, report) = SchemaLoader::new()
+    ///     .load_asking("", &order, |uri, relative| {
+    ///         asked.push((uri.to_owned(), relative.map(str::to_owned)));
+    ///         Ok((relative == Some("common.json"))
+    ///             .then(|| json!({"$defs": {"person": {"type": "object"}}})))
+    ///     })
+    ///     .unwrap();
+    /// assert_eq!(asked[0].1.as_deref(), Some("common.json"));
+    /// assert_eq!(asked[1], ("https://example.org/carrier.json".to_owned(), None));
+    /// assert_eq!(report.documents(), ["https://example.org/carrier.json"]);
+    /// assert!(schema.shape_at("customer").is_some());
+    /// ```
+    pub fn load_asking(
+        &self,
+        uri: &str,
+        document: &JsonValue,
+        mut give: impl FnMut(&str, Option<&str>) -> Result<Option<JsonValue>, String>,
+    ) -> Result<(Schema, LoadReport), String> {
+        /// The documents one load asks for, at most.
+        const ASKED: usize = 256;
+        let base = match document.get("$id").and_then(JsonValue::as_str) {
+            Some(id) => resolve(uri, split_fragment(id).0),
+            None => uri.to_owned(),
+        };
+        let mut given: Vec<(String, JsonValue)> = Vec::new();
+        let mut asked: Vec<String> = Vec::new();
+        loop {
+            let (schema, report) = {
+                let mut loader: SchemaLoader<'_> = self.clone();
+                for (uri, document) in &given {
+                    loader = loader.document(uri, document);
+                }
+                loader.load_at(uri, document)?
+            };
+            let before = given.len();
+            for missing in report.documents() {
+                if asked.len() == ASKED || asked.iter().any(|uri| uri == missing) {
+                    continue;
+                }
+                asked.push(missing.to_owned());
+                if let Some(document) = give(missing, relative(&base, missing).as_deref())? {
+                    given.push((missing.to_owned(), document));
+                }
+            }
+            if given.len() == before {
+                return Ok((schema, report));
+            }
+        }
     }
 }
 

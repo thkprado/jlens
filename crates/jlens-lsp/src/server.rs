@@ -298,15 +298,19 @@ impl Server<'_> {
             Source::Default
         });
         if !self.services.contains_key(&source) {
-            let (service, problems) = match source {
+            let made = match source {
                 Source::Init(i) => self.init[i].service(),
                 Source::Folder(f, i) => self.folders[f].1[i].service(),
-                Source::Default => (LanguageService::new(None), Vec::new()),
+                Source::Default => config::Made {
+                    service: LanguageService::new(None),
+                    problems: Vec::new(),
+                    notes: Vec::new(),
+                },
             };
-            for problem in problems {
+            for problem in made.problems.into_iter().chain(made.notes) {
                 self.warn(problem)?;
             }
-            self.services.insert(source, service);
+            self.services.insert(source, made.service);
         }
         Ok(&self.services[&source])
     }

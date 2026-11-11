@@ -81,7 +81,8 @@ final class Native {
             U64, U64, U64, ValueLayout.ADDRESS, U64, U64, U64, U32, U64);
     private static final MethodHandle EVALUATE_AUDITED =
             function("jlens_evaluate_audited", U64, U64, U64, U64, U64, U64);
-    private static final MethodHandle SCHEMA_NEW = function("jlens_schema_new", U64, U64);
+    private static final MethodHandle SCHEMA_NEW = function("jlens_schema_new", U64, U64, U64);
+    private static final MethodHandle SCHEMA_REPORT = function("jlens_schema_report", U64, U64);
     private static final MethodHandle SCHEMA_FREE = function("jlens_schema_free", U32, U64);
     private static final MethodHandle SERVICE_NEW = function("jlens_service_new", U64, U64, U64);
     private static final MethodHandle SERVICE_FREE = function("jlens_service_free", U32, U64);
@@ -342,10 +343,23 @@ final class Native {
         }
     }
 
-    /** Reads the JSON Schema text in buffer {@code text}: a reply with the schema's handle. */
-    static long schemaNew(long text) {
+    /**
+     * Reads the JSON Schema text in buffer {@code text}, with its URI and its other documents
+     * as buffer {@code sources} gives them (JSON text, 0 for none): a reply with the schema's
+     * handle.
+     */
+    static long schemaNew(long text, long sources) {
         try {
-            return (long) SCHEMA_NEW.invokeExact(text);
+            return (long) SCHEMA_NEW.invokeExact(text, sources);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /** What the load of schema {@code schema} did not read: a reply with JSON. */
+    static long schemaReport(long schema) {
+        try {
+            return (long) SCHEMA_REPORT.invokeExact(schema);
         } catch (Throwable e) {
             throw failed(e);
         }

@@ -42,8 +42,13 @@ A `jlens.json` at the root of a workspace folder says which schema, variables an
   schema.
 - **`schema`** is a JSON Schema of the input documents, relative to the folder of `jlens.json`.
   `jlens schema infer` creates one from sample documents; see the [schema guide](schema.md).
+  Its `$ref`s to other files are followed when the files are at the same relative paths from
+  the schema's; nothing is read from the network, and a `$ref` that is not followed is shown
+  as a message and leaves its place unchecked
+  ([A schema in several documents](schema.md#a-schema-in-several-documents)).
 - **`variables`** declares the variables the expressions are evaluated with, with a JSON Schema
-  of each value, or `null` when the shape is unknown. Names can start with `$`.
+  of each value, or `null` when the shape is unknown. Names can start with `$`. A `$ref` to a
+  file there is relative to the folder of `jlens.json`.
 - **`functions`** declares the host functions: `name`, and optionally `signature`, `params` and
   `summary`.
 

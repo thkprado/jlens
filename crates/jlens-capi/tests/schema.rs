@@ -52,7 +52,7 @@ fn error(reply: Reply) -> (String, Option<String>) {
 
 fn schema(document: &Value) -> u64 {
     handle(with_buffer(document.to_string().as_bytes(), |buffer| {
-        jlens_schema_new(buffer)
+        jlens_schema_new(buffer, 0)
     }))
 }
 
@@ -230,17 +230,17 @@ fn failures_use_the_codes_of_the_c_api() {
     // A schema.
     assert_eq!(
         code(with_buffer(b"{\"type\": ", |buffer| jlens_schema_new(
-            buffer
+            buffer, 0
         ))),
         "U2001"
     );
     assert_eq!(
         code(with_buffer(&[0xff, 0xfe], |buffer| jlens_schema_new(
-            buffer
+            buffer, 0
         ))),
         "U2001"
     );
-    let refused = with_buffer(b"[1]", |buffer| jlens_schema_new(buffer));
+    let refused = with_buffer(b"[1]", |buffer| jlens_schema_new(buffer, 0));
     assert_eq!(
         error(refused),
         ("U2005".to_owned(), Some("schema".to_owned()))
@@ -248,7 +248,7 @@ fn failures_use_the_codes_of_the_c_api() {
     // A `$ref` that leads nowhere leaves its place unknown: the schema loads.
     let unresolved = schema(&json!({"$ref": "https://example.com/other.json"}));
     assert_eq!(jlens_schema_free(unresolved), 1);
-    assert_eq!(error(reply(jlens_schema_new(0))).0, "U2002");
+    assert_eq!(error(reply(jlens_schema_new(0, 0))).0, "U2002");
     assert_eq!(jlens_schema_free(0), 0);
 
     // A service.
@@ -433,4 +433,132 @@ fn uses_and_changes_fail_with_the_codes_of_the_c_api() {
         error(reply(jlens_uses_changes(0, 0))),
         ("U2002".to_owned(), Some("buffer".to_owned()))
     );
+}
+
+/// A schema made with its own URI and other documents, each in a buffer that is freed after.
+fn schema_with(document: &Value, uri: Option<&str>, documents: &Value) -> Reply {
+    let mut buffers_of = serde_json::Map::new();
+    for (uri, document) in documents.as_object().unwrap() {
+        let buffer = buffers::insert(document.to_string().into_bytes());
+        buffers_of.insert(uri.clone(), json!(buffer));
+    }
+    let mut sources = json!({"documents": buffers_of});
+    if let Some(uri) = uri {
+        sources["uri"] = uri.into();
+    }
+    let text = buffers::insert(document.to_string().into_bytes());
+    let made = with_buffer(sources.to_string().as_bytes(), |sources| {
+        jlens_schema_new(text, sources)
+    });
+    assert_eq!(jlens_buffer_free(text), 1);
+    for buffer in buffers_of.values() {
+        assert_eq!(jlens_buffer_free(buffer.as_u64().unwrap()), 1);
+    }
+    made
+}
+
+/// The schema of two documents that every package loads (roadmap 0.33 #10).
+#[test]
+fn a_schema_takes_its_documents_and_reports_what_it_did_not_follow() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/uses/cases.json"
+    );
+    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let fixture = &fixture["references"];
+    let with = handle(schema_with(&fixture["schema"], None, &fixture["documents"]));
+    let alone = schema(&fixture["schema"]);
+    assert_eq!(json(reply(jlens_schema_report(with))), fixture["report"]);
+    assert_eq!(
+        json(reply(jlens_schema_report(alone))),
+        fixture["reportAlone"]
+    );
+    let service_with = handle(service(with, None));
+    let service_alone = handle(service(alone, None));
+    for case in fixture["cases"].as_array().unwrap() {
+        let text = case["expression"].as_str().unwrap();
+        let expression = compile(text);
+        let uses = json(reply(jlens_service_uses(service_with, expression)));
+        assert_eq!(uses, case["uses"], "{text}");
+        let before = json(reply(jlens_service_uses(service_alone, expression)));
+        assert_eq!(json(changes(&before, &uses)), case["changes"], "{text}");
+        assert_eq!(jlens_expression_free(expression), 1);
+    }
+    for service in [service_with, service_alone] {
+        assert_eq!(jlens_service_free(service), 1);
+    }
+
+    // A schema that reads everything reports nothing, and its own URI is where its `$ref`s
+    // start from.
+    let whole = schema(&order());
+    assert_eq!(json(reply(jlens_schema_report(whole))), json!({}));
+    let located = handle(schema_with(
+        &json!({"$ref": "common.json#/$defs/person"}),
+        Some("https://example.com/schemas/order.json"),
+        &fixture["documents"],
+    ));
+    let report = json(reply(jlens_schema_report(located)));
+    assert_eq!(
+        report["unresolved"][0]["place"],
+        "https://example.com/schemas/common.json#/$defs/person/properties/address"
+    );
+    assert_eq!(report["unresolved"].as_array().map(Vec::len), Some(1));
+    for schema in [with, alone, whole, located] {
+        assert_eq!(jlens_schema_free(schema), 1);
+    }
+    assert_eq!(
+        error(reply(jlens_schema_report(with))),
+        ("U2002".to_owned(), Some("schema".to_owned()))
+    );
+}
+
+#[test]
+fn sources_fail_with_the_codes_of_the_c_api() {
+    let text = buffers::insert(b"{}".to_vec());
+    let new = |sources: &[u8]| with_buffer(sources, |sources| jlens_schema_new(text, sources));
+    assert_eq!(error(new(b"{\"uri\": ")).0, "U2001");
+    let freed = buffers::insert(Vec::new());
+    assert_eq!(jlens_buffer_free(freed), 1);
+    let not_json = buffers::insert(b"{\"type\"".to_vec());
+    for sources in [
+        json!([]),
+        json!({"url": "a"}),
+        json!({"uri": 1}),
+        json!({"documents": []}),
+        json!({"documents": {"a.json": {"type": "string"}}}),
+        json!({"documents": {"a.json": "1"}}),
+        json!({"documents": {"a.json": -1}}),
+    ] {
+        assert_eq!(
+            error(new(sources.to_string().as_bytes())),
+            ("U2005".to_owned(), Some("sources".to_owned())),
+            "{sources}"
+        );
+    }
+    assert_eq!(
+        error(new(json!({"documents": {"a.json": freed}})
+            .to_string()
+            .as_bytes())),
+        ("U2002".to_owned(), Some("buffer".to_owned()))
+    );
+    assert_eq!(
+        error(new(json!({"documents": {"a.json": not_json}})
+            .to_string()
+            .as_bytes()))
+        .0,
+        "U2001"
+    );
+    assert_eq!(
+        error(reply(jlens_schema_new(text, freed))),
+        ("U2002".to_owned(), Some("buffer".to_owned()))
+    );
+    // Members that are null give nothing, and a document may be any JSON.
+    let nothing = handle(new(b"{\"uri\": null, \"documents\": null}"));
+    assert_eq!(jlens_schema_free(nothing), 1);
+    let any = handle(new(json!({"documents": {"a.json": text}})
+        .to_string()
+        .as_bytes()));
+    assert_eq!(jlens_schema_free(any), 1);
+    assert_eq!(jlens_buffer_free(not_json), 1);
+    assert_eq!(jlens_buffer_free(text), 1);
 }

@@ -711,10 +711,29 @@ proptest! {
         let buffer = |pick: usize| buffers[picks[pick] % buffers.len()];
         let mut schemas = Vec::new();
         for &text in &buffers {
-            if let Replied::Handle(schema) = reply(jlens_schema_new(text))? {
+            if let Replied::Handle(schema) = reply(jlens_schema_new(text, 0))? {
                 schemas.push(schema);
             }
+            // The same text with sources of any bytes, and with other texts as its documents,
+            // by handles of buffers and of any number.
+            if let Replied::Handle(schema) = reply(jlens_schema_new(text, buffer(0)))? {
+                schemas.push(schema);
+            }
+            let sources = format!(
+                "{{\"uri\": \"s/main.json\", \"documents\": {{\"s/other.json\": {}, \"b\": {}}}}}",
+                buffer(1),
+                if picks[2] % 2 == 0 { buffer(3) } else { picks[4] as u64 },
+            );
+            let sources = buffers::insert(sources.into_bytes());
+            if let Replied::Handle(schema) = reply(jlens_schema_new(text, sources))? {
+                schemas.push(schema);
+            }
+            prop_assert_eq!(jlens_buffer_free(sources), 1);
         }
+        for &schema in &schemas {
+            prop_assert_eq!(reply(jlens_schema_report(schema))?, Replied::Value);
+        }
+        reply(jlens_schema_report(buffer(5)))?;
         // Handles of other kinds, and of the right kind, in each place.
         let schema = schemas.first().copied().unwrap_or(buffer(0));
         let mut services = Vec::new();
@@ -736,6 +755,7 @@ proptest! {
             prop_assert_eq!(jlens_schema_free(schema), 1);
             prop_assert_eq!(jlens_schema_free(schema), 0);
             prop_assert_eq!(reply(jlens_service_new(schema, 0))?, unknown());
+            prop_assert_eq!(reply(jlens_schema_report(schema))?, unknown());
         }
         for &service in &services {
             for &text in &buffers {
@@ -760,7 +780,7 @@ proptest! {
             reply(jlens_uses_changes(service, service))?;
             reply(jlens_service_diagnostics(service, service))?;
             reply(jlens_service_diagnostics(buffer(4), buffer(5)))?;
-            reply(jlens_schema_new(service))?;
+            reply(jlens_schema_new(service, 0))?;
             prop_assert_eq!(jlens_service_free(service), 1);
             prop_assert_eq!(jlens_service_free(service), 0);
             prop_assert_eq!(reply(jlens_service_diagnostics(service, buffer(6)))?, unknown());

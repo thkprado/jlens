@@ -395,6 +395,29 @@ written against a schema checks them again when a new version of the schema arri
   keeps what it needs of its schemas, which can be closed as soon as it is built; a new version
   of a schema is a new `Schema` and a new `LanguageService`.
 
+### A schema in several documents
+
+A `$ref` may lead to another document. The package never fetches one: a `Schema.Loader` takes
+each document with its URI (the [schema guide](schema.md#a-schema-in-several-documents);
+[ADR 0025](../adr/0025-references-to-other-documents.md)):
+
+```java
+{{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:documents}}
+```
+
+- **`Schema.loader()`** takes `document(uri, text)` for each other document, as text or as
+  UTF-8 bytes, and `uri(uri)` for the URI of the schema itself, which its `$ref`s are resolved
+  against when it has no `$id`. `load(text)` reads the schema; a document that is not JSON
+  fails it with `U2001`.
+- **A `$ref` that is not followed does not fail the load.** Its place is unknown: nothing is
+  warned under it, and what an expression uses marks it `unknown()`, so that a load with the
+  document shows as a change.
+- **`schema.unresolved()`** lists those `$ref`s as `UnresolvedRef` records: `place()`, where
+  it is written; `reference()`, its text; `uri()`, what it resolves to; and `document()`, the
+  URI of the document to give, `null` when the document is there without that place.
+  `schema.missingDocuments()` lists the documents to give, each once. Both are read with the
+  schema, and are there after it is closed.
+
 ## What an expression uses of its schema
 
 Diagnostics tell whether a stored expression still passes with a new version of its schema.

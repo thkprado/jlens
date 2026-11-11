@@ -314,6 +314,34 @@ class GuideTest {
     }
 
     @Test
+    void documents() {
+        String orderSchema = """
+                {"$id": "https://example.com/schemas/order.json",
+                 "type": "object", "properties": {
+                    "customer": {"$ref": "common.json#/$defs/person"},
+                    "carrier": {"$ref": "carrier.json"}}}""";
+        String commonSchema = """
+                {"$defs": {"person": {"type": "object", "properties": {
+                    "name": {"type": "string"}}}}}""";
+        // ANCHOR: documents
+        try (Schema order = Schema.loader()
+                        .document("https://example.com/schemas/common.json", commonSchema)
+                        .load(orderSchema);
+                LanguageService service = LanguageService.of(order)) {
+            assertEquals("W0201", service.diagnostics("customer.nme").getFirst().code());
+
+            // carrier.json was not given: its place is unknown, and nothing is warned under it.
+            assertEquals(List.of(), service.diagnostics("carrier.anything"));
+            assertEquals(List.of("https://example.com/schemas/carrier.json"),
+                    order.missingDocuments());
+            UnresolvedRef carrier = order.unresolved().getFirst();
+            assertEquals("#/properties/carrier", carrier.place());
+            assertEquals("carrier.json", carrier.reference());
+        }
+        // ANCHOR_END: documents
+    }
+
+    @Test
     void uses() {
         String orderSchema = """
                 {"type": "object", "required": ["active"], "properties": {

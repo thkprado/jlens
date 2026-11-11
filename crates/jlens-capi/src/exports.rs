@@ -76,9 +76,13 @@ export! {
     /// reached: a reply with the result, its error, the audit tree and its explanation as values
     /// (the `audit` module), or the error of an argument.
     jlens_evaluate_audited(expression: u64, input: u64, bindings: u64, options: u64, audit: u64) -> u64 = crate::audit::evaluate_audited, crate::api::panicked;
-    /// Reads the JSON Schema text in buffer `text`: a reply with the schema's handle or the
-    /// error.
-    jlens_schema_new(text: u64) -> u64 = crate::schema::schema_new, crate::api::panicked;
+    /// Reads the JSON Schema text in buffer `text`, with its own URI and the other documents
+    /// its `$ref`s lead to as buffer `sources` gives them (JSON text, 0 for none), as the
+    /// `schema` module describes: a reply with the schema's handle or the error.
+    jlens_schema_new(text: u64, sources: u64) -> u64 = crate::schema::schema_new, crate::api::panicked;
+    /// What the load of schema `schema` did not read, the `$ref`s it did not follow: a reply
+    /// with a JSON object, `{}` when everything was read, or the error.
+    jlens_schema_report(schema: u64) -> u64 = crate::schema::schema_report, crate::api::panicked;
     /// Frees a schema: 1 when it was live, 0 for an unknown or freed handle.
     jlens_schema_free(schema: u64) -> u32 = crate::schema::schema_free, crate::zero;
     /// Makes a language service of schema `schema` (0 for none) and the declarations of

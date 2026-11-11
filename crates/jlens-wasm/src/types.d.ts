@@ -289,6 +289,47 @@ export interface ParseResult {
 /** A JSON Schema document (2020-12). */
 export type JsonSchema = boolean | { [keyword: string]: unknown };
 
+/**
+ * Where the `$ref`s of a schema lead. jlens never fetches a document: the application gives
+ * each one with its URI.
+ */
+export interface SchemaSources {
+  /**
+   * The URI of the schema itself, which its `$ref`s are resolved against where no `$id` says
+   * otherwise. Without one, a reference to another document is taken as written.
+   */
+  uri?: string | null;
+  /** The other documents, each by its URI. A document is also known by the `$id`s in it. */
+  documents?: Record<string, JsonSchema> | null;
+}
+
+/** What a load did not read of its JSON Schema, given by `schemaReport()`. */
+export interface LoadReport {
+  /**
+   * The `$ref`s that were not followed, in the order the load met them; absent when every one
+   * was. A `$ref` that nothing of the schema leads to is not read, and so not listed.
+   */
+  unresolved?: UnresolvedRef[];
+}
+
+/** A `$ref` that a load did not follow: its place in the schema is unknown. */
+export interface UnresolvedRef {
+  /**
+   * Where the `$ref` is written: the URI of its document, as it was given, and a JSON Pointer
+   * as its fragment (`#/properties/carrier` in a schema given with no URI).
+   */
+  place: string;
+  /** The `$ref` as written. */
+  reference: string;
+  /** The `$ref` resolved against its base: the place it names. */
+  uri: string;
+  /**
+   * The URI of the document that was not given, to give in `SchemaSources.documents`. Absent
+   * when the document is there and has no such place.
+   */
+  document?: string;
+}
+
 export type JsonType = "null" | "boolean" | "integer" | "number" | "string" | "array" | "object";
 
 /** Settings applied to the value at one path of an inferred schema. */
@@ -634,12 +675,15 @@ export class LanguageService {
    * `schema` describes the input documents; without it, functions and variables are still
    * completed. `variables` declares the bindings the expressions are evaluated with (names with
    * or without `$`), optionally with a schema for their values. `functions` declares the host
-   * functions they are evaluated with.
+   * functions they are evaluated with. `sources` gives the documents that the `$ref`s of the
+   * schemas lead to, those of the variables included, and the URI of `schema`; a `$ref` that
+   * is not followed leaves its place unknown, and `schemaReport()` lists those.
    */
   constructor(
     schema?: JsonSchema | null,
     variables?: Record<string, JsonSchema | null> | null,
     functions?: FunctionDeclaration[] | null,
+    sources?: SchemaSources | null,
   );
   /** Suggestions for the word at `offset`, and the range they replace. */
   complete(text: string, offset: number): Completions;
@@ -667,6 +711,14 @@ export class LanguageService {
  * result. Throws a `TypeError` when an item is not in the form `reads()` returns.
  */
 export function unionReads(reads: Reads[]): Reads;
+
+/**
+ * What a load of `schema` does not read, with the documents that `sources` gives: the `$ref`s
+ * it does not follow. A `LanguageService` made of the same schema and sources leaves their
+ * places unknown, so that nothing is warned under them. Throws a `TypeError` for a document
+ * that is not a schema, or sources not in their form.
+ */
+export function schemaReport(schema: JsonSchema, sources?: SchemaSources | null): LoadReport;
 
 /**
  * What changed between two answers of `LanguageService.uses()` for one expression: that of the

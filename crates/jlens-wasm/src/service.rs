@@ -2,7 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use jlens_schema::{FunctionDecl, Override, Schema};
+use jlens_schema::{FunctionDecl, LoadReport, Override, Schema, SchemaLoader};
+use serde::Deserialize;
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
@@ -82,8 +83,66 @@ pub fn functions() -> JsValue {
     ser_to_js(&jlens_core::function_catalog())
 }
 
-fn import_schema(doc: Value, what: &str) -> Result<Schema, JsValue> {
-    Schema::from_json_schema(&doc).map_err(|e| type_error(&format!("{what}: {e}")))
+/// Where the `$ref`s of a schema lead, as the application gives it: nothing is fetched.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Sources {
+    /// The URI of the schema itself, which its `$ref`s are resolved against where no `$id`
+    /// says otherwise.
+    #[serde(default)]
+    uri: Option<String>,
+    /// The other documents, by URI.
+    #[serde(default)]
+    documents: Option<serde_json::Map<String, Value>>,
+}
+
+impl Sources {
+    fn read(sources: Option<&JsValue>) -> Result<Sources, JsValue> {
+        let Some(sources) = sources else {
+            return Ok(Sources::default());
+        };
+        match from_js(sources, "sources")? {
+            None | Some(Value::Null) => Ok(Sources::default()),
+            // A derived `Deserialize` would take an array for its fields in order.
+            Some(sources @ Value::Object(_)) => serde_json::from_value(sources)
+                .map_err(|e| type_error(&format!("invalid sources: {e}"))),
+            Some(_) => Err(type_error("sources must be an object")),
+        }
+    }
+
+    /// Reads `doc` with these documents; `located` says whether it is the schema that `uri`
+    /// names, which a variable's schema is not.
+    fn load(
+        &self,
+        doc: &Value,
+        located: bool,
+        what: &str,
+    ) -> Result<(Schema, LoadReport), JsValue> {
+        let loader = self
+            .documents
+            .iter()
+            .flatten()
+            .fold(SchemaLoader::new(), |loader, (uri, document)| {
+                loader.document(uri, document)
+            });
+        let uri = self.uri.as_deref().filter(|_| located).unwrap_or("");
+        loader
+            .load_at(uri, doc)
+            .map_err(|e| type_error(&format!("{what}: {e}")))
+    }
+}
+
+/// What a load of `schema` does not read (the `$ref`s it does not follow), with the documents
+/// that `sources` gives: `{}` when it reads everything. A `LanguageService` made of the same
+/// schema and sources leaves the places of those `$ref`s unknown. Throws a `TypeError` for a
+/// document that is not a schema, or sources not in their form.
+#[wasm_bindgen(js_name = schemaReport, skip_typescript)]
+pub fn schema_report(schema: JsValue, sources: Option<JsValue>) -> Result<JsValue, JsValue> {
+    crate::convert::install_hooks();
+    let sources = Sources::read(sources.as_ref())?;
+    let doc = from_js(&schema, "schema")?.ok_or_else(|| type_error("schema has no JSON form"))?;
+    let (_, report) = sources.load(&doc, true, "schema")?;
+    Ok(ser_to_js(&report))
 }
 
 /// Completion, diagnostics, hover and signature help for expressions over documents described
@@ -98,17 +157,20 @@ impl LanguageService {
     /// Creates a service. `schema` describes the input documents (without it, functions and
     /// variables are still completed); `variables` declares the bindings the expressions are
     /// evaluated with, optionally with a schema for their values; `functions` declares the host
-    /// functions they are evaluated with.
+    /// functions they are evaluated with; `sources` gives the URI of `schema` and the other
+    /// documents that the `$ref`s of the schemas lead to.
     #[wasm_bindgen(constructor, skip_typescript)]
     pub fn new(
         schema: Option<JsValue>,
         variables: Option<JsValue>,
         functions: Option<JsValue>,
+        sources: Option<JsValue>,
     ) -> Result<LanguageService, JsValue> {
         crate::convert::install_hooks();
+        let sources = Sources::read(sources.as_ref())?;
         let schema = match &schema {
             Some(schema) if !schema.is_null() => match from_js(schema, "schema")? {
-                Some(doc) => Some(import_schema(doc, "schema")?),
+                Some(doc) => Some(sources.load(&doc, true, "schema")?.0),
                 None => None,
             },
             _ => None,
@@ -123,7 +185,8 @@ impl LanguageService {
                         inner = match doc {
                             Value::Null => inner.with_variable(name, None),
                             doc => {
-                                let schema = import_schema(doc, &format!("variable ${name}"))?;
+                                let what = format!("variable ${name}");
+                                let schema = sources.load(&doc, false, &what)?.0;
                                 inner.with_variable_schema(name, schema)
                             }
                         };
