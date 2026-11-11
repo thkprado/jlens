@@ -2,9 +2,9 @@
 //! the replies.
 
 use std::any::Any;
+use std::borrow::Cow;
 use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::{Arc, LazyLock, Weak};
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use jlens_core::input::{Sink, Source};
 use jlens_core::output::Output;
@@ -27,6 +27,9 @@ pub(crate) struct Compiled {
     pub(crate) source: String,
     pub(crate) reads: Reads,
     read: Read,
+    /// The fields it reads of its input with bindings that hold host functions, by their
+    /// [`Bound::functions_key`] ([`bound_read`]).
+    bound: [OnceLock<(Arc<str>, Read)>; BOUND_READS],
 }
 
 /// The live expressions. `Expression` is `Send` and `Sync`: one serves every thread.
@@ -70,6 +73,7 @@ fn compile_text(source: u64) -> Result<Vec<u8>, Vec<u8>> {
         source: text,
         reads,
         read,
+        bound: Default::default(),
     };
     handle_reply(EXPRESSIONS.insert(compiled))
 }
@@ -264,49 +268,36 @@ fn evaluate_text(
     )
 }
 
-/// The pairs of an expression and bindings a thread keeps the reads of: an evaluation uses one.
-const BOUND_READS: usize = 8;
-
-thread_local! {
-    /// What this thread's last evaluations of JSON text read of their input, by the objects of
-    /// the expression and of the bindings, which hold host functions: the analysis costs as
-    /// much as parsing a few kilobytes, so it runs once for a pair that is evaluated again.
-    /// Weak references keep their allocations, so a dead one never matches a live object.
-    #[allow(clippy::type_complexity)]
-    static BOUND: RefCell<Vec<(Weak<Compiled>, Weak<Bound>, Rc<Read>)>> =
-        const { RefCell::new(Vec::new()) };
-}
+/// The sets of host functions an expression keeps its reads for: an application has one, or
+/// a few.
+const BOUND_READS: usize = 4;
 
 /// What `compiled` reads of its input when evaluated with `bound`, as `Expression::reads_with`
 /// gives it: a call to a host function, which receives its arguments and nothing else, reads
 /// them alone, where `compiled.read`, worked out with no bindings, takes it as reading its
 /// context whole (roadmap 0.33 #12).
-fn bound_read(compiled: &Found<Compiled>, bound: &Found<Bound>) -> Rc<Read> {
-    BOUND.with_borrow_mut(|kept| {
-        if let Some((_, _, read)) = kept.iter().find(|(expression, bindings, _)| {
-            std::ptr::eq(expression.as_ptr(), Arc::as_ptr(compiled.arc()))
-                && std::ptr::eq(bindings.as_ptr(), Arc::as_ptr(bound.arc()))
-        }) {
-            return read.clone();
+///
+/// The analysis costs as much as parsing a few kilobytes, and depends on the bindings only by
+/// the names and signatures of their functions ([`Bound::functions_key`]): the expression
+/// keeps its answer for the first sets of functions it is evaluated with, which every thread
+/// then reads with no lock and nothing written. Past those, the analysis runs at each
+/// evaluation. The expressions first evaluated with the same bindings share their key.
+fn bound_read<'c>(compiled: &'c Compiled, bound: &Bound) -> Cow<'c, Read> {
+    let analyse = || {
+        compiled
+            .expression
+            .reads_with(&bound.bindings)
+            .input()
+            .cloned()
+            .unwrap_or_else(|| Read::Fields(Default::default()))
+    };
+    for kept in &compiled.bound {
+        let (key, read) = kept.get_or_init(|| (bound.functions_key.clone(), analyse()));
+        if Arc::ptr_eq(key, &bound.functions_key) || *key == bound.functions_key {
+            return Cow::Borrowed(read);
         }
-        let read = Rc::new(
-            compiled
-                .expression
-                .reads_with(&bound.bindings)
-                .input()
-                .cloned()
-                .unwrap_or_else(|| Read::Fields(Default::default())),
-        );
-        if kept.len() == BOUND_READS {
-            kept.remove(0);
-        }
-        kept.push((
-            Arc::downgrade(compiled.arc()),
-            Arc::downgrade(bound.arc()),
-            read.clone(),
-        ));
-        read
-    })
+    }
+    Cow::Owned(analyse())
 }
 
 /// Evaluates expression `expression` against document `document` with bindings `bindings` (0

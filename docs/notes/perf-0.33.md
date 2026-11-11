@@ -40,12 +40,27 @@ microseconds:
   bytes), with or without bindings: too much to run at each evaluation of a small input, where an
   evaluation takes 0.3 µs.
 
-So the C API cuts by the bindings, when they hold host functions, and keeps the answer: each
-thread remembers the reads of the last eight pairs of an expression and bindings it evaluated,
-found by the two objects' addresses, which a weak reference keeps from being given to another
-object. Bindings with no function, and no bindings, go by the reads of the compilation as
-before, with nothing looked up. An application that makes new bindings with functions for each
-evaluation pays the analysis at each one.
+So the C API cuts by the bindings, when they hold host functions, and keeps the answer in the
+compiled expression: the reads for the first four lists of host functions it is evaluated with.
+The analysis depends on the bindings only through the names and signatures of their host
+functions, so a list is known by those, written once when the bindings are made and shared with
+the expressions that keep it; bindings made again with the same functions find the reads kept.
+Bindings with no function, and no bindings, go by the reads of the compilation as before, with
+nothing looked up. An expression evaluated with a fifth list of functions pays the analysis at
+each evaluation with it, and the reads kept are released with the expression.
+
+The reads were first kept by thread, the last eight pairs of an expression and bindings found by
+the two objects' addresses. That lost its place with more expressions than eight on a thread,
+as a rules engine has, and with bindings made for each document. A program that evaluates rules
+of the form `$h(customer.tier)[0] = 'gold' and total > N` once each against a document of 83
+bytes, in microseconds an evaluation (the median of 41 documents, the second of two rounds):
+
+| Rules | Bindings | Kept by thread | Kept in the expression |
+|---:|---|---:|---:|
+| 4 | shared | 1.00 | 1.02 |
+| 200 | shared | 2.13 | 1.03 |
+| 200 | new for each document | 2.13 | 1.03 |
+| 4 | new for each document | 2.26 | 1.15 |
 
 The property test (`json_text_cut_for_host_functions_gives_what_the_whole_document_gives`)
 evaluates 22 expressions that call a host function against JSON text and against the document

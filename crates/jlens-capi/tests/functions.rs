@@ -293,6 +293,39 @@ fn json_text_is_cut_by_what_the_bindings_host_functions_read() {
     not_json(run("$add(price, 1)", variables_only));
     not_json(run("$add(price, 1)", 0));
     assert_eq!(run("price * $rate", variables_only), Reply::Json(json!(4)));
+
+    // An expression keeps its reads by the functions of the bindings, not by the bindings:
+    // others with the same functions find them, and others with other functions do not.
+    let source = buffer(b"$add(price, 1) + $count($args(items.n))");
+    let Reply::Handle(expression) = reply(jlens_compile(source)) else {
+        panic!("compiles")
+    };
+    assert_eq!(jlens_buffer_free(source), 1);
+    let with = |functions: &str| match make(Some(functions), None) {
+        Reply::Handle(handle) => handle,
+        other => panic!("{other:?}"),
+    };
+    let same = with(FUNCTIONS);
+    // Without `$args`, the last of the functions.
+    let fewer = with(&format!("{}]", FUNCTIONS.rsplit_once(',').unwrap().0));
+    // More sets of functions than an expression keeps reads for.
+    let others: Vec<u64> = (0..6)
+        .map(|n| {
+            let list = FUNCTIONS.trim_end().strip_suffix(']').unwrap();
+            with(&format!(r#"{list}, {{"name": "f{n}"}}]"#))
+        })
+        .collect();
+    let evaluate = |bindings: u64| reply(jlens_evaluate(expression, input, bindings, 0, 0, 0));
+    for _ in 0..2 {
+        not_json(evaluate(fewer));
+        for &known in others.iter().chain([&bindings, &same]) {
+            assert_eq!(evaluate(known), Reply::Json(json!(4)));
+        }
+    }
+    assert_eq!(jlens_expression_free(expression), 1);
+    for handle in others.into_iter().chain([same, fewer]) {
+        assert_eq!(jlens_bindings_free(handle), 1);
+    }
     for handle in [bindings, variables_only] {
         assert_eq!(jlens_bindings_free(handle), 1);
     }

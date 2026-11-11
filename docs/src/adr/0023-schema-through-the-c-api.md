@@ -267,9 +267,13 @@ change of the schema as a change for every rule.
   that calls a host function at its top, and the whole item for one that calls it in a step.
   Measured on an Apple M1, the 23 KB order of the benchmarks parses in 27 to 50 µs cut by the
   bindings, against 69 µs, and the analysis takes 1 to 8 µs, which an evaluation of 0.3 µs
-  cannot pay each time. So each thread keeps the reads of the last eight pairs of an
-  expression and bindings it evaluated; bindings without functions, and none, go by the reads
-  of the compilation, with nothing looked up
+  cannot pay each time. So a compiled expression keeps the reads for the first four lists of
+  host functions it is evaluated with, a list known by its functions' names and signatures,
+  which is all the analysis takes from the bindings: bindings made again with the same
+  functions find them, on any thread. Kept by thread for each pair of an expression and
+  bindings, as first written, 200 rules evaluated in turn paid the analysis each time, 2.13 µs
+  an evaluation against 1.03. Bindings without functions, and none, go by the reads of the
+  compilation, with nothing looked up
   ([notes](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.33.md#12-json-text-parsed-for-what-the-host-functions-read)).
   `Document.fromJson` still takes the reads the application gives it.
 - **The size.** The Windows library is 3,664,384 bytes, 17.2% over 0.32.0 (1,379,571

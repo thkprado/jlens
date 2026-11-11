@@ -29,6 +29,7 @@
 //! call fails with `U1005`.
 
 use std::cell::RefCell;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use jlens_core::{Bindings, Error, HostCall, HostFunction};
@@ -51,6 +52,10 @@ pub(crate) static BINDINGS: Table<Bound> = Table::new();
 pub(crate) struct Bound {
     pub(crate) bindings: Bindings,
     pub(crate) functions: bool,
+    /// The names and signatures of the host functions, in their order: all that what an
+    /// expression reads depends on in its bindings, so two bindings with the same key share an
+    /// expression's reads.
+    pub(crate) functions_key: Arc<str>,
 }
 
 /// A host function, as [`bindings_new`] reads it.
@@ -117,6 +122,15 @@ fn make(
         None => {}
     }
     let functions = !specs.is_empty();
+    // As JSON, so that no two lists of names and signatures give one text.
+    let functions_key: Arc<str> = serde_json::to_string(
+        &specs
+            .iter()
+            .map(|spec| (&spec.name, &spec.signature))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_default()
+    .into();
     if functions && function.is_none() {
         return Err(invalid("functions", "no function to run them".into()));
     }
@@ -138,6 +152,7 @@ fn make(
     handle_reply(BINDINGS.insert(Bound {
         bindings,
         functions,
+        functions_key,
     }))
 }
 
