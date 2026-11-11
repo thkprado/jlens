@@ -171,3 +171,7 @@ jlens-specific. Warnings are reported as diagnostics by `jlens check` and `parse
 | `W0204` | `Variable ${{{token}}} is not declared{{{hint}}}` |
 | `W0205` | `Argument {{{index}}} of ${{{token}}} is {{{type}}}, which does not match the signature {{{signature}}}` |
 | `W0206` | `The value {{{value}}} is not one of the allowed values{{{hint}}}` |
+| `W0207` | `The {{{side}}} side of {{{token}}} is {{{type}}}, which has no order` |
+| `W0208` | `The sides of {{{token}}} are {{{lhs}}} and {{{rhs}}}, which cannot be compared` |
+| `W0209` | `The {{{side}}} side of {{{token}}} is {{{type}}}, not a number` |
+| `W0210` | `The value {{{value}}} never equals {{{type}}}` |

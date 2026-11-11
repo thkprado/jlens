@@ -112,6 +112,14 @@ machinery as `$map(items, function($i){ $i.`.
   or an object. A literal with a predicate, `"a"[false]`, is not checked. The nearest string
   value, by the same Levenshtein distance, is suggested for a string. A shape with an open domain
   (`Shape::domain`, `x-jlens-domain`) never warns either.
+- Without a declared enumeration, a literal on the right whose JSON type the left-hand side never
+  has gets `W0210`, unless the left-hand side is a literal too. The operand events (`<`, `<=`,
+  `>`, `>=` and arithmetic) carry both sides' nodes and types. A side whose present types, an
+  array's replaced by its items, include none the operator takes gets `W0207` (no order) or
+  `W0209` (not a number), and two orderable sides with no type in common get `W0208`. A type that
+  is not fully known, or holds arrays of arrays, is not checked. The suite test runs these over
+  the official suite, which has one expected warning: a comparison guarded by `$type`, which
+  the typing does not read.
 - **Value requests**: where values are completed, the first shape of the left-hand side (or of
   its arrays' items) with a domain becomes a `ValueRequest` beside the items. Its path is found
   by identity in the schema's tree of shapes, iteratively; a variable's shape has none. Its

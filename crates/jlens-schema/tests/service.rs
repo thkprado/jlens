@@ -871,6 +871,166 @@ fn diagnostics_report_argument_types_the_signature_rejects() {
 }
 
 #[test]
+fn diagnostics_report_operands_the_operator_cannot_take() {
+    let schema = Schema::from_json_schema(&json!({
+        "type": "object",
+        "required": ["total"],
+        "properties": {
+            "total": {"type": "string"},
+            "amount": {"type": "number"},
+            "count": {"type": "integer"},
+            "active": {"type": "string"},
+            "flag": {"type": "boolean"},
+            "note": {"type": ["string", "null"]},
+            "code": {"type": ["string", "number"]},
+            "kind": {"enum": ["a", "b"]},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "scores": {"type": "array", "items": {"type": "number"}},
+            "grid": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+            "customer": {"type": "object", "properties": {"name": {"type": "string"}}},
+            "free": {}
+        }
+    }))
+    .unwrap();
+    let svc = LanguageService::new(Some(schema))
+        .with_variable("limit", Some(Schema::infer(&[json!(5)]).root));
+    let side = |code: &str, side: &str, op: &str, ty: &str| {
+        let tail = if code == "W0207" {
+            "which has no order"
+        } else {
+            "not a number"
+        };
+        (
+            code.to_owned(),
+            format!("The {side} side of {op} is {ty}, {tail}"),
+        )
+    };
+    let sides = |op: &str, lhs: &str, rhs: &str| {
+        (
+            "W0208".to_owned(),
+            format!("The sides of {op} are {lhs} and {rhs}, which cannot be compared"),
+        )
+    };
+    let never = |value: &str, ty: &str| {
+        (
+            "W0210".to_owned(),
+            format!("The value {value} never equals {ty}"),
+        )
+    };
+    let cases: Vec<(&str, Vec<(String, String)>)> = vec![
+        // Types the operator takes, and types that are not known.
+        (
+            "amount > 1000 and count <= $limit and total < 'm' and code > 1 and code < 'x'",
+            vec![],
+        ),
+        ("amount + count * 2 - $limit / 4 % 3 + $sum(scores)", vec![]),
+        (
+            "free > 1 and free + 1 = 2 and missing > 1 and $lookup($, 'x') + 1",
+            vec![(
+                "W0201".to_owned(),
+                "Field \"missing\" is not in the schema".to_owned(),
+            )],
+        ),
+        // An array of numbers may be one number, as a path yields it; arrays of arrays are left.
+        (
+            "scores > 1 and scores + 1 = 2 and grid > 1 and grid + 1 = 2",
+            vec![],
+        ),
+        // Order comparisons (`T2010`, `T2009` when evaluated).
+        ("total > 1000", vec![sides(">", "a string", "a number")]),
+        ("1000 <= total", vec![sides("<=", "a number", "a string")]),
+        (
+            "amount >= 'x' & ''",
+            vec![sides(">=", "a number", "a string")],
+        ),
+        ("flag < 1", vec![side("W0207", "left", "<", "a boolean")]),
+        (
+            "1 < customer",
+            vec![side("W0207", "right", "<", "an object")],
+        ),
+        (
+            "tags > 1",
+            vec![sides(">", "an array of strings", "a number")],
+        ),
+        (
+            "(amount > 1) > (flag = true)",
+            vec![
+                side("W0207", "left", ">", "a boolean"),
+                side("W0207", "right", ">", "a boolean"),
+            ],
+        ),
+        ("note > 'a'", vec![]),
+        ("note > 1", vec![sides(">", "null or a string", "a number")]),
+        // Arithmetic (`T2001`, `T2002`).
+        ("total + 1", vec![side("W0209", "left", "+", "a string")]),
+        (
+            "1 - (amount & '')",
+            vec![side("W0209", "right", "-", "a string")],
+        ),
+        (
+            "flag * customer",
+            vec![
+                side("W0209", "left", "*", "a boolean"),
+                side("W0209", "right", "*", "an object"),
+            ],
+        ),
+        (
+            "tags / 2",
+            vec![side("W0209", "left", "/", "an array of strings")],
+        ),
+        (
+            "note % 2",
+            vec![side("W0209", "left", "%", "null or a string")],
+        ),
+        ("code + 1", vec![]),
+        // A field compared with a literal of another type is always false.
+        ("active = true", vec![never("true", "a string")]),
+        ("amount != '1'", vec![never("'1'", "a number")]),
+        (
+            "count in [1, '2', null]",
+            vec![never("'2'", "a number"), never("null", "a number")],
+        ),
+        (
+            "note = null and note = 'x' and code = 1 and code = 'x'",
+            vec![],
+        ),
+        ("tags = 'a' and 'a' in tags and scores = 1", vec![]),
+        ("tags = 1", vec![never("1", "an array of strings")]),
+        // A declared enumeration has its own warning, `W0206`; two literals are left alone, as
+        // are values that are not literals.
+        (
+            "kind = 1",
+            vec![(
+                "W0206".to_owned(),
+                "The value 1 is not one of the allowed values".to_owned(),
+            )],
+        ),
+        ("'3' = 3 and 'a' in [1, 2]", vec![]),
+        (
+            "active = flag and amount = 1 + 1 and active = 'a'[false]",
+            vec![],
+        ),
+    ];
+    for (text, expected) in &cases {
+        let got: Vec<(String, String)> = svc
+            .diagnostics(text)
+            .into_iter()
+            .map(|d| (d.code, d.message))
+            .collect();
+        assert_eq!(&got, expected, "{text}");
+    }
+    // An operand's warning points at the operand, `W0208` at the comparison, `W0210` at the
+    // literal.
+    let span = |text: &str| {
+        let d = &svc.diagnostics(text)[0];
+        (d.span.start, d.span.end)
+    };
+    assert_eq!(span("1 + total"), (4, 9));
+    assert_eq!(span("total > 1000"), (0, 12));
+    assert_eq!(span("active = true"), (9, 13));
+}
+
+#[test]
 fn hover_and_signature_help() {
     let svc = service();
     let (text, offset) = cursor("items.t|ax");

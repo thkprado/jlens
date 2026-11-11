@@ -325,7 +325,22 @@ Completion works on incomplete expressions too, such as `$count(items[` or
   `const` of the JSON Schema, or an `enum` set in the overrides, counts: one inferred from samples
   (`x-jlens-enum-inferred`) is a guess, and is never warned about, and neither is a field with an
   [open domain](#open-domains). Values that are not literals, such as `type = color`, are not
-  checked.
+  checked;
+- warnings for the operands of an operator whose types it cannot take, so that the expression
+  fails whenever they are present, or a comparison is always false. With `total` a string,
+  `total > 1000` gets `W0208`: strings and numbers are not compared with each other (`T2009`
+  when it runs). A side of `<`, `<=`, `>` or `>=` that is a boolean, null, an object or an array
+  of them has no order, `W0207` (`T2010`), and a side of `+`, `-`, `*`, `/` or `%` that is not a
+  number gets `W0209` (`T2001`, `T2002`). With `active` a string, `active = true` gets `W0210`:
+  a field compared by `=`, `!=` or `in` with a literal of another type is never equal to it. A
+  field with a declared enumeration gets `W0206` there instead, and two literals compared are
+  left alone. As for `W0205`, only types that are known count, an absent field passes, and an
+  array stands for its items, which a path may yield one at a time: `scores > 1` passes when
+  `scores` is an array of numbers.
+
+The typing does not read the guards of an expression: in `$type(x) = 'number' and x > 10`, with
+`x` a string in the schema, `x > 10` is warned about, though the left side, always false, keeps it
+from running.
 
 Missing fields are reported only where the context is fully known. Nothing is reported after a
 user-defined function, an object constructor or `$lookup`, so the warnings do not produce false

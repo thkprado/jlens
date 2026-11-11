@@ -289,6 +289,17 @@ pub(crate) enum Event<'a, 's> {
         lhs: &'a Ty<'s>,
         rhs: &'a Node,
     },
+    /// An order comparison (`<`, `<=`, `>`, `>=`) or arithmetic (`+`, `-`, `*`, `/`, `%`),
+    /// reported after both sides are walked.
+    Operands {
+        /// The operation.
+        node: &'a Node,
+        op: BinaryOp,
+        /// The left-hand side and its type.
+        lhs: (&'a Node, &'a Ty<'s>),
+        /// The right-hand side and its type.
+        rhs: (&'a Node, &'a Ty<'s>),
+    },
 }
 
 /// Functions whose result has the type of their first argument.
@@ -400,14 +411,29 @@ impl<'s> Walker<'s, '_> {
             }
             NodeKind::Binary { op, lhs, rhs } => {
                 let left = self.walk(lhs, ctx, scope);
-                self.walk(rhs, ctx, scope);
-                if matches!(op, BinaryOp::Eq | BinaryOp::Ne | BinaryOp::In) {
-                    (self.visit)(Event::Compare {
+                let right = self.walk(rhs, ctx, scope);
+                match op {
+                    BinaryOp::Eq | BinaryOp::Ne | BinaryOp::In => (self.visit)(Event::Compare {
                         node,
                         op: *op,
                         lhs: &left,
                         rhs,
-                    });
+                    }),
+                    BinaryOp::Lt
+                    | BinaryOp::Le
+                    | BinaryOp::Gt
+                    | BinaryOp::Ge
+                    | BinaryOp::Add
+                    | BinaryOp::Sub
+                    | BinaryOp::Mul
+                    | BinaryOp::Div
+                    | BinaryOp::Mod => (self.visit)(Event::Operands {
+                        node,
+                        op: *op,
+                        lhs: (lhs, &left),
+                        rhs: (rhs, &right),
+                    }),
+                    _ => {}
                 }
                 match op {
                     BinaryOp::Add

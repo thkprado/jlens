@@ -611,21 +611,7 @@ fn value_diagnostics(
     rhs: &Node,
     out: &mut Vec<Diagnostic>,
 ) {
-    // A literal with a predicate or a group, `"a"[false]`, is not that value, nor is an array
-    // with one, `["a", "b"][0]`, those items.
-    let plain = |node: &Node| {
-        let attrs = &node.attrs;
-        attrs.stages.is_empty() && attrs.predicate.is_empty() && attrs.group.is_none()
-    };
-    let literals: Vec<&Node> = match &rhs.kind {
-        NodeKind::Array { items } if op == BinaryOp::In && plain(rhs) => items.iter().collect(),
-        NodeKind::Array { .. } => Vec::new(),
-        _ => vec![rhs],
-    };
-    for node in literals {
-        if !plain(node) {
-            continue;
-        }
+    for node in compared_literals(op, rhs) {
         let Some(value) = literal_value(node) else {
             continue;
         };
@@ -651,6 +637,134 @@ fn value_diagnostics(
             &[("value", source), ("hint", &hint)],
         ));
     }
+}
+
+/// The types a present value of `ty` may have, as signature symbols: those of the value, an
+/// array replaced by its items, as a path yields them and a single item stands alone. `None`
+/// when the type is not fully known, or holds arrays of arrays, which a path flattens.
+fn present_types(ty: &Ty<'_>) -> Option<(Symbols, String)> {
+    let symbols = ty.symbols()?;
+    if symbols.items.contains('a') {
+        return None;
+    }
+    let values = symbols.values.chars().filter(|c| *c != 'a');
+    let set: String = values.chain(symbols.items.chars()).collect();
+    Some((symbols, set))
+}
+
+/// `W0207`, `W0208` and `W0209` for the operands of an order comparison or of arithmetic whose
+/// known types the operator never takes, as `T2010`, `T2009`, `T2001` and `T2002` would fail when
+/// it runs. An operand that may be undefined passes: the operator takes undefined.
+fn operand_diagnostics(
+    node: &Node,
+    op: BinaryOp,
+    lhs: (&Node, &Ty<'_>),
+    rhs: (&Node, &Ty<'_>),
+    out: &mut Vec<Diagnostic>,
+) {
+    let left = present_types(lhs.1);
+    let right = present_types(rhs.1);
+    let order = matches!(
+        op,
+        BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge
+    );
+    // The types each side must have.
+    let takes = |c: char| {
+        if order {
+            c == 's' || c == 'n'
+        } else {
+            c == 'n'
+        }
+    };
+    let code = if order { "W0207" } else { "W0209" };
+    let mut wrong = false;
+    for (side, (node, _), types) in [("left", lhs, &left), ("right", rhs, &right)] {
+        if let Some((symbols, set)) = types
+            && !set.chars().any(takes)
+        {
+            wrong = true;
+            out.push(Diagnostic::new(
+                Severity::Warning,
+                code,
+                node.span,
+                &[
+                    ("side", side),
+                    ("token", op.symbol()),
+                    ("type", &describe(symbols)),
+                ],
+            ));
+        }
+    }
+    // Strings and numbers are not compared with each other.
+    if order
+        && !wrong
+        && let (Some((l, left)), Some((r, right))) = (&left, &right)
+        && !left.chars().any(|c| takes(c) && right.contains(c))
+    {
+        out.push(Diagnostic::new(
+            Severity::Warning,
+            "W0208",
+            node.span,
+            &[
+                ("token", op.symbol()),
+                ("lhs", &describe(l)),
+                ("rhs", &describe(r)),
+            ],
+        ));
+    }
+}
+
+/// `W0210` for each literal on the right of `op` (`=`, `!=` or `in`) whose type a present value
+/// of `lhs` never has, so that it never equals it: the right-hand side itself, or the items of
+/// the array on the right of `in`.
+fn equality_diagnostics(
+    text: &str,
+    op: BinaryOp,
+    lhs: &Ty<'_>,
+    rhs: &Node,
+    out: &mut Vec<Diagnostic>,
+) {
+    let Some((symbols, set)) = present_types(lhs) else {
+        return;
+    };
+    for node in compared_literals(op, rhs) {
+        let Some(value) = literal_value(node) else {
+            continue;
+        };
+        let symbol = match value {
+            JsonValue::Null => 'l',
+            JsonValue::Bool(_) => 'b',
+            JsonValue::Number(_) => 'n',
+            JsonValue::String(_) => 's',
+            _ => continue,
+        };
+        if set.contains(symbol) {
+            continue;
+        }
+        let source = text.get(node.span.start..node.span.end).unwrap_or_default();
+        out.push(Diagnostic::new(
+            Severity::Warning,
+            "W0210",
+            node.span,
+            &[("value", source), ("type", &describe(&symbols))],
+        ));
+    }
+}
+
+/// The literals on the right of `op` that a comparison checks: the right-hand side itself, or
+/// the items of the array on the right of `in`. A literal with a predicate or a group,
+/// `"a"[false]`, is not that value, nor is an array with one, `["a", "b"][0]`, those items.
+fn compared_literals(op: BinaryOp, rhs: &Node) -> Vec<&Node> {
+    let plain = |node: &Node| {
+        let attrs = &node.attrs;
+        attrs.stages.is_empty() && attrs.predicate.is_empty() && attrs.group.is_none()
+    };
+    let literals: Vec<&Node> = match &rhs.kind {
+        NodeKind::Array { items } if op == BinaryOp::In && plain(rhs) => items.iter().collect(),
+        NodeKind::Array { .. } => Vec::new(),
+        _ => vec![rhs],
+    };
+    literals.into_iter().filter(|n| plain(n)).collect()
 }
 
 /// `value` as a JSONata literal: a string in `quote` (`'` or `"`) when it can be (JSONata has no
@@ -1191,10 +1305,18 @@ impl LanguageService {
             }),
             Event::Variable { node, name, .. } => variables.push((node.span, name.to_owned())),
             Event::Bind { name } => bound.push(name.to_owned()),
-            Event::Compare { op, lhs, rhs, .. } => {
-                if let Some(values) = declared_values(lhs) {
-                    value_diagnostics(text, op, &values, rhs, &mut out);
+            Event::Compare { node, op, lhs, rhs } => match declared_values(lhs) {
+                Some(values) => value_diagnostics(text, op, &values, rhs, &mut out),
+                // Two literals compared are left alone: the reader sees both.
+                None if !matches!(&node.kind, NodeKind::Binary { lhs, .. }
+                    if literal_value(lhs).is_some()) =>
+                {
+                    equality_diagnostics(text, op, lhs, rhs, &mut out);
                 }
+                None => {}
+            },
+            Event::Operands { node, op, lhs, rhs } => {
+                operand_diagnostics(node, op, lhs, rhs, &mut out);
             }
             Event::Field { .. } => {}
         };
@@ -1367,7 +1489,10 @@ impl LanguageService {
                 };
                 consider(node.span, contents);
             }
-            Event::Call { .. } | Event::Bind { .. } | Event::Compare { .. } => {}
+            Event::Call { .. }
+            | Event::Bind { .. }
+            | Event::Compare { .. }
+            | Event::Operands { .. } => {}
         };
         self.walk(&ast.root, &mut visit);
         best.map(|(range, contents)| Hover { range, contents })

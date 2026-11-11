@@ -1,6 +1,6 @@
 //! No false positives: the expressions of the official suite that evaluate without error get
-//! no warning about functions or variables, with a schema inferred from their input and their
-//! bindings declared.
+//! no warning about functions, variables or the types of operands, with a schema inferred from
+//! their input and their bindings declared.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -21,6 +21,19 @@ fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
 fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
+
+/// The warnings checked.
+const CODES: &[&str] = &[
+    "W0202", "W0203", "W0204", "W0205", "W0207", "W0208", "W0209", "W0210",
+];
+
+/// Warnings that are right although the expression evaluates without error.
+const EXPECTED: &[(&str, &str)] = &[
+    // `data` is a string: the comparison fails with `T2009` when it runs, and only the left side
+    // of `and`, false for that document, keeps it from running ("will not evaluate rhs (which
+    // would error)", says the case).
+    ("$type(data) = 'number' and data > 10", "W0208"),
+];
 
 #[test]
 fn suite_expressions_get_no_function_or_variable_warnings() {
@@ -67,7 +80,9 @@ fn suite_expressions_get_no_function_or_variable_warnings() {
                 }
                 checked += 1;
                 for d in service.diagnostics(&expr) {
-                    if ["W0202", "W0203", "W0204", "W0205"].contains(&d.code.as_str()) {
+                    if CODES.contains(&d.code.as_str())
+                        && !EXPECTED.contains(&(expr.as_str(), d.code.as_str()))
+                    {
                         failures.push(format!("{}#{i}: {expr}\n  {}", file.display(), d.message));
                     }
                 }
