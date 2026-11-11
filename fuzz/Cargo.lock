@@ -136,7 +136,7 @@ checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 
 [[package]]
 name = "jlens-core"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "foldhash",
  "hashbrown",
@@ -164,14 +164,14 @@ dependencies = [
 
 [[package]]
 name = "jlens-regress"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "memchr",
 ]
 
 [[package]]
 name = "jlens-schema"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "indexmap",
  "jlens-core",
