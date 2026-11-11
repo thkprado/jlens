@@ -11,7 +11,7 @@ All notable changes are recorded here. The format follows
 - The diagnostics check the operands of operators, where their types are known: `total > 1000`
   with `total` a string gets `W0208` (`T2009` when it runs), a side of an order comparison with
   no order `W0207` (`T2010`), a side of arithmetic that is not a number `W0209` (`T2001`,
-  `T2002`), and `active = true` with `active` a string `W0210`, as it is always false. An absent
+  `T2002`) or of a negation `W0211` (`D1002`), and `active = true` with `active` a string `W0210`, as it is always false. An absent
   field passes, as for `W0205`.
 
 ### Fixed

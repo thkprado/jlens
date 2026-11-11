@@ -24,7 +24,7 @@ fn read_json(path: &Path) -> Option<Value> {
 
 /// The warnings checked.
 const CODES: &[&str] = &[
-    "W0202", "W0203", "W0204", "W0205", "W0207", "W0208", "W0209", "W0210",
+    "W0202", "W0203", "W0204", "W0205", "W0207", "W0208", "W0209", "W0210", "W0211",
 ];
 
 /// Warnings that are right although the expression evaluates without error.

@@ -1318,6 +1318,18 @@ impl LanguageService {
             Event::Operands { node, op, lhs, rhs } => {
                 operand_diagnostics(node, op, lhs, rhs, &mut out);
             }
+            Event::Negate { operand, ty } => {
+                if let Some((symbols, set)) = present_types(ty)
+                    && !set.contains('n')
+                {
+                    out.push(Diagnostic::new(
+                        Severity::Warning,
+                        "W0211",
+                        operand.span,
+                        &[("type", &describe(&symbols))],
+                    ));
+                }
+            }
             Event::Field { .. } => {}
         };
         self.walk(&ast.root, &mut visit);
@@ -1492,7 +1504,8 @@ impl LanguageService {
             Event::Call { .. }
             | Event::Bind { .. }
             | Event::Compare { .. }
-            | Event::Operands { .. } => {}
+            | Event::Operands { .. }
+            | Event::Negate { .. } => {}
         };
         self.walk(&ast.root, &mut visit);
         best.map(|(range, contents)| Hover { range, contents })

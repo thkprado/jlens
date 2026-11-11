@@ -983,6 +983,28 @@ fn diagnostics_report_operands_the_operator_cannot_take() {
             vec![side("W0209", "left", "%", "null or a string")],
         ),
         ("code + 1", vec![]),
+        // Negation (`D1002`).
+        ("-amount + -scores + -code + -free + -$limit", vec![]),
+        (
+            "-total",
+            vec![(
+                "W0211".to_owned(),
+                "The operand of - is a string, not a number".to_owned(),
+            )],
+        ),
+        (
+            "-(flag) + -tags",
+            vec![
+                (
+                    "W0211".to_owned(),
+                    "The operand of - is a boolean, not a number".to_owned(),
+                ),
+                (
+                    "W0211".to_owned(),
+                    "The operand of - is an array of strings, not a number".to_owned(),
+                ),
+            ],
+        ),
         // A field compared with a literal of another type is always false.
         ("active = true", vec![never("true", "a string")]),
         ("amount != '1'", vec![never("'1'", "a number")]),
@@ -1026,6 +1048,7 @@ fn diagnostics_report_operands_the_operator_cannot_take() {
         (d.span.start, d.span.end)
     };
     assert_eq!(span("1 + total"), (4, 9));
+    assert_eq!(span("1 + -total"), (5, 10));
     assert_eq!(span("total > 1000"), (0, 12));
     assert_eq!(span("active = true"), (9, 13));
 }

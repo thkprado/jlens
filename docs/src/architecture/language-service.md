@@ -116,7 +116,7 @@ machinery as `$map(items, function($i){ $i.`.
   has gets `W0210`, unless the left-hand side is a literal too. The operand events (`<`, `<=`,
   `>`, `>=` and arithmetic) carry both sides' nodes and types. A side whose present types, an
   array's replaced by its items, include none the operator takes gets `W0207` (no order) or
-  `W0209` (not a number), and two orderable sides with no type in common get `W0208`. A type that
+  `W0209` (not a number), the operand of a negation `W0211`, and two orderable sides with no type in common get `W0208`. A type that
   is not fully known, or holds arrays of arrays, is not checked. The suite test runs these over
   the official suite, which has one expected warning: a comparison guarded by `$type`, which
   the typing does not read.

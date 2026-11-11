@@ -175,3 +175,4 @@ jlens-specific. Warnings are reported as diagnostics by `jlens check` and `parse
 | `W0208` | `The sides of {{{token}}} are {{{lhs}}} and {{{rhs}}}, which cannot be compared` |
 | `W0209` | `The {{{side}}} side of {{{token}}} is {{{type}}}, not a number` |
 | `W0210` | `The value {{{value}}} never equals {{{type}}}` |
+| `W0211` | `The operand of - is {{{type}}}, not a number` |

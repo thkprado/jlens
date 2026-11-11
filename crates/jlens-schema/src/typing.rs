@@ -300,6 +300,13 @@ pub(crate) enum Event<'a, 's> {
         /// The right-hand side and its type.
         rhs: (&'a Node, &'a Ty<'s>),
     },
+    /// A negation, `-x`, reported after its operand is walked.
+    Negate {
+        /// The operand.
+        operand: &'a Node,
+        /// The operand's type.
+        ty: &'a Ty<'s>,
+    },
 }
 
 /// Functions whose result has the type of their first argument.
@@ -447,7 +454,11 @@ impl<'s> Walker<'s, '_> {
                 }
             }
             NodeKind::Negate { expr } => {
-                self.walk(expr, ctx, scope);
+                let ty = self.walk(expr, ctx, scope);
+                (self.visit)(Event::Negate {
+                    operand: expr,
+                    ty: &ty,
+                });
                 Ty::literal(JsonType::Number)
             }
             NodeKind::Array { items } => {

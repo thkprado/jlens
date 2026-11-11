@@ -208,7 +208,7 @@ signature does not accept (`W0203`) or an argument whose type it does not accept
 in `$length(1234)`). With `--schema`, it also reports field names that the schema does not have
 (see the [schema guide](schema.md)), values outside a field's declared `enum` or `const`
 (`W0206`), and checks the types of fields passed to functions and of the operands of
-operators (`W0207`–`W0210`, as in `total > 1000` with `total` a string). Each
+operators (`W0207`–`W0211`, as in `total > 1000` with `total` a string). Each
 problem is shown in context:
 
 ```text
