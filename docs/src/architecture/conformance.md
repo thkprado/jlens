@@ -77,7 +77,7 @@ random inputs rarely reach. The targets live in `fuzz/`, a crate outside the wor
 | `evaluate` | An expression, optionally followed by a NUL byte and a JSON input document | Compiling, then evaluating with and without input, against a `Document` and audited, never panics |
 | `regex` | A byte of flags, then a pattern and a text separated by a NUL byte | Compiling the pattern with `jlens-regress` and finding every match never panic; groups lie on character boundaries of the text |
 | `pictures` | A picture, optionally followed by a NUL byte and a second string | `$formatNumber`, `$formatInteger`, `$parseInteger`, `$fromMillis` and `$toMillis` never panic on the picture, the text they parse or the time zone |
-| `language_service` | Two bytes of offset, then a text | Diagnostics, completion, hover and signature help never panic, at any offset; their ranges lie inside the text |
+| `language_service` | Two bytes of offset, then a text | Diagnostics, completion, hover and signature help never panic, at any offset, against an inferred schema and a recursive one with a `$ref` left unresolved; their ranges lie inside the text. What a text that compiles uses of each schema reads back from its JSON form, and has no change against itself |
 
 Evaluations run with a timeout, a depth limit, size caps, and a fixed clock and seed. Each
 target runs on a thread with a 1 MB stack, the size of the main thread's stack on Windows, so

@@ -259,3 +259,23 @@ change of the schema as a change for every rule.
   that field, and `$other(items[0].price)`, a function that is not declared, which uses the
   whole input. The WebAssembly package answers them with `reads(bindings)`, the bindings
   holding the declared functions.
+
+## Results: JSON text cut by the bindings, and the size as released (0.33 #12)
+
+- **An evaluation of JSON text with host functions cuts its input by the bindings.** #11 left
+  it cutting by the reads of the compilation, which keep the whole input for an expression
+  that calls a host function at its top, and the whole item for one that calls it in a step.
+  Measured on an Apple M1, the 23 KB order of the benchmarks parses in 27 to 50 µs cut by the
+  bindings, against 69 µs, and the analysis takes 1 to 8 µs, which an evaluation of 0.3 µs
+  cannot pay each time. So each thread keeps the reads of the last eight pairs of an
+  expression and bindings it evaluated; bindings without functions, and none, go by the reads
+  of the compilation, with nothing looked up
+  ([notes](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.33.md#12-json-text-parsed-for-what-the-host-functions-read)).
+  `Document.fromJson` still takes the reads the application gives it.
+- **The size.** The Windows library is 3,664,384 bytes, 17.2% over 0.32.0 (1,379,571
+  compressed, 18.1%), three times the estimate of decision 1, which counted the schema reader
+  and the typing alone. The two exports of #7 are 206 KB of it: what an expression uses 96 KB,
+  the comparison of two answers 55 KB, and their JSON forms, read and written, 54 KB. The forms
+  are a quarter of the exports' size and stay; the comparison, large for what it does, is
+  looked at with 0.34's measure. The JAR of seven targets is measured from the release's
+  workflow.

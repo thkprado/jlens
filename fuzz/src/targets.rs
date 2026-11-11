@@ -3,7 +3,7 @@
 
 use jlens_core::audit::AuditOptions;
 use jlens_core::{Bindings, Document, Expression};
-use jlens_schema::{FunctionDecl, LanguageService, Schema};
+use jlens_schema::{FunctionDecl, LanguageService, Schema, Uses};
 use serde_json::json;
 
 use crate::{bindings, default_input, on_small_stack, options, record};
@@ -226,5 +226,52 @@ pub fn language_service(data: &[u8]) {
             );
         }
         let _ = service.signature_help(text, offset);
+
+        // A schema that refers to itself and to a document it was not given (roadmap 0.33 #8
+        // and #9): the typing follows it as deep as the text goes, and never further.
+        let recursive = LanguageService::new(Some(
+            Schema::from_json_schema(&json!({
+                "$ref": "#/$defs/node",
+                "$defs": {"node": {
+                    "type": "object",
+                    "required": ["name"],
+                    "properties": {
+                        "name": {"type": "string"},
+                        "kind": {"enum": ["file", "folder"]},
+                        "items": {"type": "array", "items": {"$ref": "#/$defs/node"}},
+                        "parent": {"$ref": "#"},
+                        "owner": {"$ref": "people.json#/$defs/person"}
+                    }
+                }}
+            }))
+            .expect("a schema"),
+        ))
+        .with_function(FunctionDecl::new("echo", "Returns its arguments.").signature("<x-x?:o>"));
+        for d in recursive.diagnostics(text) {
+            assert!(
+                d.span.start <= d.span.end && d.span.end <= text.len(),
+                "{d:?}"
+            );
+        }
+        let _ = recursive.complete(text, offset);
+        let _ = recursive.hover(text, offset);
+
+        // What the expression uses of each schema reads back from its JSON form, and compared
+        // with itself has no change (roadmap 0.33 #5 and #6).
+        let Ok(expression) = Expression::compile(text) else {
+            return;
+        };
+        let answers = [&service, &recursive].map(|service| {
+            let uses = service.uses_of(&expression);
+            let json = serde_json::to_value(&uses).expect("JSON");
+            // A path that holds a backquote does not read back: such an answer is refused.
+            if let Ok(read) = Uses::from_json(&json) {
+                assert_eq!(read, uses, "{json}");
+            }
+            assert!(uses.changes(&uses).is_empty(), "{json}");
+            uses
+        });
+        let changes = answers[0].changes(&answers[1]);
+        let _ = serde_json::to_value(&changes).expect("JSON");
     });
 }
