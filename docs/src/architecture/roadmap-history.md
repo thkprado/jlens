@@ -346,3 +346,32 @@ measured on the Apple M1 alone, and x86_64 keeps a comparison with the release b
 release's notes. How it was measured is in
 [`docs/notes/perf-0.32.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.32.md).
 ([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0320))
+
+## 0.33
+
+*Expressions checked again when their schema changes.* An application that keeps expressions
+written against a schema another system sends it has two questions when a new version arrives:
+does each expression still pass the diagnostics, and did anything it uses change, even if it
+does? 0.33 answers both where the schema is read. The Java package gained `Schema` and
+`LanguageService` over the C API ([ADR 0023](../adr/0023-schema-through-the-c-api.md)): a schema
+and a service are objects by handle, shared by every thread, and the diagnostics cross as JSON
+text; completion, hover and signature help stay out of it. `LanguageService::uses` lists each
+path an expression reads with what the schema says there, following the analysis of the reads
+and not the typing, and `Uses::changes` compares two such answers: the paths added, removed and
+changed, `{}` when nothing the expression uses changed. The Rust crate, the WebAssembly
+package, the Java package and the CLI (`jlens schema uses`, `jlens schema changes`) give the
+same JSON, pinned by shared cases, and a host function declared to the service counts as reading
+its arguments alone. Two kinds of schema that jlens refused whole now load: a recursive one,
+whose `$ref` is kept as a reference by name to a definition
+([ADR 0024](../adr/0024-recursive-schemas.md)), and one whose `$ref` leads to another document,
+which the application gives by URI, as jlens never fetches
+([ADR 0025](../adr/0025-references-to-other-documents.md)); a `$ref` that cannot be followed
+leaves its place unknown, and the load reports it at every end. On the way, the diagnostics
+were found quadratic in the fields of an object, and the load exponential in definitions that
+each refer twice to the next: both are bounded now. In the C API and the Java package, JSON
+text evaluated with host functions is cut by what the bindings read. The library of the C API
+grew by 17.2% on Windows, three times the estimate, of which the comparison of two answers is
+looked at in 0.34. `jlens-core` did not change, and no case of the tables moved past 3.5%. How
+it was measured is in
+[`docs/notes/perf-0.33.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.33.md).
+([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0330))

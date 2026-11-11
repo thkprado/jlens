@@ -6,6 +6,19 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.33.0]
+
+Expressions checked again when their schema changes. The Java package reads a JSON Schema and
+gives an expression's diagnostics, through the C API. Every package that reads a schema tells
+what an expression uses of it, each field with its types, its enumeration and whether it is
+required, and compares two such answers, so that an application that keeps expressions learns
+which ones a new version of the schema changes, even when they still pass the diagnostics. A
+recursive schema loads, and so does one whose `$ref` leads to another document, which the
+application gives: jlens never fetches one. The evaluation did not change, and the tables of the
+[performance page](docs/src/architecture/performance.md) moved by no more than 3.5%. The
+breaking changes are in `jlens-schema` (`Shape::references`, `Schema::definitions`) and
+`jlens-lsp` (`config::Made`), under Changed.
+
 ### Added
 
 - The Java package checks expressions against a schema
@@ -54,7 +67,6 @@ All notable changes are recorded here. The format follows
   functions parse the fields that `reads(bindings)` names, where they parsed the whole input
   whenever the expression called one at its top. Parsing a 23 KB order for
   `$tax(customer.name)` takes 27 µs where it took 69, on an Apple M1.
-
 - A recursive JSON Schema loads ([ADR 0024](docs/src/adr/0024-recursive-schemas.md)): one
   whose `$ref` leads back to itself, as `"$ref": "#"` in a tree, a definition that refers to
   itself or two that refer to each other. It failed with `$ref nesting is too deep` before.
@@ -111,7 +123,6 @@ All notable changes are recorded here. The format follows
   has its own `$id` is resolved against that `$id`, as JSON Schema 2020-12 says, so its
   pointer starts at that schema, not at the root of the document; and a property named
   `$ref` or `$id` is read as a property.
-
 - `jlens-lsp`: `config::Entry::service` and `config::Settings::service` return a `Made`
   (the service, its problems and the notes of its schemas) where they returned a pair, and
   `Settings::declare` takes the configuration's folder.
@@ -1573,7 +1584,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/thkprado/jlens/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/thkprado/jlens/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/thkprado/jlens/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/thkprado/jlens/compare/v0.29.0...v0.30.0

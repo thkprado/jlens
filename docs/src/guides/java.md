@@ -12,7 +12,7 @@ UTF-16 code units, the unit of a `String`.
 <dependency>
   <groupId>io.github.thkprado</groupId>
   <artifactId>jlens</artifactId>
-  <version>0.32.0</version>
+  <version>0.33.0</version>
 </dependency>
 ```
 

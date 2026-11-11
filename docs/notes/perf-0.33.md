@@ -4,7 +4,7 @@ How the measurements of roadmap 0.33 were made: methods, traps and intermediate 
 [performance page](../src/architecture/performance.md) leaves out. The item numbers are those of
 the plan, whose table the tag keeps in
 [the roadmap](https://github.com/thkprado/jlens/blob/v0.33.0/docs/src/architecture/roadmap.md#033-expressions-checked-again-when-their-schema-changes);
-[the roadmap's history](../src/architecture/roadmap-history.md) sums it up. The plan changed
+[the roadmap's history](../src/architecture/roadmap-history.md#033) sums it up. The plan changed
 no line of `jlens-core`: its measurements are of the schema's load and of the C API's library,
 which the ADRs [0023](../src/adr/0023-schema-through-the-c-api.md),
 [0024](../src/adr/0024-recursive-schemas.md) and
