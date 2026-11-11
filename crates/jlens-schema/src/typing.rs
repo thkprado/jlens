@@ -28,6 +28,26 @@ pub(crate) struct Ty<'s> {
     /// type may be anything, undefined included. The context a node is walked against is
     /// always there, as each item of a path is.
     pub undefined: Option<Span>,
+    /// The value may be a sequence: several values gathered in an array, as a path over several
+    /// items gives them, and one value alone. The span of the operand that makes it so (the step
+    /// over an array, a filter...). The shapes are then those of the values, or arrays of them
+    /// that the sequence flattens: [`Ty::elements`] gives the values.
+    pub sequence: Option<Span>,
+    /// Whether the value is the shapes themselves or an array of them.
+    pub form: Form,
+}
+
+/// Whether a value is what its shapes describe or an array of such values: an array constructor
+/// gives one, as do built-in functions such as `$sort`. Paths read the items of either.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) enum Form {
+    /// The shapes themselves.
+    #[default]
+    Value,
+    /// An array whose items have the shapes.
+    Array,
+    /// Either of the two.
+    Either,
 }
 
 impl<'s> Ty<'s> {
@@ -35,7 +55,7 @@ impl<'s> Ty<'s> {
         Ty {
             shapes: Vec::new(),
             partial: true,
-            undefined: None,
+            ..Ty::default()
         }
     }
 
@@ -70,7 +90,7 @@ impl<'s> Ty<'s> {
         Ty {
             partial: unknown || shapes.iter().any(|s| s.types.is_empty()),
             shapes,
-            undefined: None,
+            ..Ty::default()
         }
     }
 
@@ -82,6 +102,10 @@ impl<'s> Ty<'s> {
         }
         self.partial |= other.partial;
         self.undefined = self.undefined.or(other.undefined);
+        self.sequence = self.sequence.or(other.sequence);
+        if self.form != other.form {
+            self.form = Form::Either;
+        }
         self
     }
 
@@ -91,17 +115,98 @@ impl<'s> Ty<'s> {
         self
     }
 
-    /// Whether one of the shapes may be an array, which may be empty.
+    /// This type as an array of its values, as an array constructor or `$sort` gives it.
+    fn into_array(mut self) -> Self {
+        self.form = Form::Array;
+        self.sequence = None;
+        self.undefined = None;
+        self
+    }
+
+    /// The items a filter or `$filter` selects from this value, a sequence of them where `cause`
+    /// may select several.
+    fn selected(&self, cause: Option<Span>) -> Self {
+        let mut out = self.items();
+        out.undefined = self.undefined;
+        out.sequence = cause;
+        out
+    }
+
+    /// The items of this value, one level down, as a filter reads them: those of an array, a
+    /// value that is not an array as it is. [`Ty::elements`] goes down every level, as a path
+    /// step does.
+    fn items(&self) -> Ty<'s> {
+        let mut out = Ty {
+            partial: self.partial,
+            ..Ty::default()
+        };
+        let push = |shape: Sh<'s>, out: &mut Ty<'s>| {
+            if !out
+                .shapes
+                .iter()
+                .any(|s| std::ptr::eq(s.shape, shape.shape))
+            {
+                out.shapes.push(shape);
+            }
+        };
+        if self.form != Form::Value {
+            // The shapes are those of the items already.
+            for shape in &self.shapes {
+                push(*shape, &mut out);
+            }
+        }
+        if self.form != Form::Array {
+            for shape in &self.shapes {
+                if shape.types.is_empty() {
+                    out.partial = true;
+                    continue;
+                }
+                if shape.types.contains(&JsonType::Array) {
+                    match &shape.shape.items {
+                        Some(items) => {
+                            let (items, unknown) = members_of(items, shape.defs);
+                            out.partial |= unknown;
+                            for item in items {
+                                out.partial |= item.types.is_empty();
+                                push(item, &mut out);
+                            }
+                        }
+                        None => out.partial = true,
+                    }
+                }
+                if shape.types.iter().any(|t| *t != JsonType::Array) {
+                    push(*shape, &mut out);
+                }
+            }
+        }
+        out
+    }
+
+    /// This type, not fully known where `unknown` is: a value computed from a value that may be
+    /// anything may be undefined.
+    fn unknown_if(mut self, unknown: bool) -> Self {
+        self.partial |= unknown;
+        self
+    }
+
+    /// Whether one of the shapes may be an array.
     fn has_arrays(&self) -> bool {
         self.shapes
             .iter()
             .any(|s| s.types.contains(&JsonType::Array))
     }
 
+    /// Whether one of the shapes may be an empty array: one with no `minItems` of at least 1.
+    fn may_be_empty(&self) -> bool {
+        self.shapes
+            .iter()
+            .any(|s| s.types.contains(&JsonType::Array) && s.shape.min_items.is_none_or(|n| n == 0))
+    }
+
     /// Whether `*` on this value may give nothing: an array may be empty, an item may not be an
     /// object, or an object may have none of its fields.
     fn may_have_no_fields(&self) -> bool {
-        self.has_arrays()
+        self.may_be_empty()
             || self.elements().shapes.iter().any(|s| {
                 s.types.iter().any(|t| *t != JsonType::Object)
                     || !s.fields.values().any(|f| f.required)
@@ -143,7 +248,7 @@ impl<'s> Ty<'s> {
         let mut out = Ty {
             shapes: Vec::new(),
             partial: self.partial,
-            undefined: None,
+            ..Ty::default()
         };
         let mut arrays = Vec::new();
         for shape in &self.shapes {
@@ -184,9 +289,9 @@ impl<'s> Ty<'s> {
         let mut out = Ty {
             shapes: Vec::new(),
             partial: elements.partial,
-            undefined: None,
+            ..Ty::default()
         };
-        let mut miss = self.has_arrays();
+        let mut miss = self.may_be_empty();
         for shape in &elements.shapes {
             let field = shape.shape.fields.get(name);
             miss |= shape.types.iter().any(|t| *t != JsonType::Object)
@@ -226,19 +331,47 @@ impl<'s> Ty<'s> {
         if self.partial || self.shapes.is_empty() {
             return None;
         }
-        let mut out = Symbols::default();
+        let mut shapes = Symbols::default();
         for shape in &self.shapes {
             for &t in &shape.types {
-                add(&mut out.values, symbol(t));
+                add(&mut shapes.values, symbol(t));
                 if t == JsonType::Array {
                     let (items, unknown) = members_of(shape.shape.items.as_deref()?, shape.defs);
                     if unknown || items.iter().any(|i| i.types.is_empty()) {
                         return None;
                     }
                     for &i in items.iter().flat_map(|i| &i.types) {
-                        add(&mut out.items, symbol(i));
+                        add(&mut shapes.items, symbol(i));
                     }
                 }
+            }
+        }
+        // An array of the shapes, or a sequence of their values, is an array whose items are
+        // those values.
+        let mut out = match self.form {
+            Form::Value => shapes.clone(),
+            Form::Array => Symbols {
+                values: String::new(),
+                items: shapes.values.clone(),
+            },
+            Form::Either => Symbols {
+                values: shapes.values.clone(),
+                items: shapes.values.clone(),
+            },
+        };
+        if self.form != Form::Value {
+            add(&mut out.values, 'a');
+            // An array of arrays: their items are counted with the items, which a path
+            // flattens.
+            for c in shapes.items.chars() {
+                add(&mut out.items, c);
+            }
+        }
+        if self.sequence.is_some() {
+            add(&mut out.values, 'a');
+            let values = shapes.values.chars().filter(|c| *c != 'a');
+            for c in values.chain(shapes.items.chars()).collect::<Vec<_>>() {
+                add(&mut out.items, c);
             }
         }
         Some(out)
@@ -248,7 +381,7 @@ impl<'s> Ty<'s> {
         let mut out = Ty {
             shapes: Vec::new(),
             partial: self.elements().partial,
-            undefined: None,
+            ..Ty::default()
         };
         for (_, f, defs) in self.fields() {
             out = out.union(Ty::of(&f.shape, defs));
@@ -260,7 +393,7 @@ impl<'s> Ty<'s> {
         let mut out = Ty {
             shapes: Vec::new(),
             partial: self.partial,
-            undefined: None,
+            ..Ty::default()
         };
         // Iterative, so that a deep schema cannot overflow the stack. `seen` holds the shapes
         // already collected: a recursive schema leads back to them.
@@ -400,29 +533,47 @@ impl<'s> Walker<'s, '_> {
                 // the last step is the result as it is, unless the step ran over several items:
                 // their arrays are then flattened into a sequence, which is undefined when
                 // empty. The array constructor that starts a path is never flattened.
+                //
+                // `several` is where the steps may start to run over several items: the step
+                // that gave arrays, or a sequence. A step that runs over several items gives a
+                // sequence, as does a filter that may keep several.
                 let mut undefined = None;
-                let mut several = ctx.has_arrays()
+                let mut several = (ctx.has_arrays()
                     && !matches!(
                         steps.first().map(|s| &s.kind),
                         Some(NodeKind::Variable { .. })
-                    );
+                    ))
+                .then(|| steps.first().map_or(node.span, |s| s.span));
+                let mut sequence = None;
                 let last = steps.len().saturating_sub(1);
                 for (i, step) in steps.iter().enumerate() {
                     let res = self.step(step, &cur, scope);
                     let cons = i == 0 && step.attrs.cons_array;
                     let arrays = !cons && res.has_arrays();
                     undefined = undefined.or(res.undefined);
-                    if arrays && (i < last || several) {
+                    if !cons && res.may_be_empty() && (i < last || several.is_some()) {
                         undefined = undefined.or(Some(step.span));
                     }
-                    several |= arrays || cons;
+                    sequence = several.or(res.sequence);
+                    let index = Self::index_filter(step);
+                    if (arrays || cons) && !index {
+                        several = several.or(Some(step.span));
+                    }
+                    several = several.or(res.sequence);
                     let elements = res.elements();
+                    let mut filtered = false;
                     for stage in &step.attrs.stages {
                         if let Stage::Filter { expr, span, .. } = stage {
                             self.walk(expr, &elements, scope);
                             undefined = undefined.or(Some(*span));
+                            filtered = true;
+                            if !index {
+                                sequence = sequence.or(Some(*span));
+                            }
                         }
                     }
+                    // A filter gives the items it keeps.
+                    let res = if filtered { res.items() } else { res };
                     // Other steps are walked whole, group-by included.
                     if let Some(group) = &step.attrs.group
                         && Self::is_simple_step(step)
@@ -454,9 +605,20 @@ impl<'s> Walker<'s, '_> {
                     result = Ty::unknown();
                 } else {
                     result.undefined = undefined;
+                    result.sequence = sequence;
                 }
+                // A tuple stream (`@$v`, `#$i`) gives what its steps are evaluated against,
+                // which is not told here.
+                let tuples = steps.iter().any(|s| {
+                    s.attrs.focus.is_some()
+                        || s.attrs.index.is_some()
+                        || s.attrs
+                            .stages
+                            .iter()
+                            .any(|t| matches!(t, Stage::Index { .. }))
+                });
                 scope.truncate(mark);
-                return result;
+                return result.unknown_if(tuples);
             }
             NodeKind::Name { .. } | NodeKind::Wildcard | NodeKind::Descendant => {
                 self.step(node, ctx, scope)
@@ -504,17 +666,22 @@ impl<'s> Walker<'s, '_> {
                 // Arithmetic, an order comparison and a range are undefined where a side is;
                 // `=`, `!=`, `in`, `and` and `or` are false there, and `&` reads it as "".
                 let either = left.undefined.or(right.undefined);
+                let unknown = left.partial || right.partial;
                 match op {
                     BinaryOp::Add
                     | BinaryOp::Sub
                     | BinaryOp::Mul
                     | BinaryOp::Div
-                    | BinaryOp::Mod => Ty::literal(JsonType::Number).or_undefined(either),
+                    | BinaryOp::Mod => Ty::literal(JsonType::Number)
+                        .or_undefined(either)
+                        .unknown_if(unknown),
                     BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-                        Ty::literal(JsonType::Boolean).or_undefined(either)
+                        Ty::literal(JsonType::Boolean)
+                            .or_undefined(either)
+                            .unknown_if(unknown)
                     }
                     BinaryOp::Concat => Ty::literal(JsonType::String),
-                    BinaryOp::Range => Ty::scalar().or_undefined(either),
+                    BinaryOp::Range => Ty::scalar().or_undefined(either).unknown_if(unknown),
                     _ => Ty::literal(JsonType::Boolean),
                 }
             }
@@ -524,16 +691,19 @@ impl<'s> Walker<'s, '_> {
                     operand: expr,
                     ty: &ty,
                 });
-                Ty::literal(JsonType::Number).or_undefined(ty.undefined)
+                Ty::literal(JsonType::Number)
+                    .or_undefined(ty.undefined)
+                    .unknown_if(ty.partial)
             }
             NodeKind::Array { items } => {
                 let mut ty = Ty::scalar();
                 for item in items {
                     ty = ty.union(self.walk(item, ctx, scope));
                 }
-                // An array is always there, empty where its items are undefined.
-                ty.undefined = None;
-                ty
+                // An array is always there, empty where its items are undefined. An array of
+                // arrays has items the shapes do not tell.
+                let nested = ty.form != Form::Value;
+                ty.into_array().unknown_if(nested)
             }
             NodeKind::Object { pairs } => {
                 for (k, v) in pairs {
@@ -650,10 +820,15 @@ impl<'s> Walker<'s, '_> {
         };
         let mut ty = ty;
         let elements = ty.elements();
+        let index = Self::index_filter_of(&node.attrs.predicate);
         for stage in &node.attrs.predicate {
             if let Stage::Filter { expr, span, .. } = stage {
                 self.walk(expr, &elements, scope);
-                ty.undefined = ty.undefined.or(Some(*span));
+                // A filter gives the items it keeps: one for an index, a sequence otherwise.
+                let undefined = ty.undefined.or(Some(*span));
+                let sequence = (!index).then_some(*span);
+                ty = ty.selected(sequence);
+                ty.undefined = undefined;
             }
         }
         if let Some(group) = &node.attrs.group {
@@ -693,6 +868,26 @@ impl<'s> Walker<'s, '_> {
             }
             _ => self.walk(step, ctx, scope),
         }
+    }
+
+    /// Whether the filters of `step` are all a number, `[0]` or `[-1]`: each keeps one item at
+    /// most of each array it is applied to.
+    fn index_filter(step: &Node) -> bool {
+        Self::index_filter_of(&step.attrs.stages)
+    }
+
+    /// Whether `stages` has filters, all of them a number.
+    fn index_filter_of(stages: &[Stage]) -> bool {
+        let number = |e: &Node| match &e.kind {
+            NodeKind::Number { .. } => true,
+            NodeKind::Negate { expr } => matches!(expr.kind, NodeKind::Number { .. }),
+            _ => false,
+        };
+        let mut filters = stages.iter().filter_map(|s| match s {
+            Stage::Filter { expr, .. } => Some(expr),
+            Stage::Index { .. } => None,
+        });
+        filters.next().is_some_and(|first| number(first)) && filters.all(|e| number(e))
     }
 
     fn is_simple_step(step: &Node) -> bool {
@@ -768,30 +963,81 @@ impl<'s> Walker<'s, '_> {
         };
         // An argument left out is the context, where the signature allows it, which is there.
         let args = |n: usize| types.iter().take(n).find_map(|t| t.undefined);
-        let undefined = match gives_undefined(name).unwrap_or(GivesUndefined::Maybe) {
+        // An argument not fully known may be undefined too, as may a context not fully known.
+        let unknown =
+            |n: usize| types.iter().take(n).any(|t| t.partial) || (types.len() < n && ctx.partial);
+        let gives = gives_undefined(name).unwrap_or(GivesUndefined::Maybe);
+        let unknown = match gives {
+            GivesUndefined::For(n) => unknown(n),
+            _ => false,
+        };
+        let undefined = match gives {
             GivesUndefined::Never => None,
             GivesUndefined::For(n) => args(n),
+            // Undefined for an empty array, which a sequence never is (it is undefined then).
+            GivesUndefined::Maybe if matches!(name, "max" | "min" | "average") => {
+                let empty = types.first().is_none_or(|t| {
+                    t.partial || t.form != Form::Value || (t.sequence.is_none() && t.may_be_empty())
+                });
+                args(1).or(empty.then_some(span))
+            }
             GivesUndefined::Maybe => args(1).or(Some(span)),
         };
-        let mut ty = if PASSTHROUGH.contains(&name) {
-            types.first().cloned().unwrap_or_else(Ty::unknown)
-        } else if name == "append" {
-            // Undefined only where both arguments are.
-            let mut it = types.into_iter();
-            let a = it.next().unwrap_or_default();
-            let b = it.next().unwrap_or_default();
-            let undefined = a.undefined.filter(|_| b.undefined.is_some());
-            let mut ty = a.union(b);
-            ty.undefined = undefined;
-            return ty;
-        } else if OPAQUE.contains(&name) {
-            Ty::unknown()
-        } else {
-            Ty::scalar()
+        let first = || types.first().cloned().unwrap_or_else(Ty::unknown);
+        let mut ty = match name {
+            // An array, even of one value: `$sort(5)` is `[5]`.
+            "sort" | "reverse" | "shuffle" => first().into_array(),
+            // The items kept, a sequence of them.
+            "filter" => first().selected(Some(span)),
+            "single" => first().selected(None),
+            "append" => {
+                // An array, undefined only where both arguments are; one argument alone, as it
+                // is, where the other is undefined.
+                let mut it = types.into_iter();
+                let a = it.next().unwrap_or_default();
+                let b = it.next().unwrap_or_default();
+                let undefined = a.undefined.filter(|_| b.undefined.is_some());
+                let alone =
+                    a.undefined.is_some() || b.undefined.is_some() || a.partial || b.partial;
+                let mut ty = a.elements().union(b.elements()).into_array();
+                if alone {
+                    ty.form = Form::Either;
+                }
+                ty.undefined = undefined;
+                return ty;
+            }
+            "split" => Ty::literal(JsonType::String).into_array(),
+            // A sequence of the keys: one alone is a string.
+            "keys" => {
+                let mut ty = Ty::literal(JsonType::String);
+                ty.sequence = Some(span);
+                ty
+            }
+            _ if PASSTHROUGH.contains(&name) => first(),
+            _ if OPAQUE.contains(&name) => Ty::unknown(),
+            // The type its signature gives.
+            _ => match result_symbol(name) {
+                Some('n') => Ty::literal(JsonType::Number),
+                Some('s') => Ty::literal(JsonType::String),
+                Some('b') => Ty::literal(JsonType::Boolean),
+                _ => Ty::scalar(),
+            },
         };
         ty.undefined = undefined;
-        ty
+        ty.unknown_if(unknown)
     }
+}
+
+/// The symbol of the result type in the signature of the built-in function `name`, `<s-:n>` for
+/// `$length`, when it is one letter.
+fn result_symbol(name: &str) -> Option<char> {
+    let f = jlens_core::function_catalog()
+        .into_iter()
+        .find(|f| f.name == name)?;
+    let result = f.signature.strip_suffix('>')?.rsplit_once(':')?.1;
+    let mut chars = result.chars();
+    let c = chars.next()?;
+    chars.next().is_none().then_some(c)
 }
 
 /// When a built-in function gives undefined, as jsonata-js does, short of an error.

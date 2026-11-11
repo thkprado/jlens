@@ -10,6 +10,7 @@
 //! | `x-jlens-presence` | Fraction of objects that have an optional field |
 //! | `x-jlens-hidden` | Hide from completion |
 //! | `x-jlens-enum-inferred` | The `enum` was inferred from samples, so it is not warned about |
+//! | `x-jlens-min-items-inferred` | The `minItems` was inferred from samples: no array seen was empty |
 //! | `x-jlens-domain` | An open domain: an identifier the application fetches the values of |
 //! | `x-jlens-samples` | (root) Number of sample documents inferred from |
 
@@ -59,7 +60,8 @@ impl Schema {
     }
 
     /// Reads a JSON Schema document. Supports `type`, `properties`, `required`, `items`,
-    /// `enum`, `const`, `format`, `minimum`, `maximum`, `title`, `description`, `examples`,
+    /// `enum`, `const`, `format`, `minimum`, `maximum`, `minItems`, `title`, `description`,
+    /// `examples`,
     /// `$ref`, `$id`, `$anchor`, and `anyOf`/`oneOf`/`allOf` (whose branches are merged). Other
     /// keywords are ignored.
     ///
@@ -377,6 +379,12 @@ fn export(shape: &Shape, definitions: &Definitions) -> JsonValue {
     }
     if let Some(m) = shape.maximum {
         out.insert("maximum".into(), json_number(m));
+    }
+    if let Some(n) = shape.min_items.filter(|n| *n > 0) {
+        out.insert("minItems".into(), n.into());
+        if shape.min_items_inferred {
+            out.insert("x-jlens-min-items-inferred".into(), true.into());
+        }
     }
     if !shape.examples.is_empty() {
         out.insert("examples".into(), shape.examples.clone().into());
@@ -931,6 +939,13 @@ impl<'d> Importer<'d> {
         if let Some(f) = map.get("format").and_then(JsonValue::as_str) {
             shape.format = Some(f.to_owned());
         }
+        if let Some(n) = map.get("minItems").and_then(JsonValue::as_u64) {
+            shape.min_items = Some(n);
+            shape.min_items_inferred = map
+                .get("x-jlens-min-items-inferred")
+                .and_then(JsonValue::as_bool)
+                == Some(true);
+        }
         shape.minimum = map
             .get("minimum")
             .and_then(JsonValue::as_f64)
@@ -969,6 +984,8 @@ fn add_type(shape: &mut Shape, name: &str) {
 
 /// Merges `other` into `shape` (union of types and fields).
 fn merge(shape: &mut Shape, other: Shape) {
+    let arrays = shape.types.contains(&JsonType::Array);
+    let other_arrays = other.types.contains(&JsonType::Array);
     for t in other.types {
         if !shape.types.contains(&t) {
             shape.types.push(t);
@@ -996,6 +1013,15 @@ fn merge(shape: &mut Shape, other: Shape) {
         (slot @ None, Some(b)) => *slot = Some(b),
         _ => {}
     }
+    // An array of either shape: the fewer items, and only if both say.
+    if !arrays {
+        shape.min_items = other.min_items;
+        shape.min_items_inferred = other.min_items_inferred;
+    } else if other_arrays {
+        shape.min_items = shape.min_items.zip(other.min_items).map(|(a, b)| a.min(b));
+        shape.min_items_inferred &= shape.min_items.is_some();
+        shape.min_items_inferred |= other.min_items_inferred && shape.min_items.is_some();
+    }
     if shape.enumeration.is_none() {
         shape.enumeration = other.enumeration;
         shape.enumeration_inferred = other.enumeration_inferred;
@@ -1018,6 +1044,8 @@ impl Shape {
             format: self.format.clone(),
             enumeration: self.enumeration.clone(),
             enumeration_inferred: self.enumeration_inferred,
+            min_items: self.min_items,
+            min_items_inferred: self.min_items_inferred,
             domain: self.domain.clone(),
             examples: self.examples.clone(),
             description: self.description.clone(),
@@ -1092,5 +1120,38 @@ mod tests {
             Some(vec![json!("open")])
         );
         assert!(!schema.shape_at("status").unwrap().enumeration_inferred);
+    }
+
+    #[test]
+    fn min_items_declared_and_inferred() {
+        // `tags` was empty in a sample, `codes` never.
+        let schema = Schema::infer(&[
+            json!({"tags": [], "codes": ["a"]}),
+            json!({"tags": ["x"], "codes": ["b", "c"]}),
+        ]);
+        let doc = schema.to_json_schema();
+        assert_eq!(doc["properties"]["tags"].get("minItems"), None);
+        assert_eq!(doc["properties"]["codes"]["minItems"], 1);
+        assert_eq!(
+            doc["properties"]["codes"]["x-jlens-min-items-inferred"],
+            true
+        );
+        let back = Schema::from_json_schema(&doc).unwrap();
+        assert_eq!(back.root, schema.root.without_state());
+
+        // Declared, in a branch of `anyOf` too, it is not marked as inferred.
+        let doc = json!({
+            "type": "object",
+            "properties": {
+                "a": {"type": "array", "minItems": 2},
+                "b": {"anyOf": [{"type": "array", "minItems": 1}, {"type": "array", "minItems": 3}]},
+                "c": {"anyOf": [{"type": "array", "minItems": 1}, {"type": "array"}]}
+            }
+        });
+        let schema = Schema::from_json_schema(&doc).unwrap();
+        let a = schema.shape_at("a").unwrap();
+        assert_eq!((a.min_items, a.min_items_inferred), (Some(2), false));
+        assert_eq!(schema.shape_at("b").unwrap().min_items, Some(1));
+        assert_eq!(schema.shape_at("c").unwrap().min_items, None);
     }
 }

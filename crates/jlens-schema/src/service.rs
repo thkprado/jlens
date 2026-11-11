@@ -13,7 +13,7 @@ use serde_json::Value as JsonValue;
 use std::collections::HashSet;
 
 use crate::shape::{Definitions, Field, JsonType, Schema, Sh, Shape, members_of, summary};
-use crate::typing::{Event, Scope, Symbols, Ty, Walker};
+use crate::typing::{Event, Form, Scope, Symbols, Ty, Walker};
 
 /// The identifier substituted for the word under the cursor before parsing.
 const PLACEHOLDER: &str = "__jlens_cursor__";
@@ -142,6 +142,203 @@ impl ValueRequest {
     }
 }
 
+/// What the typing knows of the result of an expression, from
+/// [`LanguageService::result_type`].
+///
+/// ```
+/// use jlens_schema::{JsonType, LanguageService, ResultCheck, Schema};
+/// use serde_json::json;
+///
+/// let schema = Schema::from_json_schema(&json!({
+///     "type": "object",
+///     "required": ["total"],
+///     "properties": {"total": {"type": "number"}, "notes": {"type": "string"}}
+/// })).unwrap();
+/// let service = LanguageService::new(Some(schema));
+///
+/// let result = service.result_type("total > 1000 and $contains(notes, 'urgent')");
+/// assert_eq!(result.check(&[JsonType::Boolean]), ResultCheck::Always);
+///
+/// // Undefined for the document without `notes`, which the span points at:
+/// let text = "$contains(notes, 'urgent')";
+/// let result = service.result_type(text);
+/// assert_eq!(result.check(&[JsonType::Boolean]), ResultCheck::Maybe);
+/// let cause = result.undefined.unwrap();
+/// assert_eq!(&text[cause.start..cause.end], "notes");
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResultType {
+    /// The JSON types the result may have when it is defined, `None` when they are not known
+    /// (a function the expression defines, an object constructor, no schema...). An integer is
+    /// also a number. Several values gathered in an array, as a path over several items gives
+    /// them, count as an array.
+    pub types: Option<Vec<JsonType>>,
+    /// The result may be undefined: the operand that makes it so (a field that may be absent, a
+    /// filter, an array that may be empty, a function that may give nothing, a condition without
+    /// `else`...). `None` when it is always defined, as far as the typing knows: with `types`
+    /// unknown, it may be undefined too.
+    pub undefined: Option<Span>,
+    /// The result may be several values gathered in an array, and one value alone: the operand
+    /// that makes it so (a step over an array, a filter...).
+    pub sequence: Option<Span>,
+}
+
+/// How the result of an expression compares with the type expected of it, from
+/// [`ResultType::check`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ResultCheck {
+    /// Always one of the expected types, and never undefined.
+    Always,
+    /// Never one of them, when it is defined.
+    Never,
+    /// It may be another type, or undefined.
+    Maybe,
+    /// The typing does not know.
+    Unknown,
+}
+
+impl ResultType {
+    /// How the result compares with `expected`, a list of JSON types: `Number` accepts an
+    /// integer too.
+    pub fn check(&self, expected: &[JsonType]) -> ResultCheck {
+        let Some(types) = &self.types else {
+            return match self.undefined {
+                Some(_) => ResultCheck::Maybe,
+                None => ResultCheck::Unknown,
+            };
+        };
+        let (taken, other): (Vec<JsonType>, Vec<JsonType>) =
+            types.iter().partition(|t| accepts(expected, **t));
+        if taken.is_empty() {
+            ResultCheck::Never
+        } else if other.is_empty() && self.undefined.is_none() {
+            ResultCheck::Always
+        } else {
+            ResultCheck::Maybe
+        }
+    }
+
+    /// The type of a result typed as `ty`.
+    fn of(ty: &Ty<'_>) -> Self {
+        ResultType {
+            types: result_types(ty),
+            undefined: ty.undefined,
+            sequence: ty.sequence,
+        }
+    }
+}
+
+/// Whether a value of type `t` is one of `expected`.
+fn accepts(expected: &[JsonType], t: JsonType) -> bool {
+    expected.contains(&t) || (t == JsonType::Integer && expected.contains(&JsonType::Number))
+}
+
+/// The JSON types a value of `ty` may have, when it is defined, `None` when they are not known.
+fn result_types(ty: &Ty<'_>) -> Option<Vec<JsonType>> {
+    if ty.partial || ty.shapes.is_empty() {
+        return None;
+    }
+    let mut out: Vec<JsonType> = Vec::new();
+    let mut add = |t: JsonType| {
+        if !out.contains(&t) {
+            out.push(t);
+        }
+    };
+    if ty.form != Form::Array {
+        for s in &ty.shapes {
+            s.types.iter().for_each(|t| add(*t));
+        }
+    }
+    if ty.form != Form::Value || ty.sequence.is_some() {
+        add(JsonType::Array);
+    }
+    if ty.sequence.is_some() {
+        let elements = ty.elements();
+        if elements.partial {
+            return None;
+        }
+        for s in &elements.shapes {
+            s.types
+                .iter()
+                .filter(|t| **t != JsonType::Array)
+                .for_each(|t| add(*t));
+        }
+    }
+    out.sort();
+    Some(out)
+}
+
+/// `W0212`, `W0213` and `W0214` for a result `ty` of the expression `root` that never has one of
+/// the `expected` types, may have another, or may be undefined.
+fn result_diagnostics(
+    text: &str,
+    root: &Node,
+    ty: &Ty<'_>,
+    expected: &[JsonType],
+    out: &mut Vec<Diagnostic>,
+) {
+    let result = ResultType::of(ty);
+    let wanted = describe_types(expected);
+    if let Some(types) = &result.types {
+        let other: Vec<JsonType> = types
+            .iter()
+            .copied()
+            .filter(|t| !accepts(expected, *t))
+            .collect();
+        if other.len() == types.len() {
+            out.push(Diagnostic::new(
+                Severity::Warning,
+                "W0212",
+                root.span,
+                &[("type", &describe_types(types)), ("expected", &wanted)],
+            ));
+            return;
+        }
+        if !other.is_empty() {
+            // An array that a sequence gives, of the values or of their arrays flattened, is
+            // caused by its operand.
+            let span = match result.sequence {
+                Some(span) if other == [JsonType::Array] && ty.form == Form::Value => span,
+                _ => root.span,
+            };
+            out.push(Diagnostic::new(
+                Severity::Warning,
+                "W0213",
+                span,
+                &[("type", &describe_types(&other)), ("expected", &wanted)],
+            ));
+        }
+    }
+    if let Some(span) = result.undefined {
+        let source = text.get(span.start..span.end).unwrap_or_default();
+        out.push(Diagnostic::new(
+            Severity::Warning,
+            "W0214",
+            span,
+            &[("token", source), ("expected", &wanted)],
+        ));
+    }
+}
+
+/// `a boolean`, `a number or a string`, `null`...
+fn describe_types(types: &[JsonType]) -> String {
+    let parts: Vec<&str> = types
+        .iter()
+        .map(|t| match t {
+            JsonType::Null => "null",
+            JsonType::Boolean => "a boolean",
+            JsonType::Integer => "an integer",
+            JsonType::Number => "a number",
+            JsonType::String => "a string",
+            JsonType::Array => "an array",
+            JsonType::Object => "an object",
+        })
+        .collect();
+    parts.join(" or ")
+}
+
 /// Hover information.
 #[derive(Debug, Clone, Serialize)]
 pub struct Hover {
@@ -246,6 +443,8 @@ pub struct LanguageService {
     pub(crate) schema: Option<Schema>,
     pub(crate) variables: Vec<(String, Option<Schema>)>,
     pub(crate) functions: Vec<FunctionDecl>,
+    /// The types the result of an expression is expected to have.
+    pub(crate) result: Option<Vec<JsonType>>,
 }
 
 /// Lexical situation at an offset.
@@ -829,7 +1028,48 @@ impl LanguageService {
             schema,
             variables: Vec::new(),
             functions: Vec::new(),
+            result: None,
         }
+    }
+
+    /// Declares the types the result of an expression is expected to have, as the conditions
+    /// of a rules engine must give a boolean: [`LanguageService::diagnostics`] then warns about
+    /// a result that never has one of them (`W0212`), may have another type (`W0213`), or may
+    /// be undefined (`W0214`). `Number` accepts an integer too.
+    ///
+    /// ```
+    /// use jlens_schema::{JsonType, LanguageService, Schema};
+    /// use serde_json::json;
+    ///
+    /// let schema = Schema::infer(&[json!({"total": 10, "notes": "a"}), json!({"total": 5})]);
+    /// let service = LanguageService::new(Some(schema)).with_result_type([JsonType::Boolean]);
+    ///
+    /// assert!(service.diagnostics("total > 1000").is_empty());
+    /// assert_eq!(service.diagnostics("total")[0].code, "W0212");
+    /// assert_eq!(service.diagnostics("$contains(notes, 'x')")[0].code, "W0214");
+    /// ```
+    pub fn with_result_type(mut self, types: impl IntoIterator<Item = JsonType>) -> Self {
+        self.result = Some(types.into_iter().collect());
+        self
+    }
+
+    /// What the typing knows of the result of the expression `text`: the types it may have,
+    /// and whether it may be undefined or several values, with the operand that makes it so.
+    /// See [`ResultType`].
+    pub fn result_type(&self, text: &str) -> ResultType {
+        let ast = parse_recover(text);
+        if ast
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error)
+        {
+            return ResultType {
+                types: None,
+                undefined: None,
+                sequence: None,
+            };
+        }
+        ResultType::of(&self.walk(&ast.root, &mut |_| {}))
     }
 
     /// Declares a variable the expression is evaluated with (a binding), optionally with the
@@ -904,8 +1144,9 @@ impl LanguageService {
             .collect()
     }
 
-    /// Walks `root`, calling `visit` for each field reference and variable.
-    fn walk<'s>(&'s self, root: &Node, visit: &mut dyn FnMut(Event<'_, 's>)) {
+    /// Walks `root`, calling `visit` for each field reference and variable, and gives the type of
+    /// its result.
+    fn walk<'s>(&'s self, root: &Node, visit: &mut dyn FnMut(Event<'_, 's>)) -> Ty<'s> {
         // Declared functions are external names too: a call to one is not typed as a built-in.
         let mut externals = self.externals();
         externals.extend(
@@ -919,7 +1160,7 @@ impl LanguageService {
             visit,
         };
         let ctx = walker.root.clone();
-        walker.walk(root, &ctx, &mut Vec::new());
+        walker.walk(root, &ctx, &mut Vec::new())
     }
 
     /// Suggestions for the word at `offset`.
@@ -1332,7 +1573,15 @@ impl LanguageService {
             }
             Event::Field { .. } => {}
         };
-        self.walk(&ast.root, &mut visit);
+        let result = self.walk(&ast.root, &mut visit);
+        if let Some(expected) = &self.result
+            && !ast
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == Severity::Error)
+        {
+            result_diagnostics(text, &ast.root, &result, expected, &mut out);
+        }
         out.extend(self.call_diagnostics(&calls, &bound));
         out.extend(self.variable_diagnostics(&variables, &calls, &bound));
         out.sort_by_key(|d| d.span.start);

@@ -78,6 +78,15 @@ pub struct Shape {
     /// Largest number seen.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub maximum: Option<f64>,
+    /// The fewest items an array has (`minItems`). An array with at least one is never empty,
+    /// so a path over it gives a value. Inference gives 1 to an array no sample had empty.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub min_items: Option<u64>,
+    /// `min_items` was inferred from samples, not declared by a JSON Schema: a guess, which
+    /// the typing takes as it takes an inferred `required`, written so that it can be
+    /// reviewed.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub min_items_inferred: bool,
     /// A string format shared by every string seen: `date-time`, `date`, `time`, `email`,
     /// `uuid` or `uri`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -792,6 +801,12 @@ impl Shape {
                 JsonType::String
             }
             JsonValue::Array(items) => {
+                // 1 while no array seen was empty; one empty array drops it for good.
+                let first = !self.types.contains(&JsonType::Array);
+                if first || self.min_items.is_some() {
+                    self.min_items = (!items.is_empty()).then_some(1);
+                    self.min_items_inferred = self.min_items.is_some();
+                }
                 let item_shape = self.items.get_or_insert_with(Default::default);
                 for item in items {
                     item_shape.observe(item);

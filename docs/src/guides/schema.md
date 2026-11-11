@@ -27,6 +27,7 @@ Inference records, for every place in the documents:
 | Types | Every JSON type seen. `integer` is used while all numbers are written without a fraction; `1500.0` makes it `number` |
 | Fields | In first-seen order, with `required` when every object had the field, and the fraction of objects that had it otherwise |
 | Array items | The merged shape of all items of all arrays seen at that place |
+| Arrays never empty | `minItems: 1` when no array seen at that place was empty |
 | Numbers | Minimum and maximum |
 | String formats | `date-time`, `date`, `time`, `email`, `uuid` or `uri`, when every string seen has that format |
 | Enumerations | When the values come from a small set (at most 10) and repeat |
@@ -36,7 +37,10 @@ The result is a standard **JSON Schema 2020-12** document. Fields that are not r
 `x-jlens-presence`, the fraction of objects that had them, and an inferred `enum` carries
 `x-jlens-enum-inferred`: it lists the values seen, not every value allowed, so the language
 service completes them but never warns about another one. Remove the keyword once the list is
-complete, or set the values in the overrides (below). You can commit the file, review it,
+complete, or set the values in the overrides (below). An inferred `minItems` carries
+`x-jlens-min-items-inferred`: the language service takes it as it takes an inferred `required`
+(the [result's type](#the-type-of-the-result) counts on it), so review both, and remove a
+`minItems` where an empty array is allowed. You can commit the file, review it,
 and edit it like any JSON Schema. jlens also reads JSON Schemas written by hand or by other
 tools: it follows `$ref`, by JSON Pointer, `$id` and `$anchor`, and it merges `anyOf`, `oneOf`
 and `allOf`.
@@ -119,6 +123,7 @@ tools ignore. jlens writes them and reads them back, so they can also be written
 |---|---|
 | `x-jlens-presence` | On a field that is not required: the fraction of objects that had it, from 0 to 1 |
 | `x-jlens-enum-inferred` | The `enum` lists the values seen in the samples, not every value allowed: completion offers them, but a value outside them is not warned about |
+| `x-jlens-min-items-inferred` | The `minItems` comes from the samples: no array seen there was empty |
 | `x-jlens-domain` | An [open domain](#open-domains): an identifier naming a list of values only the application can fetch |
 | `x-jlens-hidden` | `true` hides the field from completion, like `hidden` in the overrides (below); it is still known, so it is not reported as unknown, and hover shows it |
 | `x-jlens-samples` | At the root: the number of sample documents the schema was inferred from. For information only: nothing depends on it |
@@ -337,7 +342,9 @@ Completion works on incomplete expressions too, such as `$count(items[` or
   field with a declared enumeration gets `W0206` there instead, and two literals compared are
   left alone. As for `W0205`, only types that are known count, an absent field passes, and an
   array stands for its items, which a path may yield one at a time: `scores > 1` passes when
-  `scores` is an array of numbers.
+  `scores` is an array of numbers;
+- with the type the result must have declared, `W0212`, `W0213` and `W0214` for a result that
+  never has it, may have another, or may be undefined ([below](#the-type-of-the-result)).
 
 The typing does not read the guards of an expression: in `$type(x) = 'number' and x > 10`, with
 `x` a string in the schema, `x > 10` is warned about, though the left side, always false, keeps it
@@ -347,6 +354,48 @@ Missing fields are reported only where the context is fully known. Nothing is re
 user-defined function, an object constructor or `$lookup`, so the warnings do not produce false
 alarms. Schemas inferred from samples can miss optional fields that the samples did not contain.
 Add those fields with overrides, or treat `W0201` as advice.
+
+## The type of the result
+
+An application often knows the type an expression must give: the conditions of a rules engine
+must give a boolean. Declare it, and the diagnostics compare the result with it:
+
+```rust
+use jlens_schema::{JsonType, LanguageService};
+
+let service = LanguageService::new(Some(schema)).with_result_type([JsonType::Boolean]);
+let diagnostics = service.diagnostics("$contains(notes, 'urgent')");
+// W0214: The result may be undefined, not a boolean, because of notes
+```
+
+There are three answers. The result is always one of the types, and nothing is reported. It
+is never one of them, `W0212`, as `total` is a number. Or it may not be: `W0213` when it may
+have another type, with the types it may have, and `W0214` when it may be undefined, pointing
+at the operand that makes it so. `Number` accepts an integer.
+
+Most conditions are proved without a document: `=`, `!=`, `in`, `and`, `or` and `$exists`
+always give a boolean. An order comparison, arithmetic and most functions are undefined
+where an operand is, and these may be undefined:
+
+- a field that is not required, and what is under it: `$contains(notes, 'urgent')`;
+- a filter, which may keep nothing: `items[type = 'gift'].price > 10`;
+- a step over an array that may be empty, as `$sum(items.price) > 100` is when `items` is `[]`
+  (`$sum` of nothing is undefined). An array with `minItems` of at least 1 is never empty, and
+  inference gives `minItems: 1` to an array no sample had empty;
+- a function that may give nothing, such as `$lookup`, `$max` of an empty array or `$keys` of
+  an object without fields, and a condition without `else`.
+
+A path over several items gives a **sequence**: one value alone, or several in an array.
+`lines.price` is a number for an order of one line and an array for an order of two, so a
+result expected to be a number gets `W0213`, pointing at `lines`; `$sum(lines.price)` is one
+number. An array constructor, `[price]`, and functions such as `$sort` always give an array.
+
+Where the typing does not know the type, nothing is reported: a function the expression
+defines, an object constructor, a path that binds `@$v` or `#$i`, a variable declared without a
+shape, a field without a schema. `LanguageService::result_type` gives what it knows as a value,
+with no expected type: the types the result may have (`None` where they are not known) and the
+spans of the operands that may make it undefined or a sequence. `ResultType::check` compares
+it with a list of types, and answers `Always`, `Never`, `Maybe` or `Unknown`.
 
 ## What an expression uses of its schema
 

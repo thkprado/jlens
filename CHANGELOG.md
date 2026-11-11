@@ -13,6 +13,23 @@ All notable changes are recorded here. The format follows
   no order `W0207` (`T2010`), a side of arithmetic that is not a number `W0209` (`T2001`,
   `T2002`) or of a negation `W0211` (`D1002`), and `active = true` with `active` a string `W0210`, as it is always false. An absent
   field passes, as for `W0205`.
+- The type an expression's result must have, declared to the language service
+  (`LanguageService::with_result_type`), as the conditions of a rules engine must give a
+  boolean. A result that is never of that type gets `W0212`, one that may be of another type
+  `W0213`, and one that may be undefined `W0214`, at the operand that makes it so:
+  `$contains(notes, 'urgent')` with `notes` optional, a filter that may keep nothing, a step
+  over an array that may be empty. `LanguageService::result_type` gives what the typing knows of
+  a result as a value (`ResultType`), and `ResultType::check` compares it with a list of types.
+  The typing now tells a path over several items, which gives one value or an array, from an
+  array, and knows the result types of built-in functions from their signatures.
+- `minItems` in a schema: an array with at least one item is never empty, so a path over it
+  gives a value. Inference writes `minItems: 1` for an array no sample had empty, marked with
+  `x-jlens-min-items-inferred`.
+
+### Changed
+
+- The language service describes a path over several items as one value or an array of them:
+  `$sum(items.label)` with `label` a string gets `W0205` for "a string or an array of strings".
 
 ### Fixed
 

@@ -1,6 +1,6 @@
 //! Property tests: the language service never panics, whatever the text and the offset.
 
-use jlens_schema::{CompletionKind, FunctionDecl, LanguageService, Override, Schema};
+use jlens_schema::{CompletionKind, FunctionDecl, JsonType, LanguageService, Override, Schema};
 use proptest::prelude::*;
 use serde_json::json;
 
@@ -24,10 +24,11 @@ proptest! {
 
     #[test]
     fn the_language_service_never_panics(text in text()) {
-        let mut schema = Schema::infer(&[json!({
+        let sample = json!({
             "customer": {"login": "1", "name": "X"},
             "items": [{"type": "a", "unitPrice": 1.5, "odd name": true}]
-        })]);
+        });
+        let mut schema = Schema::infer(std::slice::from_ref(&sample));
         // An enumeration with values that need escaping, or cannot take single quotes, one of
         // scalars, whose values outside it are warned about, and an open domain.
         let overrides: std::collections::BTreeMap<String, Override> = serde_json::from_value(
@@ -51,13 +52,44 @@ proptest! {
             // A host function that replaces a built-in.
             .with_function(FunctionDecl::new("sum", ""))
             // A signature that does not parse: calls are not checked against it.
-            .with_function(FunctionDecl::new("bad", "").signature("<x<n>"));
+            .with_function(FunctionDecl::new("bad", "").signature("<x<n>"))
+            .with_result_type([JsonType::Boolean]);
         let diagnostics = service.diagnostics(&text);
         for d in &diagnostics {
             prop_assert!(d.span.start <= d.span.end && d.span.end <= text.len(), "{d:?}");
             if d.code == "W0206" {
                 // The warning points at a literal.
                 prop_assert!(jlens_core::parse(&text[d.span.start..d.span.end]).is_ok(), "{d:?}");
+            }
+        }
+        // What the typing says of the result points into the text, and holds for the sample
+        // the schema was inferred from.
+        let result = service.result_type(&text);
+        for span in [result.undefined, result.sequence].into_iter().flatten() {
+            prop_assert!(span.end <= text.len(), "{result:?}");
+            prop_assert!(text.is_char_boundary(span.start) && text.is_char_boundary(span.end));
+        }
+        if let (Some(types), Ok(expr)) = (&result.types, jlens_core::Expression::compile(&text)) {
+            let options = jlens_core::Options::default().max_steps(10_000);
+            let bindings = jlens_core::Bindings::new();
+            if let Ok(value) = expr.evaluate_with(Some(&sample), &bindings, &options) {
+                match value {
+                    None => prop_assert!(result.undefined.is_some(), "undefined: {result:?}"),
+                    Some(value) => {
+                        let actual = match &value {
+                            serde_json::Value::Null => vec![JsonType::Null],
+                            serde_json::Value::Bool(_) => vec![JsonType::Boolean],
+                            serde_json::Value::Number(n) if n.as_f64().is_some_and(|f| f.fract() == 0.0) => {
+                                vec![JsonType::Integer, JsonType::Number]
+                            }
+                            serde_json::Value::Number(_) => vec![JsonType::Number],
+                            serde_json::Value::String(_) => vec![JsonType::String],
+                            serde_json::Value::Array(_) => vec![JsonType::Array],
+                            serde_json::Value::Object(_) => vec![JsonType::Object],
+                        };
+                        prop_assert!(actual.iter().any(|t| types.contains(t)), "{value}: {result:?}");
+                    }
+                }
             }
         }
         // Every byte offset, including those inside characters and past the end.

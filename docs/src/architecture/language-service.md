@@ -72,7 +72,31 @@ condition without `else` is undefined where its condition is false, `?:` where i
 and `??` where both sides are. A built-in's result follows a table in `typing.rs`, which a test
 checks covers the catalog: never undefined (`$exists`, `$count`), undefined where its first
 arguments are (most, as in jsonata-js), or also for some values (`$lookup`, `$filter`,
-`$keys`, `$max`).
+`$keys`, and `$max`, `$min` and `$average` of an array that may be empty). An array whose
+`Shape::min_items` is at least 1 (`minItems`, given by inference to an array no sample had
+empty, `x-jlens-min-items-inferred`) is never empty. A value computed from a value not fully
+known (an operand of arithmetic or an order comparison, the argument of a built-in) is not
+fully known either: it may be undefined.
+
+A type also tells a sequence from an array. `Ty::sequence` is the span of the operand that may
+make the value several values gathered in an array: a step that runs over several items (after
+a step that gave arrays, but for one whose filters are all numbers, `items[0]`), a filter that
+may keep several, `$filter`, `$keys`. `Ty::form` tells whether the value is the shapes
+themselves or an array of them (an array constructor, `$sort`, `$append`, `$split`), or either.
+Paths read the items of both. A filter's result is the items of its value, one level down (not
+every level, as a step's context is). A path with a tuple stream (`@$v`, `#$i`) gives what its
+steps run against, which the walker does not follow: its type is unknown. A built-in's result
+has the type of its signature (`n`, `s`, `b`).
+
+`LanguageService::result_type` turns the root's type into a `ResultType`: the JSON types it may
+have (an array for a sequence or an array form, and the values of a sequence), and the spans
+that make it undefined or a sequence. With an expected type declared
+(`LanguageService::with_result_type`), the diagnostics add `W0212` (never one of the types,
+over the whole expression), `W0213` (another type too: at the sequence's operand when the other
+type is only the array a sequence makes, over the whole expression otherwise) and `W0214`
+(undefined, at its cause). A text with a syntax error gets none. The suite test checks every
+result the typing knows against the result of the case (1,047 of 1,401 expressions are typed,
+805 always defined), and a property does the same for random expressions against their sample.
 
 While walking, the walker reports *events* to a visitor:
 - a field reference, with the context it is looked up in;

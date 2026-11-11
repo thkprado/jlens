@@ -1,12 +1,13 @@
 //! No false positives: the expressions of the official suite that evaluate without error get
 //! no warning about functions, variables or the types of operands, with a schema inferred from
-//! their input and their bindings declared.
+//! their input and their bindings declared. And what the typing says of their result holds: the
+//! result has one of the types it gives, and is defined where it is said to be.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use jlens_schema::{LanguageService, Schema};
+use jlens_schema::{JsonType, LanguageService, ResultType, Schema};
 use serde_json::Value;
 
 fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
@@ -35,6 +36,29 @@ const EXPECTED: &[(&str, &str)] = &[
     ("$type(data) = 'number' and data > 10", "W0208"),
 ];
 
+/// What the typing says of the result of `case` that its result contradicts, or `None`.
+fn unsound(typed: &ResultType, case: &Value) -> Option<String> {
+    let types = typed.types.as_ref()?;
+    let Some(result) = case.get("result") else {
+        return typed
+            .undefined
+            .is_none()
+            .then(|| format!("undefined, typed as always {types:?}"));
+    };
+    let actual: &[JsonType] = match result {
+        Value::Null => &[JsonType::Null],
+        Value::Bool(_) => &[JsonType::Boolean],
+        Value::Number(n) if n.as_f64().is_some_and(|f| f.fract() == 0.0) => {
+            &[JsonType::Integer, JsonType::Number]
+        }
+        Value::Number(_) => &[JsonType::Number],
+        Value::String(_) => &[JsonType::String],
+        Value::Array(_) => &[JsonType::Array],
+        Value::Object(_) => &[JsonType::Object],
+    };
+    (!actual.iter().any(|t| types.contains(t))).then(|| format!("{result}, typed as {types:?}"))
+}
+
 #[test]
 fn suite_expressions_get_no_function_or_variable_warnings() {
     let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/jsonata-suite");
@@ -46,6 +70,8 @@ fn suite_expressions_get_no_function_or_variable_warnings() {
     }
 
     let mut checked = 0;
+    // The results whose types are known, and those also known to be always defined.
+    let (mut typed, mut defined) = (0, 0);
     let mut failures = Vec::new();
     for group in sorted_entries(&suite.join("groups")) {
         for file in sorted_entries(&group) {
@@ -79,6 +105,16 @@ fn suite_expressions_get_no_function_or_variable_warnings() {
                     }
                 }
                 checked += 1;
+                let result = service.result_type(&expr);
+                typed += usize::from(result.types.is_some());
+                defined += usize::from(result.types.is_some() && result.undefined.is_none());
+                if let Some(problem) = unsound(&result, case) {
+                    failures.push(format!(
+                        "{}#{i}: {expr}
+  {problem}",
+                        file.display()
+                    ));
+                }
                 for d in service.diagnostics(&expr) {
                     if CODES.contains(&d.code.as_str())
                         && !EXPECTED.contains(&(expr.as_str(), d.code.as_str()))
@@ -90,5 +126,10 @@ fn suite_expressions_get_no_function_or_variable_warnings() {
         }
     }
     assert!(checked > 1000, "only {checked} expressions found");
+    // 1,047 and 805 of 1,401 when written: the check above is not empty.
+    assert!(
+        typed > 1000 && defined > 780,
+        "{typed} results typed, {defined} always defined"
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

@@ -140,4 +140,7 @@ Warnings (W):
   W0209  The {{{side}}} side of {{{token}}} is {{{type}}}, not a number
   W0210  The value {{{value}}} never equals {{{type}}}
   W0211  The operand of - is {{{type}}}, not a number
+  W0212  The result is {{{type}}}, never {{{expected}}}
+  W0213  The result may be {{{type}}}, not {{{expected}}}
+  W0214  The result may be undefined, not {{{expected}}}, because of {{{token}}}
 --- stderr

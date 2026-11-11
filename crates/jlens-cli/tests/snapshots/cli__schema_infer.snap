@@ -38,6 +38,8 @@ exit: 0
     },
     "items": {
       "type": "array",
+      "minItems": 1,
+      "x-jlens-min-items-inferred": true,
       "items": {
         "type": "object",
         "properties": {

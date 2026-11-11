@@ -271,7 +271,7 @@ fn diagnostics_report_unknown_functions_and_argument_counts() {
         .with_function(FunctionDecl::new("shipping", "").signature("<ns?:n>"))
         .with_function(FunctionDecl::new("audit", ""));
     let cases: &[(&str, &[(&str, &str)])] = &[
-        ("$sum([1]) + $substring('abc', 1) + $string()", &[]),
+        ("$sum([1]) & $substring('abc', 1) & $string()", &[]),
         (
             "$summ([1])",
             &[("W0202", "Unknown function $summ; did you mean `$sum`?")],
@@ -821,7 +821,10 @@ fn diagnostics_report_argument_types_the_signature_rejects() {
         ),
         (
             "$sum(items.label)",
-            vec![("W0205", message(1, "sum", "a string", "<a<n>:n>"))],
+            vec![(
+                "W0205",
+                message(1, "sum", "a string or an array of strings", "<a<n>:n>"),
+            )],
         ),
         (
             "$substring(name, 'x')",
@@ -1137,4 +1140,133 @@ fn function_declarations_deserialize_from_json() {
         serde_json::from_value(json!({"name": "tax", "signature": "<n:n>"})).unwrap();
     assert_eq!(decl, FunctionDecl::new("tax", "").signature("<n:n>"));
     assert!(serde_json::from_value::<FunctionDecl>(json!({"name": "x", "sig": "<n>"})).is_err());
+}
+
+/// An order: `total` always there, `notes` optional, `status` a string or null, `items` an
+/// array that may be empty, `lines` one with at least one item.
+fn order_service() -> LanguageService {
+    let schema = Schema::from_json_schema(&json!({
+        "type": "object",
+        "required": ["total", "status", "items", "lines"],
+        "properties": {
+            "total": {"type": "number"},
+            "notes": {"type": "string"},
+            "status": {"type": ["string", "null"]},
+            "items": {"type": "array", "items": {
+                "type": "object",
+                "required": ["price"],
+                "properties": {"price": {"type": "number"}, "type": {"type": "string"}}
+            }},
+            "lines": {"type": "array", "minItems": 1, "items": {
+                "type": "object",
+                "required": ["price"],
+                "properties": {"price": {"type": "number"}}
+            }}
+        }
+    }))
+    .unwrap();
+    LanguageService::new(Some(schema))
+}
+
+/// The code of each diagnostic of `text` in `svc`, with the text it points at.
+fn located(svc: &LanguageService, text: &str) -> Vec<(String, String)> {
+    svc.diagnostics(text)
+        .into_iter()
+        .map(|d| (d.code, text[d.span.start..d.span.end].to_owned()))
+        .collect()
+}
+
+#[test]
+fn diagnostics_compare_the_result_with_the_expected_type() {
+    use jlens_schema::JsonType::{Array, Boolean, Number};
+    let boolean = order_service().with_result_type([Boolean]);
+    for (text, expected) in [
+        // Always a boolean.
+        ("total > 100", vec![]),
+        ("total > 100 and $contains(notes, 'x')", vec![]),
+        ("status = 'open' or $exists(notes)", vec![]),
+        ("$count(items[type = 'a']) > 0", vec![]),
+        // `lines` is never empty: its sum, and its largest price, are always there.
+        ("$sum(lines.price) > 100", vec![]),
+        ("$max(lines.price) > 100", vec![]),
+        // Never a boolean.
+        ("total", vec![("W0212", "total")]),
+        ("lines.price", vec![("W0212", "lines.price")]),
+        // A boolean or undefined, because of the operand that may give nothing.
+        ("$contains(notes, 'x')", vec![("W0214", "notes")]),
+        ("$sum(items.price) > 100", vec![("W0214", "items")]),
+        ("$max(items.price) > 100", vec![("W0214", "items")]),
+        (
+            "items[type = 'a'].price > 1",
+            vec![("W0214", "items[type = 'a']")],
+        ),
+        ("total > 1 ? true", vec![("W0214", "total > 1")]),
+        // A boolean or another type.
+        (
+            "total > 1 ? true : status",
+            vec![("W0213", "total > 1 ? true : status")],
+        ),
+        // A syntax error leaves the result alone.
+        ("total >", vec![("S0207", "")]),
+    ] {
+        let found = located(&boolean, text);
+        let found: Vec<(&str, &str)> = found
+            .iter()
+            .map(|(c, s)| (c.as_str(), s.as_str()))
+            .collect();
+        assert_eq!(found, expected, "{text}");
+    }
+
+    let number = order_service().with_result_type([Number]);
+    assert_eq!(located(&number, "$sum(lines.price)"), []);
+    // An integer is a number; several prices, gathered by the step over `lines`, an array.
+    assert_eq!(located(&number, "$count(items)"), []);
+    assert_eq!(
+        located(&number, "lines.price"),
+        [("W0213".to_owned(), "lines".to_owned())]
+    );
+    assert_eq!(
+        number.diagnostics("lines.price")[0].message,
+        "The result may be an array, not a number"
+    );
+    let array = order_service().with_result_type([Array]);
+    for text in [
+        "items",
+        "[total]",
+        "$sort(lines.price)",
+        "$split(status, ',') ?? []",
+    ] {
+        assert_eq!(located(&array, text), [], "{text}");
+    }
+    assert_eq!(
+        array.diagnostics("lines.price")[0].message,
+        "The result may be a number, not an array"
+    );
+}
+
+#[test]
+fn result_type_tells_what_the_typing_knows() {
+    use jlens_schema::JsonType::{Array, Boolean, Null, Number, String};
+    use jlens_schema::ResultCheck::{Always, Maybe, Never, Unknown};
+    let svc = order_service();
+    let text = "lines.price";
+    let result = svc.result_type(text);
+    assert_eq!(result.types, Some(vec![Number, Array]));
+    assert_eq!(result.undefined, None);
+    let at = result.sequence.unwrap();
+    assert_eq!(&text[at.start..at.end], "lines");
+    assert_eq!(result.check(&[Number, Array]), Always);
+    assert_eq!(result.check(&[Number]), Maybe);
+    assert_eq!(result.check(&[Boolean]), Never);
+
+    assert_eq!(svc.result_type("status").types, Some(vec![Null, String]));
+    // `$x`, not declared, an object constructor and a tuple stream (`items@$v` gives the order,
+    // once for each item) are not known, nor is a text that does not parse.
+    for text in ["$x > 1", "{'a': total}", "items@$v", "items#$i", "total >"] {
+        assert_eq!(svc.result_type(text).check(&[Boolean]), Unknown, "{text}");
+    }
+    // Without a schema, neither are the fields.
+    let none = LanguageService::new(None);
+    assert_eq!(none.result_type("a > 1").check(&[Boolean]), Unknown);
+    assert_eq!(none.result_type("a = 1").check(&[Boolean]), Always);
 }

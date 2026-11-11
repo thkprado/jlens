@@ -140,7 +140,7 @@ host API, not in the language syntax, so that expressions that use them remain v
   jsonata-js also rejects, with a JavaScript `SyntaxError`.
 - Audit annotations and the warnings `W0101`–`W0103`.
 - `Ast` node ids and spans, and `parse_recover` diagnostics with severities.
-- Static warnings (`W0201`–`W0211`) and the language service.
+- Static warnings (`W0201`–`W0214`) and the language service.
 - `Document`, for evaluating many expressions against one converted document.
 
 ## Quirks reproduced on purpose
