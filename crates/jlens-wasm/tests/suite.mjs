@@ -861,8 +861,11 @@ export const cases = [
     const fixture = JSON.parse(await env.load("../../../fixtures/uses/cases.json"));
     const old = new j.LanguageService(fixture.schema, fixture.variables, fixture.functions);
     const current = new j.LanguageService(fixture.newSchema, fixture.newVariables, fixture.functions);
+    // A JavaScript function receives its arguments and nothing else: `reads` is told so by
+    // the bindings, here the functions declared to the service.
+    const bindings = Object.fromEntries(fixture.functions.map(({ name }) => [name, () => 0]));
     for (const { expression, uses, changes } of fixture.cases) {
-      const reads = new j.Expression(expression).reads();
+      const reads = new j.Expression(expression).reads(bindings);
       const answer = old.uses(reads);
       equal(answer, uses, `uses of ${expression}`);
       equal(j.usesChanges(answer, current.uses(reads)), changes, `changes of ${expression}`);

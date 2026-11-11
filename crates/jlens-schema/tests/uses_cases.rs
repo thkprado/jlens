@@ -39,9 +39,10 @@ fn the_shared_cases() {
     );
     for case in fixture["cases"].as_array().unwrap() {
         let text = case["expression"].as_str().unwrap();
-        let reads = Expression::compile(text).unwrap().reads();
-        let uses = old.uses(&reads);
-        let changes = uses.changes(&new.uses(&reads));
+        // The declared functions read their arguments alone, as those of every package do.
+        let expression = Expression::compile(text).unwrap();
+        let uses = old.uses_of(&expression);
+        let changes = uses.changes(&new.uses_of(&expression));
         assert_eq!(serde_json::to_value(&uses).unwrap(), case["uses"], "{text}");
         assert_eq!(
             serde_json::to_value(&changes).unwrap(),
@@ -50,7 +51,7 @@ fn the_shared_cases() {
         );
         // The answers kept as JSON are compared with no service.
         let kept: Uses = serde_json::from_value(case["uses"].clone()).unwrap();
-        assert_eq!(kept.changes(&new.uses(&reads)), changes, "{text}");
+        assert_eq!(kept.changes(&new.uses_of(&expression)), changes, "{text}");
         let read: UsesChanges = serde_json::from_value(case["changes"].clone()).unwrap();
         assert_eq!(read, changes, "{text}");
     }

@@ -8,6 +8,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use jlens_core::reads::{Read, Reads};
+use jlens_core::{Bindings, Expression, HostFunction};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -465,6 +466,65 @@ impl LanguageService {
             every_binding: reads.every_binding(),
         }
     }
+
+    /// What `expression` uses of the schemas of the service, as [`uses`](Self::uses) gives it
+    /// for the fields the expression reads, with a call to a host function declared to the
+    /// service ([`with_function`](Self::with_function)) taken as reading its arguments alone,
+    /// and the context that a `-` of its signature may take.
+    ///
+    /// That is what the host functions of the WebAssembly, Python and Java packages do, which
+    /// receive their arguments and nothing else, and in Rust those marked
+    /// [`without_input`](HostFunction::without_input). When a declared function reads the
+    /// context of its call ([`HostCall::input`](jlens_core::HostCall::input)), give the
+    /// expression's own reads to [`uses`](Self::uses): there the call of a function reads its
+    /// context whole, so `$describe(items[0])` uses the whole input, and here `items` alone.
+    /// A function declared with a signature that is not one is taken that way too.
+    ///
+    /// ```
+    /// use jlens_core::Expression;
+    /// use jlens_schema::{FunctionDecl, LanguageService, Schema};
+    /// use serde_json::json;
+    ///
+    /// let schema = Schema::from_json_schema(&json!({
+    ///     "type": "object",
+    ///     "properties": {
+    ///         "items": {"type": "array", "items": {"type": "string"}},
+    ///         "total": {"type": "number"}
+    ///     }
+    /// }))
+    /// .unwrap();
+    /// let service = LanguageService::new(Some(schema))
+    ///     .with_function(FunctionDecl::new("describe", "Describes a value"));
+    /// let expression = Expression::compile("$describe(items[0])").unwrap();
+    /// let uses = service.uses_of(&expression);
+    /// assert_eq!(
+    ///     serde_json::to_value(&uses).unwrap(),
+    ///     json!({
+    ///         "input": {
+    ///             "$": {"types": ["object"]},
+    ///             "items": {"whole": true, "types": ["array"], "required": false},
+    ///             "items[]": {"types": ["string"]}
+    ///         },
+    ///         "bindings": {}
+    ///     })
+    /// );
+    /// // The reads alone take the call as reading the input whole.
+    /// assert!(service.uses(&expression.reads()).input.unwrap().contains_key("total"));
+    /// ```
+    pub fn uses_of(&self, expression: &Expression) -> Uses {
+        let mut bindings = Bindings::new();
+        for function in &self.functions {
+            let host = match &function.signature {
+                Some(signature) => HostFunction::with_signature(signature, |_, _| Ok(None)),
+                None => Ok(HostFunction::new(0, |_, _| Ok(None))),
+            };
+            // A signature that is not one tells nothing of the context: the call reads it.
+            if let Ok(host) = host {
+                bindings = bindings.function(function.name.clone(), host.without_input());
+            }
+        }
+        self.uses(&expression.reads_with(&bindings))
+    }
 }
 
 #[cfg(test)]
@@ -507,6 +567,46 @@ mod tests {
     fn uses(service: &LanguageService, text: &str) -> JsonValue {
         let reads = Expression::compile(text).unwrap().reads();
         serde_json::to_value(service.uses(&reads)).unwrap()
+    }
+
+    #[test]
+    fn a_declared_function_reads_its_arguments_alone() {
+        use crate::FunctionDecl;
+        let service = LanguageService::new(Some(schema()))
+            .with_variable("x", None)
+            .with_function(FunctionDecl::new("plain", ""))
+            .with_function(FunctionDecl::new("context", "").signature("<s-:s>"))
+            .with_function(FunctionDecl::new("broken", "").signature("<n<s>>"));
+        let of = |text: &str| {
+            let expression = Expression::compile(text).unwrap();
+            serde_json::to_value(service.uses_of(&expression)).unwrap()
+        };
+        let paths = |uses: &JsonValue| -> Vec<String> {
+            uses["input"]
+                .as_object()
+                .map(|input| input.keys().cloned().collect())
+                .unwrap_or_default()
+        };
+        // Nothing of the input, where the reads alone take it whole.
+        assert_eq!(of("$plain(1)"), json!({"bindings": {}}));
+        assert!(uses(&service, "$plain(1)")["input"]["$"]["whole"] == json!(true));
+        assert_eq!(
+            paths(&of("$plain(customer.login)")),
+            ["$", "customer", "customer.login"]
+        );
+        assert_eq!(
+            of("$plain($x)")["bindings"],
+            json!({"x": {"$": {"unknown": true, "whole": true}}})
+        );
+        // A `-` takes the context when the argument is left out: a string here, with no field.
+        assert_eq!(paths(&of("status.$context()")), ["$", "status"]);
+        assert_eq!(
+            of("$context()")["input"],
+            json!({"$": {"types": ["object"]}})
+        );
+        // A signature that is not one, and a function that is not declared, read the context.
+        assert_eq!(of("$broken(1)")["input"]["$"]["whole"], json!(true));
+        assert_eq!(of("$other(1)")["input"]["$"]["whole"], json!(true));
     }
 
     fn input(text: &str) -> JsonValue {

@@ -217,7 +217,7 @@ fn uses(args: UsesArgs) -> Result<ExitCode> {
     let service = crate::service_for(file, args.schema.as_ref(), args.config.as_ref())?;
     match Expression::compile(&source) {
         Ok(expression) => {
-            print_json(&service.uses(&expression.reads()))?;
+            print_json(&service.uses_of(&expression))?;
             Ok(ExitCode::SUCCESS)
         }
         Err(err) => {

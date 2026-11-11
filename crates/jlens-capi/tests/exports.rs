@@ -450,12 +450,12 @@ fn a_document_that_is_not_json_or_not_utf8_fails_with_u2001() {
 #[test]
 fn reads_are_json_and_their_union_prunes_a_document() {
     let (a, c) = (compile("a.b"), compile("$sum(c)"));
-    let reads_a = json(reply(jlens_reads(a)));
+    let reads_a = json(reply(jlens_reads(a, 0)));
     assert_eq!(
         reads_a,
         json!({"input": {"a": {"b": true}}, "bindings": {}})
     );
-    let reads_c = json(reply(jlens_reads(c)));
+    let reads_c = json(reply(jlens_reads(c, 0)));
     let all = json!([reads_a, reads_c]).to_string();
     let union = json(with_buffer(&all, |b| jlens_union_reads(b)));
     assert_eq!(union["input"], json!({"a": {"b": true}, "c": true}));
@@ -472,11 +472,11 @@ fn reads_are_json_and_their_union_prunes_a_document() {
     let whole = document(input, None);
     assert_eq!(on_document(compile("d"), whole, 0), Reply::Json("3".into()));
     // An expression that does not read its input reads no field of it.
-    let constant = json(reply(jlens_reads(compile("1 + 1"))));
+    let constant = json(reply(jlens_reads(compile("1 + 1"), 0)));
     assert_eq!(constant, json!({"bindings": {}}));
     jlens_document_free(pruned);
     jlens_document_free(whole);
-    assert_eq!(code(&reply(jlens_reads(u64::MAX))), "U2002");
+    assert_eq!(code(&reply(jlens_reads(u64::MAX, 0))), "U2002");
 }
 
 #[test]

@@ -554,6 +554,61 @@
     {
       "expression": "$rate(1)",
       "uses": {
+        "bindings": {}
+      },
+      "changes": {}
+    },
+    {
+      "expression": "$rate(items[0].price)",
+      "uses": {
+        "input": {
+          "$": {
+            "types": [
+              "object"
+            ]
+          },
+          "items": {
+            "types": [
+              "array"
+            ],
+            "required": true
+          },
+          "items[]": {
+            "types": [
+              "object"
+            ]
+          },
+          "items[].price": {
+            "whole": true,
+            "types": [
+              "number"
+            ],
+            "required": false
+          }
+        },
+        "bindings": {}
+      },
+      "changes": {
+        "input": {
+          "changed": {
+            "items[].price": {
+              "types": {
+                "old": [
+                  "number"
+                ],
+                "new": [
+                  "integer",
+                  "string"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "expression": "$other(items[0].price)",
+      "uses": {
         "input": {
           "$": {
             "whole": true,
@@ -634,7 +689,14 @@
             "required": false
           }
         },
-        "bindings": {}
+        "bindings": {
+          "other": {
+            "$": {
+              "unknown": true,
+              "whole": true
+            }
+          }
+        }
       },
       "changes": {
         "input": {

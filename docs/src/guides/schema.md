@@ -393,6 +393,22 @@ path the schema has under it is listed. `$eval` can also read any variable: the 
 `"everyBinding": true`, and every variable declared with a schema, whole. The host functions
 declared to the service are not values, and are left out of `bindings`.
 
+The call of a function that is not built in reads the context of its call whole, as a host
+function written in Rust can read it: `$describe(items[0])` at the top of an expression uses the
+whole input, and every change of the schema is then a change for the expression. The host
+functions of the WebAssembly, Python and Java packages receive their arguments and nothing
+else, and so do those marked `HostFunction::without_input` in Rust. `LanguageService::uses_of`
+takes the expression itself, and counts a call to a function declared to the service
+(`with_function`) as reading its arguments alone, and the context that a `-` of its signature
+may take: the call above uses `items`, whole, and nothing else.
+
+```rust
+let uses = service.uses_of(&expression);
+```
+
+Give `uses` the reads when a declared function reads its context, or when the application
+knows better which functions do (`Expression::reads_with`).
+
 Under a value read whole, a recursive schema is listed down to where it repeats: what is
 under a definition is listed once, at the place nearest to the value read whole, and another
 value of that definition is the last path on its way. Read whole, a tree whose `children` are
@@ -462,9 +478,9 @@ Every place that has the schema gives the two answers, as the same JSON:
 
 | Where | What an expression uses | What changed |
 |---|---|---|
-| Rust | `LanguageService::uses(&reads)` | `Uses::changes(&new)` |
+| Rust | `LanguageService::uses(&reads)`, `uses_of(&expression)` | `Uses::changes(&new)` |
 | CLI | `jlens schema uses <EXPR>` | `jlens schema changes OLD NEW` |
-| [WebAssembly](wasm.md#what-an-expression-uses-of-its-schema) | `service.uses(expression.reads())` | `usesChanges(old, current)` |
+| [WebAssembly](wasm.md#what-an-expression-uses-of-its-schema) | `service.uses(expression.reads(bindings))` | `usesChanges(old, current)` |
 | [Java](java.md#what-an-expression-uses-of-its-schema) | `service.uses(expression)` | `uses.changes(current)` |
 
 The comparison takes the two answers and nothing else, so the answer kept beside an expression
@@ -475,7 +491,8 @@ an object.
 `jlens schema uses` prints the answer of an expression, given as an argument or with `-f`. It
 takes its schema, variables and host functions as [`jlens check`](cli.md#jlens-check) does:
 from `--schema`, and from the `jlens.json` of the current directory or of `--config`, which
-`--path` applies to an expression given as an argument. `jlens schema changes` compares two
+`--path` applies to an expression given as an argument. A host function the configuration
+declares reads its arguments alone, as `uses_of` takes it. `jlens schema changes` compares two
 files it wrote:
 
 ```sh

@@ -257,9 +257,11 @@ fn diagnostics_text(service: u64, text: u64) -> Result<Vec<u8>, Vec<u8>> {
 }
 
 /// Replies with what expression `expression` uses of the schemas of service `service`
-/// (roadmap 0.33 #5), as `LanguageService::uses` gives it for the expression's reads: the JSON
-/// object `{"input": {path: Use}, "bindings": {name: {path: Use}}, "everyBinding": true}`, the
-/// same text for two equal answers. Paths are not offsets: nothing is converted.
+/// (roadmap 0.33 #5), as `LanguageService::uses_of` gives it: the JSON object `{"input":
+/// {path: Use}, "bindings": {name: {path: Use}}, "everyBinding": true}`, the same text for two
+/// equal answers. A call to a function declared to the service reads its arguments alone, as
+/// a host function of `bindings_new` receives nothing else (roadmap 0.33 #11). Paths are not
+/// offsets: nothing is converted.
 pub fn service_uses(service: u64, expression: u64) -> u64 {
     reply(uses_text(service, expression))
 }
@@ -271,7 +273,7 @@ fn uses_text(service: u64, expression: u64) -> Result<Vec<u8>, Vec<u8>> {
     let compiled = EXPRESSIONS
         .get(expression)
         .ok_or_else(|| unknown("expression", expression))?;
-    let uses = service.uses(&compiled.reads);
+    let uses = service.uses_of(&compiled.expression);
     Ok(json_reply(&serde_json::to_value(uses).unwrap_or_default()))
 }
 

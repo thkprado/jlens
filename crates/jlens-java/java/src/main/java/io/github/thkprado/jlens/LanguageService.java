@@ -108,7 +108,9 @@ public final class LanguageService implements AutoCloseable {
      * <p>The answer follows the fields the expression reads ({@link Expression#reads()}), an
      * upper bound: the fields it names, those of a predicate included, and the whole value
      * where the analysis cannot follow it ({@code *}, {@code **}, {@code $eval}, the call of a
-     * host function), with every path the schema has under it.
+     * function that is not declared), with every path the schema has under it. The call of a
+     * host function declared to the service reads its arguments alone, as a {@link
+     * HostFunction} receives nothing else: {@code $describe(items[0])} uses {@code items}.
      *
      * @param expression the expression
      * @return what it uses

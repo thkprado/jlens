@@ -39,6 +39,17 @@ All notable changes are recorded here. The format follows
     `EnumChange`;
   - the Java package: `LanguageService.uses(expression)` returns a `Uses` record, and
     `Uses.changes` a `UsesChanges` record; both read and write the JSON form.
+- A host function reads only its arguments in what an expression uses of its schema:
+  `$describe(items[0])` uses `items`, where the call of a function the analysis does not know
+  reads its context whole, the whole input at the top of an expression. `jlens-schema` has
+  `LanguageService::uses_of`, which takes the expression and counts a call to a function
+  declared to the service that way; `LanguageService.uses` in the Java package and
+  `jlens schema uses` answer with it. In the WebAssembly package, give `uses` the reads of
+  `expression.reads(bindings)`.
+- The Java package: `Expression.reads(Bindings)` tells what an expression reads when it is
+  evaluated with those bindings, a call to one of their host functions reading its arguments
+  alone. `reads()` takes such a call as reading its context whole, which the guide did not
+  say.
 
 - A recursive JSON Schema loads ([ADR 0024](docs/src/adr/0024-recursive-schemas.md)): one
   whose `$ref` leads back to itself, as `"$ref": "#"` in a tree, a definition that refers to

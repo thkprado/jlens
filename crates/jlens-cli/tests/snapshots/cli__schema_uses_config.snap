@@ -12,7 +12,6 @@ exit: 0
       ]
     },
     "items": {
-      "whole": true,
       "types": [
         "array"
       ],
@@ -23,25 +22,22 @@ exit: 0
         "object"
       ]
     },
-    "items[].code": {
-      "types": [
-        "string"
-      ],
-      "required": false
-    },
     "items[].quantity": {
+      "whole": true,
       "types": [
         "integer"
       ],
       "required": false
     },
     "items[].type": {
+      "whole": true,
       "types": [
         "string"
       ],
       "required": false
     },
     "items[].unitPrice": {
+      "whole": true,
       "types": [
         "number"
       ],

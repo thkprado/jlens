@@ -643,12 +643,34 @@ public final class Expression implements AutoCloseable {
      * What the expression reads of its input and of its bindings (ADR 0016): the fields to keep
      * of a {@link Document} only this expression evaluates.
      *
+     * <p>The call of a function that is not built in reads its context whole, as the analysis
+     * does not know the function: {@link #reads(Bindings)} knows the host functions of the
+     * bindings.
+     *
      * @return the reads
+     * @throws IllegalStateException when the expression was closed
      */
     public Reads reads() {
+        return reads(Bindings.NONE);
+    }
+
+    /**
+     * What the expression reads of its input and of its bindings (ADR 0016) when it is evaluated
+     * with {@code bindings}: as {@link #reads()}, except that a call to one of their host
+     * functions, which receives its arguments and nothing else, reads its arguments alone, and
+     * the context that a {@code -} of its signature may take. {@code $tax(price)} then reads
+     * {@code price}, where {@link #reads()} reads the whole input.
+     *
+     * @param bindings the bindings the expression is evaluated with
+     * @return the reads
+     * @throws IllegalStateException when the expression or the bindings were closed
+     */
+    public Reads reads(Bindings bindings) {
+        long expression = live();
         try {
-            return Reads.fromJson(Native.json(Native.reads(live())));
+            return Reads.fromJson(Native.json(Native.reads(expression, bindings.live())));
         } finally {
+            Reference.reachabilityFence(bindings);
             Reference.reachabilityFence(this);
         }
     }

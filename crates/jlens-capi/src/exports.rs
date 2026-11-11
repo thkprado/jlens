@@ -30,8 +30,9 @@ export! {
     jlens_compile(source: u64) -> u64 = crate::api::compile, crate::api::panicked;
     /// Frees an expression: 1 when it was live, 0 for an unknown or freed handle.
     jlens_expression_free(expression: u64) -> u32 = crate::api::expression_free, crate::zero;
-    /// What an expression reads: a reply with its reads as JSON text, or the error.
-    jlens_reads(expression: u64) -> u64 = crate::api::reads, crate::api::panicked;
+    /// What an expression reads, evaluated with bindings `bindings` (0 for none): a reply with
+    /// its reads as JSON text, or the error.
+    jlens_reads(expression: u64, bindings: u64) -> u64 = crate::api::reads, crate::api::panicked;
     /// The union of the reads in buffer `reads`, a JSON array: a reply with the union as JSON
     /// text, or the error.
     jlens_union_reads(reads: u64) -> u64 = crate::api::union_reads, crate::api::panicked;

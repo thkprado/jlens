@@ -71,6 +71,29 @@ class DocumentTest {
         try (Expression expression = Expression.compile("$eval('a')")) {
             assertEquals(true, expression.reads().everyBinding());
         }
+        // A host function receives its arguments and nothing else: with the bindings, a call
+        // to one reads them alone, and the context a `-` of its signature may take.
+        try (Bindings bindings = Bindings.builder()
+                        .function("tax", "<n-n?:n>", args -> 0)
+                        .function("rate", 1, args -> 0)
+                        .value("limit", 1)
+                        .build();
+                Expression expression = Expression.compile("$rate(country) + $tax(price) + $limit");
+                Expression context = Expression.compile("order.$tax()");
+                Expression unknown = Expression.compile("$other(price)")) {
+            assertEquals(Read.WHOLE, expression.reads().input());
+            assertEquals(expression.reads(), expression.reads(Bindings.NONE));
+            Reads reads = expression.reads(bindings);
+            assertEquals("{\"input\":{\"country\":true,\"price\":true},"
+                    + "\"bindings\":{\"limit\":true,\"rate\":true,\"tax\":true}}", reads.toJson());
+            assertEquals("{\"order\":{}}", context.reads(bindings).input().toJson());
+            assertEquals(Read.WHOLE, unknown.reads(bindings).input());
+        }
+        Bindings closed = Bindings.builder().function("rate", 1, args -> 0).build();
+        closed.close();
+        try (Expression expression = Expression.compile("$rate(1)")) {
+            assertThrows(IllegalStateException.class, () -> expression.reads(closed));
+        }
         assertEquals(Read.WHOLE, Read.fromJson("true"));
         assertEquals("{\"a\\\"b\":true}", Read.fromJson("{\"a\\\"b\": true}").toJson());
         assertThrows(IllegalArgumentException.class, () -> Read.fromJson("false"));

@@ -80,14 +80,27 @@ pub fn expression_free(expression: u64) -> u32 {
 }
 
 /// Replies with what expression `expression` reads (ADR 0016), as `Expression::reads` gives
-/// it: an object whose `input` is the `read` of `document_new`.
-pub fn reads(expression: u64) -> u64 {
-    reply(
-        EXPRESSIONS
-            .get(expression)
-            .ok_or_else(|| unknown("expression", expression))
-            .map(|compiled| json_reply(&serde_json::to_value(&compiled.reads).unwrap_or_default())),
-    )
+/// it: an object whose `input` is the `read` of `document_new`. Given bindings `bindings` (0
+/// for none), as `Expression::reads_with` gives it: a call to one of their host functions,
+/// which receives nothing else, reads its arguments alone (roadmap 0.33 #11).
+pub fn reads(expression: u64, bindings: u64) -> u64 {
+    reply(reads_text(expression, bindings))
+}
+
+fn reads_text(expression: u64, bindings: u64) -> Result<Vec<u8>, Vec<u8>> {
+    let compiled = EXPRESSIONS
+        .get(expression)
+        .ok_or_else(|| unknown("expression", expression))?;
+    let reads = match bindings {
+        0 => serde_json::to_value(&compiled.reads),
+        bindings => {
+            let bound = BINDINGS
+                .get(bindings)
+                .ok_or_else(|| unknown("bindings", bindings))?;
+            serde_json::to_value(compiled.expression.reads_with(&bound.bindings))
+        }
+    };
+    Ok(json_reply(&reads.unwrap_or_default()))
 }
 
 /// Replies with the union of the reads in buffer `reads`, a JSON array of what `reads` replies

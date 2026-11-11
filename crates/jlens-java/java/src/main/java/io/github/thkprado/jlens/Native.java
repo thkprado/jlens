@@ -63,7 +63,7 @@ final class Native {
     private static final MethodHandle BUFFER_FREE = critical("jlens_buffer_free", U32, U64);
     private static final MethodHandle COMPILE = function("jlens_compile", U64, U64);
     private static final MethodHandle EXPRESSION_FREE = function("jlens_expression_free", U32, U64);
-    private static final MethodHandle READS = function("jlens_reads", U64, U64);
+    private static final MethodHandle READS = function("jlens_reads", U64, U64, U64);
     private static final MethodHandle UNION_READS = function("jlens_union_reads", U64, U64);
     private static final MethodHandle OPTIONS_NEW = function("jlens_options_new", U64, U64);
     private static final MethodHandle OPTIONS_FREE = function("jlens_options_free", U32, U64);
@@ -160,9 +160,9 @@ final class Native {
         }
     }
 
-    static long reads(long expression) {
+    static long reads(long expression, long bindings) {
         try {
-            return (long) READS.invokeExact(expression);
+            return (long) READS.invokeExact(expression, bindings);
         } catch (Throwable e) {
             throw failed(e);
         }

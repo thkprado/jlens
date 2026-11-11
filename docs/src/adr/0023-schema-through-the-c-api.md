@@ -229,5 +229,32 @@ Two exports: `jlens_service_uses` and `jlens_uses_changes`.
 - **The size.** The Windows library is 3,507,200 bytes, 12.2% over 0.32.0 (1,321,041
   compressed, 13.1%), and 4.8% over the library of #3: the answers of #5 and #6, read and
   written as JSON, add 161 KB, as much as the schema reader and the typing did. Decision 1
-  estimated 5 to 6% before #5 and #6; roadmap 0.33 #11 measures the library and the JAR as
+  estimated 5 to 6% before #5 and #6; roadmap 0.33 #12 measures the library and the JAR as
   released, and looks at what of these 161 KB the JSON forms cost.
+
+## Results: a host function reads only its arguments (0.33 #11)
+
+The results of #7 said that Java has no bindings that would change an expression's reads. It
+has: a host function of the C API receives its arguments and nothing else, and the bindings
+mark it so (`HostFunction::without_input`), but the reads worked out when an expression is
+compiled know no function, and take the call of one as reading its context whole. An
+application whose rules call its own functions then got the whole input as used, and every
+change of the schema as a change for every rule.
+
+- **`jlens_service_uses` takes the functions declared to the service as reading their
+  arguments alone**, and the context a `-` of their signature may take. The service already
+  knows them, so the export keeps its two handles and takes no bindings: what an expression
+  uses is a question about the schema and the declarations, asked where no function is at
+  hand to run. `LanguageService::uses_of`, in `jlens-schema`, is that answer, and the CLI gives
+  it too, so that the same configuration gives the same answer at both ends. A function that
+  is not declared still reads its context whole, as does one declared with a signature that
+  is not one.
+- **`jlens_reads` takes the bindings**, 0 for none, and Java has `Expression.reads(Bindings)`.
+  `reads()` is unchanged, and so are the evaluations that cut their own input, which go by it:
+  an expression is compiled once for any bindings, and cutting by the bindings of each
+  evaluation would work the reads out at each one. An application that parses a document for
+  several rules gives `Document.fromJson` the reads with its bindings.
+- **The shared cases** have `$rate(1)`, which uses nothing, `$rate(items[0].price)`, which uses
+  that field, and `$other(items[0].price)`, a function that is not declared, which uses the
+  whole input. The WebAssembly package answers them with `reads(bindings)`, the bindings
+  holding the declared functions.

@@ -247,6 +247,15 @@ class GuideTest {
         }
         // ANCHOR_END: reads
 
+        // ANCHOR: reads_bindings
+        try (Bindings bindings = Bindings.builder().function("tax", 1, args -> 0).build();
+                Expression expression = Expression.compile("$tax(price)")) {
+            assertEquals(Read.WHOLE, expression.reads().input());   // an unknown function
+            assertEquals(new Read.Fields(Map.of("price", Read.WHOLE)),
+                    expression.reads(bindings).input());
+        }
+        // ANCHOR_END: reads_bindings
+
         String text = """
                 {"total": 120, "customer": {"tier": "gold", "notes": "..."}, "log": []}""";
         // ANCHOR: document_read

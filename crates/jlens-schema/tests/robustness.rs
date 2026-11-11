@@ -187,6 +187,12 @@ proptest! {
         prop_assert_eq!(uses.input.is_some(), reads.input().is_some());
         prop_assert_eq!(uses.every_binding, reads.every_binding());
         prop_assert!(!uses.bindings.contains_key("rate"));
+        // With the declared function reading its arguments alone, no path is added.
+        let narrow = whole.uses_of(&expression);
+        prop_assert!(!narrow.bindings.contains_key("rate"));
+        for (path, _) in narrow.input.iter().flatten() {
+            prop_assert!(uses.input.as_ref().is_some_and(|i| i.contains_key(path)), "{}", path);
+        }
         let paths = uses.input.iter().flatten();
         for (path, entry) in paths.chain(uses.bindings.get("limit").into_iter().flatten()) {
             prop_assert!(!entry.unknown || entry.types.is_empty(), "{path}: {entry:?}");

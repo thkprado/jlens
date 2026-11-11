@@ -206,6 +206,47 @@ fn bindings_hold_variables_and_host_functions() {
     );
 }
 
+/// A host function receives its arguments and nothing else, so with the bindings a call to
+/// one reads them alone (roadmap 0.33 #11).
+#[test]
+fn reads_with_bindings_take_a_host_function_as_reading_its_arguments() {
+    let bindings = bindings();
+    let text = buffer(b"$add(price, $rate) + $unknown(1).x");
+    let unknown = buffer(b"$unknown(1)");
+    let compile = |text: u64| match reply(jlens_compile(text)) {
+        Reply::Handle(handle) => handle,
+        other => panic!("{other:?}"),
+    };
+    let (expression, other) = (compile(text), compile(unknown));
+    for buffer in [text, unknown] {
+        assert_eq!(jlens_buffer_free(buffer), 1);
+    }
+    let reads = |expression: u64, bindings: u64| match reply(jlens_reads(expression, bindings)) {
+        Reply::Json(value) => value,
+        other => panic!("{other:?}"),
+    };
+    let narrow = buffer(b"$add(price, 1)");
+    let added = compile(narrow);
+    assert_eq!(jlens_buffer_free(narrow), 1);
+    assert_eq!(reads(added, 0)["input"], json!(true));
+    assert_eq!(reads(added, bindings)["input"], json!({"price": true}));
+    // A function the bindings do not hold still reads its context.
+    assert_eq!(reads(expression, bindings)["input"], json!(true));
+    assert_eq!(reads(other, bindings), reads(other, 0));
+    let freed = reply(jlens_reads(added, bindings ^ (1 << 40)));
+    let Reply::Error(error) = freed else {
+        panic!("{freed:?}")
+    };
+    assert_eq!(
+        (&error["code"], &error["token"]),
+        (&json!("U2002"), &json!("bindings"))
+    );
+    for expression in [expression, other, added] {
+        assert_eq!(jlens_expression_free(expression), 1);
+    }
+    assert_eq!(jlens_bindings_free(bindings), 1);
+}
+
 #[test]
 fn host_functions_call_the_functions_they_receive() {
     let bindings = bindings();

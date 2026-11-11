@@ -258,7 +258,7 @@ proptest! {
                 }
                 Call::Reads(index) => {
                     let Some(expression) = pick(&expressions, index) else { continue };
-                    let replied = reply(jlens_reads(expression.handle))?;
+                    let replied = reply(jlens_reads(expression.handle, 0))?;
                     match expression.live {
                         true => prop_assert_eq!(replied, Replied::Value),
                         false => prop_assert_eq!(replied, unknown()),
@@ -300,7 +300,7 @@ proptest! {
                         8 => prop_assert_eq!(reply(jlens_options_new(handle))?, unknown()),
                         9 => prop_assert_eq!(reply(jlens_document_new(handle, 0))?, unknown()),
                         10 => prop_assert_eq!(reply(jlens_document_new(some, handle))?, unknown()),
-                        11 => prop_assert_eq!(reply(jlens_reads(handle))?, unknown()),
+                        11 => prop_assert_eq!(reply(jlens_reads(handle, 0))?, unknown()),
                         12 => prop_assert_eq!(reply(jlens_union_reads(handle))?, unknown()),
                         13 => {
                             let Some(document) = document else { continue };
@@ -348,7 +348,8 @@ proptest! {
         reply(jlens_evaluate(input, 0, 0, source, 0, 0))?;
         reply(jlens_evaluate_document(source, input, 0, 0, 0, 0))?;
         reply(jlens_evaluate_audited(source, input, 0, 0, input))?;
-        reply(jlens_reads(source))?;
+        reply(jlens_reads(source, 0))?;
+        reply(jlens_reads(source, input))?;
         if let Replied::Handle(options) = reply(jlens_options_new(input))? {
             reply(jlens_evaluate(source, input, 0, options, 0, 0))?;
             reply(jlens_document_new(options, options))?;

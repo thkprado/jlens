@@ -35,6 +35,13 @@ $limits
   changed  max: types integer -> number; required false -> true
 
 $rate(1)
+no change
+
+$rate(items[0].price)
+input
+  changed  items[].price: types number -> integer | string
+
+$other(items[0].price)
 input
   added    customer.since: string, format date, optional
   added    items[].weight: number, optional

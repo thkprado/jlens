@@ -293,8 +293,18 @@ expressions.
   expression gives the same result, or fails with the same error code. Where the analysis cannot
   follow a value, under `*` or `**`, in a constructed object or in the result, it reads the value
   whole. `input()` is `null` when the expression does not read its input.
-- **A host function** does not receive the context of its call, so a call to one reads only its
-  arguments, and the context a `-` parameter may take.
+- **A function that is not built in** reads the context of its call whole, as `reads()` does
+  not know it: `$tax(price)` at the top of an expression reads the whole input. A host function
+  receives its arguments and nothing else, so `reads(bindings)`, given the bindings the
+  expression is evaluated with, takes a call to one of their functions as reading its arguments
+  alone, and the context a `-` of its signature may take:
+
+  ```java
+{{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:reads_bindings}}
+  ```
+
+  The evaluations that cut their own input (`evaluateJson`, `evaluateFromJson`, and `evaluate`
+  over Java objects) go by `reads()`, as an expression serves any bindings.
 - **`everyBinding()`** says the expression may read any binding whole, as `$eval` can: keep them
   all. `toJson()` gives the JSON form, which the other packages and the CLI share.
 
@@ -430,6 +440,10 @@ each field an expression reads, and `changes` compares two such answers (the
 {{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:uses}}
 ```
 
+- **A host function declared to the service** reads its arguments alone, as a `HostFunction`
+  receives nothing else: `$describe(items[0])` uses `items`, not the whole input, which every
+  change of the schema would be a change of. A function that is not declared reads its context
+  whole.
 - **`service.uses(expression)`** returns a `Uses` record: `input()`, a map from each path the
   expression reads of its input to a `Use`, `null` when it does not read it; `bindings()`, the
   same for each variable; and `everyBinding()`. A `Use` has what the schema says of the path:
