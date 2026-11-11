@@ -78,8 +78,9 @@ The Windows library (x86-64, built as `cargo xtask java` builds it; compressed w
 
 On the M1, the macOS library goes from 2,734,592 to 3,133,344 bytes (+14.6%), the JAR with that
 library alone from 1,237,257 to 1,455,594 (+17.6%), and the WebAssembly module, which had the
-schema already, from 1,460,812 to 1,583,753 (+8.4%). The JAR of seven targets is built by the
-`jar.yml` workflow from a push; 0.32.0's is 8,739,574 bytes.
+schema already, from 1,460,812 to 1,583,753 (+8.4%). The JAR of seven targets, built by the
+`jar.yml` workflow in the release's run, is 10,198,056 bytes, where 0.32.0's is 8,739,574
+(+16.7%, 1.46 MB).
 
 ADR 0023 estimated 5 to 6% for the schema and the diagnostics, before the plan added what an
 expression uses (#5 to #7, #11), recursive schemas (#8) and the loader (#9, #10). What the two

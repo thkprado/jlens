@@ -290,7 +290,7 @@ entries have a fixed time (`project.build.outputTimestamp`).
 Maven Central limits what a namespace publishes. Since November 2026 `io.github.thkprado` has an
 open-source exemption (Sonatype ticket #130375): 24 releases, 250 MB and 1,000 files a month,
 set from the project's past releases; ask Sonatype support to review them if the release pace
-changes. A release of jlens is about 9 MB in 24 files, so the number of releases binds first;
+changes. A release of jlens is about 10.7 MB in 24 files, so the number of releases binds first;
 going past a limit starts a grace period of 30 days. Before each tag, read the
 count in the Portal's **Usage Center**. When it leaves no room, release the other channels and
 **Drop** the Java deployment at step 6: the Java package then skips that version. Say so in the
@@ -311,15 +311,25 @@ To set it up, once:
    ed25519 sign never`. Keep the revocation certificate that gpg writes, and the key, out of the
    repository. Send the public key to a key server the Portal reads, one that keeps its user ID
    without a confirmation mail, which a noreply address cannot receive:
-   `gpg --keyserver keyserver.ubuntu.com --send-keys <fingerprint>`. Set
+   `gpg --keyserver keyserver.ubuntu.com --send-keys <fingerprint>`. Send it to
+   `keys.openpgp.org` as well, `gpg --keyserver keys.openpgp.org --send-keys <fingerprint>`,
+   which serves it by fingerprint without the user ID. Set
    `gpg --armor --export-secret-keys <fingerprint>` as the secret `MAVEN_GPG_KEY` and its
    passphrase as `MAVEN_GPG_PASSPHRASE`.
 
 The release key's fingerprint is `D007C3464271F80C1C1DF11BF1B365D7F599090B` (`jlens releases`,
-Ed25519, made 2026-10-26).
+Ed25519, made 2026-10-26). It is on `keyserver.ubuntu.com`, with its user ID, and since 0.33.0
+on `keys.openpgp.org`, without it.
 
-If the key is lost or leaks, revoke it with the certificate, send the revocation to the key
-server, and make a new one: the versions already published stay signed by the old key.
+If the Portal fails a deployment with "Could not find a public key by the key fingerprint", it
+did not find the key on the servers it reads, whatever they answer elsewhere. The deployment of
+0.33.0 failed so three times while the key was on `keyserver.ubuntu.com` alone, where the Portal
+had found it for every release before, and passed once the key was on `keys.openpgp.org` too.
+Check both servers, send the key where it is missing, and run the job again
+(`gh run rerun <run> --failed`); the failed deployments stay in the Portal until dropped.
+
+If the key is lost or leaks, revoke it with the certificate, send the revocation to both key
+servers, and make a new one: the versions already published stay signed by the old key.
 
 To publish a release by hand, download the libraries of a `Release` (or CI) run,
 `gh run download <run> --pattern 'java-native-*' --dir dl`, which puts each artifact in a folder

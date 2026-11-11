@@ -281,5 +281,6 @@ change of the schema as a change for every rule.
   and the typing alone. The two exports of #7 are 206 KB of it: what an expression uses 96 KB,
   the comparison of two answers 55 KB, and their JSON forms, read and written, 54 KB. The forms
   are a quarter of the exports' size and stay; the comparison, large for what it does, is
-  looked at with 0.34's measure. The JAR of seven targets is measured from the release's
-  workflow.
+  looked at with 0.34's measure. The JAR of seven targets, from the release's workflow, is
+  10,198,056 bytes, where 0.32.0's is 8,739,574: 1.46 MB more (16.7%), as the libraries grew,
+  against the 0.5 MB estimated before #5 and #6.
