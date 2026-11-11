@@ -96,3 +96,33 @@ fn the_shared_schema_of_two_documents() {
         );
     }
 }
+
+/// A recursive schema (roadmap 0.33 #8 and #12): what each expression uses of it, as deep as
+/// it goes and once under a value read whole, and what a change in its definition changes.
+#[test]
+fn the_shared_recursive_schema() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/uses/cases.json"
+    );
+    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let fixture = &fixture["recursive"];
+    let service = |schema: &str| {
+        LanguageService::new(Some(Schema::from_json_schema(&fixture[schema]).unwrap()))
+    };
+    let (old, new) = (service("schema"), service("newSchema"));
+    let cases = fixture["cases"].as_array().unwrap();
+    assert!(!cases.is_empty());
+    for case in cases {
+        let text = case["expression"].as_str().unwrap();
+        let expression = Expression::compile(text).unwrap();
+        let uses = old.uses_of(&expression);
+        assert_eq!(serde_json::to_value(&uses).unwrap(), case["uses"], "{text}");
+        let changes = uses.changes(&new.uses_of(&expression));
+        assert_eq!(
+            serde_json::to_value(&changes).unwrap(),
+            case["changes"],
+            "{text}"
+        );
+    }
+}

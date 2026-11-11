@@ -116,6 +116,33 @@ class UsesTest {
         }
     }
 
+    /** The recursive schema that every package answers the same about (roadmap 0.33 #12). */
+    @Test
+    void theSharedRecursiveSchema() throws IOException {
+        Path path = Path.of("..", "..", "..", "fixtures", "uses", "cases.json");
+        Map<String, Object> fixture = Json.object(
+                Json.object(Json.parse(Files.readString(path)), "fixture").get("recursive"),
+                "recursive");
+        List<?> cases = (List<?>) fixture.get("cases");
+        assertFalse(cases.isEmpty());
+        try (Schema schema = Schema.fromJson(Json.write(fixture.get("schema")));
+                Schema newSchema = Schema.fromJson(Json.write(fixture.get("newSchema")));
+                LanguageService old = LanguageService.of(schema);
+                LanguageService current = LanguageService.of(newSchema)) {
+            for (Object item : cases) {
+                Map<String, Object> expected = Json.object(item, "case");
+                String source = (String) expected.get("expression");
+                try (Expression expression = Expression.compile(source)) {
+                    Uses uses = old.uses(expression);
+                    assertEquals(expected.get("uses"), Json.parse(uses.toJson()), source);
+                    assertEquals(uses, Uses.fromJson(uses.toJson()), source);
+                    UsesChanges changes = uses.changes(current.uses(expression));
+                    assertEquals(expected.get("changes"), Json.parse(changes.toJson()), source);
+                }
+            }
+        }
+    }
+
     /** The references a schema did not follow, in the JSON form of the other packages. */
     private static Map<String, Object> report(Schema schema) {
         List<Object> unresolved = new ArrayList<>();

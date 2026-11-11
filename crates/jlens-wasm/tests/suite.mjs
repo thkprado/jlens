@@ -888,6 +888,19 @@ export const cases = [
     }
   }],
 
+  ["a recursive schema: the case every package answers the same", async (j, env) => {
+    const { schema, newSchema, cases } =
+      JSON.parse(await env.load("../../../fixtures/uses/cases.json")).recursive;
+    const old = new j.LanguageService(schema);
+    const current = new j.LanguageService(newSchema);
+    ok(cases.length > 0, "cases");
+    for (const { expression, uses, changes } of cases) {
+      const reads = new j.Expression(expression).reads();
+      equal(old.uses(reads), uses, `uses of ${expression}`);
+      equal(j.usesChanges(old.uses(reads), current.uses(reads)), changes, `changes of ${expression}`);
+    }
+  }],
+
   ["schema sources and schemaReport", (j) => {
     const person = { type: "object", properties: { name: { type: "string" } } };
     const documents = { "https://example.com/s/common.json": { $defs: { person } } };

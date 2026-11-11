@@ -55,6 +55,36 @@ class HostFunctionTest {
         return ((Number) value).doubleValue();
     }
 
+    /**
+     * JSON text is parsed for what the expression reads with its bindings (0.33 #12): a number
+     * too large for a double is not JSON where it is read, and passes where it is skipped.
+     */
+    @Test
+    void jsonTextIsCutByWhatTheHostFunctionsRead() {
+        String text = "{\"price\": 2, \"big\": 1e999}";
+        try (Bindings tax = Bindings.builder()
+                        .function("tax", 1, args -> ((Number) args.get(0)).doubleValue() * 2)
+                        .build();
+                Bindings rate = Bindings.of(Map.of("rate", 2));
+                Expression known = Expression.compile("$tax(price)");
+                Expression whole = Expression.compile("$tax($)");
+                Expression unknown = Expression.compile("$other(price)");
+                Expression variable = Expression.compile("price * $rate")) {
+            for (int i = 0; i < 2; i++) {
+                assertEquals("4", known.evaluateJson(text, tax));
+                assertEquals(4L, known.evaluateFromJson(text, tax));
+                assertEquals("4", variable.evaluateJson(text, rate));
+                for (Runnable read : List.<Runnable>of(
+                        () -> whole.evaluateJson(text, tax),
+                        () -> unknown.evaluateJson(text, tax),
+                        () -> known.evaluateJson(text, rate),
+                        () -> known.evaluateJson(text))) {
+                    assertEquals("U2001", assertThrows(JlensException.class, read::run).code());
+                }
+            }
+        }
+    }
+
     @Test
     void bindingsHoldVariables() {
         try (Expression expression = Expression.compile("$limit + $count(items)");

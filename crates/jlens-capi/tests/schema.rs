@@ -512,6 +512,38 @@ fn a_schema_takes_its_documents_and_reports_what_it_did_not_follow() {
     );
 }
 
+/// The recursive schema that every package answers the same about (roadmap 0.33 #12).
+#[test]
+fn uses_of_a_recursive_schema_are_those_of_the_shared_cases() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/uses/cases.json"
+    );
+    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let fixture = &fixture["recursive"];
+    let make = |version: &str| {
+        let schema = schema(&fixture[version]);
+        let service = handle(service(schema, None));
+        assert_eq!(jlens_schema_free(schema), 1);
+        service
+    };
+    let (old, new) = (make("schema"), make("newSchema"));
+    let cases = fixture["cases"].as_array().unwrap();
+    assert!(!cases.is_empty());
+    for case in cases {
+        let text = case["expression"].as_str().unwrap();
+        let expression = compile(text);
+        let uses = json(reply(jlens_service_uses(old, expression)));
+        assert_eq!(uses, case["uses"], "{text}");
+        let after = json(reply(jlens_service_uses(new, expression)));
+        assert_eq!(json(changes(&uses, &after)), case["changes"], "{text}");
+        assert_eq!(jlens_expression_free(expression), 1);
+    }
+    for service in [old, new] {
+        assert_eq!(jlens_service_free(service), 1);
+    }
+}
+
 #[test]
 fn sources_fail_with_the_codes_of_the_c_api() {
     let text = buffers::insert(b"{}".to_vec());

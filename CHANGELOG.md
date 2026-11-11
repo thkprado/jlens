@@ -50,6 +50,10 @@ All notable changes are recorded here. The format follows
   evaluated with those bindings, a call to one of their host functions reading its arguments
   alone. `reads()` takes such a call as reading its context whole, which the guide did not
   say.
+- The Java package: `evaluateJson` and `evaluateFromJson` with bindings that hold host
+  functions parse the fields that `reads(bindings)` names, where they parsed the whole input
+  whenever the expression called one at its top. Parsing a 23 KB order for
+  `$tax(customer.name)` takes 27 µs where it took 69, on an Apple M1.
 
 - A recursive JSON Schema loads ([ADR 0024](docs/src/adr/0024-recursive-schemas.md)): one
   whose `$ref` leads back to itself, as `"$ref": "#"` in a tree, a definition that refers to

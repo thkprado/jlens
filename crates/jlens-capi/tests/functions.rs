@@ -247,6 +247,58 @@ fn reads_with_bindings_take_a_host_function_as_reading_its_arguments() {
     assert_eq!(jlens_bindings_free(bindings), 1);
 }
 
+/// An evaluation of JSON text with host functions parses the fields their arguments read
+/// (roadmap 0.33 #12): a number too large for a float is not JSON where it is read, and passes
+/// where it is skipped.
+#[test]
+fn json_text_is_cut_by_what_the_bindings_host_functions_read() {
+    let bindings = bindings();
+    let variables_only = match make(None, Some(&json!({"rate": 2}))) {
+        Reply::Handle(handle) => handle,
+        other => panic!("{other:?}"),
+    };
+    let input = buffer(br#"{"price": 2, "items": [{"n": 1, "big": 1e999}], "big": 1e999}"#);
+    let run = |source: &str, bindings: u64| {
+        let text = buffer(source.as_bytes());
+        let Reply::Handle(expression) = reply(jlens_compile(text)) else {
+            panic!("{source}")
+        };
+        assert_eq!(jlens_buffer_free(text), 1);
+        // Twice: the second evaluation finds the reads the first worked out.
+        let replies = [0, 1].map(|_| reply(jlens_evaluate(expression, input, bindings, 0, 0, 0)));
+        assert_eq!(replies[0], replies[1], "{source}");
+        assert_eq!(jlens_expression_free(expression), 1);
+        let [first, _] = replies;
+        first
+    };
+    let not_json = |reply: Reply| match reply {
+        Reply::Error(error) => assert_eq!(error["code"], json!("U2001"), "{error}"),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(run("$add(price, 1)", bindings), Reply::Json(json!(3)));
+    assert_eq!(
+        run("$sum(items.$add(n, 1))", bindings),
+        Reply::Json(json!(2))
+    );
+    assert_eq!(
+        run("$args(price, items.n)", bindings),
+        Reply::Json(json!([2, 1]))
+    );
+    // An argument that reads the field, and a function that receives the context value.
+    not_json(run("$add(big, 1)", bindings));
+    not_json(run("$args($)", bindings));
+    // A function the bindings do not hold reads its context whole, as do bindings without
+    // host functions and no bindings.
+    not_json(run("$unknown(price)", bindings));
+    not_json(run("$add(price, 1)", variables_only));
+    not_json(run("$add(price, 1)", 0));
+    assert_eq!(run("price * $rate", variables_only), Reply::Json(json!(4)));
+    for handle in [bindings, variables_only] {
+        assert_eq!(jlens_bindings_free(handle), 1);
+    }
+    assert_eq!(jlens_buffer_free(input), 1);
+}
+
 #[test]
 fn host_functions_call_the_functions_they_receive() {
     let bindings = bindings();

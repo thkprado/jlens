@@ -617,6 +617,13 @@ extern "C" fn replying(_context: u64, index: u32, frame: u64, _arguments: u64) -
     buffers::insert(vec![REPLY_UNDEFINED])
 }
 
+/// A host function that replies with its arguments, as an array.
+extern "C" fn echoing(_context: u64, _index: u32, _frame: u64, arguments: u64) -> u64 {
+    let mut reply = vec![REPLY_VALUES];
+    buffers::with(arguments, |bytes| reply.extend_from_slice(bytes));
+    buffers::insert(reply)
+}
+
 proptest! {
     /// A host function that replies with any bytes, replies nearly in their form included, or
     /// calls the functions it receives with any bytes, makes the evaluation fail with an error
@@ -654,6 +661,51 @@ proptest! {
             }
             prop_assert_eq!(jlens_expression_free(expression), 1);
         }
+        prop_assert_eq!(jlens_bindings_free(bindings), 1);
+    }
+
+    /// With host functions, JSON text is parsed for what the expression reads given them
+    /// (roadmap 0.33 #12), and gives what the document parsed whole gives.
+    #[test]
+    fn json_text_cut_for_host_functions_gives_what_the_whole_document_gives(
+        input in json(),
+        source in prop::sample::select(vec![
+            "$h()", "$h(a)", "$h($)", "$h(a, b.c)", "$h(a)[0].b", "$h(a[0]).b", "*.$h(a)",
+            "**.$h(b)", "a.$h(b, $)", "$map($.*, $h)", "$map(a, function($v) { $h($v.b) })",
+            "[$h(1), a]", "{'k': $h(a.b)}", "a[$h(b)[0] = 1]", "$h(a).$h(b)", "$h($h(a), d)",
+            "$unknown(a)", "$h(a) & $string($)", "a ~> $h()", "($f := $h; $f(c))",
+            "$h(?, 1)(a.b)", "$h(function() { c })[0]()",
+        ]),
+    ) {
+        let functions = buffers::insert(br#"[{"name": "h", "arity": 1}]"#.to_vec());
+        let Replied::Handle(bindings) = reply(jlens_bindings_new(functions, 0, Some(echoing), 0))?
+        else {
+            return Err(TestCaseError::fail("no bindings"));
+        };
+        prop_assert_eq!(jlens_buffer_free(functions), 1);
+        let expression = compiled(source);
+        let text = buffers::insert(input.to_string().into_bytes());
+        let Replied::Handle(document) = reply(jlens_document_new(text, 0))? else {
+            return Err(TestCaseError::fail("no document"));
+        };
+        for _ in 0..2 {
+            let cut = buffers::take(jlens_evaluate(expression, text, bindings, 0, 0, 0)).unwrap();
+            let whole =
+                buffers::take(jlens_evaluate_document(expression, document, bindings, 0, 0, 0)).unwrap();
+            prop_assert_eq!(cut[0], whole[0], "the same kind of reply");
+            if cut[0] == REPLY_JSON {
+                let cut: Value = serde_json::from_slice(&cut[1..]).unwrap();
+                let whole: Value = serde_json::from_slice(&whole[1..]).unwrap();
+                prop_assert_eq!(cut, whole);
+            } else if cut[0] != REPLY_UNDEFINED {
+                let cut: Value = serde_json::from_slice(&cut[1..]).unwrap();
+                let whole: Value = serde_json::from_slice(&whole[1..]).unwrap();
+                prop_assert_eq!(&cut["code"], &whole["code"]);
+            }
+        }
+        prop_assert_eq!(jlens_document_free(document), 1);
+        prop_assert_eq!(jlens_buffer_free(text), 1);
+        prop_assert_eq!(jlens_expression_free(expression), 1);
         prop_assert_eq!(jlens_bindings_free(bindings), 1);
     }
 

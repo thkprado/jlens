@@ -712,6 +712,51 @@ fn schema_uses_and_changes_of_the_shared_cases() {
     insta::assert_snapshot!("schema_changes_text", text);
 }
 
+/// The recursive schema that every package answers the same about (roadmap 0.33 #12).
+#[test]
+fn schema_uses_and_changes_of_the_shared_recursive_schema() {
+    use serde_json::Value;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixture: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("fixtures/uses/cases.json")).unwrap(),
+    )
+    .unwrap();
+    let fixture = &fixture["recursive"];
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("recursive");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (version, schema) in [("old", "schema"), ("new", "newSchema")] {
+        std::fs::write(
+            dir.join(format!("{version}.schema.json")),
+            fixture[schema].to_string(),
+        )
+        .unwrap();
+    }
+    let cases = fixture["cases"].as_array().unwrap();
+    assert!(!cases.is_empty());
+    for case in cases {
+        let expression = case["expression"].as_str().unwrap();
+        for version in ["old", "new"] {
+            let schema = format!("{version}.schema.json");
+            let uses = stdout(&dir, &["schema", "uses", "--schema", &schema, expression]);
+            std::fs::write(dir.join(format!("{version}.uses.json")), &uses).unwrap();
+            if version == "old" {
+                let uses: Value = serde_json::from_str(&uses).unwrap();
+                assert_eq!(uses, case["uses"], "{expression}");
+            }
+        }
+        let args = [
+            "schema",
+            "changes",
+            "old.uses.json",
+            "new.uses.json",
+            "--json",
+        ];
+        let changes: Value = serde_json::from_str(&stdout(&dir, &args)).unwrap();
+        assert_eq!(changes, case["changes"], "{expression}");
+    }
+}
+
 #[test]
 fn schema_uses() {
     // The schema, the variables and the host functions of the configuration.

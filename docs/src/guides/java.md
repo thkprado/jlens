@@ -134,7 +134,9 @@ comes back as itself, not as a copy, as `$` returns the input: modifying it modi
 `evaluateFromJson` returns Java objects from JSON text. For a document you already have as text,
 such as an HTTP response body, they avoid building Java objects only to read them. While they
 parse, they skip the fields the expression does not [read](#the-fields-an-expression-reads),
-checking them as JSON syntax only:
+checking them as JSON syntax only. With bindings that hold host functions, the fields are those
+of `reads(bindings)`: a call to one of the functions keeps the fields its arguments read, not
+the whole input.
 
 ```java
 {{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:json_text}}

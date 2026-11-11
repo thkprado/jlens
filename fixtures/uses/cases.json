@@ -1221,5 +1221,370 @@
         }
       }
     ]
+  },
+  "recursive": {
+    "schema": {
+      "$ref": "#/$defs/node",
+      "$defs": {
+        "node": {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "size": {
+              "type": "number"
+            },
+            "kind": {
+              "enum": [
+                "file",
+                "folder"
+              ]
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/node"
+              }
+            }
+          }
+        }
+      }
+    },
+    "newSchema": {
+      "$ref": "#/$defs/node",
+      "$defs": {
+        "node": {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "size": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "file",
+                "folder"
+              ]
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/node"
+              }
+            }
+          }
+        }
+      }
+    },
+    "cases": [
+      {
+        "expression": "children.children.name",
+        "uses": {
+          "input": {
+            "$": {
+              "types": [
+                "object"
+              ]
+            },
+            "children": {
+              "types": [
+                "array"
+              ],
+              "required": false
+            },
+            "children[]": {
+              "types": [
+                "object"
+              ]
+            },
+            "children[].children": {
+              "types": [
+                "array"
+              ],
+              "required": false
+            },
+            "children[].children[]": {
+              "types": [
+                "object"
+              ]
+            },
+            "children[].children[].name": {
+              "whole": true,
+              "types": [
+                "string"
+              ],
+              "required": true
+            }
+          },
+          "bindings": {}
+        },
+        "changes": {}
+      },
+      {
+        "expression": "children[kind = 'folder'].children[0].size",
+        "uses": {
+          "input": {
+            "$": {
+              "types": [
+                "object"
+              ]
+            },
+            "children": {
+              "types": [
+                "array"
+              ],
+              "required": false
+            },
+            "children[]": {
+              "types": [
+                "object"
+              ]
+            },
+            "children[].children": {
+              "types": [
+                "array"
+              ],
+              "required": false
+            },
+            "children[].children[]": {
+              "types": [
+                "object"
+              ]
+            },
+            "children[].children[].size": {
+              "whole": true,
+              "types": [
+                "number"
+              ],
+              "required": false
+            },
+            "children[].kind": {
+              "whole": true,
+              "enum": [
+                "file",
+                "folder"
+              ],
+              "closed": true,
+              "required": false
+            }
+          },
+          "bindings": {}
+        },
+        "changes": {
+          "input": {
+            "changed": {
+              "children[].children[].size": {
+                "types": {
+                  "old": [
+                    "number"
+                  ],
+                  "new": [
+                    "string"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "expression": "children",
+        "uses": {
+          "input": {
+            "$": {
+              "types": [
+                "object"
+              ]
+            },
+            "children": {
+              "whole": true,
+              "types": [
+                "array"
+              ],
+              "required": false
+            },
+            "children[]": {
+              "types": [
+                "object"
+              ]
+            },
+            "children[].children": {
+              "types": [
+                "array"
+              ],
+              "required": false
+            },
+            "children[].kind": {
+              "enum": [
+                "file",
+                "folder"
+              ],
+              "closed": true,
+              "required": false
+            },
+            "children[].name": {
+              "types": [
+                "string"
+              ],
+              "required": true
+            },
+            "children[].size": {
+              "types": [
+                "number"
+              ],
+              "required": false
+            }
+          },
+          "bindings": {}
+        },
+        "changes": {
+          "input": {
+            "changed": {
+              "children[].size": {
+                "types": {
+                  "old": [
+                    "number"
+                  ],
+                  "new": [
+                    "string"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "expression": "$",
+        "uses": {
+          "input": {
+            "$": {
+              "whole": true,
+              "types": [
+                "object"
+              ]
+            },
+            "children": {
+              "types": [
+                "array"
+              ],
+              "required": false
+            },
+            "children[]": {
+              "types": [
+                "object"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "file",
+                "folder"
+              ],
+              "closed": true,
+              "required": false
+            },
+            "name": {
+              "types": [
+                "string"
+              ],
+              "required": true
+            },
+            "size": {
+              "types": [
+                "number"
+              ],
+              "required": false
+            }
+          },
+          "bindings": {}
+        },
+        "changes": {
+          "input": {
+            "changed": {
+              "size": {
+                "types": {
+                  "old": [
+                    "number"
+                  ],
+                  "new": [
+                    "string"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "expression": "**.size",
+        "uses": {
+          "input": {
+            "$": {
+              "whole": true,
+              "types": [
+                "object"
+              ]
+            },
+            "children": {
+              "types": [
+                "array"
+              ],
+              "required": false
+            },
+            "children[]": {
+              "types": [
+                "object"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "file",
+                "folder"
+              ],
+              "closed": true,
+              "required": false
+            },
+            "name": {
+              "types": [
+                "string"
+              ],
+              "required": true
+            },
+            "size": {
+              "types": [
+                "number"
+              ],
+              "required": false
+            }
+          },
+          "bindings": {}
+        },
+        "changes": {
+          "input": {
+            "changed": {
+              "size": {
+                "types": {
+                  "old": [
+                    "number"
+                  ],
+                  "new": [
+                    "string"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
   }
 }

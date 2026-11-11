@@ -3,7 +3,8 @@
 
 use std::any::Any;
 use std::cell::RefCell;
-use std::sync::{Arc, LazyLock};
+use std::rc::Rc;
+use std::sync::{Arc, LazyLock, Weak};
 
 use jlens_core::input::{Sink, Source};
 use jlens_core::output::Output;
@@ -237,10 +238,18 @@ fn evaluate_text(
     let options = find_options(options)?;
     let document = match input {
         0 => None,
-        input => Some(
-            buffers::with(input, |bytes| parse(bytes, &compiled.read))
-                .ok_or_else(|| unknown("buffer", input))??,
-        ),
+        input => {
+            // With host functions, what the expression reads is narrower than `compiled.read`.
+            let bound = match &bindings {
+                Some(bound) if bound.functions => Some(bound_read(&compiled, bound)),
+                _ => None,
+            };
+            let read = bound.as_deref().unwrap_or(&compiled.read);
+            Some(
+                buffers::with(input, |bytes| parse(bytes, read))
+                    .ok_or_else(|| unknown("buffer", input))??,
+            )
+        }
     };
     let input = match &document {
         Some(document) => Input::Document(document),
@@ -253,6 +262,51 @@ fn evaluate_text(
         options.as_deref().unwrap_or(&DEFAULTS),
         format,
     )
+}
+
+/// The pairs of an expression and bindings a thread keeps the reads of: an evaluation uses one.
+const BOUND_READS: usize = 8;
+
+thread_local! {
+    /// What this thread's last evaluations of JSON text read of their input, by the objects of
+    /// the expression and of the bindings, which hold host functions: the analysis costs as
+    /// much as parsing a few kilobytes, so it runs once for a pair that is evaluated again.
+    /// Weak references keep their allocations, so a dead one never matches a live object.
+    #[allow(clippy::type_complexity)]
+    static BOUND: RefCell<Vec<(Weak<Compiled>, Weak<Bound>, Rc<Read>)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// What `compiled` reads of its input when evaluated with `bound`, as `Expression::reads_with`
+/// gives it: a call to a host function, which receives its arguments and nothing else, reads
+/// them alone, where `compiled.read`, worked out with no bindings, takes it as reading its
+/// context whole (roadmap 0.33 #12).
+fn bound_read(compiled: &Found<Compiled>, bound: &Found<Bound>) -> Rc<Read> {
+    BOUND.with_borrow_mut(|kept| {
+        if let Some((_, _, read)) = kept.iter().find(|(expression, bindings, _)| {
+            std::ptr::eq(expression.as_ptr(), Arc::as_ptr(compiled.arc()))
+                && std::ptr::eq(bindings.as_ptr(), Arc::as_ptr(bound.arc()))
+        }) {
+            return read.clone();
+        }
+        let read = Rc::new(
+            compiled
+                .expression
+                .reads_with(&bound.bindings)
+                .input()
+                .cloned()
+                .unwrap_or_else(|| Read::Fields(Default::default())),
+        );
+        if kept.len() == BOUND_READS {
+            kept.remove(0);
+        }
+        kept.push((
+            Arc::downgrade(compiled.arc()),
+            Arc::downgrade(bound.arc()),
+            read.clone(),
+        ));
+        read
+    })
 }
 
 /// Evaluates expression `expression` against document `document` with bindings `bindings` (0

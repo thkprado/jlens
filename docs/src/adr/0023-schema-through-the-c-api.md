@@ -250,10 +250,11 @@ change of the schema as a change for every rule.
   is not declared still reads its context whole, as does one declared with a signature that
   is not one.
 - **`jlens_reads` takes the bindings**, 0 for none, and Java has `Expression.reads(Bindings)`.
-  `reads()` is unchanged, and so are the evaluations that cut their own input, which go by it:
-  an expression is compiled once for any bindings, and cutting by the bindings of each
-  evaluation would work the reads out at each one. An application that parses a document for
-  several rules gives `Document.fromJson` the reads with its bindings.
+  `reads()` is unchanged. The evaluations that cut their own input went by it too, as an
+  expression is compiled once for any bindings, and cutting by the bindings of each
+  evaluation would work the reads out at each one; #12 measured it and cuts by the bindings,
+  below. An application that parses a document for several rules gives `Document.fromJson`
+  the reads with its bindings.
 - **The shared cases** have `$rate(1)`, which uses nothing, `$rate(items[0].price)`, which uses
   that field, and `$other(items[0].price)`, a function that is not declared, which uses the
   whole input. The WebAssembly package answers them with `reads(bindings)`, the bindings
