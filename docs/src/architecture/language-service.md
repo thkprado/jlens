@@ -58,6 +58,22 @@ computes the type of each node and applies the evaluator's context rules:
   expression (a declared variable or host function) is not a built-in, and its calls return
   unknown types.
 
+A type also tells whether its value may be undefined, by the span of the operand that makes it
+so; nothing is warned by this alone. The context a node is walked against is always there, as
+each item of a path is. A field step is undefined where the objects may lack the field (it is
+not `required`), an item may not be an object, or the value it steps over may be an empty
+array; `*` and `**` likewise. A path is undefined where one of its steps is, a filter may keep
+nothing, or a step before the last gives an array, which may be empty. The array of the last
+step is the result, empty or not, unless an earlier step gave several items, whose arrays are
+flattened into a sequence, undefined when empty. A path that starts with an array constructor
+is never flattened. Arithmetic, order comparisons and negation are undefined where an operand
+is; `=`, `!=`, `in`, `and`, `or` and `&` are always there, and so is an array constructor. A
+condition without `else` is undefined where its condition is false, `?:` where its fallback is,
+and `??` where both sides are. A built-in's result follows a table in `typing.rs`, which a test
+checks covers the catalog: never undefined (`$exists`, `$count`), undefined where its first
+arguments are (most, as in jsonata-js), or also for some values (`$lookup`, `$filter`,
+`$keys`, `$max`).
+
 While walking, the walker reports *events* to a visitor:
 - a field reference, with the context it is looked up in;
 - a variable reference, with its type and the scope.

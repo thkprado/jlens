@@ -4,12 +4,13 @@
 //! *elements* of the previous step's result (arrays are flattened), predicates see the elements
 //! of their step, `@$var` and `:=` bind variables, and block scopes end with the block. The
 //! types are sets of schema shapes; `partial` marks that something unknown contributed, in
-//! which case no "missing field" warnings are produced.
+//! which case no "missing field" warnings are produced. A type also tells whether its value may
+//! be undefined, and which operand makes it so.
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use jlens_core::ast::{BinaryOp, LambdaDef, Node, NodeKind, Span, Stage};
+use jlens_core::ast::{BinaryOp, FallbackOp, LambdaDef, Node, NodeKind, Span, Stage};
 
 use crate::shape::{Definitions, Field, JsonType, NO_DEFINITIONS, Sh, Shape, members, members_of};
 
@@ -21,6 +22,12 @@ pub(crate) struct Ty<'s> {
     pub shapes: Vec<Sh<'s>>,
     /// Something unknown contributed (a user function, an object constructor, no schema...).
     pub partial: bool,
+    /// The value may be undefined: the span of the operand that makes it so (a field the
+    /// objects may lack, a filter, an array that may be empty, a function that may give
+    /// nothing...). `None` when it is always there, as far as the shapes tell: a `partial`
+    /// type may be anything, undefined included. The context a node is walked against is
+    /// always there, as each item of a path is.
+    pub undefined: Option<Span>,
 }
 
 impl<'s> Ty<'s> {
@@ -28,6 +35,7 @@ impl<'s> Ty<'s> {
         Ty {
             shapes: Vec::new(),
             partial: true,
+            undefined: None,
         }
     }
 
@@ -62,6 +70,7 @@ impl<'s> Ty<'s> {
         Ty {
             partial: unknown || shapes.iter().any(|s| s.types.is_empty()),
             shapes,
+            undefined: None,
         }
     }
 
@@ -72,7 +81,31 @@ impl<'s> Ty<'s> {
             }
         }
         self.partial |= other.partial;
+        self.undefined = self.undefined.or(other.undefined);
         self
+    }
+
+    /// This type, undefined where `cause` is (when it is `Some`).
+    pub fn or_undefined(mut self, cause: Option<Span>) -> Self {
+        self.undefined = self.undefined.or(cause);
+        self
+    }
+
+    /// Whether one of the shapes may be an array, which may be empty.
+    fn has_arrays(&self) -> bool {
+        self.shapes
+            .iter()
+            .any(|s| s.types.contains(&JsonType::Array))
+    }
+
+    /// Whether `*` on this value may give nothing: an array may be empty, an item may not be an
+    /// object, or an object may have none of its fields.
+    fn may_have_no_fields(&self) -> bool {
+        self.has_arrays()
+            || self.elements().shapes.iter().any(|s| {
+                s.types.iter().any(|t| *t != JsonType::Object)
+                    || !s.fields.values().any(|f| f.required)
+            })
     }
 
     /// The items a path step iterates over: arrays are replaced by their items, recursively.
@@ -110,6 +143,7 @@ impl<'s> Ty<'s> {
         let mut out = Ty {
             shapes: Vec::new(),
             partial: self.partial,
+            undefined: None,
         };
         let mut arrays = Vec::new();
         for shape in &self.shapes {
@@ -142,18 +176,26 @@ impl<'s> Ty<'s> {
             .any(|shape| shape.fields.contains_key(name))
     }
 
-    /// The value of field `name` on the element shapes.
-    pub fn field(&self, name: &str) -> Ty<'s> {
+    /// The value of field `name` on the element shapes, looked up by the step at `at`, which
+    /// makes it undefined where an array may be empty, an item may not be an object, or an
+    /// object may lack the field.
+    pub fn field(&self, name: &str, at: Span) -> Ty<'s> {
         let elements = self.elements();
         let mut out = Ty {
             shapes: Vec::new(),
             partial: elements.partial,
+            undefined: None,
         };
+        let mut miss = self.has_arrays();
         for shape in &elements.shapes {
-            if let Some(f) = shape.shape.fields.get(name) {
+            let field = shape.shape.fields.get(name);
+            miss |= shape.types.iter().any(|t| *t != JsonType::Object)
+                || !field.is_some_and(|f| f.required);
+            if let Some(f) = field {
                 out = out.union(Ty::of(&f.shape, shape.defs));
             }
         }
+        out.undefined = miss.then_some(at);
         out
     }
 
@@ -206,6 +248,7 @@ impl<'s> Ty<'s> {
         let mut out = Ty {
             shapes: Vec::new(),
             partial: self.elements().partial,
+            undefined: None,
         };
         for (_, f, defs) in self.fields() {
             out = out.union(Ty::of(&f.shape, defs));
@@ -217,6 +260,7 @@ impl<'s> Ty<'s> {
         let mut out = Ty {
             shapes: Vec::new(),
             partial: self.partial,
+            undefined: None,
         };
         // Iterative, so that a deep schema cannot overflow the stack. `seen` holds the shapes
         // already collected: a recursive schema leads back to them.
@@ -350,12 +394,33 @@ impl<'s> Walker<'s, '_> {
                 let mark = scope.len();
                 let mut cur = ctx.clone();
                 let mut result = Ty::unknown();
-                for step in steps {
+                // Where the path may give nothing. Each step is walked against one item, and
+                // gives nothing where its result for an item may be undefined, a filter may
+                // drop every item, or the step before gave an empty array. An empty array of
+                // the last step is the result as it is, unless the step ran over several items:
+                // their arrays are then flattened into a sequence, which is undefined when
+                // empty. The array constructor that starts a path is never flattened.
+                let mut undefined = None;
+                let mut several = ctx.has_arrays()
+                    && !matches!(
+                        steps.first().map(|s| &s.kind),
+                        Some(NodeKind::Variable { .. })
+                    );
+                let last = steps.len().saturating_sub(1);
+                for (i, step) in steps.iter().enumerate() {
                     let res = self.step(step, &cur, scope);
+                    let cons = i == 0 && step.attrs.cons_array;
+                    let arrays = !cons && res.has_arrays();
+                    undefined = undefined.or(res.undefined);
+                    if arrays && (i < last || several) {
+                        undefined = undefined.or(Some(step.span));
+                    }
+                    several |= arrays || cons;
                     let elements = res.elements();
                     for stage in &step.attrs.stages {
-                        if let Stage::Filter { expr, .. } = stage {
+                        if let Stage::Filter { expr, span, .. } = stage {
                             self.walk(expr, &elements, scope);
+                            undefined = undefined.or(Some(*span));
                         }
                     }
                     // Other steps are walked whole, group-by included.
@@ -387,21 +452,15 @@ impl<'s> Walker<'s, '_> {
                         self.walk(v, &elements, scope);
                     }
                     result = Ty::unknown();
+                } else {
+                    result.undefined = undefined;
                 }
                 scope.truncate(mark);
                 return result;
             }
-            NodeKind::Name { name } => {
-                (self.visit)(Event::Field {
-                    node,
-                    name,
-                    ctx,
-                    scope,
-                });
-                ctx.field(name)
+            NodeKind::Name { .. } | NodeKind::Wildcard | NodeKind::Descendant => {
+                self.step(node, ctx, scope)
             }
-            NodeKind::Wildcard => ctx.all_field_values(),
-            NodeKind::Descendant => ctx.descendants(),
             NodeKind::Variable { name } => {
                 let ty = match name.as_str() {
                     "" => ctx.clone(),
@@ -442,14 +501,20 @@ impl<'s> Walker<'s, '_> {
                     }),
                     _ => {}
                 }
+                // Arithmetic, an order comparison and a range are undefined where a side is;
+                // `=`, `!=`, `in`, `and` and `or` are false there, and `&` reads it as "".
+                let either = left.undefined.or(right.undefined);
                 match op {
                     BinaryOp::Add
                     | BinaryOp::Sub
                     | BinaryOp::Mul
                     | BinaryOp::Div
-                    | BinaryOp::Mod => Ty::literal(JsonType::Number),
+                    | BinaryOp::Mod => Ty::literal(JsonType::Number).or_undefined(either),
+                    BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+                        Ty::literal(JsonType::Boolean).or_undefined(either)
+                    }
                     BinaryOp::Concat => Ty::literal(JsonType::String),
-                    BinaryOp::Range => Ty::scalar(),
+                    BinaryOp::Range => Ty::scalar().or_undefined(either),
                     _ => Ty::literal(JsonType::Boolean),
                 }
             }
@@ -459,13 +524,15 @@ impl<'s> Walker<'s, '_> {
                     operand: expr,
                     ty: &ty,
                 });
-                Ty::literal(JsonType::Number)
+                Ty::literal(JsonType::Number).or_undefined(ty.undefined)
             }
             NodeKind::Array { items } => {
                 let mut ty = Ty::scalar();
                 for item in items {
                     ty = ty.union(self.walk(item, ctx, scope));
                 }
+                // An array is always there, empty where its items are undefined.
+                ty.undefined = None;
                 ty
             }
             NodeKind::Object { pairs } => {
@@ -484,16 +551,27 @@ impl<'s> Walker<'s, '_> {
                 let t = self.walk(then, ctx, scope);
                 match otherwise {
                     Some(e) => t.union(self.walk(e, ctx, scope)),
-                    None => t,
+                    // Undefined where the condition is false.
+                    None => t.or_undefined(Some(condition.span)),
                 }
             }
-            NodeKind::Fallback { lhs, rhs, .. } => {
-                let t = self.walk(lhs, ctx, scope);
-                t.union(self.walk(rhs, ctx, scope))
+            NodeKind::Fallback { op, lhs, rhs } => {
+                let left = self.walk(lhs, ctx, scope);
+                let right = self.walk(rhs, ctx, scope);
+                // The fallback is taken where the value is undefined (`??`), or where it may
+                // also be false (`?:`): the result is undefined only where the fallback is.
+                let undefined = match op {
+                    FallbackOp::Default => right.undefined,
+                    FallbackOp::Coalesce => left.undefined.and(right.undefined),
+                };
+                let mut t = left.union(right);
+                t.undefined = undefined;
+                t
             }
             NodeKind::Block { exprs, .. } => {
                 let mark = scope.len();
-                let mut last = Ty::unknown();
+                // `()` is undefined.
+                let mut last = Ty::unknown().or_undefined(Some(node.span));
                 for e in exprs {
                     last = self.walk(e, ctx, scope);
                 }
@@ -508,7 +586,9 @@ impl<'s> Walker<'s, '_> {
                 }
                 ty
             }
-            NodeKind::Function { procedure, args } => self.call(procedure, args, None, ctx, scope),
+            NodeKind::Function { procedure, args } => {
+                self.call(node.span, procedure, args, None, ctx, scope)
+            }
             NodeKind::Partial { procedure, args } => {
                 self.walk(procedure, ctx, scope);
                 if let NodeKind::Variable { name } = &procedure.kind {
@@ -527,9 +607,14 @@ impl<'s> Walker<'s, '_> {
             NodeKind::Apply { lhs, rhs } => {
                 let value = self.walk(lhs, ctx, scope);
                 match &rhs.kind {
-                    NodeKind::Function { procedure, args } => {
-                        self.call(procedure, args, Some((lhs.span, value)), ctx, scope)
-                    }
+                    NodeKind::Function { procedure, args } => self.call(
+                        rhs.span,
+                        procedure,
+                        args,
+                        Some((lhs.span, value)),
+                        ctx,
+                        scope,
+                    ),
                     _ => {
                         self.walk(rhs, ctx, scope);
                         Ty::unknown()
@@ -563,10 +648,12 @@ impl<'s> Walker<'s, '_> {
                 Ty::unknown()
             }
         };
+        let mut ty = ty;
         let elements = ty.elements();
         for stage in &node.attrs.predicate {
-            if let Stage::Filter { expr, .. } = stage {
+            if let Stage::Filter { expr, span, .. } = stage {
                 self.walk(expr, &elements, scope);
+                ty.undefined = ty.undefined.or(Some(*span));
             }
         }
         if let Some(group) = &node.attrs.group {
@@ -589,10 +676,15 @@ impl<'s> Walker<'s, '_> {
                     ctx,
                     scope,
                 });
-                ctx.field(name)
+                ctx.field(name, step.span)
             }
-            NodeKind::Wildcard => ctx.all_field_values(),
-            NodeKind::Descendant => ctx.descendants(),
+            NodeKind::Wildcard => {
+                let miss = ctx.may_have_no_fields();
+                ctx.all_field_values()
+                    .or_undefined(miss.then_some(step.span))
+            }
+            // Descendants are not told apart: any may be missing.
+            NodeKind::Descendant => ctx.descendants().or_undefined(Some(step.span)),
             NodeKind::Sort { terms } => {
                 for t in terms {
                     self.walk(&t.expr, ctx, scope);
@@ -623,8 +715,10 @@ impl<'s> Walker<'s, '_> {
         scope.truncate(mark);
     }
 
+    /// The type of a call: `span` is the call's, `applied` the value applied with `~>`.
     fn call(
         &mut self,
+        span: Span,
         procedure: &Node,
         args: &[Node],
         applied: Option<(Span, Ty<'s>)>,
@@ -669,17 +763,297 @@ impl<'s> Walker<'s, '_> {
                 && !scope.iter().any(|(v, _)| v == n)
                 && !self.externals.iter().any(|(v, _)| v == n)
         });
-        match name {
-            Some(n) if builtin && PASSTHROUGH.contains(&n) => {
-                types.first().cloned().unwrap_or_else(Ty::unknown)
+        let Some(name) = name.filter(|_| builtin) else {
+            return Ty::unknown();
+        };
+        // An argument left out is the context, where the signature allows it, which is there.
+        let args = |n: usize| types.iter().take(n).find_map(|t| t.undefined);
+        let undefined = match gives_undefined(name).unwrap_or(GivesUndefined::Maybe) {
+            GivesUndefined::Never => None,
+            GivesUndefined::For(n) => args(n),
+            GivesUndefined::Maybe => args(1).or(Some(span)),
+        };
+        let mut ty = if PASSTHROUGH.contains(&name) {
+            types.first().cloned().unwrap_or_else(Ty::unknown)
+        } else if name == "append" {
+            // Undefined only where both arguments are.
+            let mut it = types.into_iter();
+            let a = it.next().unwrap_or_default();
+            let b = it.next().unwrap_or_default();
+            let undefined = a.undefined.filter(|_| b.undefined.is_some());
+            let mut ty = a.union(b);
+            ty.undefined = undefined;
+            return ty;
+        } else if OPAQUE.contains(&name) {
+            Ty::unknown()
+        } else {
+            Ty::scalar()
+        };
+        ty.undefined = undefined;
+        ty
+    }
+}
+
+/// When a built-in function gives undefined, as jsonata-js does, short of an error.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum GivesUndefined {
+    /// Never.
+    Never,
+    /// Where one of its first `n` arguments is undefined.
+    For(usize),
+    /// Where its first argument is undefined, and for some values of its arguments too (a key
+    /// that is not there, a filter that keeps nothing, an empty array...).
+    Maybe,
+}
+
+/// When the built-in function `name` gives undefined; `None` for a name this table does not
+/// know, which a test keeps from being a built-in. `append` is undefined where both its
+/// arguments are, which the walker handles.
+fn gives_undefined(name: &str) -> Option<GivesUndefined> {
+    use GivesUndefined::*;
+    Some(match name {
+        "exists" | "count" | "random" | "millis" | "now" | "zip" | "append" => Never,
+        "string" | "substring" | "substringBefore" | "substringAfter" | "lowercase"
+        | "uppercase" | "length" | "trim" | "pad" | "join" | "formatNumber" | "formatBase"
+        | "formatInteger" | "parseInteger" | "number" | "floor" | "ceil" | "round" | "abs"
+        | "sqrt" | "power" | "boolean" | "not" | "type" | "clone" | "base64encode"
+        | "base64decode" | "encodeUrlComponent" | "encodeUrl" | "decodeUrlComponent"
+        | "decodeUrl" | "fromMillis" | "sum" | "sort" | "reverse" | "shuffle" | "distinct"
+        | "single" | "merge" => For(1),
+        "contains" | "split" | "replace" => For(2),
+        "lookup" | "filter" | "sift" | "average" | "max" | "min" | "match" | "map" | "reduce"
+        | "keys" | "spread" | "each" | "eval" | "assert" | "error" | "toMillis" => Maybe,
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Schema;
+    use serde_json::json;
+
+    /// An order: `id` always there, `note` optional, `customer` an object with a required
+    /// `name` and an optional `email`, `items` an array of objects with a required `price` and
+    /// optional `tags`, `status` a string or null, `meta.sizes` an array.
+    fn schema() -> Schema {
+        Schema::from_json_schema(&json!({
+            "type": "object",
+            "required": ["id", "customer", "items", "status", "meta"],
+            "properties": {
+                "id": {"type": "integer"},
+                "note": {"type": "string"},
+                "customer": {
+                    "type": "object",
+                    "required": ["name"],
+                    "properties": {
+                        "name": {"type": "string"},
+                        "email": {"type": "string"},
+                        "address": {
+                            "type": "object",
+                            "required": ["city"],
+                            "properties": {"city": {"type": "string"}}
+                        }
+                    }
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["price"],
+                        "properties": {
+                            "price": {"type": "number"},
+                            "tags": {"type": "array", "items": {"type": "string"}}
+                        }
+                    }
+                },
+                "codes": {"type": "array", "items": {"type": "string"}},
+                "status": {"type": ["string", "null"]},
+                "meta": {
+                    "type": "object",
+                    "required": ["sizes"],
+                    "properties": {"sizes": {"type": "array", "items": {"type": "number"}}}
+                }
             }
-            Some("append") if builtin => {
-                let mut it = types.into_iter();
-                let a = it.next().unwrap_or_default();
-                a.union(it.next().unwrap_or_default())
-            }
-            Some(n) if builtin && !OPAQUE.contains(&n) => Ty::scalar(),
-            _ => Ty::unknown(),
+        }))
+        .unwrap()
+    }
+
+    /// The text of the operand that may make `expr` undefined, `None` when it is always there.
+    fn cause(expr: &str) -> Option<String> {
+        let schema = schema();
+        let ast = jlens_core::parse_recover(expr);
+        assert!(ast.diagnostics.is_empty(), "{expr}: {:?}", ast.diagnostics);
+        let root = Ty::of(&schema.root, &schema.definitions);
+        let mut visit = |_: Event<'_, '_>| {};
+        let mut walker = Walker {
+            root: root.clone(),
+            externals: &[("bound".to_string(), Ty::literal(JsonType::Number))],
+            visit: &mut visit,
+        };
+        let ty = walker.walk(&ast.root, &root, &mut Vec::new());
+        ty.undefined.map(|s| expr[s.start..s.end].to_string())
+    }
+
+    /// Documents that follow [`schema`]: every optional field there, none of them, and arrays
+    /// empty or with several items.
+    fn documents() -> [serde_json::Value; 3] {
+        [
+            json!({
+                "id": 1, "note": "n", "status": "s", "codes": ["c"], "meta": {"sizes": [1]},
+                "customer": {"name": "Ann", "email": "a@b", "address": {"city": "X"}},
+                "items": [{"price": 2, "tags": ["t"]}]
+            }),
+            json!({
+                "id": 1, "status": null, "meta": {"sizes": []},
+                "customer": {"name": "Bo"}, "items": []
+            }),
+            json!({
+                "id": 2, "status": null, "codes": [], "meta": {"sizes": []},
+                "customer": {"name": "Cy", "address": {"city": "Y"}},
+                "items": [{"price": 1, "tags": []}, {"price": 3, "tags": []}]
+            }),
+        ]
+    }
+
+    /// Whether `expr` is defined on each of the [`documents`], as the engine evaluates it.
+    fn defined(expr: &str) -> Vec<bool> {
+        let compiled = jlens_core::Expression::compile(expr).unwrap();
+        let bindings = jlens_core::Bindings::new().var("bound", 1);
+        documents()
+            .iter()
+            .map(|doc| compiled.evaluate(Some(doc), &bindings).unwrap().is_some())
+            .collect()
+    }
+
+    #[test]
+    fn values_always_there() {
+        for expr in [
+            "id",
+            "customer.name",
+            "$.customer.name",
+            "$$.id",
+            // An array field with no step after it is the array, empty or not.
+            "items",
+            "meta.sizes",
+            // Every item of a path has its required fields, as a predicate's context does.
+            "$count(items[price > 10])",
+            "items[$exists(tags)] ~> $count()",
+            "1",
+            "'a'",
+            "null",
+            "true",
+            "id + 1",
+            "-id",
+            "id > 1",
+            "customer.name & note",
+            "note = 'a'",
+            "note in ['a']",
+            "note and true",
+            "id > 1 ? 'big' : note ?: 'none'",
+            "note ?? 'none'",
+            "[note]",
+            "[note, items.tags]",
+            "{'a': note}",
+            "($x := id; $x + 1)",
+            "$exists(note)",
+            "$count(items.tags)",
+            "$sort(meta.sizes)",
+            "customer.*",
+            "$append(note, id)",
+            "$uppercase(customer.name)",
+            "$substring(customer.name, $length(note))",
+            "$string(id)",
+            "customer.name ~> $uppercase()",
+            "$replace(customer.name, 'a', note)",
+            "$bound + 1",
+            "$now()",
+        ] {
+            assert_eq!(cause(expr), None, "{expr}");
+            assert!(
+                !defined(expr).contains(&false),
+                "{expr} is undefined on a document"
+            );
+        }
+    }
+
+    #[test]
+    fn values_that_may_be_undefined() {
+        for (expr, by) in [
+            // An optional field, and what is under it.
+            ("note", "note"),
+            ("customer.email", "email"),
+            ("customer.address", "address"),
+            ("customer.address.city", "address"),
+            ("$.customer.email", "email"),
+            // A value that is not always an object has no fields.
+            ("status.code", "code"),
+            // A step over an array that may be empty gives nothing.
+            ("items.price", "items"),
+            ("meta.sizes.x", "sizes"),
+            // The arrays of several items are flattened into a sequence, empty when they are.
+            ("items.tags", "items"),
+            ("items[0].tags", "items[0]"),
+            ("codes", "codes"),
+            // A filter may keep nothing.
+            ("customer[name = 'a']", "[name = 'a']"),
+            ("$.customer[0].name", "[0]"),
+            ("customer.name[0]", "[0]"),
+            ("[1, 2][0]", "[0]"),
+            ("status.*", "*"),
+            ("$sum(items.price)", "items"),
+            ("**.name", "**"),
+            // Operators that give undefined for an undefined operand.
+            ("note > 'a'", "note"),
+            ("id + $length(customer.email)", "email"),
+            ("-$length(note)", "note"),
+            ("customer.name ? 1", "customer.name"),
+            ("id > 1 ? 'big' : note", "note"),
+            ("note ?: customer.email", "email"),
+            ("note ?? customer.email", "email"),
+            ("($x := note; $x)", "note"),
+            ("()", "()"),
+            ("customer.(email)", "email"),
+            ("customer.($length(email) + 1)", "email"),
+            // Functions.
+            ("$uppercase(note)", "note"),
+            ("note ~> $uppercase()", "note"),
+            ("$contains(customer.name, note)", "note"),
+            ("$append(note, customer.email)", "note"),
+            ("$sort(codes)", "codes"),
+            ("$lookup(customer, 'name')", "$lookup(customer, 'name')"),
+            (
+                "$filter(items, function($i) { $i.price > 1 })",
+                "$filter(items, function($i) { $i.price > 1 })",
+            ),
+            ("$max(items.price)", "items"),
+            ("$keys(customer)", "$keys(customer)"),
+            ("customer ~> $keys()", "$keys()"),
+        ] {
+            assert_eq!(cause(expr).as_deref(), Some(by), "{expr}");
+            // The typing does not read the values of a filter or a condition, nor which key a
+            // function is given: these may be undefined for all it knows.
+            let conservative = [
+                "$.customer[0].name",
+                "customer.name[0]",
+                "[1, 2][0]",
+                "**.name",
+                "customer.name ? 1",
+                "$lookup(customer, 'name')",
+                "$keys(customer)",
+                "customer ~> $keys()",
+            ];
+            assert!(
+                conservative.contains(&expr) || defined(expr).contains(&false),
+                "{expr} is defined on every document"
+            );
+        }
+    }
+
+    #[test]
+    fn every_built_in_function_is_classified() {
+        for f in jlens_core::function_catalog() {
+            assert!(gives_undefined(f.name).is_some(), "${}", f.name);
         }
     }
 }
