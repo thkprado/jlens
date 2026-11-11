@@ -460,7 +460,9 @@ fn wildcard_first(expr: &str) -> bool {
 /// (`#$j`), which jsonata-js leaves unbound. And a
 /// call with a group-by in tail position of a lambda, whose group-by jsonata-js drops. And
 /// `$fromMillis` with a computed picture, where a marker with an unknown component and a
-/// presentation gives jsonata-js the text "undefined" and jlens `D3132`. And a left side of `??`
+/// presentation gives jsonata-js the text "undefined" and jlens `D3132`; with fractional seconds
+/// other than `[f001]`, or a negative time zone with minutes, two date bugs of jsonata-js 2.2.2
+/// that jlens fixes as its pull requests #855 and #856 do. And a left side of `??`
 /// or `?:` that binds, in the frame it is evaluated in, a name it reads: jsonata-js evaluates
 /// that side twice, so the second sees the first's binding
 /// (`$count($x := [$x, 1]) ?: 0` is 5 there, 4 in jlens).
@@ -509,9 +511,15 @@ fn dropped_quirk(expr: &str) -> bool {
                     .is_some_and(|a| {
                         !matches!(a.kind, NodeKind::String { .. } | NodeKind::Lambda(_))
                     }),
-                NodeKind::Variable { name } if name == "fromMillis" => args
-                    .get(1)
-                    .is_some_and(|a| !matches!(a.kind, NodeKind::String { .. })),
+                NodeKind::Variable { name } if name == "fromMillis" => {
+                    let literal = |i: usize| match args.get(i).map(|a| &a.kind) {
+                        Some(NodeKind::String { value }) => Some(value.as_str()),
+                        _ => None,
+                    };
+                    args.get(1).is_some_and(|_| literal(1).is_none())
+                        || literal(1).is_some_and(short_fraction)
+                        || literal(2).is_some_and(negative_with_minutes)
+                }
                 _ => false,
             },
             NodeKind::Lambda(def) => tail_group(&def.body),
@@ -524,6 +532,27 @@ fn dropped_quirk(expr: &str) -> bool {
         };
     });
     found
+}
+
+/// Whether a date/time picture has a marker of fractional seconds other than `[f001]`, which
+/// jsonata-js 2.2.2 writes as an integer of milliseconds and jlens as the digits of the fraction
+/// (jsonata-js#853).
+fn short_fraction(picture: &str) -> bool {
+    picture
+        .match_indices("[f")
+        .any(|(i, _)| !picture[i..].starts_with("[f001]"))
+}
+
+/// Whether a time zone is negative with minutes (`-0330`), which jsonata-js 2.2.2 reads an hour
+/// off (jsonata-js#852).
+fn negative_with_minutes(timezone: &str) -> bool {
+    let digits: String = timezone
+        .strip_prefix('-')
+        .unwrap_or_default()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits.parse::<u64>().is_ok_and(|n| n % 100 != 0)
 }
 
 /// Whether `node` reads one of `names`, other than as the target of a binding.
@@ -789,7 +818,7 @@ const DATE_PICTURES: &[&str] = &[
     "'[Y0001]-[M01]-[D01]'", "'[H01]:[m01]:[s01].[f001]'", "'[FNn], [D1o] [MNn] [Y]'",
     "'[Y,2]-[M,2]'", "'[h]:[m01] [P]'", "'[Z01:01]'", "'[z]'", "'[d] [F1] [W] [w]'",
     "'[X0001]-W[W01]-[F1]'", "'[MNn,3-3] [Dwo] [YI]'", "'[D01]/[M01]/[Y0001] [H01]:[m01]'",
-    "'[Y0001][M01][D01]'",
+    "'[Y0001][M01][D01]'", "'[s].[f01] [f]'",
 ];
 
 /// The pictures above that give the date: `$toMillis` takes the parts a picture leaves out from
@@ -802,7 +831,7 @@ const FULL_DATE_PICTURES: &[&str] = &[
 ];
 
 #[rustfmt::skip]
-const TIMEZONES: &[&str] = &["'+0530'", "'-0800'", "'0000'", "'+01:00'"];
+const TIMEZONES: &[&str] = &["'+0530'", "'-0800'", "'0000'", "'+01:00'", "'-0330'"];
 
 #[rustfmt::skip]
 const DATES: &[&str] = &[

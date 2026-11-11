@@ -1091,8 +1091,10 @@ pub(crate) fn from_millis(
         if offset.is_nan() {
             return Err(Error::new("D3150").with("value", tz));
         }
-        offset_hours = (offset / 100.0).floor();
+        // Both parts take the sign: "-0330" is -3 hours and -30 minutes. jsonata-js 2.2.2 floors
+        // the hours, so it reads -4 hours and -30 minutes, an hour off (jsonata-js#852).
         offset_minutes = offset % 100.0;
+        offset_hours = (offset - offset_minutes) / 100.0;
     }
     let spec = analyse_datetime_picture(
         picture.unwrap_or("[Y0001]-[M01]-[D01]T[H01]:[m01]:[s01].[f001][Z01:01t]"),
@@ -1156,6 +1158,9 @@ fn format_component(
     }
     match m.component {
         'f' => match (value, &m.integer_format) {
+            (Component::Number(v), Some(format)) if format.primary == Primary::Decimal => {
+                format_fraction(v, m)
+            }
             (Component::Number(v), Some(format)) => format_integer_with(v, format),
             // A name presentation (`[fn]`) leaves no integer format; jsonata-js then throws a
             // TypeError.
@@ -1163,27 +1168,27 @@ fn format_component(
             _ => Ok(String::new()),
         },
         'Z' | 'z' => {
+            // The sign is written once, before the hours and the minutes it applies to
+            // (jsonata-js#852): jsonata-js 2.2.2 writes "-0030" as "-1:-30" with `[Z0]`.
             let offset = offset_hours * 100.0 + offset_minutes;
             let format = m.integer_format.as_ref().expect("integer format");
             let mut s = if format.regular {
-                format_integer_with(offset, format)?
+                format_integer_with(offset.abs(), format)?
             } else {
                 match format.mandatory_digits {
                     1 | 2 => {
-                        let mut s = format_integer_with(offset_hours, format)?;
+                        let mut s = format_integer_with(offset_hours.abs(), format)?;
                         if offset_minutes != 0.0 {
                             s.push(':');
-                            s.push_str(&format_integer(offset_minutes, "00", usize::MAX)?);
+                            s.push_str(&format_integer(offset_minutes.abs(), "00", usize::MAX)?);
                         }
                         s
                     }
-                    3 | 4 => format_integer_with(offset, format)?,
+                    3 | 4 => format_integer_with(offset.abs(), format)?,
                     n => return Err(Error::new("D3134").with("value", n)),
                 }
             };
-            if offset >= 0.0 {
-                s.insert(0, '+');
-            }
+            s.insert(0, if offset < 0.0 { '-' } else { '+' });
             if m.component == 'z' {
                 s.insert_str(0, "GMT");
             }
@@ -1207,6 +1212,58 @@ fn format_component(
             Component::None => Err(Error::new("D3132").with("value", m.component.to_string())),
         },
     }
+}
+
+/// Fractional seconds in a decimal presentation, as the picture rules give (XPath F&O 3.1
+/// §9.8.4.5): the digits of the fraction, padded and cut on the right, so `[f01]` of 33 ms is
+/// "03". A single digit (`[f]`, `[f1]`) allows the full precision, insignificant zeros are left
+/// out down to the mandatory digits, and the separators of the picture count from the left.
+/// jsonata-js 2.2.2 writes the milliseconds as an integer ("33"); this follows its fix
+/// (jsonata-js#853, pull request #855).
+fn format_fraction(ms: f64, m: &Marker) -> Result<String> {
+    let picture: Vec<char> = m.presentation1.chars().collect();
+    // An empty modifier keeps a semicolon of the picture a separator.
+    let format = analyse_integer_picture(&format!("{};", m.presentation1))?;
+    let mut min = format.mandatory_digits;
+    let mut max = min + format.optional_digits;
+    if let Some(width) = &m.width {
+        if let Some(w) = width.min {
+            min = min.max(w);
+        }
+        max = max.max(min);
+        if let Some(w) = width.max {
+            max = max.max(w);
+        }
+    } else if picture.len() == 1 {
+        max = 3;
+    }
+    // `ms` is a whole number below 1,000.
+    let mut fraction: Vec<u8> = format!("{:03}", ms as u32).into_bytes();
+    while fraction.last() == Some(&b'0') {
+        fraction.pop();
+    }
+    fraction.resize(fraction.len().max(min), b'0');
+    fraction.truncate(max);
+    let zero = format.zero_code;
+    let mut digits: Vec<String> = fraction
+        .iter()
+        .map(|&d| {
+            char::from_u32(zero + u32::from(d - b'0'))
+                .unwrap_or('\u{FFFD}')
+                .to_string()
+        })
+        .collect();
+    // Each separator goes before the digit at its position, as jsonata-js prepends it (two
+    // separators in a row come out in reverse order there too).
+    let mut position = 0;
+    for &c in &picture {
+        if c == '#' || (zero..=zero + 9).contains(&(c as u32)) {
+            position += 1;
+        } else if let Some(d) = digits.get_mut(position) {
+            d.insert(0, c);
+        }
+    }
+    Ok(digits.concat())
 }
 
 /// `$toMillis`: parses an ISO 8601 timestamp, or one described by a picture string. `now` is the
@@ -1296,27 +1353,35 @@ fn parse_datetime(
                 if let Some(sep) = separator {
                     r.push_str(&escape_regex(&sep.to_string()));
                     r.push_str("[0-9]+");
+                } else if format.mandatory_digits <= 2 {
+                    // `[Z01]` and `[Z0]` write minutes after a colon, when there are any.
+                    r.push_str("(?::[0-9]+)?");
                 }
                 regex.push_str(&format!("({r})"));
                 let is_z = m.component == 'z';
+                // The sign applies to the hours and the minutes, also of "-00:30", and the
+                // minutes are the last two digits of "-0330" or "-330". jsonata-js 2.2.2 reads
+                // the sign with the hours only and takes the first three characters as hours
+                // (jsonata-js#852, pull request #856).
                 parsers.push(Some((
                     m.component,
                     Box::new(move |v: &str| {
                         let v = if is_z { &v[3.min(v.len())..] } else { v };
-                        let (hours, minutes) =
-                            match separator.and_then(|s| v.find(s).map(|i| (s, i))) {
-                                Some((s, i)) => {
-                                    (js_parse_int(&v[..i]), js_parse_int(&v[i + s.len_utf8()..]))
-                                }
-                                None => {
-                                    if v.len() - 1 <= 2 {
-                                        (js_parse_int(v), 0.0)
-                                    } else {
-                                        (js_parse_int(&v[..3]), js_parse_int(&v[3..]))
-                                    }
-                                }
-                            };
-                        hours * 60.0 + minutes
+                        let sign = if v.starts_with('-') { -1.0 } else { 1.0 };
+                        let v = v.get(1..).unwrap_or_default();
+                        let sep = separator.unwrap_or(':');
+                        let (hours, minutes) = match v.find(sep) {
+                            Some(i) => (
+                                js_parse_int(&v[..i]),
+                                js_parse_int(&v[i + sep.len_utf8()..]),
+                            ),
+                            None if v.len() <= 2 => (js_parse_int(v), 0.0),
+                            None => (
+                                js_parse_int(&v[..v.len() - 2]),
+                                js_parse_int(&v[v.len() - 2..]),
+                            ),
+                        };
+                        sign * (hours * 60.0 + minutes)
                     }),
                 )));
             }

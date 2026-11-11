@@ -835,6 +835,27 @@ fn jsonata_js_quirks_that_expose_javascript_are_dropped() {
     );
 }
 
+/// Two date bugs of jsonata-js 2.2.2 that jlens fixes as jsonata-js's pull requests do:
+/// fractional seconds written as the digits of the fraction (jsonata-js#853, pull request #855
+/// at 8c86a80) and negative offsets with minutes (jsonata-js#852, pull request #856 at
+/// 03a595b). `dates_fixed_upstream.json` holds the cases those pull requests add to the suite,
+/// each with its pull request's number.
+#[test]
+fn date_bugs_fixed_by_jsonata_js_pull_requests_are_fixed() {
+    let cases: Vec<Value> =
+        serde_json::from_str(include_str!("dates_fixed_upstream.json")).unwrap();
+    assert_eq!(cases.len(), 53);
+    for case in &cases {
+        let expr = case["expr"].as_str().unwrap();
+        assert_eq!(
+            eval(expr, case.get("data").cloned().unwrap_or(Value::Null)).as_ref(),
+            Some(&case["result"]),
+            "{}: {expr}",
+            case["description"]
+        );
+    }
+}
+
 #[test]
 fn quirks_found_by_the_differential_tests_match_jsonata_js() {
     // `$base64decode` reads each UTF-16 code unit as its low byte, as Node's `Buffer` does:

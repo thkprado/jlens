@@ -6,6 +6,17 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `$fromMillis` writes fractional seconds as the digits of the fraction, as the picture rules
+  give: `[f01]` of 1,033 ms is "03", where it wrote "33", which reads as 330 ms; `[f]` writes up
+  to three digits without the zeros at the end. `[f001]` is unchanged. As jsonata-js's pull
+  request #855 fixes jsonata-js#853; jsonata-js 2.2.2 still writes "33".
+- A negative timezone with minutes is no longer an hour off: `$fromMillis(0, '[H]:[m] [Z]',
+  '-0330')` is "20:30 -03:30", where it was "19:30 -04:30", and `$toMillis` reads `-03:30`,
+  `-00:30` and `-330` (`[Z001]`) with their sign on the minutes too. As jsonata-js's pull request
+  #856 fixes jsonata-js#852; jsonata-js 2.2.2 still has the bug.
+
 ## [0.33.0]
 
 Expressions checked again when their schema changes. The Java package reads a JSON Schema and
