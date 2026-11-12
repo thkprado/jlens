@@ -79,3 +79,4 @@
   - [0023 The schema through the C API](adr/0023-schema-through-the-c-api.md)
   - [0024 Recursive schemas](adr/0024-recursive-schemas.md)
   - [0025 References to other documents](adr/0025-references-to-other-documents.md)
+  - [0026 Our own JSON Schema reader](adr/0026-own-json-schema-reader.md)
