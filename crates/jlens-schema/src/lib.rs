@@ -56,4 +56,4 @@ pub use service::{
     CompletionItem, CompletionKind, Completions, FunctionDecl, Hover, LanguageService, ResultCheck,
     ResultType, SignatureHelp, ValueCondition, ValueRequest, value_literal,
 };
-pub use shape::{Definitions, Field, JsonType, MissingPath, Override, Schema, Shape};
+pub use shape::{Definitions, Field, JsonType, MissingPath, OtherFields, Override, Schema, Shape};

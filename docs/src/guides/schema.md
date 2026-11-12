@@ -386,6 +386,25 @@ user-defined function, an object constructor or `$lookup`, so the warnings do no
 alarms. Schemas inferred from samples can miss optional fields that the samples did not contain.
 Add those fields with overrides, or treat `W0201` as advice.
 
+### Objects open to other fields
+
+JSON Schema lets an object have fields its `properties` do not list, unless
+`additionalProperties` is `false`. jlens takes an object that lists its fields in `properties`
+to have those alone, and warns about another one: it is most often a typo, and the warning is
+what the schema is there for. An object that says it has others is not warned about: one with
+`additionalProperties` other than `false` (`true` or a schema), with `patternProperties`, or
+with no field listed at all, such as `{"type": "object"}`, often a map whose keys are data. An
+object always empty in the samples a schema is inferred from lists no field either.
+
+`additionalProperties` gives such a field its type, and each pattern of `patternProperties` the
+fields whose names it matches (an ECMAScript regular expression, which may match anywhere in the
+name). With `"additionalProperties": {"type": "number"}` on `totals`, `totals.usd + 1` gets
+nothing and `totals.usd > 'a'` gets `W0208`. A field the object does not list may be absent,
+which counts for the [result's type](#the-type-of-the-result). Patterns alone leave the other
+fields unknown; with `"additionalProperties": false` beside them, a name no pattern matches is
+warned about. A name that several patterns match, or that a pattern takes too long to match, has
+a type that is not known, and so has a field of `{"type": "object"}`.
+
 ## The type of the result
 
 An application often knows the type an expression must give: the conditions of a rules engine

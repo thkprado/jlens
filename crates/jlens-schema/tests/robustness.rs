@@ -12,11 +12,37 @@ const TOKENS: &[&str] = &[
     "$map(", "$rate(", "%", "%.", "login =", "name in", "or", "type =", "unitPrice in [", "$summ(", "$bad(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
 ];
 
+/// The types a JSON value has, as the typing names them.
+fn types_of(value: &serde_json::Value) -> Vec<JsonType> {
+    match value {
+        serde_json::Value::Null => vec![JsonType::Null],
+        serde_json::Value::Bool(_) => vec![JsonType::Boolean],
+        serde_json::Value::Number(n) if n.as_f64().is_some_and(|f| f.fract() == 0.0) => {
+            vec![JsonType::Integer, JsonType::Number]
+        }
+        serde_json::Value::Number(_) => vec![JsonType::Number],
+        serde_json::Value::String(_) => vec![JsonType::String],
+        serde_json::Value::Array(_) => vec![JsonType::Array],
+        serde_json::Value::Object(_) => vec![JsonType::Object],
+    }
+}
+
 fn text() -> impl Strategy<Value = String> {
     prop_oneof![
         4 => prop::collection::vec(prop::sample::select(TOKENS), 0..20).prop_map(|t| t.join("")),
         1 => any::<String>(),
     ]
+}
+
+#[rustfmt::skip]
+const OPEN_TOKENS: &[&str] = &[
+    "meta", "totals", "labels", "sealed", "regions", "a", "b", "usd", "count", "`x-a`", "n1",
+    "flag", "north", "qty", "sub", ".", "*", "**", "[", "]", "[0]", "(", ")", "1", "'s'", "+",
+    ">", "=", "and", "&", "$sum(", "$count(", "$exists(", "$keys(", ",", "%.", " ",
+];
+
+fn open_text() -> impl Strategy<Value = String> {
+    prop::collection::vec(prop::sample::select(OPEN_TOKENS), 0..16).prop_map(|t| t.join(""))
 }
 
 proptest! {
@@ -76,17 +102,7 @@ proptest! {
                 match value {
                     None => prop_assert!(result.undefined.is_some(), "undefined: {result:?}"),
                     Some(value) => {
-                        let actual = match &value {
-                            serde_json::Value::Null => vec![JsonType::Null],
-                            serde_json::Value::Bool(_) => vec![JsonType::Boolean],
-                            serde_json::Value::Number(n) if n.as_f64().is_some_and(|f| f.fract() == 0.0) => {
-                                vec![JsonType::Integer, JsonType::Number]
-                            }
-                            serde_json::Value::Number(_) => vec![JsonType::Number],
-                            serde_json::Value::String(_) => vec![JsonType::String],
-                            serde_json::Value::Array(_) => vec![JsonType::Array],
-                            serde_json::Value::Object(_) => vec![JsonType::Object],
-                        };
+                        let actual = types_of(&value);
                         prop_assert!(actual.iter().any(|t| types.contains(t)), "{value}: {result:?}");
                     }
                 }
@@ -164,6 +180,78 @@ proptest! {
             let completions = body.complete(&text, offset);
             prop_assert!(completions.range.end <= text.len());
             if let Some(hover) = body.hover(&text, offset) {
+                prop_assert!(hover.range.end <= text.len());
+            }
+        }
+    }
+
+    /// Objects open to other fields (`additionalProperties`, `patternProperties`, or no field
+    /// listed): what the typing says of a result holds on documents that follow the schema,
+    /// and nothing panics.
+    #[test]
+    fn an_open_object_is_typed_as_its_documents(text in open_text()) {
+        let schema = Schema::from_json_schema(&json!({
+            "type": "object",
+            "required": ["meta", "totals", "labels", "sealed"],
+            "properties": {
+                "meta": {"type": "object"},
+                "totals": {
+                    "type": "object",
+                    "required": ["count"],
+                    "properties": {"count": {"type": "integer"}},
+                    "additionalProperties": {"type": "number"}
+                },
+                "labels": {
+                    "type": "object",
+                    "patternProperties": {"^x-": {"type": "string"}, "^n": {"type": "number"}},
+                    "additionalProperties": {"type": "boolean"}
+                },
+                "sealed": {
+                    "type": "object",
+                    "properties": {"a": {"type": "number"}},
+                    "additionalProperties": false
+                },
+                "regions": {"type": "object", "additionalProperties": {"$ref": "#/$defs/region"}}
+            },
+            "$defs": {"region": {
+                "type": "object",
+                "required": ["qty"],
+                "properties": {"qty": {"type": "number"}, "sub": {"$ref": "#/$defs/region"}}
+            }}
+        }))
+        .unwrap();
+        let samples = [
+            json!({
+                "meta": {"a": "s", "b": [1, {"a": true}]},
+                "totals": {"count": 2, "usd": 1.5, "eur": 3},
+                "labels": {"x-a": "s", "n1": 2, "flag": true},
+                "sealed": {"a": 1},
+                "regions": {"north": {"qty": 1, "sub": {"qty": 3}}, "south": {"qty": 2.5}}
+            }),
+            json!({"meta": {}, "totals": {"count": 0}, "labels": {}, "sealed": {}}),
+        ];
+        let service = LanguageService::new(Some(schema)).with_result_type([JsonType::Boolean]);
+        for d in service.diagnostics(&text) {
+            prop_assert!(d.span.start <= d.span.end && d.span.end <= text.len(), "{d:?}");
+        }
+        let result = service.result_type(&text);
+        if let (Some(types), Ok(expr)) = (&result.types, jlens_core::Expression::compile(&text)) {
+            let options = jlens_core::Options::default().max_steps(10_000);
+            let bindings = jlens_core::Bindings::new();
+            for sample in &samples {
+                match expr.evaluate_with(Some(sample), &bindings, &options) {
+                    Ok(None) => prop_assert!(result.undefined.is_some(), "undefined: {result:?}"),
+                    Ok(Some(value)) => {
+                        let actual = types_of(&value);
+                        prop_assert!(actual.iter().any(|t| types.contains(t)), "{value}: {result:?}");
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+        for offset in 0..=text.len() + 1 {
+            prop_assert!(service.complete(&text, offset).range.end <= text.len());
+            if let Some(hover) = service.hover(&text, offset) {
                 prop_assert!(hover.range.end <= text.len());
             }
         }

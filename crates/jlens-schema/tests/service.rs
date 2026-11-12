@@ -291,6 +291,97 @@ fn diagnostics_report_unknown_fields() {
 }
 
 #[test]
+fn objects_open_to_other_fields() {
+    use jlens_schema::JsonType::Boolean;
+    let schema = Schema::from_json_schema(&json!({
+        "type": "object",
+        "required": ["closed", "sealed", "empty", "meta", "totals", "labels", "tagged", "anything", "regions"],
+        "properties": {
+            "closed": {"type": "object", "properties": {"a": {"type": "number"}}},
+            "sealed": {
+                "type": "object",
+                "properties": {"a": {"type": "number"}},
+                "additionalProperties": false
+            },
+            "empty": {"type": "object", "additionalProperties": false},
+            "meta": {"type": "object"},
+            "totals": {
+                "type": "object",
+                "required": ["count"],
+                "properties": {"count": {"type": "integer"}},
+                "additionalProperties": {"type": "number", "description": "A total by currency"}
+            },
+            "labels": {"type": "object", "patternProperties": {"^x-": {"type": "string"}}},
+            "tagged": {
+                "type": "object",
+                "patternProperties": {"^x-": {"type": "string"}, "^n-": {"type": "number"}},
+                "additionalProperties": false
+            },
+            "anything": {
+                "type": "object",
+                "properties": {"a": {"type": "number"}},
+                "additionalProperties": true
+            },
+            "regions": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "required": ["qty"],
+                    "properties": {"qty": {"type": "number"}}
+                }
+            },
+            "either": {"anyOf": [
+                {"type": "object", "properties": {"a": {"type": "number"}}},
+                {"type": "object", "additionalProperties": {"type": "string"}}
+            ]}
+        }
+    }))
+    .unwrap();
+    let svc = LanguageService::new(Some(schema.clone()));
+    for (text, expected) in [
+        // `properties` alone list the fields, as `additionalProperties: false` does.
+        ("closed.b", vec![("W0201", "b")]),
+        ("sealed.b", vec![("W0201", "b")]),
+        ("empty.b", vec![("W0201", "b")]),
+        // No field listed at all, or other fields declared: any field may be there.
+        ("meta.b", vec![]),
+        ("meta.b + 1", vec![]),
+        ("anything.b.c", vec![]),
+        ("labels.color", vec![]),
+        ("either.b", vec![]),
+        // `additionalProperties` gives the other fields their type, a pattern those it
+        // matches.
+        ("totals.usd + 1", vec![]),
+        ("totals.usd > 'a'", vec![("W0208", "totals.usd > 'a'")]),
+        ("labels.`x-color` + 1", vec![("W0209", "labels.`x-color`")]),
+        ("tagged.`n-count` + 1", vec![]),
+        ("tagged.`x-color` & tagged.`n-count`", vec![]),
+        ("tagged.`x-color` + 1", vec![("W0209", "tagged.`x-color`")]),
+        ("tagged.color", vec![("W0201", "color")]),
+        ("regions.north.qty > 1", vec![]),
+        ("regions.north.qtx", vec![("W0201", "qtx")]),
+        ("either.b & 'x'", vec![]),
+        // The values of `*` are several, and of a type the other fields give.
+        ("$sum(totals.*) > 1", vec![]),
+        ("totals.* > 1", vec![("W0215", "totals.*")]),
+    ] {
+        let got = located(&svc, text);
+        let got: Vec<(&str, &str)> = got.iter().map(|(c, s)| (c.as_str(), s.as_str())).collect();
+        assert_eq!(got, expected, "{text}");
+    }
+    // A field the schema does not list may be absent.
+    let boolean = LanguageService::new(Some(schema)).with_result_type([Boolean]);
+    assert_eq!(located(&boolean, "totals.count > 1"), []);
+    assert_eq!(
+        located(&boolean, "totals.usd > 1"),
+        [("W0214".to_owned(), "usd".to_owned())]
+    );
+    let (text, offset) = cursor("totals.u|sd");
+    let hover = svc.hover(&text, offset).unwrap();
+    assert_eq!(hover.contents, "`usd`: number\n\nA total by currency");
+}
+
+#[test]
 fn diagnostics_report_unknown_functions_and_argument_counts() {
     use jlens_schema::FunctionDecl;
     let svc = LanguageService::new(None)

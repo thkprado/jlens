@@ -1911,8 +1911,31 @@ impl LanguageService {
                         }
                         s
                     }
-                    None if ctx.is_known_objects() => format!("`{name}`: not in the schema"),
-                    None => format!("`{name}`"),
+                    // A field an open object may have, with the shape it gives it.
+                    None => match ctx
+                        .elements()
+                        .shapes
+                        .iter()
+                        .find_map(|s| s.shape.other_field(name).map(|o| (o, s.defs)))
+                    {
+                        Some((other, defs)) if !other.types.is_empty() => {
+                            let mut s = format!("`{name}`: {}", summary(other, defs));
+                            if let Some(docs) = shape_docs(other, defs, None) {
+                                s.push_str(
+                                    "
+
+",
+                                );
+                                s.push_str(&docs);
+                            }
+                            s
+                        }
+                        Some(_) => format!("`{name}`"),
+                        None if ctx.is_known_objects() => {
+                            format!("`{name}`: not in the schema")
+                        }
+                        None => format!("`{name}`"),
+                    },
                 };
                 consider(span, contents);
             }

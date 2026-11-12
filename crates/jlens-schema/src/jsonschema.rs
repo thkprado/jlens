@@ -20,7 +20,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::{Map, Value as JsonValue, json};
 
-use crate::shape::{Definitions, Field, JsonType, Schema, Shape};
+use crate::shape::{Definitions, Field, JsonType, OtherFields, Schema, Shape};
 use crate::uri::{percent_decode, relative, resolve, split_fragment};
 
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
@@ -59,9 +59,9 @@ impl Schema {
         doc
     }
 
-    /// Reads a JSON Schema document. Supports `type`, `properties`, `required`, `items`,
-    /// `enum`, `const`, `format`, `minimum`, `maximum`, `minItems`, `title`, `description`,
-    /// `examples`,
+    /// Reads a JSON Schema document. Supports `type`, `properties`, `required`,
+    /// `patternProperties`, `additionalProperties` ([`Shape::other_fields`]), `items`, `enum`,
+    /// `const`, `format`, `minimum`, `maximum`, `minItems`, `title`, `description`, `examples`,
     /// `$ref`, `$id`, `$anchor`, and `anyOf`/`oneOf`/`allOf` (whose branches are merged). Other
     /// keywords are ignored.
     ///
@@ -408,6 +408,29 @@ fn export(shape: &Shape, definitions: &Definitions) -> JsonValue {
             out.insert("required".into(), required.into());
         }
     }
+    if let Some(other) = &shape.other_fields {
+        if !other.patterns.is_empty() {
+            let patterns: Map<String, JsonValue> = other
+                .patterns
+                .iter()
+                .map(|(pattern, p)| (pattern.clone(), export(p, definitions)))
+                .collect();
+            out.insert("patternProperties".into(), patterns.into());
+        }
+        match other.rest.as_deref() {
+            None => {
+                out.insert("additionalProperties".into(), false.into());
+            }
+            // Patterns alone leave the other fields unknown when read back.
+            Some(rest) if *rest == Shape::default() && !other.patterns.is_empty() => {}
+            Some(rest) if *rest == Shape::default() => {
+                out.insert("additionalProperties".into(), true.into());
+            }
+            Some(rest) => {
+                out.insert("additionalProperties".into(), export(rest, definitions));
+            }
+        }
+    }
     if let Some(items) = &shape.items {
         out.insert("items".into(), export(items, definitions));
     }
@@ -439,8 +462,13 @@ fn subschemas<'d>(map: &'d Map<String, JsonValue>, out: &mut Vec<&'d JsonValue>)
             out.extend(branches);
         }
     }
-    if let Some(JsonValue::Object(properties)) = map.get("properties") {
-        out.extend(properties.values());
+    for key in ["properties", "patternProperties"] {
+        if let Some(JsonValue::Object(properties)) = map.get(key) {
+            out.extend(properties.values());
+        }
+    }
+    if let Some(additional @ JsonValue::Object(_)) = map.get("additionalProperties") {
+        out.push(additional);
     }
     match map.get("items") {
         Some(items @ JsonValue::Object(_)) => out.push(items),
@@ -909,6 +937,32 @@ impl<'d> Importer<'d> {
             }
             add_type(&mut shape, "object");
         }
+        let patterns = map.get("patternProperties").and_then(JsonValue::as_object);
+        let additional = map.get("additionalProperties");
+        if patterns.is_some() || additional.is_some() {
+            let mut other = OtherFields::default();
+            for (pattern, p) in patterns.into_iter().flatten() {
+                other
+                    .patterns
+                    .push((pattern.clone(), self.import(p, depth + 1)?));
+            }
+            other.rest = match additional {
+                Some(JsonValue::Bool(false)) => None,
+                Some(rest) => Some(Box::new(self.import(rest, depth + 1)?)),
+                // A schema of patterns alone says nothing of the other fields.
+                None => (!other.patterns.is_empty()).then(Box::default),
+            };
+            // Another `other_fields` is that of a `$ref` or a branch: these keywords hold
+            // beside it, as `properties` do.
+            match shape.other_fields.take() {
+                Some(mut before) => {
+                    union_others(&mut before, other);
+                    shape.other_fields = Some(before);
+                }
+                None => shape.other_fields = Some(Box::new(other)),
+            }
+            add_type(&mut shape, "object");
+        }
         match map.get("items") {
             Some(items @ JsonValue::Object(_)) => {
                 shape.items = Some(Box::new(self.import(items, depth + 1)?));
@@ -984,6 +1038,29 @@ fn add_type(shape: &mut Shape, name: &str) {
 
 /// Merges `other` into `shape` (union of types and fields).
 fn merge(shape: &mut Shape, other: Shape) {
+    // An object of either shape may have a field either may have.
+    let open = |s: &Shape| -> Option<Box<OtherFields>> {
+        match &s.other_fields {
+            None if s.is_object() && s.fields.is_empty() => Some(Box::new(OtherFields {
+                patterns: Vec::new(),
+                rest: Some(Box::default()),
+            })),
+            others => others.clone(),
+        }
+    };
+    let (mine, theirs) = (open(shape), open(&other));
+    let empty = shape.fields.is_empty() && other.fields.is_empty();
+    shape.other_fields = match (mine, theirs) {
+        (Some(mut a), Some(b)) => {
+            union_others(&mut a, *b);
+            Some(a)
+        }
+        (a, b) => a.or(b),
+    };
+    if shape.other_fields.is_none() && empty && (shape.is_object() || other.is_object()) {
+        // Both had no field at all: an object that has none, still.
+        shape.other_fields = Some(Box::default());
+    }
     let arrays = shape.types.contains(&JsonType::Array);
     let other_arrays = other.types.contains(&JsonType::Array);
     for t in other.types {
@@ -1032,6 +1109,34 @@ fn merge(shape: &mut Shape, other: Shape) {
     shape.label = shape.label.take().or(other.label);
 }
 
+/// Adds the other fields of `other` to those of `shape`: an object may have a field either
+/// may have. A pattern of one takes the other's rest too, where that has one.
+fn union_others(shape: &mut OtherFields, other: OtherFields) {
+    let mut patterns = std::mem::take(&mut shape.patterns);
+    for (_, p) in &mut patterns {
+        if let Some(rest) = &other.rest {
+            merge(p, (**rest).clone());
+        }
+    }
+    for (pattern, mut p) in other.patterns {
+        if let Some(rest) = &shape.rest {
+            merge(&mut p, (**rest).clone());
+        }
+        match patterns.iter_mut().find(|(q, _)| *q == pattern) {
+            Some((_, q)) => merge(q, p),
+            None => patterns.push((pattern, p)),
+        }
+    }
+    shape.patterns = patterns;
+    shape.rest = match (shape.rest.take(), other.rest) {
+        (Some(mut a), Some(b)) => {
+            merge(&mut a, *b);
+            Some(a)
+        }
+        (a, b) => a.or(b),
+    };
+}
+
 impl Shape {
     /// A copy without inference bookkeeping, as produced by a JSON Schema round trip.
     pub fn without_state(&self) -> Shape {
@@ -1052,6 +1157,14 @@ impl Shape {
             label: self.label.clone(),
             hidden: self.hidden,
             references: self.references.clone(),
+            other_fields: self.other_fields.as_ref().map(|other| {
+                Box::new(OtherFields {
+                    patterns: (other.patterns.iter())
+                        .map(|(pattern, p)| (pattern.clone(), p.without_state()))
+                        .collect(),
+                    rest: (other.rest.as_ref()).map(|rest| Box::new(rest.without_state())),
+                })
+            }),
             ..Shape::default()
         };
         for (k, f) in &self.fields {
@@ -1153,5 +1266,86 @@ mod tests {
         assert_eq!((a.min_items, a.min_items_inferred), (Some(2), false));
         assert_eq!(schema.shape_at("b").unwrap().min_items, Some(1));
         assert_eq!(schema.shape_at("c").unwrap().min_items, None);
+    }
+
+    #[test]
+    fn other_fields_of_an_object() {
+        let doc = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {
+                "meta": {"type": "object"},
+                "sealed": {"type": "object", "additionalProperties": false},
+                "open": {
+                    "type": "object",
+                    "properties": {"a": {"type": "number"}},
+                    "additionalProperties": true
+                },
+                "labels": {"type": "object", "patternProperties": {"^x-": {"type": "string"}}},
+                "tagged": {
+                    "type": "object",
+                    "patternProperties": {"^x-": {"type": "string"}},
+                    "additionalProperties": false
+                },
+                "totals": {"type": "object", "additionalProperties": {"type": "number"}}
+            }
+        });
+        let schema = Schema::from_json_schema(&doc).unwrap();
+        assert_eq!(schema.to_json_schema(), doc);
+        let at = |path: &str| schema.shape_at(path).map(|s| s.types.clone());
+        assert_eq!(at("meta.any"), Some(vec![]));
+        assert_eq!(at("sealed.any"), None);
+        assert_eq!(at("open.any"), Some(vec![]));
+        assert_eq!(at("labels.x-a"), Some(vec![JsonType::String]));
+        assert_eq!(at("labels.any"), Some(vec![]));
+        assert_eq!(at("tagged.x-a"), Some(vec![JsonType::String]));
+        assert_eq!(at("tagged.any"), None);
+        assert_eq!(at("totals.usd"), Some(vec![JsonType::Number]));
+
+        // A pattern that is not a regular expression may match any name.
+        let schema = Schema::from_json_schema(&json!({
+            "type": "object",
+            "patternProperties": {"(": {"type": "string"}},
+            "additionalProperties": false
+        }))
+        .unwrap();
+        assert_eq!(schema.root.other_field("a").unwrap().types, []);
+
+        // An object that is a map of itself is a recursive schema.
+        let schema = Schema::from_json_schema(&json!({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "additionalProperties": {"$ref": "#"}
+        }))
+        .unwrap();
+        assert_eq!(schema.definitions.len(), 1);
+        let name = schema.shape_at("a.b.name").unwrap();
+        assert_eq!(name.types, [JsonType::String]);
+
+        // Branches: an object of either may have a field either may have.
+        let schema = Schema::from_json_schema(&json!({"anyOf": [
+            {"type": "object", "properties": {"a": {"type": "number"}}},
+            {"type": "object", "additionalProperties": {"type": "string"}}
+        ]}))
+        .unwrap();
+        assert_eq!(
+            schema.root.other_field("b").unwrap().types,
+            [JsonType::String]
+        );
+        let schema = Schema::from_json_schema(&json!({"anyOf": [
+            {"type": "object", "properties": {"a": {"type": "number"}}},
+            {"type": "null"}
+        ]}))
+        .unwrap();
+        assert!(schema.root.other_field("b").is_none());
+        let schema = Schema::from_json_schema(&json!({"anyOf": [
+            {"type": "object", "additionalProperties": false},
+            {"type": "null"}
+        ]}))
+        .unwrap();
+        assert!(schema.root.other_field("b").is_none());
+        // An inferred object never seen with a field has none known.
+        let schema = Schema::infer(&[json!({"meta": {}})]);
+        assert_eq!(schema.shape_at("meta.any").unwrap().types, []);
     }
 }

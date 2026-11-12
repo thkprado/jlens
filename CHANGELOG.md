@@ -40,6 +40,14 @@ All notable changes are recorded here. The format follows
   `jlens_core::parse_recover_as_body` parses such a body, and `Slot::enclosing` tells which step
   a `%` refers to.
 
+- Objects open to other fields: an object with `additionalProperties` other than `false`, with
+  `patternProperties`, or with no field listed at all, such as `{"type": "object"}`, gets no
+  `W0201` for a field it does not list, and `additionalProperties`, or the pattern a name
+  matches, gives such a field its type: `totals.usd > 'a'` gets `W0208` when
+  `additionalProperties` is `{"type": "number"}`. An object with `properties` alone is warned
+  about as before. `Shape::other_fields` holds them, and the JSON Schema export writes them
+  back.
+
 ### Changed
 
 - The language service describes a path over several items as one value or an array of them:

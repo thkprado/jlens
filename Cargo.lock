@@ -836,6 +836,7 @@ version = "0.33.0"
 dependencies = [
  "indexmap",
  "jlens-core",
+ "jlens-regress",
  "proptest",
  "serde",
  "serde_json",

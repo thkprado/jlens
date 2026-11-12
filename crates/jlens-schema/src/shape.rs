@@ -124,6 +124,12 @@ pub struct Shape {
     /// becomes ([`crate::SchemaLoader`]), named by the URI it resolves to.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub references: Vec<String>,
+    /// The fields an object may have besides those of `fields`, as a JSON Schema's
+    /// `patternProperties` and `additionalProperties` declare them. `None` is an object with
+    /// the fields of `fields` alone, whose other fields are warned about (`W0201`), or, when
+    /// `fields` is empty, an object whose fields are not known at all: any field may be there.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub other_fields: Option<Box<OtherFields>>,
 
     // Inference state.
     #[serde(skip)]
@@ -150,6 +156,40 @@ pub struct Field {
     pub required: bool,
     /// Fraction of the objects that have the field (1.0 when required).
     pub presence: f64,
+}
+
+/// The fields an object may have besides those it lists ([`Shape::other_fields`]). None of
+/// them is required.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherFields {
+    /// The fields whose names match a pattern (`patternProperties`: an ECMAScript regular
+    /// expression, which may match anywhere in the name), and the shape each has.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub patterns: Vec<(String, Shape)>,
+    /// The shape of any other field (`additionalProperties`): a shape with no types when the
+    /// schema says nothing of it; `None` when the object has no other field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub rest: Option<Box<Shape>>,
+}
+
+/// The shape of a value the schema says nothing of.
+static UNKNOWN: LazyLock<Shape> = LazyLock::new(Shape::default);
+
+/// Steps a pattern of `patternProperties` may take on a field name before it is taken to
+/// match: four times [`regress::INTERRUPT_INTERVAL`], well under a millisecond.
+const PATTERN_BUDGET: u32 = 4;
+
+/// Whether `pattern` matches `name`; `None` when that cannot be told: the pattern is not a
+/// regular expression, or it runs out of steps.
+fn pattern_matches(pattern: &str, name: &str) -> Option<bool> {
+    let re = regress::Regex::with_flags(pattern, "u").ok()?;
+    let mut budget = PATTERN_BUDGET;
+    let found = re.find_from_interruptible(name, 0, || {
+        budget = budget.saturating_sub(1);
+        budget == 0
+    });
+    found.ok().map(|m| m.is_some())
 }
 
 /// Structural metadata about a family of JSON documents.
@@ -344,7 +384,7 @@ impl Schema {
                 let mut first = None;
                 for shape in &shapes {
                     let child = match step {
-                        Some(name) => shape.shape.fields.get(name).map(|f| &f.shape),
+                        Some(name) => shape.shape.field_shape(name),
                         None => shape.shape.items.as_deref(),
                     };
                     if let Some(child) = child {
@@ -394,8 +434,7 @@ impl Schema {
         members_of(shape, &self.definitions)
             .0
             .iter()
-            .find_map(|m| m.shape.fields.get(name))
-            .map(|f| &f.shape)
+            .find_map(|m| m.shape.field_shape(name))
     }
 
     /// The shape of the items of what `shape` stands for.
@@ -874,6 +913,74 @@ impl Shape {
     /// Whether objects with fields were seen here.
     pub fn is_object(&self) -> bool {
         self.types.contains(&JsonType::Object)
+    }
+
+    /// The shape of field `name` when [`Shape::fields`] does not list it but the object may
+    /// still have it ([`Shape::other_fields`]); a shape with no types when its shape is not
+    /// known. `None` when the object has no such field.
+    ///
+    /// The shape of a pattern the name matches, or else of the other fields. A name that
+    /// several patterns match, or one whose match cannot be told (a pattern that is not a
+    /// regular expression, or that takes too long), has a shape that is not known.
+    ///
+    /// ```
+    /// use jlens_schema::{JsonType, Schema};
+    /// use serde_json::json;
+    ///
+    /// let schema = Schema::from_json_schema(&json!({
+    ///     "type": "object",
+    ///     "properties": {"id": {"type": "string"}},
+    ///     "patternProperties": {"^x-": {"type": "string"}},
+    ///     "additionalProperties": {"type": "number"}
+    /// }))
+    /// .unwrap();
+    /// assert_eq!(schema.root.other_field("x-tag").unwrap().types, [JsonType::String]);
+    /// assert_eq!(schema.root.other_field("total").unwrap().types, [JsonType::Number]);
+    /// assert!(schema.root.other_field("id").is_none());
+    /// ```
+    pub fn other_field(&self, name: &str) -> Option<&Shape> {
+        if !self.is_object() || self.fields.contains_key(name) {
+            return None;
+        }
+        let Some(other) = &self.other_fields else {
+            return self.fields.is_empty().then(|| &*UNKNOWN);
+        };
+        let mut found = None;
+        for (pattern, shape) in &other.patterns {
+            match pattern_matches(pattern, name) {
+                Some(false) => {}
+                Some(true) if found.is_none() => found = Some(shape),
+                _ => return Some(&UNKNOWN),
+            }
+        }
+        found.or(other.rest.as_deref())
+    }
+
+    /// The shape of field `name`: listed in [`Shape::fields`], or one of its
+    /// [`Shape::other_field`]s.
+    pub(crate) fn field_shape(&self, name: &str) -> Option<&Shape> {
+        match self.fields.get(name) {
+            Some(field) => Some(&field.shape),
+            None => self.other_field(name),
+        }
+    }
+
+    /// The shapes the fields of an object that [`Shape::fields`] does not list may have: of
+    /// its patterns, and of the other fields, which have no types when they are not known.
+    pub(crate) fn other_shapes(&self) -> Vec<&Shape> {
+        if !self.is_object() {
+            return Vec::new();
+        }
+        match &self.other_fields {
+            None if self.fields.is_empty() => vec![&UNKNOWN],
+            None => Vec::new(),
+            Some(other) => other
+                .patterns
+                .iter()
+                .map(|(_, shape)| shape)
+                .chain(other.rest.as_deref())
+                .collect(),
+        }
     }
 
     /// A short type description: `string`, `array<object>`, `integer | null`, ...

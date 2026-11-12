@@ -191,18 +191,24 @@ fn shapes_of<'a>(shape: &'a Shape, defs: &'a Definitions) -> Option<Vec<Sh<'a>>>
 }
 
 /// The field `name` of a value that may have any of `shapes`: its shapes, and whether every
-/// shape that has it requires it. `None` when none has it.
+/// shape that has it requires it. `None` when none has it; no shapes when one is open to it
+/// with a shape it does not know ([`Shape::other_field`]).
 fn field_of<'a>(shapes: &[Sh<'a>], name: &str) -> Option<(Option<Vec<Sh<'a>>>, bool)> {
     let mut found: Option<(Option<Vec<Sh<'a>>>, bool)> = None;
     for shape in shapes {
-        let Some(field) = shape.shape.fields.get(name) else {
-            continue;
+        let (field, is_required, unknown) = match shape.shape.fields.get(name) {
+            Some(field) => (&field.shape, field.required, false),
+            None => match shape.shape.other_field(name) {
+                Some(other) => (other, false, *other == Shape::default()),
+                None => continue,
+            },
         };
         let (all, required) = found.get_or_insert((Some(Vec::new()), true));
-        *required &= field.required;
-        if all
-            .as_mut()
-            .is_none_or(|all| members(&field.shape, shape.defs, all))
+        *required &= is_required;
+        if unknown
+            || all
+                .as_mut()
+                .is_none_or(|all| members(field, shape.defs, all))
         {
             *all = None;
         }
@@ -678,6 +684,29 @@ mod tests {
                 "items[].price": {"unknown": true, "whole": true},
                 "status": {"enum": ["open", "closed"], "required": false},
                 "status.a": {"unknown": true, "whole": true}
+            })
+        );
+    }
+
+    #[test]
+    fn a_field_an_open_object_may_have() {
+        let schema = Schema::from_json_schema(&json!({
+            "type": "object",
+            "properties": {
+                "meta": {"type": "object"},
+                "totals": {"type": "object", "additionalProperties": {"type": "number"}}
+            }
+        }))
+        .unwrap();
+        let service = LanguageService::new(Some(schema));
+        assert_eq!(
+            uses(&service, "meta.a & totals.usd")["input"],
+            json!({
+                "$": {"types": ["object"]},
+                "meta": {"types": ["object"], "required": false},
+                "meta.a": {"unknown": true, "whole": true},
+                "totals": {"types": ["object"], "required": false},
+                "totals.usd": {"types": ["number"], "required": false, "whole": true}
             })
         );
     }

@@ -279,12 +279,13 @@ impl<'s> Ty<'s> {
         out
     }
 
-    /// Whether one of the (element) shapes has field `name`.
+    /// Whether one of the (element) shapes has field `name`: lists it, or is open to it
+    /// ([`Shape::other_field`]).
     pub fn has_field(&self, name: &str) -> bool {
         self.elements()
             .shapes
             .iter()
-            .any(|shape| shape.fields.contains_key(name))
+            .any(|shape| shape.field_shape(name).is_some())
     }
 
     /// The value of field `name` on the element shapes, looked up by the step at `at`, which
@@ -304,6 +305,8 @@ impl<'s> Ty<'s> {
                 || !field.is_some_and(|f| f.required);
             if let Some(f) = field {
                 out = out.union(Ty::of(&f.shape, shape.defs));
+            } else if let Some(other) = shape.shape.other_field(name) {
+                out = out.union(Ty::of(other, shape.defs));
             }
         }
         out.undefined = miss.then_some(at);
@@ -392,6 +395,11 @@ impl<'s> Ty<'s> {
         for (_, f, defs) in self.fields() {
             out = out.union(Ty::of(&f.shape, defs));
         }
+        for shape in self.elements().shapes {
+            for other in shape.shape.other_shapes() {
+                out = out.union(Ty::of(other, shape.defs));
+            }
+        }
         out
     }
 
@@ -414,7 +422,8 @@ impl<'s> Ty<'s> {
             out.shapes.push(shape);
             let mut below = Vec::new();
             let children = shape.shape.fields.values().map(|f| &f.shape);
-            for child in children.chain(shape.shape.items.as_deref()) {
+            let others = shape.shape.other_shapes();
+            for child in children.chain(others).chain(shape.shape.items.as_deref()) {
                 out.partial |= members(child, shape.defs, &mut below);
             }
             pending.extend(below.into_iter().rev());
@@ -879,7 +888,9 @@ impl<'s> Walker<'s, '_> {
                 let mut ty = ctx
                     .all_field_values()
                     .or_undefined(miss.then_some(step.span));
-                if ctx.fields().len() > 1 {
+                let others =
+                    (ctx.elements().shapes.iter()).any(|s| !s.shape.other_shapes().is_empty());
+                if others || ctx.fields().len() > 1 {
                     ty.sequence = Some(step.span);
                 }
                 ty
