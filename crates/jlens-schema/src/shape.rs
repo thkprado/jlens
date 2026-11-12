@@ -725,7 +725,7 @@ where
 }
 
 /// Parses `a.b[].c` into `[(Some("a"), 0), (Some("b"), 1), (Some("c"), 0)]`.
-fn parse_path(path: &str) -> Option<Vec<(Option<String>, usize)>> {
+pub(crate) fn parse_path(path: &str) -> Option<Vec<(Option<String>, usize)>> {
     let path = path.trim();
     let path = path.strip_prefix('$').unwrap_or(path);
     let path = path.strip_prefix('.').unwrap_or(path);

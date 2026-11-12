@@ -96,10 +96,27 @@ pub fn parse(source: &str) -> Result<Ast> {
 /// and [`Ast::diagnostics`] lists every error and warning, ordered by position. This is the
 /// entry point for editors and language tooling.
 pub fn parse_recover(source: &str) -> Ast {
+    parse_recover_as_body(source, 0)
+}
+
+/// Parses, recovering from syntax errors, an expression that will be evaluated as the body of
+/// `steps` nested path steps, as `body` is in `a.b.(body)`.
+///
+/// A parent operator (`%`) may then refer past the expression to the input of one of those
+/// steps, where [`parse_recover`] reports `S0217`: [`ast::Slot::enclosing`] tells which. Tooling
+/// that checks such a body uses this, so that its offsets stay those of the text.
+///
+/// ```
+/// let ast = jlens_core::parse_recover_as_body("%.name", 1);
+/// assert!(ast.diagnostics.is_empty());
+/// assert_eq!(ast.slots[0].enclosing(), 1);
+/// assert!(jlens_core::parse_recover_as_body("%.%.name", 1).has_errors());
+/// ```
+pub fn parse_recover_as_body(source: &str, steps: usize) -> Ast {
     let (raw, parse_errors, warnings) = parser::parse(source, true);
     let mut processor = process::Processor::new(source, true);
     let root = raw
-        .and_then(|raw| processor.process_root(raw))
+        .and_then(|raw| processor.process_body(raw, steps))
         .unwrap_or_else(|err| {
             let span = err.span().unwrap_or_default();
             processor.errors.push(err.clone());

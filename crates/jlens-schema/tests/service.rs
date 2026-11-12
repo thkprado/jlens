@@ -1515,3 +1515,115 @@ fn result_type_tells_what_the_typing_knows() {
     assert_eq!(none.result_type("a > 1").check(&[Boolean]), Unknown);
     assert_eq!(none.result_type("a = 1").check(&[Boolean]), Always);
 }
+
+#[test]
+fn an_expression_is_typed_as_the_body_of_a_step() {
+    use jlens_schema::JsonType::Boolean;
+    use jlens_schema::ResultCheck::Always;
+    // Each item of the order, as inside `items.( … )`: `%` is the order.
+    let svc = service().with_context("items[]");
+    let cases: &[(&str, &[&str])] = &[
+        ("|", ITEM_FIELDS),
+        ("t|", &["type", "tax"]),
+        ("%.|", &["customer", "items"]),
+        ("%.customer.|", &["login", "name"]),
+        ("%.items[%.c|]", &["customer"]),
+        ("$$.cus|", &["customer"]),
+        ("`t|", &["type", "tax"]),
+    ];
+    for (marked, expected) in cases {
+        let got = labels(&svc, marked, Some(CompletionKind::Field));
+        assert_eq!(got, *expected, "{marked}");
+    }
+    // `items` and `items[]` are the same context: a step reads the items of an array.
+    assert_eq!(
+        labels(
+            &service().with_context("items"),
+            "|",
+            Some(CompletionKind::Field)
+        ),
+        ITEM_FIELDS
+    );
+
+    // The diagnostics are those of the body inside `items.( … )`, at the text's offsets.
+    let wrapped = service();
+    for body in [
+        "type = 'toy' and %.customer.login = 'a'",
+        "customer",
+        "%.custmer",
+        "type = 'toys'",
+        "$sum(%.items.unitPrice) > quantity",
+        "unitPrice > 'a'",
+        "%.items.unitPrice > 1",
+        "$$.customer.nick",
+        "%.items.(%.customer)",
+    ] {
+        let text = format!("items.({body})");
+        let expected: Vec<(String, usize, usize)> = wrapped
+            .diagnostics(&text)
+            .into_iter()
+            .map(|d| (d.code, d.span.start - 7, d.span.end - 7))
+            .collect();
+        let found: Vec<(String, usize, usize)> = svc
+            .diagnostics(body)
+            .into_iter()
+            .map(|d| (d.code, d.span.start, d.span.end))
+            .collect();
+        assert_eq!(found, expected, "{body}");
+    }
+    let codes = |svc: &LanguageService, text: &str| -> Vec<String> {
+        svc.diagnostics(text).into_iter().map(|d| d.code).collect()
+    };
+    assert_eq!(codes(&svc, "customer"), ["W0201"]);
+    assert_eq!(codes(&svc, "%.custmer"), ["W0201"]);
+    // Past the document, as without a context.
+    assert_eq!(codes(&svc, "%.%.x"), ["S0217"]);
+    assert_eq!(codes(&service(), "%.customer"), ["S0217"]);
+
+    // Two steps: `%` is the order, `%.%` the document.
+    let schema = Schema::infer(&[json!({
+        "region": "south",
+        "orders": [{"total": 10, "items": [{"price": 1}]}]
+    })]);
+    let nested = LanguageService::new(Some(schema)).with_context("orders[].items[]");
+    assert_eq!(
+        labels(&nested, "|", None).first().map(String::as_str),
+        Some("price")
+    );
+    assert_eq!(
+        labels(&nested, "%.|", Some(CompletionKind::Field)),
+        ["total", "items"]
+    );
+    assert_eq!(
+        labels(&nested, "%.%.|", Some(CompletionKind::Field)),
+        ["region", "orders"]
+    );
+    assert!(
+        nested
+            .diagnostics("price < %.total and %.%.region = 'south'")
+            .is_empty()
+    );
+    assert_eq!(codes(&nested, "%.region"), ["W0201"]);
+    assert_eq!(codes(&nested, "%.%.%"), ["S0217"]);
+
+    // The item is always there: a condition on its required fields is always a boolean.
+    let boolean = order_service()
+        .with_context("lines[]")
+        .with_result_type([Boolean]);
+    assert_eq!(located(&boolean, "price > 10 and %.total > 100"), []);
+    assert_eq!(
+        boolean.result_type("price > %.total").check(&[Boolean]),
+        Always
+    );
+    assert_eq!(
+        located(&boolean, "$contains(%.notes, 'x')"),
+        [("W0214".to_owned(), "notes".to_owned())]
+    );
+
+    // A path the schema does not have: an unknown context, nothing warned; its parent, the
+    // document, is known.
+    let unknown = service().with_context("nothing[]");
+    assert!(unknown.diagnostics("anything.at.all").is_empty());
+    assert!(unknown.diagnostics("%.customer.name").is_empty());
+    assert_eq!(codes(&unknown, "%.anything"), ["W0201"]);
+}

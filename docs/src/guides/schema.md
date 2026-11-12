@@ -363,6 +363,24 @@ The typing does not read the guards of an expression: in `$type(x) = 'number' an
 `x` a string in the schema, `x > 10` is warned about, though the left side, always false, keeps it
 from running.
 
+### An expression that is the body of a step
+
+An application may evaluate an expression against each item of an array, as the body of
+`items.( … )`: a rule on each line of an order. Declare the path of the items, and the service
+completes and checks the text with an item as its context, at the offsets of the text, without
+the application wrapping it:
+
+```rust
+let service = LanguageService::new(Some(schema)).with_context("items[]");
+let diagnostics = service.diagnostics("price > 10 and %.customer.vip");
+```
+
+`%` is then the value the last step of the path was evaluated against, the order, where alone
+it fails with `S0217`; `%.%` is the one before, for a path of two steps such as
+`orders[].items[]`. `$$` stays the document. The path is written as for `Schema::shape_at`;
+`items` and `items[]` are the same context, as a step reads the items of an array. A path the
+schema does not have gives an unknown context, where no field is warned about.
+
 Missing fields are reported only where the context is fully known. Nothing is reported after a
 user-defined function, an object constructor or `$lookup`, so the warnings do not produce false
 alarms. Schemas inferred from samples can miss optional fields that the samples did not contain.

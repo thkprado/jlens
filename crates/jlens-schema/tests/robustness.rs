@@ -133,6 +133,42 @@ proptest! {
         }
     }
 
+    /// An expression typed as the body of `items` is told what it is told inside
+    /// `items.( … )`, at the offsets of its own text, and completion never panics.
+    #[test]
+    fn a_body_is_checked_as_inside_its_step(text in text()) {
+        let schema = Schema::infer(&[json!({
+            "customer": {"login": "1", "name": "X"},
+            "items": [{"type": "a", "unitPrice": 1.5, "tags": ["x"]}]
+        })]);
+        let body = LanguageService::new(Some(schema.clone())).with_context("items[]");
+        let found: Vec<_> = body
+            .diagnostics(&text)
+            .into_iter()
+            .map(|d| (d.code, d.span.start, d.span.end))
+            .collect();
+        for (_, start, end) in &found {
+            prop_assert!(start <= end && *end <= text.len());
+        }
+        let alone = jlens_core::parse_recover_as_body(&text, 1);
+        let wrapped = format!("items.({text})");
+        if !alone.has_errors() && !jlens_core::parse_recover(&wrapped).has_errors() {
+            let expected: Vec<_> = LanguageService::new(Some(schema))
+                .diagnostics(&wrapped)
+                .into_iter()
+                .map(|d| (d.code, d.span.start - 7, d.span.end - 7))
+                .collect();
+            prop_assert_eq!(found, expected);
+        }
+        for offset in 0..=text.len() + 1 {
+            let completions = body.complete(&text, offset);
+            prop_assert!(completions.range.end <= text.len());
+            if let Some(hover) = body.hover(&text, offset) {
+                prop_assert!(hover.range.end <= text.len());
+            }
+        }
+    }
+
     #[test]
     fn missing_override_paths_are_the_ones_created(
         paths in prop::collection::vec(override_path(), 0..6),

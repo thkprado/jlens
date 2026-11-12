@@ -34,6 +34,11 @@ All notable changes are recorded here. The format follows
   for an item of `items`), and a field under `%` that the parent lacks gets `W0201`. Where the
   parent is not known, as for a step inside parentheses (`customer.(login).%`), nothing is
   warned.
+- An expression that is the body of a step, as a rule on each item of an order is:
+  `LanguageService::with_context("items[]")` completes and checks the text with an item as its
+  context, at the offsets of the text, and `%` is the order, where alone it fails with `S0217`.
+  `jlens_core::parse_recover_as_body` parses such a body, and `Slot::enclosing` tells which step
+  a `%` refers to.
 
 ### Changed
 

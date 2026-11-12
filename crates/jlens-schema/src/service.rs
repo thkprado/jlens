@@ -6,7 +6,7 @@
 
 use jlens_core::ast::{BinaryOp, Node, NodeKind, Span};
 use jlens_core::signature::Signature;
-use jlens_core::{Diagnostic, Severity, parse_recover};
+use jlens_core::{Ast, Diagnostic, Severity, parse_recover_as_body};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -445,6 +445,9 @@ pub struct LanguageService {
     pub(crate) functions: Vec<FunctionDecl>,
     /// The types the result of an expression is expected to have.
     pub(crate) result: Option<Vec<JsonType>>,
+    /// The steps whose body an expression is (`None` for `[]` at the root): empty for the
+    /// document.
+    pub(crate) context: Vec<Option<String>>,
 }
 
 /// Lexical situation at an offset.
@@ -1115,7 +1118,40 @@ impl LanguageService {
             variables: Vec::new(),
             functions: Vec::new(),
             result: None,
+            context: Vec::new(),
         }
+    }
+
+    /// Declares that expressions are evaluated as the body of the steps of `path`, as `body` is
+    /// in `orders.items.(body)`: the context of an expression is then an item and not the
+    /// document, and `%` is the value the last step was evaluated against (`%.%` the one
+    /// before), where alone it fails with `S0217`. `$$` stays the document. The application
+    /// gives the text as it is, and the offsets are those of the text.
+    ///
+    /// `path` is written as for [`Schema::shape_at`]: `orders[].items[]`, or `orders.items`, as a
+    /// step reads the items of an array. A path the schema does not have gives an unknown
+    /// context, where no field is warned about. [`LanguageService::uses`] is not changed: it
+    /// reads what an evaluation reads, of the expression the application compiles.
+    ///
+    /// ```
+    /// use jlens_schema::{LanguageService, Schema};
+    /// use serde_json::json;
+    ///
+    /// let schema = Schema::infer(&[json!({"customer": "c", "items": [{"price": 1}]})]);
+    /// let service = LanguageService::new(Some(schema)).with_context("items[]");
+    ///
+    /// assert!(service.diagnostics("price > 10 and %.customer = 'c'").is_empty());
+    /// assert_eq!(service.diagnostics("customer")[0].code, "W0201");
+    /// let labels: Vec<_> = service.complete("%.", 2).items.into_iter().map(|i| i.label).collect();
+    /// assert_eq!(labels, ["customer", "items"]);
+    /// ```
+    pub fn with_context(mut self, path: &str) -> Self {
+        self.context = crate::shape::parse_path(path)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        self
     }
 
     /// Declares the types the result of an expression is expected to have, as the conditions
@@ -1143,7 +1179,7 @@ impl LanguageService {
     /// and whether it may be undefined or several values, with the operand that makes it so.
     /// See [`ResultType`].
     pub fn result_type(&self, text: &str) -> ResultType {
-        let ast = parse_recover(text);
+        let ast = self.parse(text);
         if ast
             .diagnostics
             .iter()
@@ -1155,7 +1191,7 @@ impl LanguageService {
                 sequence: None,
             };
         }
-        ResultType::of(&self.walk(&ast.root, &mut |_| {}))
+        ResultType::of(&self.walk(&ast, &mut |_| {}))
     }
 
     /// Declares a variable the expression is evaluated with (a binding), optionally with the
@@ -1218,6 +1254,32 @@ impl LanguageService {
         }
     }
 
+    /// Parses `text`, as the body of the context's steps.
+    fn parse(&self, text: &str) -> Ast {
+        parse_recover_as_body(text, self.context.iter().flatten().count())
+    }
+
+    /// The type of the context an expression is evaluated against, and those of the values the
+    /// context's steps were evaluated against, the document first: what `%` refers to.
+    fn context_tys(&self) -> (Ty<'_>, Vec<Ty<'_>>) {
+        let mut cur = self.root_ty();
+        let mut parents = Vec::new();
+        for step in &self.context {
+            match step {
+                Some(name) => {
+                    parents.push(cur.clone());
+                    cur = cur.field(name, Span::default()).elements();
+                }
+                None => cur = cur.elements(),
+            }
+            if cur.shapes.is_empty() {
+                // A path the schema does not have.
+                cur = Ty::unknown();
+            }
+        }
+        (cur, parents)
+    }
+
     fn externals(&self) -> Vec<(String, Ty<'_>)> {
         self.variables
             .iter()
@@ -1230,9 +1292,9 @@ impl LanguageService {
             .collect()
     }
 
-    /// Walks `root`, calling `visit` for each field reference and variable, and gives the type of
+    /// Walks `ast`, calling `visit` for each field reference and variable, and gives the type of
     /// its result.
-    fn walk<'s>(&'s self, root: &Node, visit: &mut dyn FnMut(Event<'_, 's>)) -> Ty<'s> {
+    fn walk<'s>(&'s self, ast: &Ast, visit: &mut dyn FnMut(Event<'_, 's>)) -> Ty<'s> {
         // Declared functions are external names too: a call to one is not typed as a built-in.
         let mut externals = self.externals();
         externals.extend(
@@ -1245,8 +1307,18 @@ impl LanguageService {
             externals: &externals,
             visit,
         };
-        let ctx = walker.root.clone();
-        walker.walk(root, &ctx, &mut Vec::new())
+        let (ctx, parents) = self.context_tys();
+        // A parent operator that refers past the expression reads a value of the context's path.
+        let mut scope: Vec<(String, Ty<'s>)> = ast
+            .slots
+            .iter()
+            .filter(|slot| (1..=parents.len()).contains(&slot.enclosing()))
+            .map(|slot| {
+                let parent = parents[parents.len() - slot.enclosing()].clone();
+                (slot.label.clone(), parent)
+            })
+            .collect();
+        walker.walk(&ast.root, &ctx, &mut scope)
     }
 
     /// Suggestions for the word at `offset`.
@@ -1460,7 +1532,7 @@ impl LanguageService {
 
     /// Parses `modified` (which contains the placeholder) and finds the placeholder's context.
     fn probe<'s>(&'s self, modified: &str, variable: bool) -> Probe<'s> {
-        let ast = parse_recover(modified);
+        let ast = self.parse(modified);
         let siblings = if variable {
             Vec::new()
         } else {
@@ -1505,10 +1577,10 @@ impl LanguageService {
             }
             _ => {}
         };
-        self.walk(&ast.root, &mut visit);
+        self.walk(&ast, &mut visit);
         if probe.ctx.is_none() && !probe.found_variable && !variable {
-            // Could not locate the cursor (very broken input): offer the root fields.
-            probe.ctx = Some(self.root_ty());
+            // Could not locate the cursor (very broken input): offer the context's fields.
+            probe.ctx = Some(self.context_tys().0);
         }
         probe
     }
@@ -1599,7 +1671,7 @@ impl LanguageService {
     /// functions, with the wrong number of arguments or with arguments of types the signature
     /// does not accept, and, when variables are declared, references to variables that are not.
     pub fn diagnostics(&self, text: &str) -> Vec<Diagnostic> {
-        let ast = parse_recover(text);
+        let ast = self.parse(text);
         let mut out = ast.diagnostics.clone();
         // Calls and variables are checked after the walk: a name bound later can be used by a
         // function defined earlier, or by itself.
@@ -1677,7 +1749,7 @@ impl LanguageService {
             }
             Event::Field { .. } => {}
         };
-        let result = self.walk(&ast.root, &mut visit);
+        let result = self.walk(&ast, &mut visit);
         if let Some(expected) = &self.result
             && !ast
                 .diagnostics
@@ -1806,7 +1878,7 @@ impl LanguageService {
 
     /// Information about the field, variable or function at `offset`.
     pub fn hover(&self, text: &str, offset: usize) -> Option<Hover> {
-        let ast = parse_recover(text);
+        let ast = self.parse(text);
         let mut best: Option<(Span, String)> = None;
         let mut consider = |span: Span, contents: String| {
             if span.contains(offset)
@@ -1860,7 +1932,7 @@ impl LanguageService {
             | Event::Operands { .. }
             | Event::Negate { .. } => {}
         };
-        self.walk(&ast.root, &mut visit);
+        self.walk(&ast, &mut visit);
         best.map(|(range, contents)| Hover { range, contents })
     }
 

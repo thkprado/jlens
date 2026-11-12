@@ -38,13 +38,28 @@ impl<'a> Processor<'a> {
 
     /// Processes the root of a raw tree and assigns node ids.
     pub fn process_root(&mut self, raw: Raw) -> Result<Node> {
+        self.process_body(raw, 0)
+    }
+
+    /// Processes the root of a raw tree that is the body of `steps` enclosing path steps: a
+    /// parent operator may refer to the inputs of those steps.
+    pub fn process_body(&mut self, raw: Raw, steps: usize) -> Result<Node> {
         let mut root = self.process(raw)?;
-        if matches!(root.kind, NodeKind::Parent { .. }) || !root.attrs.seeking_parent.is_empty() {
+        // The ancestors the root still seeks, each with how many steps out it is.
+        let sought: Vec<(SlotId, usize)> = ancestry(&root)
+            .into_iter()
+            .map(|slot| (slot, usize::try_from(self.slots[slot].level).unwrap_or(0)))
+            .collect();
+        if sought.iter().any(|(_, level)| !(1..=steps).contains(level)) {
             // The parent of the top-level context cannot be derived.
             let err = self
                 .error("S0217", root.span, root.pos)
                 .with("token", root.type_name());
             self.report(err)?;
+        } else {
+            for (slot, level) in sought {
+                self.slots[slot].enclosing = level;
+            }
         }
         let mut eval = false;
         root.walk(&mut |node| {
@@ -395,6 +410,7 @@ impl<'a> Processor<'a> {
                 self.slots.push(Slot {
                     label: format!("!{slot}"),
                     level: 1,
+                    enclosing: 0,
                 });
                 Node::new(
                     NodeKind::Parent {

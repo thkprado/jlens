@@ -82,6 +82,18 @@ pub struct Slot {
     pub label: String,
     #[serde(skip)]
     pub(crate) level: i32,
+    #[serde(skip)]
+    pub(crate) enclosing: usize,
+}
+
+impl Slot {
+    /// How many steps out of the expression the ancestor is bound, for an expression parsed by
+    /// [`crate::parse_recover_as_body`]: 1 for the input of the innermost step the expression
+    /// is the body of, 2 for the step before it, and so on. 0 when a step of the expression
+    /// binds it.
+    pub fn enclosing(&self) -> usize {
+        self.enclosing
+    }
 }
 
 /// A node of the processed syntax tree.
