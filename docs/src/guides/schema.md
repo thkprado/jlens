@@ -33,7 +33,10 @@ Inference records, for every place in the documents:
 | Enumerations | When the values come from a small set (at most 10) and repeat |
 | Examples | Up to three distinct values |
 
-The result is a standard **JSON Schema 2020-12** document. Fields that are not required carry
+The result is a standard **JSON Schema 2020-12** document. [JSON Schema](https://json-schema.org/)
+is a specification for describing the shape of JSON documents; new to it, start with its
+[step-by-step introduction](https://json-schema.org/learn/getting-started-step-by-step) or the
+guide [Understanding JSON Schema](https://json-schema.org/understanding-json-schema). Fields that are not required carry
 `x-jlens-presence`, the fraction of objects that had them, and an inferred `enum` carries
 `x-jlens-enum-inferred`: it lists the values seen, not every value allowed, so the language
 service completes them but never warns about another one. Remove the keyword once the list is
@@ -137,7 +140,8 @@ The diagnostics warn about what a schema does not allow: a field it does not lis
 does not give. A keyword that allows more, left unread, would make them warn about what the
 schema allows; a keyword that only narrows what a place may hold cannot, and jlens leaves those
 out. So each keyword of JSON Schema (2020-12 and the drafts before it) and of OpenAPI 3.0 is
-read, left out because it only narrows, or reported:
+read, left out because it only narrows, or reported. What each keyword means is in the
+[JSON Schema reference](https://json-schema.org/understanding-json-schema/reference).
 
 | | Keywords |
 |---|---|
