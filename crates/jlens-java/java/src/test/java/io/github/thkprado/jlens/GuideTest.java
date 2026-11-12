@@ -372,11 +372,15 @@ class GuideTest {
             stored = uses.toJson();
         }
 
-        // Later, with the new version of the schema: the expression still passes the diagnostics.
+        // Later, with the new version of the schema: the diagnostics see that active is now a
+        // string, not that status may now be held.
         try (Schema order = Schema.fromJson(newOrderSchema);
                 LanguageService service = LanguageService.of(order);
                 Expression expression = Expression.compile("active = true and status = 'open'")) {
-            assertEquals(List.of(), service.diagnostics("active = true and status = 'open'"));
+            List<String> codes = service.diagnostics("active = true and status = 'open'").stream()
+                    .map(Diagnostic::code)
+                    .toList();
+            assertEquals(List.of("W0210"), codes);
 
             UsesChanges changes = Uses.fromJson(stored).changes(service.uses(expression));
             assertFalse(changes.isEmpty());

@@ -450,9 +450,10 @@ it with a list of types, and answers `Always`, `Never`, `Maybe` or `Unknown`.
 ## What an expression uses of its schema
 
 An application may store expressions written against a schema that changes. When a new version
-of the schema arrives, the diagnostics tell whether each expression still passes. They do not
-tell whether something it uses changed: a field that went from a boolean to a string leaves
-`active = true` valid, and always false.
+of the schema arrives, the diagnostics tell whether each expression still passes: a field that
+went from a boolean to a string gets `W0210` under `active = true`. They do not tell whether
+something it uses changed while the expression stays valid: an enumeration that gained `held`
+leaves `status = 'open'` passing, and the expression may need a case for it.
 
 `LanguageService::uses` answers that. It takes [the fields an expression
 reads](crate.md#the-fields-an-expression-reads) and gives what the schema says of each:

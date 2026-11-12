@@ -433,8 +433,9 @@ each document with its URI (the [schema guide](schema.md#a-schema-in-several-doc
 ## What an expression uses of its schema
 
 Diagnostics tell whether a stored expression still passes with a new version of its schema.
-They do not tell whether something it uses changed: a field that went from a boolean to a
-string leaves `active = true` valid, and always false. `uses` tells what the schema says of
+They do not tell whether something it uses changed while the expression stays valid: an
+enumeration that gained `held` leaves `status = 'open'` passing, and the expression may need
+a case for it. `uses` tells what the schema says of
 each field an expression reads, and `changes` compares two such answers (the
 [schema guide](schema.md#what-an-expression-uses-of-its-schema) describes both):
 
