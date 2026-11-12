@@ -247,6 +247,7 @@ looked up in. It follows the evaluator's rules:
 | `items@$it.` … `$it.` | Focus variables bind the items of their step |
 | `$map(items, function($i){ $i.` | Callback parameters of `$map`, `$filter`, `$single`, `$sort` and `$reduce` get the item type |
 | `$sort(items, …)[0].` | Functions that return their input (`$sort`, `$filter`, `$reverse`, …) keep its type |
+| `items.%.`, `items[%.` … `]`, `items.code.%.` | The parent: fields of the object the step that `%` refers to is evaluated against, the order for an item of `items` |
 | `` items.`ty `` | Field names that need backquotes |
 | `$su` | Variables in scope, then declared host functions, then built-in functions |
 | `customer.login ` (after a space) | Operators: `and`, `or`, `in` |
@@ -311,7 +312,9 @@ Completion works on incomplete expressions too, such as `$count(items[` or
 - syntax errors, from the recovering parser;
 - [annotation](../language/annotations.md) warnings;
 - `W0201` warnings for field names the schema does not have, with a "did you mean" suggestion
-  when a field name is close;
+  when a field name is close. Under the parent operator, `items.%.custmer`, the field is looked
+  up in the parent; where the typing does not tell the parent, as for a step inside parentheses
+  (`customer.(login).%`), nothing is reported;
 - `W0202` warnings for calls of unknown functions, with the same kind of suggestion, and `W0203`
   warnings for calls with too few or too many arguments for the function's signature. These need
   no schema. A function is known when it is built in, declared with
@@ -402,7 +405,7 @@ number. An array constructor, `[price]`, and functions such as `$sort` always gi
 
 Where the typing does not know the type, nothing is reported: a function the expression
 defines, an object constructor, a path that binds `@$v` or `#$i`, a variable declared without a
-shape, a field without a schema. `LanguageService::result_type` gives what it knows as a value,
+shape, a field without a schema, the parent of a step inside parentheses. `LanguageService::result_type` gives what it knows as a value,
 with no expected type: the types the result may have (`None` where they are not known) and the
 spans of the operands that may make it undefined or a sequence. `ResultType::check` compares
 it with a list of types, and answers `Always`, `Never`, `Maybe` or `Unknown`.

@@ -84,6 +84,14 @@ fn field_completion_follows_the_context() {
         ("$count(items[|", ITEM_FIELDS),
         // Quoted names.
         ("items.`ty|", &["type"]),
+        // The parent operator: the item the step it refers to is evaluated against.
+        ("items.%.|", &["customer", "items"]),
+        ("items[%.c|]", &["customer"]),
+        ("items.{'n': %.customer.|}", &["login", "name"]),
+        ("customer.%.items.%.c|", &["customer"]),
+        ("items.code.%.ta|", &["tax"]),
+        ("items.code.%.%.c|", &["customer"]),
+        ("items@$i.%.c|", &["customer"]),
     ];
     for (marked, expected) in cases {
         let got = labels(&svc, marked, Some(CompletionKind::Field));
@@ -235,6 +243,25 @@ fn diagnostics_report_unknown_fields() {
             "customer.nick",
             &[("W0201", "Field \"nick\" is not in the schema")],
         ),
+        // Under the parent operator, the fields of the parent.
+        ("items.%.customer.name", &[]),
+        ("items[%.customer.name = 'x'].code", &[]),
+        ("items.code.%.tax", &[]),
+        (
+            "items.%.custmer",
+            &[(
+                "W0201",
+                "Field \"custmer\" is not in the schema; did you mean `customer`?",
+            )],
+        ),
+        (
+            "items.code.%.nick",
+            &[("W0201", "Field \"nick\" is not in the schema")],
+        ),
+        // A parent the typing does not know is not checked: the step it refers to is inside
+        // a block, or under an unknown value.
+        ("customer.(login).%.anything", &[]),
+        ("$lookup(customer, 'x').a.%.anything", &[]),
         // Unknown contexts are not checked.
         ("$lookup(customer, 'x').anything", &[]),
         ("{'a': 1}.b", &[]),

@@ -9,7 +9,7 @@ const TOKENS: &[&str] = &[
     "customer", "login", "items", "type", "unitPrice", "`odd name`", "$", "$$", "$x", "$limit",
     "1", "'s'", "\"t\"", ".", "[", "]", "(", ")", "{", "}", ":", ",", ";", "=", "!=", "and", "in", "?",
     ":=", "~>", "&", "**", "^(", "@$v", "#$i", "function($v){", "$sum(", "$substring(",
-    "$map(", "$rate(", "login =", "name in", "or", "type =", "unitPrice in [", "$summ(", "$bad(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
+    "$map(", "$rate(", "%", "%.", "login =", "name in", "or", "type =", "unitPrice in [", "$summ(", "$bad(", "/* c */", "/** @label \"x\" */", "\"", "'", "`", "é", "𝄞", " ", "\n",
 ];
 
 fn text() -> impl Strategy<Value = String> {

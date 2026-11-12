@@ -30,6 +30,10 @@ All notable changes are recorded here. The format follows
 - `minItems` in a schema: an array with at least one item is never empty, so a path over it
   gives a value. Inference writes `minItems: 1` for an array no sample had empty, marked with
   `x-jlens-min-items-inferred`.
+- The parent operator in the typing: `items.%.` completes the fields of the parent (the order,
+  for an item of `items`), and a field under `%` that the parent lacks gets `W0201`. Where the
+  parent is not known, as for a step inside parentheses (`customer.(login).%`), nothing is
+  warned.
 
 ### Changed
 

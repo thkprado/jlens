@@ -557,6 +557,11 @@ impl<'s> Walker<'s, '_> {
                 let mut sequence = None;
                 let last = steps.len().saturating_sub(1);
                 for (i, step) in steps.iter().enumerate() {
+                    // A step that a parent operator (`%`) refers to binds the item it is
+                    // evaluated against, under the operator's label. The item is always there.
+                    if let Some(label) = &step.attrs.ancestor_label {
+                        scope.push((label.clone(), cur.elements()));
+                    }
                     let res = self.step(step, &cur, scope);
                     let cons = i == 0 && step.attrs.cons_array;
                     let arrays = !cons && res.has_arrays();
@@ -827,9 +832,10 @@ impl<'s> Walker<'s, '_> {
             NodeKind::Bool { .. } => Ty::literal(JsonType::Boolean),
             NodeKind::Null => Ty::literal(JsonType::Null),
             NodeKind::Regex { .. } => Ty::scalar(),
-            NodeKind::Parent { .. } | NodeKind::Placeholder | NodeKind::Error { .. } => {
-                Ty::unknown()
-            }
+            // The item bound by the step the operator refers to; unknown where that step is
+            // not in scope here (inside a block that ended, or a step the walk cannot type).
+            NodeKind::Parent { label, .. } => self.lookup(label, scope),
+            NodeKind::Placeholder | NodeKind::Error { .. } => Ty::unknown(),
         };
         let mut ty = ty;
         let elements = ty.elements();
@@ -1237,6 +1243,11 @@ mod tests {
             "$replace(customer.name, 'a', note)",
             "$bound + 1",
             "$now()",
+            // The parent of an item is always there, with its required fields.
+            "customer.%.id",
+            "customer.name.%.name",
+            "customer.name.%.%.id",
+            "$count(items[%.id = 1])",
         ] {
             assert_eq!(cause(expr), None, "{expr}");
             assert!(
@@ -1283,6 +1294,10 @@ mod tests {
             ("($x := note; $x)", "note"),
             ("()", "()"),
             ("customer.(email)", "email"),
+            // The parent is the item, and what is under it may be missing.
+            ("customer.%.note", "note"),
+            ("customer.address.%.name", "address"),
+            ("items.%.id", "items"),
             ("customer.($length(email) + 1)", "email"),
             // Functions.
             ("$uppercase(note)", "note"),
