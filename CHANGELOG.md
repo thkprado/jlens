@@ -13,6 +13,11 @@ All notable changes are recorded here. The format follows
   no order `W0207` (`T2010`), a side of arithmetic that is not a number `W0209` (`T2001`,
   `T2002`) or of a negation `W0211` (`D1002`), and `active = true` with `active` a string `W0210`, as it is always false. An absent
   field passes, as for `W0205`.
+- `W0215` for an operand that may be several values: `items.qty > 1` is true for an order of one
+  item and fails with `T2010` for two, and `items.qty = 2` is false for two. The warning names
+  the step that makes the sequence and says what to write instead (an aggregate such as `$max`
+  or `$sum`, a filter, `in`). A field that holds an array is an array even of one item:
+  `tags > 'a'` fails and `tags = 'a'` is false. A number filter, `items[0].qty`, keeps one item.
 - The type an expression's result must have, declared to the language service
   (`LanguageService::with_result_type`), as the conditions of a rules engine must give a
   boolean. A result that is never of that type gets `W0212`, one that may be of another type

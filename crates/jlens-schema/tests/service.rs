@@ -394,7 +394,7 @@ fn diagnostics_report_values_outside_a_declared_enumeration() {
         (r#"items[type != "aparel"]"#, &[("W0206", &aparel_dq)]),
         ("items[type in ['toy', 'food']]", &[("W0206", &food)]),
         ("items[type in 'food']", &[("W0206", &food)]),
-        ("items.type = 'food'", &[("W0206", &food)]),
+        ("items[0].type = 'food'", &[("W0206", &food)]),
         // A number outside a string enumeration has no suggestion.
         ("items[type = 1]", &[("W0206", &outside("1", ""))]),
         // An enumeration inferred from samples is a guess: `quantity` was only seen as 1 and 2.
@@ -934,7 +934,8 @@ fn diagnostics_report_operands_the_operator_cannot_take() {
                 "Field \"missing\" is not in the schema".to_owned(),
             )],
         ),
-        // An array of numbers may be one number, as a path yields it; arrays of arrays are left.
+        // An array stands for its items, which `W0215` warns about on its own; arrays of
+        // arrays are left.
         (
             "scores > 1 and scores + 1 = 2 and grid > 1 and grid + 1 = 2",
             vec![],
@@ -1040,6 +1041,7 @@ fn diagnostics_report_operands_the_operator_cannot_take() {
         let got: Vec<(String, String)> = svc
             .diagnostics(text)
             .into_iter()
+            .filter(|d| d.code != "W0215")
             .map(|d| (d.code, d.message))
             .collect();
         assert_eq!(&got, expected, "{text}");
@@ -1054,6 +1056,218 @@ fn diagnostics_report_operands_the_operator_cannot_take() {
     assert_eq!(span("1 + -total"), (5, 10));
     assert_eq!(span("total > 1000"), (0, 12));
     assert_eq!(span("active = true"), (9, 13));
+}
+
+#[test]
+fn diagnostics_report_operands_that_may_be_several_values() {
+    let schema = Schema::from_json_schema(&json!({
+        "type": "object",
+        "required": ["items", "order", "meta", "tags"],
+        "properties": {
+            "items": {"type": "array", "items": {
+                "type": "object",
+                "required": ["qty", "price"],
+                "properties": {
+                    "qty": {"type": "number"},
+                    "price": {"type": "number"},
+                    "type": {"type": "string"}
+                }
+            }},
+            "order": {"type": "object", "required": ["qty"], "properties": {"qty": {"type": "number"}}},
+            "meta": {"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}}},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "free": {}
+        }
+    }))
+    .unwrap();
+    let svc = LanguageService::new(Some(schema));
+    let several = |side: &str, op: &str, cause: &str, hint: &str| {
+        format!("The {side} of {op} may be several values, because of {cause}; {hint}")
+    };
+    let compare = |value: &str| {
+        format!("compare one of them, such as `$max({value})`, or test each one in a filter")
+    };
+    let compute = |value: &str| {
+        format!("compute one of them, such as `$sum({value})`, or each one inside a step")
+    };
+    let look = "to look for a value among them, write `in`";
+    let cases: Vec<(&str, Vec<String>)> = vec![
+        // A step over an array gives a sequence: an error for two items (`T2010`, `T2001`,
+        // `D1002`), and never equal to one value.
+        (
+            "items.qty > 1",
+            vec![several("left side", ">", "items", &compare("items.qty"))],
+        ),
+        (
+            "1 + items.qty",
+            vec![several("right side", "+", "items", &compute("items.qty"))],
+        ),
+        (
+            "-items.qty",
+            vec![several("operand", "-", "items", &compute("items.qty"))],
+        ),
+        (
+            "items.qty = 2",
+            vec![several("left side", "=", "items", look)],
+        ),
+        (
+            "2 != items.qty",
+            vec![several("right side", "!=", "items", look)],
+        ),
+        (
+            "items.qty in [1, 2]",
+            vec![several(
+                "left side",
+                "in",
+                "items",
+                "test each one in a filter",
+            )],
+        ),
+        // A filter that may keep several items, the fields of an object, descendants and keys.
+        (
+            "items[type = 'a'].price > 1",
+            vec![several(
+                "left side",
+                ">",
+                "items[type = 'a']",
+                &compare("items[type = 'a'].price"),
+            )],
+        ),
+        ("meta.* = 1", vec![several("left side", "=", "*", look)]),
+        ("**.qty = 1", vec![several("left side", "=", "**", look)]),
+        (
+            "$keys(meta) = 'a'",
+            vec![several("left side", "=", "$keys(meta)", look)],
+        ),
+        // An array is an array even of one item: `["a"] > "a"` fails, `["a"] = "a"` is false.
+        (
+            "tags > 'a'",
+            vec![several("left side", ">", "tags", &compare("tags"))],
+        ),
+        ("tags = 'a'", vec![several("left side", "=", "tags", look)]),
+        // One value: a number filter, a filter of one object, an aggregate, a step's body, a
+        // predicate, `in` with the sequence on the right.
+        ("items[0].qty > 1 and items[-1].qty + 1 = 2", vec![]),
+        (
+            "items[qty > 1][0].price > 1 and items[0][qty > 1].price > 1",
+            vec![],
+        ),
+        ("order[qty > 1].qty + 1 = 2", vec![]),
+        ("$sum(items.qty) > 1 and $count(items[qty > 1]) > 0", vec![]),
+        ("items.(qty * price) and items[qty > 1]", vec![]),
+        ("2 in items.qty and 'a' in tags", vec![]),
+        // Two sides that may be arrays, or a side whose type is not known, are compared whole.
+        (
+            "items.qty = items.price and tags = ['a'] and items.qty = free",
+            vec![],
+        ),
+    ];
+    for (text, expected) in &cases {
+        let got: Vec<String> = svc
+            .diagnostics(text)
+            .into_iter()
+            .map(|d| {
+                assert_eq!(d.code, "W0215", "{text}");
+                d.message
+            })
+            .collect();
+        assert_eq!(&got, expected, "{text}");
+    }
+    // The warning points at the operand; nothing is known without a schema.
+    let d = &svc.diagnostics("1 < items[0].qty + items.qty")[0];
+    assert_eq!((d.span.start, d.span.end), (19, 28));
+    assert!(
+        LanguageService::new(None)
+            .diagnostics("items.qty > 1 and items.qty = 2")
+            .is_empty()
+    );
+    // A schema inferred from a sample with one item still has an array: a second item fails.
+    let inferred = Schema::infer(&[json!({"Order": [{"Product": [{"Price": 1}]}]})]);
+    let codes: Vec<String> = LanguageService::new(Some(inferred))
+        .diagnostics("Order.Product.Price > 0")
+        .into_iter()
+        .map(|d| d.code)
+        .collect();
+    assert_eq!(codes, ["W0215"]);
+}
+
+/// Every operand built from these parts, under each operator: `W0215` is reported exactly where
+/// the operand is an array on one of the documents that follow the schema.
+#[test]
+fn several_values_are_warned_about_exactly_where_an_operand_is_an_array() {
+    let schema = Schema::from_json_schema(&json!({
+        "type": "object",
+        "required": ["items", "order", "meta", "tags"],
+        "properties": {
+            "items": {"type": "array", "minItems": 1, "items": {
+                "type": "object",
+                "required": ["qty", "price", "type"],
+                "properties": {
+                    "qty": {"type": "number"},
+                    "price": {"type": "number"},
+                    "type": {"type": "string"}
+                }
+            }},
+            "order": {"type": "object", "required": ["qty"], "properties": {"qty": {"type": "number"}}},
+            "meta": {"type": "object", "required": ["a"], "properties": {"a": {"type": "number"}, "b": {"type": "number"}}},
+            "tags": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+        }
+    }))
+    .unwrap();
+    // One item of each, and two: every filter below keeps both.
+    let documents = [
+        json!({"items": [{"qty": 2, "price": 3, "type": "a"}], "order": {"qty": 2},
+               "meta": {"a": 1}, "tags": ["a"]}),
+        json!({"items": [{"qty": 2, "price": 3, "type": "a"}, {"qty": 5, "price": 1, "type": "a"}],
+               "order": {"qty": 2}, "meta": {"a": 1, "b": 2}, "tags": ["a", "b"]}),
+    ];
+    let svc = LanguageService::new(Some(schema));
+    let bases = [
+        "items",
+        "items[0]",
+        "items[-1]",
+        "items[qty > 1]",
+        "items[type = 'a']",
+        "items[qty > 1][0]",
+        "order",
+        "order[qty > 1]",
+        "meta",
+        "tags",
+        "tags[0]",
+        "**",
+        "$keys(meta)",
+        "$keys(meta)[0]",
+        "(items)",
+        "$",
+    ];
+    let tails = ["", ".qty", ".price", ".*", ".type", ".qty[0]"];
+    let options = jlens_core::Options::default();
+    let bindings = jlens_core::Bindings::new();
+    let mut warned = 0;
+    for base in bases {
+        for tail in tails {
+            let operand = format!("{base}{tail}");
+            let expr = jlens_core::Expression::compile(&operand).unwrap();
+            let array = documents.iter().any(|d| {
+                matches!(
+                    expr.evaluate_with(Some(d), &bindings, &options),
+                    Ok(Some(Value::Array(_)))
+                )
+            });
+            for text in [
+                format!("{operand} > 1"),
+                format!("1 + {operand}"),
+                format!("-{operand}"),
+                format!("{operand} = 1"),
+                format!("{operand} in [1]"),
+            ] {
+                let found = svc.diagnostics(&text).iter().any(|d| d.code == "W0215");
+                assert_eq!(found, array, "{text}");
+                warned += usize::from(found);
+            }
+        }
+    }
+    assert!(warned > 100, "{warned}");
 }
 
 #[test]
@@ -1196,9 +1410,13 @@ fn diagnostics_compare_the_result_with_the_expected_type() {
         ("$contains(notes, 'x')", vec![("W0214", "notes")]),
         ("$sum(items.price) > 100", vec![("W0214", "items")]),
         ("$max(items.price) > 100", vec![("W0214", "items")]),
+        // Several prices fail the comparison, `W0215`.
         (
             "items[type = 'a'].price > 1",
-            vec![("W0214", "items[type = 'a']")],
+            vec![
+                ("W0215", "items[type = 'a'].price"),
+                ("W0214", "items[type = 'a']"),
+            ],
         ),
         ("total > 1 ? true", vec![("W0214", "total > 1")]),
         // A boolean or another type.

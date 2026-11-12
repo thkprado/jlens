@@ -913,6 +913,92 @@ fn operand_diagnostics(
     }
 }
 
+/// Where an operand of type `ty` may be several values, in an array: the operand that makes it a
+/// sequence (the step over an array, a filter...), or, for a value that may be an array itself,
+/// the operand's last step. `None` where it is one value, never there (a field that no item
+/// has), or its type is not known.
+fn several_values(node: &Node, ty: &Ty<'_>) -> Option<Span> {
+    if ty.shapes.is_empty() {
+        return None;
+    }
+    if ty.sequence.is_some() {
+        return ty.sequence;
+    }
+    let symbols = ty.symbols()?;
+    if !symbols.values.contains('a') {
+        return None;
+    }
+    Some(match &node.kind {
+        NodeKind::Path { steps, .. } => steps.last().map_or(node.span, |s| s.span),
+        _ => node.span,
+    })
+}
+
+/// Whether a value of type `ty` is known to be one value, never an array.
+fn one_value(ty: &Ty<'_>) -> bool {
+    ty.sequence.is_none() && ty.symbols().is_some_and(|s| !s.values.contains('a'))
+}
+
+/// `W0215` for an `operand` (`left side`, `right side` or `operand`) of `token` that may be several
+/// values, which the operator fails on (an order comparison, arithmetic, a negation) or never
+/// equals a single value with (`=`, `!=`, `in`).
+fn several_diagnostic(
+    text: &str,
+    operand: &str,
+    token: &str,
+    node: &Node,
+    cause: Span,
+    out: &mut Vec<Diagnostic>,
+) {
+    let source = |span: Span| text.get(span.start..span.end).unwrap_or_default();
+    let mut value = source(node.span).trim();
+    if value.len() > 40 || value.contains('\n') {
+        value = "…";
+    }
+    let hint = match token {
+        "<" | "<=" | ">" | ">=" => {
+            format!("compare one of them, such as `$max({value})`, or test each one in a filter")
+        }
+        "=" | "!=" => "to look for a value among them, write `in`".to_owned(),
+        "in" => "test each one in a filter".to_owned(),
+        _ => format!("compute one of them, such as `$sum({value})`, or each one inside a step"),
+    };
+    out.push(Diagnostic::new(
+        Severity::Warning,
+        "W0215",
+        node.span,
+        &[
+            ("side", operand),
+            ("token", token),
+            ("cause", source(cause)),
+            ("hint", &hint),
+        ],
+    ));
+}
+
+/// `W0215` for the sides of `=`, `!=` and `in` that may be several values, an array that never
+/// equals the single value on the other side: of `=` and `!=`, a side whose other side is one
+/// value, and the left side of `in`, which is looked for among the items on the right.
+fn several_compared(
+    text: &str,
+    op: BinaryOp,
+    (lhs, left): (&Node, &Ty<'_>),
+    (rhs, right): (&Node, &Ty<'_>),
+    out: &mut Vec<Diagnostic>,
+) {
+    if let Some(cause) = several_values(lhs, left)
+        && (op == BinaryOp::In || one_value(right))
+    {
+        several_diagnostic(text, "left side", op.symbol(), lhs, cause, out);
+    }
+    if op != BinaryOp::In
+        && let Some(cause) = several_values(rhs, right)
+        && one_value(left)
+    {
+        several_diagnostic(text, "right side", op.symbol(), rhs, cause, out);
+    }
+}
+
 /// `W0210` for each literal on the right of `op` (`=`, `!=` or `in`) whose type a present value
 /// of `lhs` never has, so that it never equals it: the right-hand side itself, or the items of
 /// the array on the right of `in`.
@@ -1392,7 +1478,9 @@ impl LanguageService {
                 probe.scope = scope.clone();
                 probe.found_variable = true;
             }
-            Event::Compare { node, op, lhs, rhs } if !variable => {
+            Event::Compare {
+                node, op, lhs, rhs, ..
+            } if !variable => {
                 if siblings.iter().any(|&s| std::ptr::eq(s, node)) {
                     if let Some(condition) = self.value_condition(op, lhs, rhs) {
                         probe.conditions.push(condition);
@@ -1546,20 +1634,36 @@ impl LanguageService {
             }),
             Event::Variable { node, name, .. } => variables.push((node.span, name.to_owned())),
             Event::Bind { name } => bound.push(name.to_owned()),
-            Event::Compare { node, op, lhs, rhs } => match declared_values(lhs) {
-                Some(values) => value_diagnostics(text, op, &values, rhs, &mut out),
-                // Two literals compared are left alone: the reader sees both.
-                None if !matches!(&node.kind, NodeKind::Binary { lhs, .. }
-                    if literal_value(lhs).is_some()) =>
-                {
-                    equality_diagnostics(text, op, lhs, rhs, &mut out);
+            Event::Compare {
+                op,
+                lhs,
+                rhs,
+                left,
+                right,
+                ..
+            } => {
+                match declared_values(lhs) {
+                    Some(values) => value_diagnostics(text, op, &values, rhs, &mut out),
+                    // Two literals compared are left alone: the reader sees both.
+                    None if literal_value(left).is_none() => {
+                        equality_diagnostics(text, op, lhs, rhs, &mut out);
+                    }
+                    None => {}
                 }
-                None => {}
-            },
+                several_compared(text, op, (left, lhs), (rhs, right), &mut out);
+            }
             Event::Operands { node, op, lhs, rhs } => {
                 operand_diagnostics(node, op, lhs, rhs, &mut out);
+                for (side, (operand, ty)) in [("left side", lhs), ("right side", rhs)] {
+                    if let Some(cause) = several_values(operand, ty) {
+                        several_diagnostic(text, side, op.symbol(), operand, cause, &mut out);
+                    }
+                }
             }
             Event::Negate { operand, ty } => {
+                if let Some(cause) = several_values(operand, ty) {
+                    several_diagnostic(text, "operand", "-", operand, cause, &mut out);
+                }
                 if let Some((symbols, set)) = present_types(ty)
                     && !set.contains('n')
                 {

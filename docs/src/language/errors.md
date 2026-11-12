@@ -179,3 +179,4 @@ jlens-specific. Warnings are reported as diagnostics by `jlens check` and `parse
 | `W0212` | `The result is {{{type}}}, never {{{expected}}}` |
 | `W0213` | `The result may be {{{type}}}, not {{{expected}}}` |
 | `W0214` | `The result may be undefined, not {{{expected}}}, because of {{{token}}}` |
+| `W0215` | `The {{{side}}} of {{{token}}} may be several values, because of {{{cause}}}; {{{hint}}}` |

@@ -272,7 +272,7 @@ fn overrides_and_variables() {
     );
     let service =
         LanguageService::new(Some(Schema::default())).with_variable_schema("tree", schema.clone());
-    assert_eq!(codes(&service, "$tree.children.name = 'c'"), ["W0206"]);
+    assert_eq!(codes(&service, "$tree.children[0].name = 'c'"), ["W0206"]);
     assert_eq!(codes(&service, "$tree.children.children.wait"), ["W0201"]);
     assert_eq!(
         uses(&service, "$tree.children.weight")["bindings"]["tree"]["children[].weight"],

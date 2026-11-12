@@ -341,8 +341,18 @@ Completion works on incomplete expressions too, such as `$count(items[` or
   a field compared by `=`, `!=` or `in` with a literal of another type is never equal to it. A
   field with a declared enumeration gets `W0206` there instead, and two literals compared are
   left alone. As for `W0205`, only types that are known count, an absent field passes, and an
-  array stands for its items, which a path may yield one at a time: `scores > 1` passes when
-  `scores` is an array of numbers;
+  array stands for its items: `scores > 1` gets none of these when `scores` is an array of
+  numbers, but `W0215`, below;
+- `W0215` for an operand that may be several values. A path over several items gives a
+  [sequence](#the-type-of-the-result): `items.qty > 1` is true for an order of one item and fails
+  for two (`T2010`), `items.qty + 1` fails too (`T2001`), and `items.qty = 2` is false for two,
+  as `=` compares the array. A field that holds an array is an array even of one item: `tags >
+  'a'` fails, and `tags = 'a'` is false. The warning names the step that makes the sequence (the
+  step over an array, a filter that may keep several items, `*`, `**`, `$keys`) and says what to
+  write instead: an aggregate, `$max(items.qty) > 1` or `$sum(items.qty) + 1`; a filter that tests
+  each item, `$count(items[qty > 1]) > 0`; `in` to find a value among them, `2 in items.qty`. A
+  number filter keeps one item, so `items[0].qty > 1` gets nothing, nor does a filter of an object,
+  `order[qty > 1]`. `=` and `!=` are warned about only where the other side is one value;
 - with the type the result must have declared, `W0212`, `W0213` and `W0214` for a result that
   never has it, may have another, or may be undefined ([below](#the-type-of-the-result)).
 

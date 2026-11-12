@@ -160,6 +160,16 @@ machinery as `$map(items, function($i){ $i.`.
   is not fully known, or holds arrays of arrays, is not checked. The suite test runs these over
   the official suite, which has one expected warning: a comparison guarded by `$type`, which
   the typing does not read.
+- An operand that may be several values gets `W0215`: its type is a sequence (`Ty::sequence`,
+  the span of the step over an array, the filter that may keep several items, `*` over an object
+  of more than one field, `**`, `$keys`), or its known types include an array, which a path
+  gives whole even of one item. The comparison events also carry the right-hand side's node and
+  type for it: `=` and `!=` warn only where the other side is one value, `in` only on the left.
+  A filter of a value that holds one value (no array, no sequence) keeps it or nothing, and a
+  number filter anywhere among a step's filters keeps one item. An operand that is never there,
+  with no shapes, is not warned about. A service test checks every operand built from a set of
+  steps and filters against documents of one and two items: the warning is reported exactly
+  where the operand evaluates to an array on one of them.
 - **Value requests**: where values are completed, the first shape of the left-hand side (or of
   its arrays' items) with a domain becomes a `ValueRequest` beside the items. Its path is found
   by identity in the schema's tree of shapes, iteratively; a variable's shape has none. Its

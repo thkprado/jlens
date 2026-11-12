@@ -189,6 +189,12 @@ impl<'s> Ty<'s> {
         self
     }
 
+    /// Whether this value may hold several values for a filter to keep: an array, or a
+    /// sequence. A filter of one value keeps it or nothing.
+    fn may_hold_several(&self) -> bool {
+        self.partial || self.form != Form::Value || self.sequence.is_some() || self.has_arrays()
+    }
+
     /// Whether one of the shapes may be an array.
     fn has_arrays(&self) -> bool {
         self.shapes
@@ -465,6 +471,10 @@ pub(crate) enum Event<'a, 's> {
         /// The type of the left-hand side.
         lhs: &'a Ty<'s>,
         rhs: &'a Node,
+        /// The left-hand side, the operand whose type is `lhs`.
+        left: &'a Node,
+        /// The type of the right-hand side.
+        right: &'a Ty<'s>,
     },
     /// An order comparison (`<`, `<=`, `>`, `>=`) or arithmetic (`+`, `-`, `*`, `/`, `%`),
     /// reported after both sides are walked.
@@ -562,12 +572,13 @@ impl<'s> Walker<'s, '_> {
                     several = several.or(res.sequence);
                     let elements = res.elements();
                     let mut filtered = false;
+                    let holds_several = res.may_hold_several();
                     for stage in &step.attrs.stages {
                         if let Stage::Filter { expr, span, .. } = stage {
                             self.walk(expr, &elements, scope);
                             undefined = undefined.or(Some(*span));
                             filtered = true;
-                            if !index {
+                            if !index && holds_several {
                                 sequence = sequence.or(Some(*span));
                             }
                         }
@@ -646,6 +657,8 @@ impl<'s> Walker<'s, '_> {
                         op: *op,
                         lhs: &left,
                         rhs,
+                        left: lhs,
+                        right: &right,
                     }),
                     BinaryOp::Lt
                     | BinaryOp::Le
@@ -824,9 +837,10 @@ impl<'s> Walker<'s, '_> {
         for stage in &node.attrs.predicate {
             if let Stage::Filter { expr, span, .. } = stage {
                 self.walk(expr, &elements, scope);
-                // A filter gives the items it keeps: one for an index, a sequence otherwise.
+                // A filter gives the items it keeps: one for an index or of one value, a
+                // sequence otherwise.
                 let undefined = ty.undefined.or(Some(*span));
-                let sequence = (!index).then_some(*span);
+                let sequence = (!index && ty.may_hold_several()).then_some(*span);
                 ty = ty.selected(sequence);
                 ty.undefined = undefined;
             }
@@ -853,13 +867,23 @@ impl<'s> Walker<'s, '_> {
                 });
                 ctx.field(name, step.span)
             }
+            // The values of the fields: several where an object may have more than one.
             NodeKind::Wildcard => {
                 let miss = ctx.may_have_no_fields();
-                ctx.all_field_values()
-                    .or_undefined(miss.then_some(step.span))
+                let mut ty = ctx
+                    .all_field_values()
+                    .or_undefined(miss.then_some(step.span));
+                if ctx.fields().len() > 1 {
+                    ty.sequence = Some(step.span);
+                }
+                ty
             }
-            // Descendants are not told apart: any may be missing.
-            NodeKind::Descendant => ctx.descendants().or_undefined(Some(step.span)),
+            // Descendants are not told apart: any may be missing, and there may be several.
+            NodeKind::Descendant => {
+                let mut ty = ctx.descendants().or_undefined(Some(step.span));
+                ty.sequence = Some(step.span);
+                ty
+            }
             NodeKind::Sort { terms } => {
                 for t in terms {
                     self.walk(&t.expr, ctx, scope);
@@ -870,24 +894,23 @@ impl<'s> Walker<'s, '_> {
         }
     }
 
-    /// Whether the filters of `step` are all a number, `[0]` or `[-1]`: each keeps one item at
-    /// most of each array it is applied to.
+    /// Whether a filter of `step` is a number, `[0]` or `[-1]`: it keeps one item at most of
+    /// each array the step gives.
     fn index_filter(step: &Node) -> bool {
         Self::index_filter_of(&step.attrs.stages)
     }
 
-    /// Whether `stages` has filters, all of them a number.
+    /// Whether one of the filters of `stages` is a number, which keeps one item at most: of the
+    /// items the filters before it kept, and the filters after it keep that one or none.
     fn index_filter_of(stages: &[Stage]) -> bool {
         let number = |e: &Node| match &e.kind {
             NodeKind::Number { .. } => true,
             NodeKind::Negate { expr } => matches!(expr.kind, NodeKind::Number { .. }),
             _ => false,
         };
-        let mut filters = stages.iter().filter_map(|s| match s {
-            Stage::Filter { expr, .. } => Some(expr),
-            Stage::Index { .. } => None,
-        });
-        filters.next().is_some_and(|first| number(first)) && filters.all(|e| number(e))
+        stages
+            .iter()
+            .any(|s| matches!(s, Stage::Filter { expr, .. } if number(expr)))
     }
 
     fn is_simple_step(step: &Node) -> bool {
