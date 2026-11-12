@@ -850,13 +850,15 @@ fn a_schema_follows_the_files_beside_it() {
             let schema = format!("{folder}/order.json");
             let (code, uses, warned) = run(&["schema", "uses", "--schema", &schema, expression]);
             assert_eq!(code, Some(0), "{warned}");
-            // One line for each document that was not found, and one for the place that the
-            // document found does not have.
+            // One line for each document that was not found, one for the place that the
+            // document found does not have, and one for the `type` of `code` in that document,
+            // which names no JSON type (roadmap 0.34 #10).
             let missing: &[&str] = match folder {
                 "schemas" => &[
                     "address.json",
                     "carrier.json",
                     "common.json#/$defs/discount",
+                    "common.json#/$defs/person/properties/code",
                 ],
                 _ => &["common.json", "carrier.json"],
             };
@@ -911,7 +913,9 @@ fn a_schema_follows_the_files_beside_it() {
         "rules/a.jsonata",
     ]);
     assert_eq!(code, Some(1), "two unknown fields: {warned}");
-    assert_eq!(warned.lines().count(), 5, "{warned}");
+    // Each of the schema and `$buyer` reads the `code` of `person`, whose `type` is not read.
+    assert_eq!(warned.lines().count(), 7, "{warned}");
+    assert_eq!(warned.matches("names what is not a JSON type").count(), 2);
     assert!(warned.contains("warning: variable $seller: "), "{warned}");
     assert!(warned.contains("warning: variable $buyer: "), "{warned}");
     let (code, found, _) = run(&["check", "--json", "-f", "rules/a.jsonata"]);
@@ -928,8 +932,8 @@ fn a_schema_follows_the_files_beside_it() {
     assert_eq!(code, Some(0), "{warned}");
     assert_eq!(
         warned.lines().count(),
-        4,
-        "three warnings and `ok`: {warned}"
+        5,
+        "four warnings and `ok`: {warned}"
     );
 
     // A file beside the schema that is not JSON fails the command.

@@ -109,8 +109,10 @@ fn schema_text(text: u64, sources: u64) -> Result<Vec<u8>, Vec<u8>> {
 /// object whose `unresolved` lists the `$ref`s that were not followed, in the order the load
 /// met them, each with `place` (where it is written: its document's URI and a JSON Pointer),
 /// `reference` (its text), `uri` (what it resolves to) and `document`, the URI of the document
-/// that was not given, absent when the document is there without that place. `{}` when
-/// everything was read.
+/// that was not given, absent when the document is there without that place; and whose
+/// `unread` lists the keywords that were not read, each with `place` (the schema that has it)
+/// and `keyword` (`$dynamicRef`, `$recursiveRef`, or a `type` that names no JSON type). `{}`
+/// when everything was read.
 pub fn schema_report(schema: u64) -> u64 {
     reply(report_text(schema))
 }

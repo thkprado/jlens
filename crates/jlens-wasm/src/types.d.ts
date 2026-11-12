@@ -310,6 +310,24 @@ export interface LoadReport {
    * was. A `$ref` that nothing of the schema leads to is not read, and so not listed.
    */
   unresolved?: UnresolvedRef[];
+  /**
+   * The keywords that were not read where leaving them out could give a false warning, in the
+   * order the load met them; absent when every one was. The schema that has one says nothing of
+   * its place. Keywords that only narrow what a place may hold (`not`, `maxLength`) are left
+   * out without a word, as they cannot.
+   */
+  unread?: UnreadKeyword[];
+}
+
+/** A keyword that a load did not read: the place of the schema that has it is unknown. */
+export interface UnreadKeyword {
+  /** Where the schema that has the keyword is, as `UnresolvedRef.place` gives it. */
+  place: string;
+  /**
+   * The keyword: `$dynamicRef` or `$recursiveRef`, which the scope of a validation resolves, or
+   * `type` with a name that is not a JSON type.
+   */
+  keyword: string;
 }
 
 /** A `$ref` that a load did not follow: its place in the schema is unknown. */

@@ -46,29 +46,33 @@ public final class Schema implements AutoCloseable {
     private final long handle;
     private final Cleaner.Cleanable cleanable;
     private final List<UnresolvedRef> unresolved;
+    private final List<UnreadKeyword> unread;
     private volatile boolean closed;
 
     private Schema(long handle) {
         this.handle = handle;
         this.cleanable = Native.CLEANER.register(this, new Free(handle));
         try {
-            this.unresolved = report(Native.json(Native.schemaReport(handle)));
+            String report = Native.json(Native.schemaReport(handle));
+            this.unresolved = report(report, "unresolved", UnresolvedRef::of);
+            this.unread = report(report, "unread", UnreadKeyword::of);
         } catch (RuntimeException | Error e) {
             cleanable.clean();
             throw e;
         }
     }
 
-    /** The {@code $ref}s of the JSON object the C API replies with. */
-    private static List<UnresolvedRef> report(String json) {
+    /** The list {@code member} of the JSON object the C API replies with. */
+    private static <T> List<T> report(
+            String json, String member, java.util.function.Function<Object, T> of) {
         try {
             Map<String, Object> report = Json.object(Json.parse(json), "a load's report");
-            List<?> listed = Json.member(report, "unresolved", List.class);
-            List<UnresolvedRef> unresolved = new ArrayList<>();
+            List<?> listed = Json.member(report, member, List.class);
+            List<T> items = new ArrayList<>();
             if (listed != null) {
-                for (Object item : listed) unresolved.add(UnresolvedRef.of(item));
+                for (Object item : listed) items.add(of.apply(item));
             }
-            return List.copyOf(unresolved);
+            return List.copyOf(items);
         } catch (IllegalArgumentException | NullPointerException e) {
             throw new IllegalStateException(
                     "jlens: unexpected report from the C API: " + json, e);
@@ -131,6 +135,21 @@ public final class Schema implements AutoCloseable {
      */
     public List<UnresolvedRef> unresolved() {
         return unresolved;
+    }
+
+    /**
+     * The keywords that the load did not read where leaving them out could give a false
+     * warning, in the order it met them: {@code $dynamicRef} and {@code $recursiveRef}, and a
+     * {@code type} that names what is not a JSON type. The schema that has one says nothing of
+     * its place: nothing is warned under it. Keywords that only narrow what a place may hold
+     * ({@code not}, {@code maxLength}) are left out without a word, as they cannot.
+     *
+     * <p>The list is read when the schema is made: it is there after the schema is closed.
+     *
+     * @return the keywords, which cannot be changed; empty when every one was read
+     */
+    public List<UnreadKeyword> unread() {
+        return unread;
     }
 
     /**

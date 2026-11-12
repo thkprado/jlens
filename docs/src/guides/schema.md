@@ -43,7 +43,7 @@ complete, or set the values in the overrides (below). An inferred `minItems` car
 `minItems` where an empty array is allowed. You can commit the file, review it,
 and edit it like any JSON Schema. jlens also reads JSON Schemas written by hand or by other
 tools: it follows `$ref`, by JSON Pointer, `$id` and `$anchor`, and it merges `anyOf`, `oneOf`
-and `allOf`.
+and `allOf` ([the keywords jlens reads](#the-keywords-jlens-reads) lists the others).
 
 A schema may be recursive: a tree whose `children` are `{"$ref": "#"}`, a definition that
 refers to itself, definitions that refer to each other. Completion, hover and the diagnostics
@@ -88,15 +88,16 @@ document that is not a schema, or one nested more than 64 levels deep, fails to 
 `Schema::from_json_schema` is that load with no other document and without the report.
 
 Every package that reads a schema takes its documents and gives the report, in the same JSON
-form (`{"unresolved": [{"place", "reference", "uri", "document"}]}`, `{}` when every `$ref`
-was followed):
+form (`{"unresolved": [{"place", "reference", "uri", "document"}], "unread": [{"place",
+"keyword"}]}`, `{}` when every `$ref` was followed and every keyword read; `unread` is
+described [below](#the-keywords-jlens-reads)):
 
 | Where | The documents | The report |
 |---|---|---|
 | Rust | `SchemaLoader::document`, or `load_asking` with a function that gives them | `LoadReport` |
 | [WebAssembly](wasm.md#a-schema-in-several-documents) | `new LanguageService(schema, variables, functions, { uri, documents })` | `schemaReport(schema, { uri, documents })` |
-| [Java](java.md#a-schema-in-several-documents) | `Schema.loader().document(uri, text).load(text)` | `schema.unresolved()`, `schema.missingDocuments()` |
-| CLI and language server | the files beside the schema's | a warning for each document not found |
+| [Java](java.md#a-schema-in-several-documents) | `Schema.loader().document(uri, text).load(text)` | `schema.unresolved()`, `schema.missingDocuments()`, `schema.unread()` |
+| CLI and language server | the files beside the schema's | a warning for each document not found, and for each keyword not read |
 
 The CLI and the language server read a document from a file, and never from the network. The
 file is the one at the same relative path from the schema's file as between the two URIs:
@@ -105,8 +106,8 @@ beside `schemas/order.json`, `"$ref": "common.json"` is `schemas/common.json` an
 path between `https://example.com/schemas/order.json` and
 `https://example.com/schemas/common.json` is `common.json`) or not. A document on another
 host, or one with no file there, is not read. A variable's schema in `jlens.json` refers to
-files from the folder of `jlens.json`. For each document that was not found, and each `$ref`
-to a place its document does not have, `jlens check`, `jlens schema uses` and
+files from the folder of `jlens.json`. For each document that was not found, each `$ref`
+to a place its document does not have, and each keyword not read, `jlens check`, `jlens schema uses` and
 `jlens schema complete` print a `warning:` line on standard error, and the language server
 shows a message; the exit code does not change, and `--deny-warnings` counts the warnings of
 expressions only. A file that is there and is not JSON fails the command, as a schema that
@@ -129,6 +130,44 @@ tools ignore. jlens writes them and reads them back, so they can also be written
 | `x-jlens-samples` | At the root: the number of sample documents the schema was inferred from. For information only: nothing depends on it |
 
 A field's `label` is written as the standard `title`, and its `description` as `description`.
+
+### The keywords jlens reads
+
+The diagnostics warn about what a schema does not allow: a field it does not list, a type it
+does not give. A keyword that allows more, left unread, would make them warn about what the
+schema allows; a keyword that only narrows what a place may hold cannot, and jlens leaves those
+out. So each keyword of JSON Schema (2020-12 and the drafts before it) and of OpenAPI 3.0 is
+read, left out because it only narrows, or reported:
+
+| | Keywords |
+|---|---|
+| Read | `type`, `properties`, `required`, `patternProperties`, `additionalProperties`, `unevaluatedProperties` (as `additionalProperties`, where that is absent), `items`, `prefixItems`, `additionalItems`, `unevaluatedItems`, `minItems`, `enum`, `const`, `format`, `minimum`, `maximum`, `$ref`, `$id`, `$anchor`, `$defs`, `definitions`, `allOf`, `anyOf`, `oneOf`, `if` with `then` and `else`, `dependentSchemas`, `dependencies`, `nullable`, `title`, `description`, `examples`, `x-jlens-*` |
+| Left out: they only narrow | `not`, `minLength`, `maxLength`, `pattern`, `multipleOf`, `exclusiveMinimum`, `exclusiveMaximum`, `maxItems` (but for a tuple, below), `uniqueItems`, `contains`, `minContains`, `maxContains`, `minProperties`, `maxProperties`, `propertyNames`, `dependentRequired`, `contentEncoding`, `contentMediaType`, `contentSchema` |
+| Left out: they describe | `default`, `deprecated`, `readOnly`, `writeOnly`, `$comment`, `$schema`, `$vocabulary`, `$dynamicAnchor`, `$recursiveAnchor`, `discriminator`, `xml`, `externalDocs`, `example` |
+| Reported | `$dynamicRef` and `$recursiveRef`, which the scope of a validation resolves; a `type` that names no JSON type, such as `"int"` |
+
+How some are read:
+
+- **`then` and `else`**, read only beside `if`, and the schemas of **`dependentSchemas`** and
+  of draft-07's **`dependencies`** hold for some of the values only. The fields they declare,
+  at any depth, are fields the object may have, none required; a field that `then` makes a
+  string and `else` a number is either. What else they say only narrows, and is left out.
+- **A tuple**, `prefixItems` or draft-07's `items` as an array, has its items merged with
+  those of the rest (`items` after `prefixItems`, `additionalItems`, `unevaluatedItems`), as
+  a step over the array takes them all. With no schema for the rest, any item may follow, and
+  the items are not known, unless `maxItems` keeps the array to the tuple or the rest is
+  `false`.
+- **`nullable: true`** adds `null` to the types a schema gives, and to its `enum`.
+
+A reported keyword leaves the place of its schema unknown, as a `$ref` that was not followed
+does: nothing is completed or warned about under it. The report beside the schema lists each
+one under `unread`, with `place`, the schema that has it (`#/properties/children/items`), and
+`keyword`. The CLI and the language server warn about each, as they do about a document not
+found.
+
+Left out, a narrowing keyword can still leave the typing less sure than the schema is: with
+`not: {"type": "null"}`, a field may still be `null` to it, and a field that `then` requires
+may still be absent.
 
 ## 2. Describe the fields
 

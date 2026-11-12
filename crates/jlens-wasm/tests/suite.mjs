@@ -922,6 +922,14 @@ export const cases = [
       }],
     });
     equal(j.schemaReport(person), {}, "everything read");
+    const tree = { properties: { children: { items: { $dynamicRef: "#node" } }, code: { type: "int" } } };
+    equal(j.schemaReport(tree), {
+      unread: [
+        { place: "#/properties/children/items", keyword: "$dynamicRef" },
+        { place: "#/properties/code", keyword: "type" },
+      ],
+    }, "keywords not read");
+    equal(codes(new j.LanguageService(tree), "[children.anything, code + 1]"), [], "unknown under them");
     equal(j.schemaReport(person, null), {});
     equal(j.schemaReport(person, { uri: null, documents: null }), {});
     for (const bad of [[], 1, { url: "a" }, { uri: 1 }, { documents: [] }]) {

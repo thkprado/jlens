@@ -51,7 +51,7 @@ mod uses;
 pub use changes::{Change, EnumChange, PathChanges, UseChanges, UsesChanges};
 pub use uses::{Use, Uses};
 
-pub use jsonschema::{LoadReport, SchemaLoader, UnresolvedRef};
+pub use jsonschema::{LoadReport, SchemaLoader, UnreadKeyword, UnresolvedRef};
 pub use service::{
     CompletionItem, CompletionKind, Completions, FunctionDecl, Hover, LanguageService, ResultCheck,
     ResultType, SignatureHelp, ValueCondition, ValueRequest, value_literal,

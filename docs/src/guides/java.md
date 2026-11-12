@@ -427,8 +427,12 @@ each document with its URI (the [schema guide](schema.md#a-schema-in-several-doc
 - **`schema.unresolved()`** lists those `$ref`s as `UnresolvedRef` records: `place()`, where
   it is written; `reference()`, its text; `uri()`, what it resolves to; and `document()`, the
   URI of the document to give, `null` when the document is there without that place.
-  `schema.missingDocuments()` lists the documents to give, each once. Both are read with the
-  schema, and are there after it is closed.
+  `schema.missingDocuments()` lists the documents to give, each once.
+- **`schema.unread()`** lists the keywords the load did not read, whose places are unknown as
+  well, as `UnreadKeyword` records: `place()`, the schema that has one, and `keyword()`
+  (`$dynamicRef`, `$recursiveRef`, or a `type` that names no JSON type; the
+  [schema guide](schema.md#the-keywords-jlens-reads) lists the keywords). The three lists are
+  read with the schema, and are there after it is closed.
 
 ## What an expression uses of its schema
 

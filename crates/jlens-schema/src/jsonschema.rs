@@ -276,12 +276,18 @@ pub struct LoadReport {
     /// nothing of the schema leads to is not read, and so not reported.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unresolved: Vec<UnresolvedRef>,
+    /// The keywords that were not read where leaving them out could give a false warning, in
+    /// the order the load met them: the schema that has one says nothing of its place.
+    /// Keywords that only narrow what a place may hold (`not`, `maxLength`) are left out
+    /// without a word, as they cannot.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unread: Vec<UnreadKeyword>,
 }
 
 impl LoadReport {
     /// Whether everything was read.
     pub fn is_empty(&self) -> bool {
-        self.unresolved.is_empty()
+        self.unresolved.is_empty() && self.unread.is_empty()
     }
 
     /// The URIs of the documents that were not given, each once: with them, the load would
@@ -312,6 +318,28 @@ pub struct UnresolvedRef {
     /// no such place.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document: Option<String>,
+}
+
+/// A keyword that a load did not read: the place of the schema that has it is unknown.
+///
+/// ```
+/// use jlens_schema::SchemaLoader;
+/// use serde_json::json;
+///
+/// let (_, report) = SchemaLoader::new()
+///     .load(&json!({"properties": {"code": {"type": ["string", "int"]}}}))
+///     .unwrap();
+/// assert_eq!(report.unread[0].place, "#/properties/code");
+/// assert_eq!(report.unread[0].keyword, "type");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct UnreadKeyword {
+    /// Where the schema that has the keyword is, as [`UnresolvedRef::place`] gives it.
+    pub place: String,
+    /// The keyword: `$dynamicRef` or `$recursiveRef`, which the scope of a validation
+    /// resolves, or `type` with a name that is not a JSON type.
+    pub keyword: String,
 }
 
 /// The `$ref` to the document itself.
@@ -457,23 +485,62 @@ fn address(node: &JsonValue) -> usize {
 /// [`Importer::import`]: a `$ref` under a keyword that is missing here is not seen by the
 /// search for recursion.
 fn subschemas<'d>(map: &'d Map<String, JsonValue>, out: &mut Vec<&'d JsonValue>) {
-    for key in ["allOf", "anyOf", "oneOf"] {
+    if unread_keyword(map).is_some() {
+        return;
+    }
+    for key in ["allOf", "anyOf", "oneOf", "prefixItems"] {
         if let Some(JsonValue::Array(branches)) = map.get(key) {
             out.extend(branches);
         }
     }
-    for key in ["properties", "patternProperties"] {
+    for key in [
+        "properties",
+        "patternProperties",
+        "dependentSchemas",
+        "dependencies",
+    ] {
         if let Some(JsonValue::Object(properties)) = map.get(key) {
-            out.extend(properties.values());
+            out.extend(properties.values().filter(|p| p.is_object()));
         }
     }
-    if let Some(additional @ JsonValue::Object(_)) = map.get("additionalProperties") {
-        out.push(additional);
+    let conditional: &[&str] = if map.contains_key("if") {
+        &["then", "else"]
+    } else {
+        &[]
+    };
+    let others = [
+        "additionalProperties",
+        "unevaluatedProperties",
+        "additionalItems",
+        "unevaluatedItems",
+    ];
+    for key in others.iter().chain(conditional) {
+        if let Some(schema @ JsonValue::Object(_)) = map.get(*key) {
+            out.push(schema);
+        }
     }
     match map.get("items") {
         Some(items @ JsonValue::Object(_)) => out.push(items),
         Some(JsonValue::Array(tuple)) => out.extend(tuple),
         _ => {}
+    }
+}
+
+/// The keyword of the schema `map` that the load does not read and that leaves its place
+/// unknown: a dynamic reference, which the scope of a validation resolves, or a `type` that
+/// names what is not a JSON type.
+fn unread_keyword(map: &Map<String, JsonValue>) -> Option<&'static str> {
+    for keyword in ["$dynamicRef", "$recursiveRef"] {
+        if map.get(keyword).is_some_and(JsonValue::is_string) {
+            return Some(keyword);
+        }
+    }
+    let known = |t: &JsonValue| t.as_str().and_then(JsonType::from_name).is_some();
+    match map.get("type") {
+        None => None,
+        Some(JsonValue::Array(types)) if types.iter().all(known) => None,
+        Some(t) if known(t) => None,
+        Some(_) => Some("type"),
     }
 }
 
@@ -643,8 +710,10 @@ impl<'d> Index<'d> {
                         match key.as_str() {
                             // Values, not schemas.
                             "enum" | "const" | "examples" | "default" => {}
-                            "properties" | "patternProperties" | "dependentSchemas" | "$defs"
-                            | "definitions" => pending.push((value, base.clone(), false)),
+                            "properties" | "patternProperties" | "dependentSchemas"
+                            | "dependencies" | "$defs" | "definitions" => {
+                                pending.push((value, base.clone(), false));
+                            }
                             _ => pending.push((value, base.clone(), true)),
                         }
                     }
@@ -702,6 +771,9 @@ struct Importer<'d> {
     /// The `$ref`s the import met that lead to nothing: the schema's address, and its text
     /// and what it is missing.
     unresolved: IndexMap<usize, (&'d str, Option<usize>)>,
+    /// The schemas the import met with a keyword it does not read: their addresses, and the
+    /// keyword.
+    unread: IndexMap<usize, &'static str>,
     definitions: Definitions,
     /// The definitions still to read: their names and their targets.
     pending: Vec<(String, &'d JsonValue)>,
@@ -773,6 +845,7 @@ impl<'d> Importer<'d> {
             root,
             missing,
             unresolved: IndexMap::new(),
+            unread: IndexMap::new(),
             definitions: Definitions::new(),
             pending: Vec::new(),
         }
@@ -832,13 +905,21 @@ impl<'d> Importer<'d> {
         })
     }
 
-    /// What the import did not follow, with the place of each `$ref`.
+    /// What the import did not follow or read, with the place of each schema.
     fn report(&self) -> LoadReport {
         let mut report = LoadReport::default();
-        if self.unresolved.is_empty() {
+        if self.unresolved.is_empty() && self.unread.is_empty() {
             return report;
         }
         // The places are looked for only now, as most loads have nothing to report.
+        let wanted =
+            |node: usize| self.unresolved.contains_key(&node) || self.unread.contains_key(&node);
+        let count = self
+            .unread
+            .keys()
+            .filter(|node| !self.unresolved.contains_key(*node))
+            .count()
+            + self.unresolved.len();
         let mut places: HashMap<usize, String> = HashMap::new();
         'documents: for (uri, document) in &self.documents {
             let mut pending = vec![(*document, String::new())];
@@ -858,11 +939,11 @@ impl<'d> Importer<'d> {
                         .collect(),
                     _ => continue,
                 };
-                if self.unresolved.contains_key(&address(node)) {
+                if wanted(address(node)) {
                     places
                         .entry(address(node))
                         .or_insert_with(|| format!("{uri}#{pointer}"));
-                    if places.len() == self.unresolved.len() {
+                    if places.len() == count {
                         break 'documents;
                     }
                 }
@@ -875,10 +956,16 @@ impl<'d> Importer<'d> {
                 None => ((*reference).to_owned(), None),
             };
             report.unresolved.push(UnresolvedRef {
-                place: places.remove(node).unwrap_or_default(),
+                place: places.get(node).cloned().unwrap_or_default(),
                 reference: (*reference).to_owned(),
                 uri,
                 document,
+            });
+        }
+        for (node, keyword) in &self.unread {
+            report.unread.push(UnreadKeyword {
+                place: places.get(node).cloned().unwrap_or_default(),
+                keyword: (*keyword).to_owned(),
             });
         }
         report
@@ -891,6 +978,12 @@ impl<'d> Importer<'d> {
         let JsonValue::Object(map) = node else {
             return Ok(Shape::default()); // `true` / `false`: nothing known
         };
+        // A schema with a keyword the load does not read says nothing of its place, as the
+        // rest of it could forbid what the keyword allows.
+        if let Some(keyword) = unread_keyword(map) {
+            self.unread.entry(address(node)).or_insert(keyword);
+            return Ok(Shape::default());
+        }
         let mut shape = match map.get("$ref").and_then(JsonValue::as_str) {
             Some(reference) => self.follow(node, reference, depth)?,
             None => Shape::default(),
@@ -938,7 +1031,11 @@ impl<'d> Importer<'d> {
             add_type(&mut shape, "object");
         }
         let patterns = map.get("patternProperties").and_then(JsonValue::as_object);
-        let additional = map.get("additionalProperties");
+        // `unevaluatedProperties` also sees the fields of the branches, which the shape has
+        // merged by now.
+        let additional = map
+            .get("additionalProperties")
+            .or_else(|| map.get("unevaluatedProperties"));
         if patterns.is_some() || additional.is_some() {
             let mut other = OtherFields::default();
             for (pattern, p) in patterns.into_iter().flatten() {
@@ -963,22 +1060,26 @@ impl<'d> Importer<'d> {
             }
             add_type(&mut shape, "object");
         }
-        match map.get("items") {
-            Some(items @ JsonValue::Object(_)) => {
-                shape.items = Some(Box::new(self.import(items, depth + 1)?));
-                add_type(&mut shape, "array");
-            }
-            Some(JsonValue::Array(tuple)) => {
-                // Draft-07 tuple form: merge the item schemas.
-                let mut merged = Shape::default();
-                for item in tuple {
-                    merge(&mut merged, self.import(item, depth + 1)?);
+        self.import_items(map, &mut shape, depth)?;
+        // What holds for some of the values only: the fields it declares may be there.
+        let mut conditions = Vec::new();
+        if map.contains_key("if") {
+            for key in ["then", "else"] {
+                if let Some(condition) = map.get(key) {
+                    conditions.push(self.import(condition, depth + 1)?);
                 }
-                shape.items = Some(Box::new(merged));
-                add_type(&mut shape, "array");
             }
-            _ => {}
         }
+        // Until draft-07, `dependencies` held both `dependentSchemas` and the lists of
+        // `dependentRequired`.
+        for key in ["dependentSchemas", "dependencies"] {
+            if let Some(JsonValue::Object(schemas)) = map.get(key) {
+                for condition in schemas.values().filter(|s| !s.is_array()) {
+                    conditions.push(self.import(condition, depth + 1)?);
+                }
+            }
+        }
+        add_conditions(&mut shape, conditions);
         if let Some(JsonValue::Array(values)) = map.get("enum") {
             shape.enumeration = Some(values.clone());
             shape.enumeration_inferred = map
@@ -1023,7 +1124,143 @@ impl<'d> Importer<'d> {
         if map.get("x-jlens-hidden").and_then(JsonValue::as_bool) == Some(true) {
             shape.hidden = true;
         }
+        // OpenAPI 3.0: `null` besides the types the schema gives.
+        if map.get("nullable") == Some(&JsonValue::Bool(true)) && !shape.types.is_empty() {
+            add_type(&mut shape, "null");
+            if let Some(values) = &mut shape.enumeration
+                && !values.contains(&JsonValue::Null)
+            {
+                values.push(JsonValue::Null);
+            }
+        }
         Ok(shape)
+    }
+
+    /// Reads the items of the array schema `map` into `shape`: one schema for every item
+    /// (`items`), or one for each of the first items (`prefixItems`, or `items` as an array
+    /// until draft-07) and one for the rest (`items` after `prefixItems`, `additionalItems`).
+    /// The first items and the rest are merged, as a step over the array takes them all.
+    fn import_items(
+        &mut self,
+        map: &'d Map<String, JsonValue>,
+        shape: &mut Shape,
+        depth: usize,
+    ) -> Result<(), String> {
+        let (tuple, rest) = match (map.get("prefixItems"), map.get("items")) {
+            (Some(JsonValue::Array(tuple)), rest) => (Some(tuple), rest),
+            (_, Some(JsonValue::Array(tuple))) => (Some(tuple), map.get("additionalItems")),
+            (_, items) => (None, items),
+        };
+        // `unevaluatedItems` is the rest where nothing else is; an item `contains` matches
+        // escapes it.
+        let rest = rest.or_else(|| {
+            (!map.contains_key("contains"))
+                .then(|| map.get("unevaluatedItems"))
+                .flatten()
+        });
+        let Some(tuple) = tuple else {
+            if let Some(items @ JsonValue::Object(_)) = map.get("items") {
+                shape.items = Some(Box::new(self.import(items, depth + 1)?));
+                add_type(shape, "array");
+            } else if let Some(rest @ JsonValue::Object(_)) = rest {
+                // `unevaluatedItems` alone: the items of the branches, or else every item.
+                let rest = self.import(rest, depth + 1)?;
+                match &mut shape.items {
+                    Some(items) => merge(items, rest),
+                    None => shape.items = Some(Box::new(rest)),
+                }
+                add_type(shape, "array");
+            }
+            return Ok(());
+        };
+        let mut merged = Shape::default();
+        for item in tuple {
+            merge(&mut merged, self.import(item, depth + 1)?);
+        }
+        let closed = map
+            .get("maxItems")
+            .and_then(JsonValue::as_u64)
+            .is_some_and(|n| n <= tuple.len() as u64);
+        match rest {
+            Some(rest @ JsonValue::Object(_)) => merge(&mut merged, self.import(rest, depth + 1)?),
+            Some(JsonValue::Bool(false)) => {}
+            // Any item may follow the first ones: what they are is not known.
+            _ if !closed => {
+                add_type(shape, "array");
+                return Ok(());
+            }
+            _ => {}
+        }
+        shape.items = Some(Box::new(merged));
+        add_type(shape, "array");
+        Ok(())
+    }
+}
+
+/// Adds to `shape` what schemas that hold for some of its values only (`then`, `else`, those
+/// of `dependentSchemas`) say they may have besides: the fields they declare, each optional, at
+/// any depth, the other fields they open the object to, and the definitions they refer to.
+/// What else they say only narrows the values, as any schema beside `shape` does, and is left
+/// out.
+fn add_conditions(shape: &mut Shape, conditions: Vec<Shape>) {
+    if conditions.is_empty() {
+        return;
+    }
+    // An object whose fields were not known stays one whose fields are not known.
+    let open = shape.fields.is_empty() && shape.other_fields.is_none();
+    let mut added: IndexMap<String, Shape> = IndexMap::new();
+    let mut under: IndexMap<String, Vec<Shape>> = IndexMap::new();
+    let mut items = Vec::new();
+    for condition in conditions {
+        for (name, field) in condition.fields {
+            if shape.fields.contains_key(&name) {
+                under.entry(name).or_default().push(field.shape);
+            } else {
+                match added.entry(name) {
+                    indexmap::map::Entry::Occupied(mut e) => merge(e.get_mut(), field.shape),
+                    indexmap::map::Entry::Vacant(e) => {
+                        e.insert(field.shape);
+                    }
+                }
+            }
+        }
+        if let Some(other) = condition.other_fields {
+            match &mut shape.other_fields {
+                Some(mine) => union_others(mine, *other),
+                None if !open => shape.other_fields = Some(other),
+                None => {}
+            }
+        }
+        items.extend(condition.items.map(|i| *i));
+        for name in condition.references {
+            if !shape.references.contains(&name) {
+                shape.references.push(name);
+            }
+        }
+    }
+    for (name, conditions) in under {
+        if let Some(field) = shape.fields.get_mut(&name) {
+            add_conditions(&mut field.shape, conditions);
+        }
+    }
+    if let Some(mine) = &mut shape.items {
+        add_conditions(mine, items);
+    }
+    if open && !added.is_empty() {
+        shape.other_fields = Some(Box::new(OtherFields {
+            patterns: Vec::new(),
+            rest: Some(Box::default()),
+        }));
+    }
+    for (name, field_shape) in added {
+        shape.fields.insert(
+            name,
+            Field {
+                shape: field_shape,
+                required: false,
+                presence: 0.0,
+            },
+        );
     }
 }
 

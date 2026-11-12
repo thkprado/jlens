@@ -143,7 +143,7 @@ class UsesTest {
         }
     }
 
-    /** The references a schema did not follow, in the JSON form of the other packages. */
+    /** What a schema did not follow or read, in the JSON form of the other packages. */
     private static Map<String, Object> report(Schema schema) {
         List<Object> unresolved = new ArrayList<>();
         for (UnresolvedRef reference : schema.unresolved()) {
@@ -154,7 +154,14 @@ class UsesTest {
             if (reference.document() != null) members.put("document", reference.document());
             unresolved.add(members);
         }
-        return unresolved.isEmpty() ? Map.of() : Map.of("unresolved", unresolved);
+        List<Object> unread = new ArrayList<>();
+        for (UnreadKeyword keyword : schema.unread()) {
+            unread.add(Map.of("place", keyword.place(), "keyword", keyword.keyword()));
+        }
+        Map<String, Object> report = new java.util.LinkedHashMap<>();
+        if (!unresolved.isEmpty()) report.put("unresolved", unresolved);
+        if (!unread.isEmpty()) report.put("unread", unread);
+        return report;
     }
 
     @Test

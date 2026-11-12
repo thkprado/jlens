@@ -119,8 +119,9 @@ fn read(path: &Path) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// What a load did not follow, for a person: a line for each document that was not found, and
-/// one for each `$ref` to a place its document does not have. `what` names the schema.
+/// What a load did not follow or read, for a person: a line for each document that was not
+/// found, one for each `$ref` to a place its document does not have, and one for each keyword
+/// that was not read. `what` names the schema.
 pub fn notes(what: &str, report: &LoadReport) -> Vec<String> {
     let mut notes = Vec::new();
     for document in report.documents() {
@@ -139,6 +140,16 @@ pub fn notes(what: &str, report: &LoadReport) -> Vec<String> {
             "{what}: $ref {:?} at {} not followed, as {} is not in its document: nothing is \
              checked under it",
             unresolved.reference, unresolved.place, unresolved.uri
+        ));
+    }
+    for unread in &report.unread {
+        let why = match unread.keyword.as_str() {
+            "type" => "names what is not a JSON type",
+            _ => "is not read",
+        };
+        notes.push(format!(
+            "{what}: {} at {} {why}: nothing is checked under it",
+            unread.keyword, unread.place
         ));
     }
     notes

@@ -178,6 +178,22 @@ class LanguageServiceTest {
         try (Schema whole = Schema.fromJson(ORDER)) {
             assertEquals(List.of(), whole.unresolved());
             assertEquals(List.of(), whole.missingDocuments());
+            assertEquals(List.of(), whole.unread());
+        }
+
+        // A keyword the load does not read leaves its place unknown, and is listed.
+        String tree = """
+                {"type": "object", "properties": {
+                    "children": {"type": "array", "items": {"$dynamicRef": "#node"}},
+                    "code": {"type": "int"}}}""";
+        try (Schema unread = Schema.fromJson(tree);
+             LanguageService service = LanguageService.of(unread)) {
+            assertEquals(
+                    List.of(new UnreadKeyword("#/properties/children/items", "$dynamicRef"),
+                            new UnreadKeyword("#/properties/code", "type")),
+                    unread.unread());
+            assertEquals(List.of(), service.diagnostics("[children.anything, code + 1]"));
+            assertThrows(UnsupportedOperationException.class, () -> unread.unread().clear());
         }
 
         JlensException notJson = assertThrows(JlensException.class,

@@ -21,6 +21,7 @@ import init, {
   type SchemaSources,
   type LoadReport,
   type UnresolvedRef,
+  type UnreadKeyword,
   type ValueCondition,
   type ValueRequest,
   Document,
@@ -118,7 +119,9 @@ export async function check(): Promise<void> {
   const report: LoadReport = schemaReport({ $ref: "c.json" }, sources);
   const unresolved: UnresolvedRef | undefined = report.unresolved?.[0];
   const missingDocument: string | undefined = unresolved?.document;
-  console.log(required, usesOfLimit, typesBefore, valuesAdded, located, missingDocument);
+  const unread: UnreadKeyword | undefined = report.unread?.[0];
+  const keyword: string | undefined = unread?.keyword;
+  console.log(required, usesOfLimit, typesBefore, valuesAdded, located, missingDocument, keyword);
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();
   console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, every, fields, text, failed, start, type, ast.id, d, kinds, value, request, literal, conditions, several, listed, domain, hover, help, catalog);

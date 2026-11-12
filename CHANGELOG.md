@@ -47,11 +47,26 @@ All notable changes are recorded here. The format follows
   `additionalProperties` is `{"type": "number"}`. An object with `properties` alone is warned
   about as before. `Shape::other_fields` holds them, and the JSON Schema export writes them
   back.
+- More of JSON Schema read, so that no field or type a schema allows is warned about: the
+  fields of `then` and `else` (beside `if`), of `dependentSchemas` and of the schemas of
+  draft-07's `dependencies`, each optional, at any depth; `prefixItems` with `items` after it,
+  draft-07's `additionalItems`, and `unevaluatedItems`; `unevaluatedProperties` as
+  `additionalProperties`; OpenAPI's `nullable`, which adds `null`. Keywords that only narrow
+  what a place may hold, such as `not` or `maxLength`, are left out, as they cannot cause such
+  a warning; the schema guide lists them.
+- The load's report lists the keywords it did not read whose places it leaves unknown:
+  `$dynamicRef`, `$recursiveRef`, and a `type` that names no JSON type (`"int"`), each with the
+  place of its schema (`LoadReport::unread`, `UnreadKeyword`). The JSON form of every package
+  has it as `unread`; Java has `Schema.unread()` and `UnreadKeyword`; the CLI and the language
+  server warn about each.
 
 ### Changed
 
 - The language service describes a path over several items as one value or an array of them:
   `$sum(items.label)` with `label` a string gets `W0205` for "a string or an array of strings".
+- A tuple of draft-07 (`items` as an array) with no `additionalItems`, or `prefixItems` with no
+  `items`, allows any item after the first ones: its items are no longer taken as those of
+  the tuple alone, but as unknown, unless `maxItems` keeps the array to the tuple.
 
 ### Fixed
 

@@ -1057,6 +1057,12 @@
               },
               "address": {
                 "$ref": "address.json"
+              },
+              "code": {
+                "type": [
+                  "string",
+                  "int"
+                ]
               }
             }
           }
@@ -1081,6 +1087,12 @@
           "place": "#/properties/discount",
           "reference": "common.json#/$defs/discount",
           "uri": "https://example.com/schemas/common.json#/$defs/discount"
+        }
+      ],
+      "unread": [
+        {
+          "place": "https://example.com/schemas/common.json#/$defs/person/properties/code",
+          "keyword": "type"
         }
       ]
     },
