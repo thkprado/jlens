@@ -12,7 +12,10 @@ use anyhow::{Context, Result, bail};
 use crate::{root, site, wasm_global};
 
 /// Upper bound for the gzipped `.wasm` of a release build, in bytes. Raise it deliberately.
-const SIZE_BUDGET_GZIP: u64 = 600 * 1024;
+///
+/// 600 KiB from phase 7 to 0.33.0 (583 KiB then); 640 KiB since plan 0.34, whose typing
+/// brought it to 602 KiB at #9.
+const SIZE_BUDGET_GZIP: u64 = 640 * 1024;
 
 const OUT_NAME: &str = "jlens";
 
