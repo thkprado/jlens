@@ -312,6 +312,78 @@ fn keywords_not_read_are_reported() {
     );
 }
 
+/// The schema of the second property test: `anyOf` and `oneOf`, whose values have the shape of
+/// one branch or another.
+fn party() -> Value {
+    json!({
+        "type": "object",
+        "required": ["party", "code", "tag"],
+        "properties": {
+            "party": {"anyOf": [
+                {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {"id": {"type": "number"}, "name": {"type": "string"}}
+                },
+                {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": {"id": {"type": "string"}, "tax": {"type": "string"}}
+                }
+            ]},
+            "code": {"anyOf": [{"type": "string"}, {}]},
+            "tag": {"oneOf": [
+                {"const": "a"},
+                {"type": "null"},
+                {"enum": ["b", "c"]}
+            ]}
+        },
+        "oneOf": [
+            {"required": ["x"], "properties": {"x": {"type": "number"}}},
+            {"properties": {"y": {"type": "string"}}}
+        ]
+    })
+}
+
+fn party_samples() -> [Value; 3] {
+    [
+        json!({"party": {"id": 1, "name": "n"}, "code": "s", "tag": "a", "x": 2}),
+        json!({"party": {"id": "i", "tax": "t"}, "code": 3, "tag": null, "y": "w"}),
+        json!({"party": {"id": "j"}, "code": {"k": 1}, "tag": "c"}),
+    ]
+}
+
+#[test]
+fn any_of_is_one_branch_or_another() {
+    let (service, report) = load(&party());
+    assert!(report.is_empty(), "{report:?}");
+    let expecting = |types: &[JsonType], text: &str| {
+        let service = service.clone().with_result_type(types.iter().copied());
+        codes(&service, text)
+    };
+    // Required by one branch only: a party of the other has no name.
+    assert_eq!(expecting(&[JsonType::String], "party.name"), ["W0214"]);
+    assert_eq!(expecting(&[JsonType::Number], "x"), ["W0214"]);
+    // Required by both, of either type.
+    assert_eq!(
+        expecting(&[JsonType::Number, JsonType::String], "party.id"),
+        Vec::<String>::new()
+    );
+    // A branch with no type: `code` may be anything, so nothing is warned about.
+    for text in ["code = 1", "code + 1", "code.k"] {
+        assert!(codes(&service, text).is_empty(), "{text}");
+    }
+    assert!(expecting(&[JsonType::Number], "code").is_empty());
+    // The values of `tag`: those each branch lists, and `null`.
+    let schema = Schema::from_json_schema(&party()).unwrap();
+    assert_eq!(
+        types(&schema, "tag"),
+        Some(vec![JsonType::Null, JsonType::String])
+    );
+    assert!(codes(&service, "tag = 'c' or tag = null").is_empty());
+    assert_eq!(codes(&service, "tag = 'd'"), ["W0206"]);
+}
+
 /// The types a JSON value has, as the typing names them.
 fn types_of(value: &Value) -> Vec<JsonType> {
     match value {
@@ -338,6 +410,64 @@ fn text() -> impl Strategy<Value = String> {
     prop::collection::vec(prop::sample::select(TOKENS), 0..14).prop_map(|t| t.join(""))
 }
 
+/// The tokens of the second property test; the first five are fields of the root.
+#[rustfmt::skip]
+const PARTY_TOKENS: &[&str] = &[
+    "party", "code", "tag", "x", "y", "id", "name", "tax", "k", ".", "[0]", "[", "]", "(", ")",
+    "1", "'a'", "null", "+", ">", "=", "and", "&", "$sum(", "$count(", "$exists(", "$string(",
+    ",", " ",
+];
+
+fn party_text() -> impl Strategy<Value = String> {
+    prop::collection::vec(prop::sample::select(PARTY_TOKENS), 0..14).prop_map(|t| t.join(""))
+}
+
+/// Checks what the typing says of `text` on `samples`, documents of `schema`: the types of
+/// the result, whether it may be undefined, and that no field of the root that `root_names`
+/// lists is warned about as unknown: anywhere, where no object under the root has a field of
+/// that name, or else as the first step of the text.
+fn types_hold(
+    schema: &Value,
+    samples: &[Value],
+    (root_names, anywhere): (&[&str], bool),
+    text: &str,
+) -> Result<(), TestCaseError> {
+    let schema = Schema::from_json_schema(schema).unwrap();
+    let service = LanguageService::new(Some(schema)).with_result_type([JsonType::Boolean]);
+    let diagnostics = service.diagnostics(text);
+    for d in &diagnostics {
+        prop_assert!(
+            d.span.start <= d.span.end && d.span.end <= text.len(),
+            "{d:?}"
+        );
+        prop_assert!(
+            d.code != "W0201"
+                || !root_names.contains(&&text[d.span.start..d.span.end])
+                || !(anywhere || d.span.start == 0),
+            "{d:?}"
+        );
+    }
+    let result = service.result_type(text);
+    if let (Some(types), Ok(expr)) = (&result.types, jlens_core::Expression::compile(text)) {
+        let options = jlens_core::Options::default().max_steps(10_000);
+        let bindings = jlens_core::Bindings::new();
+        for sample in samples {
+            match expr.evaluate_with(Some(sample), &bindings, &options) {
+                Ok(None) => prop_assert!(result.undefined.is_some(), "undefined: {result:?}"),
+                Ok(Some(value)) => {
+                    let actual = types_of(&value);
+                    prop_assert!(
+                        actual.iter().any(|t| types.contains(t)),
+                        "{value} on {sample}: {result:?}"
+                    );
+                }
+                Err(_) => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(1000))]
 
@@ -346,32 +476,14 @@ proptest! {
     /// a field one of them has.
     #[test]
     fn the_keywords_read_type_as_their_documents(text in text()) {
-        let schema = Schema::from_json_schema(&order()).unwrap();
-        let service = LanguageService::new(Some(schema)).with_result_type([JsonType::Boolean]);
-        let diagnostics = service.diagnostics(&text);
-        for d in &diagnostics {
-            prop_assert!(d.span.start <= d.span.end && d.span.end <= text.len(), "{d:?}");
-            // Each name of the schema is a field of one of the samples.
-            prop_assert!(d.code != "W0201" || !TOKENS[..8].contains(&&text[d.span.start..d.span.end]),
-                "{d:?}");
-        }
-        let result = service.result_type(&text);
-        if let (Some(types), Ok(expr)) = (&result.types, jlens_core::Expression::compile(&text)) {
-            let options = jlens_core::Options::default().max_steps(10_000);
-            let bindings = jlens_core::Bindings::new();
-            for sample in &order_samples() {
-                match expr.evaluate_with(Some(sample), &bindings, &options) {
-                    Ok(None) => prop_assert!(result.undefined.is_some(), "undefined: {result:?}"),
-                    Ok(Some(value)) => {
-                        let actual = types_of(&value);
-                        prop_assert!(
-                            actual.iter().any(|t| types.contains(t)),
-                            "{value} on {sample}: {result:?}"
-                        );
-                    }
-                    Err(_) => {}
-                }
-            }
-        }
+        // Each name of the schema is a field of the root in one of the samples.
+        types_hold(&order(), &order_samples(), (&TOKENS[..8], true), &text)?;
+    }
+
+    /// The same for `anyOf` and `oneOf`, on a document of each branch.
+    #[test]
+    fn branches_type_as_their_documents(text in party_text()) {
+        // `party` is an object, which may be warned about having a field `party`.
+        types_hold(&party(), &party_samples(), (&PARTY_TOKENS[..5], false), &text)?;
     }
 }

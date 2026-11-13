@@ -45,8 +45,9 @@ complete, or set the values in the overrides (below). An inferred `minItems` car
 (the [result's type](#the-type-of-the-result) counts on it), so review both, and remove a
 `minItems` where an empty array is allowed. You can commit the file, review it,
 and edit it like any JSON Schema. jlens also reads JSON Schemas written by hand or by other
-tools: it follows `$ref`, by JSON Pointer, `$id` and `$anchor`, and it merges `anyOf`, `oneOf`
-and `allOf` ([the keywords jlens reads](#the-keywords-jlens-reads) lists the others).
+tools: it follows `$ref`, by JSON Pointer, `$id` and `$anchor`, merges the branches of `allOf`,
+and reads those of `anyOf` and `oneOf` as one branch or another
+([the keywords jlens reads](#the-keywords-jlens-reads) lists the others).
 
 A schema may be recursive: a tree whose `children` are `{"$ref": "#"}`, a definition that
 refers to itself, definitions that refer to each other. Completion, hover and the diagnostics
@@ -152,6 +153,17 @@ read, left out because it only narrows, or reported. What each keyword means is 
 
 How some are read:
 
+- **`allOf`**: every branch holds, so its branches are merged with the rest of the schema: a
+  field that one branch requires is always there.
+- **`anyOf` and `oneOf`**: a value has the shape of one branch or another. It may have the
+  types of any branch, and a field is required only where every branch requires it: with
+  `anyOf` of a person with a `name` and a company with a `tax`, `name` may be absent, and a
+  result that needs it gets `W0214`. A field that several branches declare has the types of
+  any of them, and an `enum` or a `const` lists the values of every branch, where each lists
+  them (a branch of `null` alone lists `null`). A branch that gives no type, such as `{}` or
+  `{"minLength": 1}`, leaves the type unknown, as any value may match it, but for one with
+  `const` or `enum`, whose type is that of its values; a `type` beside the `anyOf` still holds.
+  `oneOf` is read as `anyOf`: that only one branch matches only narrows.
 - **`then` and `else`**, read only beside `if`, and the schemas of **`dependentSchemas`** and
   of draft-07's **`dependencies`** hold for some of the values only. The fields they declare,
   at any depth, are fields the object may have, none required; a field that `then` makes a

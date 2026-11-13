@@ -62,8 +62,8 @@ impl Schema {
     /// Reads a JSON Schema document. Supports `type`, `properties`, `required`,
     /// `patternProperties`, `additionalProperties` ([`Shape::other_fields`]), `items`, `enum`,
     /// `const`, `format`, `minimum`, `maximum`, `minItems`, `title`, `description`, `examples`,
-    /// `$ref`, `$id`, `$anchor`, and `anyOf`/`oneOf`/`allOf` (whose branches are merged). Other
-    /// keywords are ignored.
+    /// `$ref`, `$id`, `$anchor`, `allOf` (whose branches are merged), and `anyOf`/`oneOf` (whose
+    /// values have the shape of one branch or another). Other keywords are ignored.
     ///
     /// The target of a `$ref` is copied in its place. A recursive one, which leads back to
     /// itself, cannot be: its target becomes a definition of the schema
@@ -988,13 +988,23 @@ impl<'d> Importer<'d> {
             Some(reference) => self.follow(node, reference, depth)?,
             None => Shape::default(),
         };
-        // The keywords that hold schemas are those of `subschemas`.
-        for key in ["allOf", "anyOf", "oneOf"] {
+        // The keywords that hold schemas are those of `subschemas`. The branches of `allOf`
+        // all hold, and are merged with the rest; a value of `anyOf` or `oneOf` has the shape of
+        // one branch or another.
+        if let Some(JsonValue::Array(branches)) = map.get("allOf") {
+            for branch in branches {
+                let b = self.import(branch, depth + 1)?;
+                merge(&mut shape, b);
+            }
+        }
+        for key in ["anyOf", "oneOf"] {
             if let Some(JsonValue::Array(branches)) = map.get(key) {
-                for branch in branches {
-                    let b = self.import(branch, depth + 1)?;
-                    merge(&mut shape, b);
+                let mut alternatives = Vec::with_capacity(branches.len());
+                // A branch `false` holds for no value.
+                for branch in branches.iter().filter(|b| **b != JsonValue::Bool(false)) {
+                    alternatives.push(self.import(branch, depth + 1)?);
                 }
+                merge(&mut shape, either(alternatives));
             }
         }
         match map.get("type") {
@@ -1273,6 +1283,104 @@ fn add_type(shape: &mut Shape, name: &str) {
     }
 }
 
+/// The shape of a value of one of `branches` (`anyOf`, `oneOf`): it has the types of any
+/// branch, a field required only where every branch requires it, the field and the items of
+/// each branch read the same way, and the values of the enumerations only where every branch
+/// has one. A branch that gives no type leaves the type unknown, but for one that lists its
+/// values (`const`, `enum`), whose types are theirs, and one that only refers to a definition.
+fn either(mut branches: Vec<Shape>) -> Shape {
+    if branches.len() == 1 {
+        return branches.pop().unwrap_or_default();
+    }
+    let count = branches.len();
+    let mut unknown = branches.is_empty();
+    // The values listed, where every branch lists them, a branch of `null` alone listing one.
+    let mut values: Option<Vec<JsonValue>> = Some(Vec::new());
+    let mut listed = false;
+    let mut values_inferred = false;
+    // The shape of each field in the branches that have it, and whether all require it.
+    let mut fields: IndexMap<String, (Vec<Shape>, bool)> = IndexMap::new();
+    // The items of the branches that are arrays; `None` where one of them does not say.
+    let mut items: Option<Vec<Shape>> = Some(Vec::new());
+    let mut out = Shape::default();
+    for mut branch in branches {
+        if branch.types.is_empty() {
+            match branch.enumeration.clone() {
+                Some(values) => {
+                    for value in &values {
+                        add_type(&mut branch, value_type(value));
+                    }
+                }
+                None if branch.references.is_empty() => unknown = true,
+                None => {}
+            }
+        }
+        match (&mut values, branch.enumeration.take()) {
+            (Some(all), Some(values)) => {
+                listed = true;
+                values_inferred |= branch.enumeration_inferred;
+                for value in values {
+                    if !all.contains(&value) {
+                        all.push(value);
+                    }
+                }
+            }
+            (Some(all), None) if branch.types == [JsonType::Null] => {
+                if !all.contains(&JsonValue::Null) {
+                    all.push(JsonValue::Null);
+                }
+            }
+            _ => values = None,
+        }
+        for (name, field) in &branch.fields {
+            let entry = fields
+                .entry(name.clone())
+                .or_insert_with(|| (Vec::new(), true));
+            entry.0.push(field.shape.clone());
+            entry.1 &= field.required;
+        }
+        if branch.types.contains(&JsonType::Array) {
+            match (&mut items, &branch.items) {
+                (Some(all), Some(i)) => all.push((**i).clone()),
+                _ => items = None,
+            }
+        }
+        merge(&mut out, branch);
+    }
+    // `merge` read the other fields; the fields and items are read again as alternatives.
+    for (name, (shapes, required)) in fields {
+        let required = required && shapes.len() == count;
+        if let Some(field) = out.fields.get_mut(&name) {
+            field.shape = either(shapes);
+            if field.required && !required {
+                field.presence = 0.0;
+            }
+            field.required = required;
+        }
+    }
+    out.items = items.filter(|i| !i.is_empty()).map(|i| Box::new(either(i)));
+    if let Some(values) = values.filter(|_| listed) {
+        out.enumeration = Some(values);
+        out.enumeration_inferred = values_inferred;
+    }
+    if unknown {
+        out.types.clear();
+    }
+    out
+}
+
+/// The JSON Schema name of the type of `value`.
+fn value_type(value: &JsonValue) -> &'static str {
+    match value {
+        JsonValue::Null => "null",
+        JsonValue::Bool(_) => "boolean",
+        JsonValue::Number(_) => "number",
+        JsonValue::String(_) => "string",
+        JsonValue::Array(_) => "array",
+        JsonValue::Object(_) => "object",
+    }
+}
+
 /// Merges `other` into `shape` (union of types and fields).
 fn merge(shape: &mut Shape, other: Shape) {
     // An object of either shape may have a field either may have.
@@ -1464,12 +1572,98 @@ mod tests {
         });
         let schema = Schema::from_json_schema(&doc).unwrap();
         assert!(schema.shape_at("items[].sku").is_some());
-        assert_eq!(schema.shape_at("status").unwrap().type_summary(), "null");
+        // A `const` gives the type of its value, and `null` alone is one value.
+        let status = schema.shape_at("status").unwrap();
+        assert_eq!(status.types, [JsonType::Null, JsonType::String]);
         assert_eq!(
-            schema.shape_at("status").unwrap().enumeration,
-            Some(vec![json!("open")])
+            status.enumeration,
+            Some(vec![json!("open"), JsonValue::Null])
         );
-        assert!(!schema.shape_at("status").unwrap().enumeration_inferred);
+        assert!(!status.enumeration_inferred);
+    }
+
+    #[test]
+    fn any_of_and_one_of_are_one_branch_or_another() {
+        let object = |fields: JsonValue, required: JsonValue| json!({"type": "object", "properties": fields, "required": required});
+        let a = object(
+            json!({"id": {"type": "number"}, "a": {"type": "string"}}),
+            json!(["id", "a"]),
+        );
+        let b = object(
+            json!({"id": {"type": "string"}, "b": {"type": "string"}}),
+            json!(["id", "b"]),
+        );
+        for key in ["anyOf", "oneOf"] {
+            let schema = Schema::from_json_schema(&json!({key: [a, b]})).unwrap();
+            let fields = &schema.root.fields;
+            // Required by both branches, of the types of either.
+            assert!(fields["id"].required, "{key}");
+            assert_eq!(
+                fields["id"].shape.types,
+                [JsonType::Number, JsonType::String]
+            );
+            // Required by one branch only: a value of the other lacks it.
+            assert!(!fields["a"].required && !fields["b"].required, "{key}");
+            assert_eq!(fields["a"].presence, 0.0);
+        }
+        // `allOf` stays as it was: a field one branch requires is always there.
+        let schema = Schema::from_json_schema(&json!({"allOf": [a, b]})).unwrap();
+        assert!(schema.root.fields["a"].required && schema.root.fields["b"].required);
+
+        // A branch that gives no type leaves the type unknown, even beside a `$ref` branch.
+        let types = |doc: JsonValue| Schema::from_json_schema(&doc).unwrap().root.types;
+        assert_eq!(types(json!({"anyOf": [{"type": "string"}, {}]})), []);
+        assert_eq!(types(json!({"oneOf": [{"type": "string"}, true]})), []);
+        assert_eq!(
+            types(json!({"anyOf": [{"type": "string"}, {"minLength": 1}]})),
+            []
+        );
+        // But not the types given beside it, which every value has.
+        assert_eq!(
+            types(json!({"type": "string", "anyOf": [{"minLength": 1}, {"maxLength": 0}]})),
+            [JsonType::String]
+        );
+        // A branch `false` holds for no value.
+        assert_eq!(
+            types(json!({"anyOf": [{"type": "string"}, false]})),
+            [JsonType::String]
+        );
+
+        // Enumerations: the values of every branch, where each lists them.
+        let at = |doc: JsonValue| Schema::from_json_schema(&doc).unwrap().root;
+        let shape = at(json!({"oneOf": [{"const": "a"}, {"enum": ["b", "c"]}]}));
+        assert_eq!(shape.types, [JsonType::String]);
+        assert_eq!(
+            shape.enumeration,
+            Some(vec![json!("a"), json!("b"), json!("c")])
+        );
+        let shape = at(json!({"anyOf": [{"const": "a"}, {"type": "string"}]}));
+        assert_eq!(
+            (shape.types, shape.enumeration),
+            (vec![JsonType::String], None)
+        );
+
+        // The fields and the items the branches share are read the same way.
+        let shape = at(json!({"anyOf": [
+            {"type": "object", "properties": {"k": {"const": "x"}}},
+            {"type": "object", "properties": {"k": {"const": "y"}}}
+        ]}));
+        assert_eq!(
+            shape.fields["k"].shape.enumeration,
+            Some(vec![json!("x"), json!("y")])
+        );
+        let shape = at(json!({"anyOf": [
+            {"type": "array", "items": object(json!({"p": {"type": "number"}}), json!(["p"]))},
+            {"type": "array", "items": object(json!({"q": {"type": "number"}}), json!(["q"]))}
+        ]}));
+        let items = shape.items.unwrap();
+        assert!(!items.fields["p"].required && !items.fields["q"].required);
+        // An array whose items a branch does not give has unknown items.
+        let shape = at(json!({"anyOf": [
+            {"type": "array", "items": {"type": "number"}},
+            {"type": "array"}
+        ]}));
+        assert!(shape.items.is_none());
     }
 
     #[test]

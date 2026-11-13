@@ -67,6 +67,11 @@ All notable changes are recorded here. The format follows
 - A tuple of draft-07 (`items` as an array) with no `additionalItems`, or `prefixItems` with no
   `items`, allows any item after the first ones: its items are no longer taken as those of
   the tuple alone, but as unknown, unless `maxItems` keeps the array to the tuple.
+- `anyOf` and `oneOf` in a JSON Schema are read as one branch or another, where they were merged
+  as `allOf` is: a field that one branch requires and another does not may be absent (a result
+  that needs it now gets `W0214`), a branch that gives no type (`{}`) leaves the type unknown
+  instead of adding nothing (`anyOf: [{"type": "string"}, {}]` no longer warns `c = 1` with
+  `W0210`), and an `enum` or a `const` lists the values of every branch, not those of the first.
 
 ### Fixed
 
