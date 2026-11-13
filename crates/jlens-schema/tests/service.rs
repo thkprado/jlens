@@ -1571,6 +1571,7 @@ fn diagnostics_compare_the_result_with_the_expected_type() {
         "[total]",
         "$sort(lines.price)",
         "$split(status, ',') ?? []",
+        "status[]",
     ] {
         assert_eq!(located(&array, text), [], "{text}");
     }
@@ -1596,6 +1597,10 @@ fn result_type_tells_what_the_typing_knows() {
     assert_eq!(result.check(&[Boolean]), Never);
 
     assert_eq!(svc.result_type("status").types, Some(vec![Null, String]));
+    // `[]` keeps a path an array, of one item too.
+    for text in ["status[]", "lines.price[]", "items[]"] {
+        assert_eq!(svc.result_type(text).types, Some(vec![Array]), "{text}");
+    }
     // `$x`, not declared, an object constructor and a tuple stream (`items@$v` gives the order,
     // once for each item) are not known, nor is a text that does not parse.
     for text in ["$x > 1", "{'a': total}", "items@$v", "items#$i", "total >"] {

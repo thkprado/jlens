@@ -542,7 +542,10 @@ impl<'s> Walker<'s, '_> {
 
     fn walk_inner(&mut self, node: &Node, ctx: &Ty<'s>, scope: &mut Scope<'s>) -> Ty<'s> {
         let ty = match &node.kind {
-            NodeKind::Path { steps, .. } => {
+            NodeKind::Path {
+                steps,
+                keep_singleton_array,
+            } => {
                 let mark = scope.len();
                 let mut cur = ctx.clone();
                 let mut result = Ty::unknown();
@@ -631,6 +634,11 @@ impl<'s> Walker<'s, '_> {
                 } else {
                     result.undefined = undefined;
                     result.sequence = sequence;
+                    // `[]` keeps the result an array, of one item too: the items of the
+                    // sequence, or of the array the path gives. An empty one is undefined.
+                    if *keep_singleton_array {
+                        result = result.items().into_array().or_undefined(undefined);
+                    }
                 }
                 // A tuple stream (`@$v`, `#$i`) gives what its steps are evaluated against,
                 // which is not told here.
