@@ -13,9 +13,7 @@ license = "MIT"
 repository = "https://github.com/thkprado/jlens"
 homepage = "https://thkprado.github.io/jlens/"
 authors = ["jlens contributors"]
-description = "A JSONata implementation in Rust with auditing and schema-driven autocomplete"
 keywords = ["jsonata", "json", "query", "transform", "rules"]
-categories = ["parser-implementations", "encoding", "command-line-utilities", "wasm"]
 
 [workspace.dependencies]
 jlens-core = { path = "crates/jlens-core", version = "0.33.0" }
