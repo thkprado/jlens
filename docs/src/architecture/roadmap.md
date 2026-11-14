@@ -33,6 +33,12 @@ draft-07 tuple with no `additionalItems` now leaves its items unknown, as JSON S
 that `point[1] > "a"` is no longer warned about for a tuple of two numbers, though the position
 is inside the tuple.
 
+Two items are not reviews. The Java package takes documents as variables, as the core has since
+0.21: an application that receives two documents as JSON text, such as two versions of a record,
+evaluates an expression that compares them with neither made into Java objects. And jlens gives
+two results as jsonata-js's main branch now does, where 2.2.2, the version on npm, is wrong,
+ahead of the release that will ship the fixes.
+
 | # | Item | Done when | Status |
 |---|---|---|---|
 | 1 | The dependencies at their newest versions and the upstream watch, before the rest | As 0.33 #1 | planned |
@@ -41,21 +47,21 @@ is inside the tuple.
 | 4 | `jlens schema result` on a syntax error, documented | Exit code 1 kept, as `jlens schema uses` and `jlens check` do; the CLI guide's exit codes and the command's help say so, and that the WebAssembly and Java `resultType` give unknown types instead | planned |
 | 5 | The items of a tuple typed by their position | A literal index inside a tuple (`prefixItems`, or `items` as an array in draft-07) has the type of its position, whether the tuple is open or closed: `point[1]` is a number, and `point[1] > "a"` gets `W0208`. A negative index, one past the tuple or a computed one has the type of every item, as now; completion and hover follow it; tests; the schema guide | planned |
 | 6 | An open tuple told by the load | A tuple with no `additionalItems`, no `items` after `prefixItems` and no `maxItems` that keeps the array to it is noted in the load's report with its place, where it is put (beside `unread` or apart) decided in the item; every package that gives the report, and the CLI and the language server warn about it; the schema guide | planned |
-| 7 | The plan's code checked whole, and the release's measure | The robustness properties with `PROPTEST_CASES=100000` and the fuzz workflow on the final code; the time of `diagnostics` on the largest fixtures against 0.34.0; the performance page's tables from the M1 | planned |
-| 8 | Release 0.35.0 | The release checklist; the channels checked | planned |
+| 7 | Documents as variables in the Java package | An evaluation against a `Document`, or with no input, takes documents by name besides its `Bindings`, as `evaluate_document_with` does in the core ([ADR 0019](../adr/0019-documents-from-rust-values.md)): a document bound to a variable is not copied, and its name takes the place of a variable or a host function of the bindings, which stay as they are, built once for every evaluation. An application that receives two documents as JSON text, such as two versions of a record, or a document and a table it refers to, then evaluates with neither made into Java objects, each cut by the `Read` that `reads()` gives for it. The form of the call is decided in the item; audits keep their variables in the bindings, and the Python and WebAssembly packages are not in this item. The C API's export with its tests and a case in its robustness properties; JUnit, the Javadoc, the Java guide and an amendment to ADR 0021; measured on the M1, a field of a large variable read from a document against the same from `Bindings`, and `evaluate(Document)` with no variables against 0.34.0, to `docs/notes/perf-0.35.md` | planned |
+| 8 | Two fixes jsonata-js merged after 2.2.2, ahead of its release | jlens gives what jsonata-js's main branch gives where 2.2.2 is wrong: a predicate after a computed index, `$arr[$i][$j]`, indexes the array the index selects, as after a literal one (pull request #861), and arrays built inside an expression are kept in the results of a tuple stream (#841). The suite is vendored from a fixed commit of main (`cargo xtask update-suite`), which adds five files of cases and changes one: of its 19 cases that fail today, the 12 of #861 and the 3 of #841 pass; the 4 of #857, whose error jlens gives at the operator that overflows and jsonata-js at `and` or `or`, pass or are recorded in `overrides.json` with the reason; the baseline grows. Each answer that 2.2.2 does not give is recorded in `compatibility.md` as following main, with a narrow rule in the differential test, and a book example that 2.2.2 answers otherwise is marked `differs:`; measured with `cargo xtask ab`, as both fixes touch the evaluation of paths | planned |
+| 9 | The plan's code checked whole, and the release's measure | The robustness properties with `PROPTEST_CASES=100000` and the fuzz workflow on the final code; the time of `diagnostics` on the largest fixtures against 0.34.0; the performance page's tables from the M1 | planned |
+| 10 | Release 0.35.0 | The release checklist; the channels checked | planned |
 
-## Next: what jsonata-js fixes after 2.2.2
+## Next: the jsonata-js release after 2.2.2
 
-jlens follows jsonata-js 2.2.2, the version on npm. Its main branch has since merged fixes that
-change results jlens gives as 2.2.2 does: arrays built inside an expression are kept in the
-results of a tuple stream (jsonata-js pull request #841), and a predicate after a computed index,
-`$arr[$i][$j]`, indexes the array the index selects, as after a literal one (#861). Two more,
-#854 and #857, give the answers jlens already gives. When a release of jsonata-js ships them,
-jlens follows it.
+jlens follows jsonata-js 2.2.2, the version on npm. Its main branch has since merged fixes, and
+0.35 #8 takes the two that change results, pull requests #841 and #861, ahead of the release that
+will ship them: from a fixed commit of main, with rules in the differential test for the answers
+2.2.2 does not give. When that release is on npm, jlens follows it whole.
 
 | # | Item | Done when | Status |
 |---|---|---|---|
-| 1 | The fixes of jsonata-js after 2.2.2, once released | Each fix's cases pass, or a difference is recorded with its reason in `compatibility.md`; the official suite of that release vendored (`cargo xtask update-suite`) and the baseline grown; the differential test against that release | waiting for a jsonata-js release |
+| 1 | The jsonata-js release after 2.2.2, once published | The official suite of that release vendored (`cargo xtask update-suite`) and the baseline grown; each fix's cases pass, or a difference is recorded with its reason in `compatibility.md`; the differential test and the book's examples run against that release, and the rules, the `differs:` marks and the rows of `compatibility.md` that 0.35 #8 added are removed where the release gives jlens's answers; the version jlens follows changed wherever it is named | waiting for a jsonata-js release |
 
 ## In exploration: a regular expression engine of jlens's own
 
