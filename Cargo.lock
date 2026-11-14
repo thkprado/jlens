@@ -741,7 +741,7 @@ checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 
 [[package]]
 name = "jlens-capi"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "foldhash",
  "jlens-core",
@@ -756,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-cli"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-core"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "criterion",
  "foldhash",
@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-lsp"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "glob",
  "jlens-core",
@@ -810,7 +810,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-python"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "foldhash",
  "jlens-core",
@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-regress"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "hashbrown",
  "memchr",
@@ -832,7 +832,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-schema"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "indexmap",
  "jlens-core",
@@ -844,7 +844,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-wasm"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "console_error_panic_hook",
  "foldhash",

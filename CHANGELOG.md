@@ -73,6 +73,8 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- `jlens_lsp::config::Settings` has two new public fields, `result` and `context`: a struct
+  literal of it needs them, or `..Default::default()`.
 - The language service describes a path over several items as one value or an array of them:
   `$sum(items.label)` with `label` a string gets `W0205` for "a string or an array of strings".
 - A tuple of draft-07 (`items` as an array) with no `additionalItems`, or `prefixItems` with no
