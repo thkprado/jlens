@@ -273,11 +273,14 @@ fn failures_use_the_codes_of_the_c_api() {
         b"{\"functions\": {}}",
         b"{\"functions\": [{\"name\": \"f\", \"arity\": 1}]}",
         b"{\"functions\": [{\"name\": 1}]}",
-        b"{\"result\": \"text\"}",
-        b"{\"result\": []}",
-        b"{\"result\": [\"boolean\", 1]}",
-        b"{\"results\": \"boolean\"}",
-        b"{\"context\": 1}",
+        b"{\"resultType\": \"text\"}",
+        b"{\"resultType\": []}",
+        b"{\"resultType\": [\"boolean\", 1]}",
+        b"{\"resultTypes\": \"boolean\"}",
+        b"{\"contextPath\": 1}",
+        // Their names in 0.34.
+        b"{\"result\": \"boolean\"}",
+        b"{\"context\": \"items[]\"}",
     ] {
         assert_eq!(
             error(new(declarations)),
@@ -292,7 +295,8 @@ fn failures_use_the_codes_of_the_c_api() {
         ("U2002".to_owned(), Some("schema".to_owned()))
     );
     // Members that are null declare nothing.
-    let nothing = json!({"variables": null, "functions": null, "result": null, "context": null});
+    let nothing =
+        json!({"variables": null, "functions": null, "resultType": null, "contextPath": null});
     let service = handle(service(schema, Some(&nothing)));
 
     // Diagnostics.
@@ -629,10 +633,10 @@ fn the_result_type_and_the_context_are_those_of_the_shared_workspace() {
     let read = |path: &str| std::fs::read_to_string(format!("{dir}{path}")).unwrap();
     let schema = schema(&serde_json::from_str(&read("order.schema.json")).unwrap());
     // As `jlens.json` declares them for `conditions/` and `lines/`.
-    let conditions = handle(service(schema, Some(&json!({"result": "boolean"}))));
+    let conditions = handle(service(schema, Some(&json!({"resultType": "boolean"}))));
     let lines = handle(service(
         schema,
-        Some(&json!({"result": ["number"], "context": "items[]"})),
+        Some(&json!({"resultType": ["number"], "contextPath": "items[]"})),
     ));
     let codes_of = |service, path: &str| {
         let found = diagnostics(service, &read(path));
@@ -659,7 +663,7 @@ fn the_result_type_and_the_context_are_those_of_the_shared_workspace() {
         "always"
     );
     // The spans count UTF-16 code units: "é" is one, "😀" two.
-    let strings = handle(service(schema, Some(&json!({"result": "string"}))));
+    let strings = handle(service(schema, Some(&json!({"resultType": "string"}))));
     assert_eq!(
         result_type(strings, "/* é😀 */ customer.name")["undefined"],
         json!({"start": 10, "end": 18})

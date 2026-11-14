@@ -288,7 +288,7 @@ pub fn language_service(data: &[u8]) {
         for service in [
             typed.clone().with_result_type([JsonType::Boolean]),
             typed
-                .with_context("lines[]")
+                .with_context_path("lines[]")
                 .with_result_type([JsonType::Number]),
         ] {
             for d in service.diagnostics(text) {

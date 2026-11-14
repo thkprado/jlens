@@ -143,7 +143,7 @@ pub fn schema_free(schema: u64) -> u32 {
 /// declares nothing; an unknown one is an error, so that a misspelt one does not pass
 /// unnoticed.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Declarations {
     /// From each variable's name to the handle of the schema of its value, or `null`.
     #[serde(default)]
@@ -153,10 +153,10 @@ struct Declarations {
     /// The types the result is expected to have: one type's name or an array of them, read by
     /// `JsonType::one_or_more`.
     #[serde(default)]
-    result: Option<Value>,
+    result_type: Option<Value>,
     /// The path whose items the expressions are evaluated against.
     #[serde(default)]
-    context: Option<String>,
+    context_path: Option<String>,
 }
 
 /// Makes a language service for expressions over the documents that schema `schema` describes
@@ -166,13 +166,13 @@ struct Declarations {
 /// The declarations are an object with `variables`, an object from each variable's name to the
 /// handle of the schema of its value, a number, or `null` for a variable declared with no
 /// schema; `functions`, an array of the host functions, each an object with `name` and,
-/// optionally, `signature`, `params` and `summary`; `result`, the types the result of the
+/// optionally, `signature`, `params` and `summary`; `resultType`, the types the result of the
 /// expressions is expected to have, one type's name or an array of them
-/// (`LanguageService::with_result_type`); and `context`, the path whose items they are
-/// evaluated against (`items[]`, `LanguageService::with_context`). Names are taken with or
-/// without `$`. Text
-/// that is not JSON fails with `U2001`, declarations not in this form with `U2005` and the
-/// token `service`, and a variable's handle that names no live schema with `U2002`.
+/// (`LanguageService::with_result_type`); and `contextPath`, the path whose items they are
+/// evaluated against (`items[]`, `LanguageService::with_context_path`). Names are taken with
+/// or without `$`. Text that is not JSON fails with `U2001`, declarations not in this form
+/// with `U2005` and the token `service`, and a variable's handle that names no live schema
+/// with `U2002`.
 pub fn service_new(schema: u64, declarations: u64) -> u64 {
     reply(service_text(schema, declarations))
 }
@@ -231,16 +231,16 @@ fn service_text(schema: u64, declarations: u64) -> Result<Vec<u8>, Vec<u8>> {
         function.name = function.name.trim_start_matches('$').to_owned();
         service = service.with_function(function);
     }
-    match declarations.result {
+    match declarations.result_type {
         None | Some(Value::Null) => {}
-        Some(result) => {
-            let types = JsonType::one_or_more(&result)
-                .map_err(|e| invalid("service", format!("result {e}")))?;
+        Some(types) => {
+            let types = JsonType::one_or_more(&types)
+                .map_err(|e| invalid("service", format!("resultType {e}")))?;
             service = service.with_result_type(types);
         }
     }
-    if let Some(context) = &declarations.context {
-        service = service.with_context(context);
+    if let Some(path) = &declarations.context_path {
+        service = service.with_context_path(path);
     }
     handle_reply(SERVICES.insert(service))
 }
@@ -318,7 +318,7 @@ fn result_type_text(service: u64, text: u64) -> Result<Vec<u8>, Vec<u8>> {
     if let Value::Object(object) = &mut json {
         to_utf16(&offsets, object.get_mut("undefined"));
         to_utf16(&offsets, object.get_mut("sequence"));
-        if let Some(expected) = service.expected_result() {
+        if let Some(expected) = service.expected_result_type() {
             let check = serde_json::to_value(result.check(expected)).unwrap_or_default();
             object.insert("check".into(), check);
         }

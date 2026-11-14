@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"check\", \"--config\", \"fixtures/cli/renamed.jlens.json\", \"a\"], None)"
+---
+exit: 2
+--- stdout
+--- stderr
+error: fixtures/cli/renamed.jlens.json: pattern "*.jsonata": the setting `result` is now `resultType`

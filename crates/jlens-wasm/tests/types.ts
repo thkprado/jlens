@@ -127,12 +127,12 @@ export async function check(): Promise<void> {
   const unread: UnreadKeyword | undefined = report.unread?.[0];
   const keyword: string | undefined = unread?.keyword;
   console.log(required, usesOfLimit, typesBefore, valuesAdded, located, missingDocument, keyword);
-  const options: ServiceOptions = { result: ["number", "string"], context: "items[]" };
+  const options: ServiceOptions = { resultType: ["number", "string"], contextPath: "items[]" };
   const expecting = new LanguageService(schema, null, null, null, options);
   const result: ResultType = expecting.resultType("a");
   const resultTypes: JsonType[] | null = result.types;
   const cause: Span | null = result.undefined;
-  const check: ResultCheck | undefined = new LanguageService(schema, null, null, null, { result: "boolean" }).resultType("a").check;
+  const check: ResultCheck | undefined = new LanguageService(schema, null, null, null, { resultType: "boolean" }).resultType("a").check;
   console.log(resultTypes, cause, result.sequence, check);
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();

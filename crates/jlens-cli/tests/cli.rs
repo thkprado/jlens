@@ -759,9 +759,9 @@ fn schema_uses_and_changes_of_the_shared_recursive_schema() {
     }
 }
 
-/// The expected result type and the context, from `jlens.json` and from the flags.
+/// The expected result type and the context path, from `jlens.json` and from the flags.
 #[test]
-fn result_type_and_context() {
+fn result_type_and_context_path() {
     let workspace = |name: &str, args: &[&str]| {
         insta::assert_snapshot!(name, jlens_in("fixtures/workspace", args, None));
     };
@@ -769,7 +769,7 @@ fn result_type_and_context() {
         "check_result_config",
         &["check", "-f", "conditions/*.jsonata", "lines/*.jsonata"],
     );
-    // The flags replace the configuration's `result` and `context`.
+    // The flags replace the configuration's `resultType` and `contextPath`.
     workspace(
         "check_result_flags",
         &[
@@ -777,9 +777,9 @@ fn result_type_and_context() {
             "--json",
             "--path",
             "lines/new.jsonata",
-            "--result",
+            "--result-type",
             "string,null",
-            "--context",
+            "--context-path",
             "customer",
             "login",
         ],
@@ -795,7 +795,7 @@ fn result_type_and_context() {
             "result",
             "--schema",
             "order.schema.json",
-            "--result",
+            "--result-type",
             "number",
             "items.quantity",
         ],
@@ -804,7 +804,24 @@ fn result_type_and_context() {
     snapshot!("schema_result_syntax_error", &["schema", "result", "a +"]);
     snapshot!(
         "check_result_unknown_type",
-        &["check", "--result", "bool", "a"]
+        &["check", "--result-type", "bool", "a"]
+    );
+}
+
+/// The names of 0.34 fail with the names since 0.35: the flags, and the settings of `jlens.json`.
+#[test]
+fn renamed_result_type_and_context_path() {
+    snapshot!(
+        "check_result_old_flag",
+        &["check", "--result", "boolean", "a"]
+    );
+    snapshot!(
+        "schema_result_old_flag",
+        &["schema", "result", "--context", "items[]", "a"]
+    );
+    snapshot!(
+        "check_result_old_setting",
+        &["check", "--config", "fixtures/cli/renamed.jlens.json", "a"]
     );
 }
 

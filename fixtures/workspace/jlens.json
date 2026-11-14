@@ -8,11 +8,11 @@
   },
   "conditions/*.jsonata": {
     "schema": "order.schema.json",
-    "result": "boolean"
+    "resultType": "boolean"
   },
   "lines/*.jsonata": {
     "schema": "order.schema.json",
-    "result": "number",
-    "context": "items[]"
+    "resultType": "number",
+    "contextPath": "items[]"
   }
 }

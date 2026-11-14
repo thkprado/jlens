@@ -126,23 +126,37 @@ struct CheckArgs {
 pub struct Expect {
     /// The JSON types the result is expected to have (`boolean`, or `number,string`): a result
     /// that never, or not always, has one is warned about. It replaces the configuration's
-    /// `result`.
+    /// `resultType`.
     #[arg(long, value_name = "TYPES", value_delimiter = ',', value_parser = json_type)]
-    result: Vec<JsonType>,
+    result_type: Vec<JsonType>,
     /// Check each expression as the body of the steps of this path (`items[]`), with an item as
-    /// its context. It replaces the configuration's `context`.
+    /// its context. It replaces the configuration's `contextPath`.
     #[arg(long, value_name = "PATH")]
-    context: Option<String>,
+    context_path: Option<String>,
+    /// The name of `--result-type` in 0.34, refused with the new one.
+    #[arg(long = "result", hide = true, value_name = "TYPES", value_parser = now_result_type)]
+    old_result: Option<String>,
+    /// The name of `--context-path` in 0.34, refused with the new one.
+    #[arg(long = "context", hide = true, value_name = "PATH", value_parser = now_context_path)]
+    old_context: Option<String>,
+}
+
+fn now_result_type(_: &str) -> Result<String, String> {
+    Err("this flag is now --result-type".to_owned())
+}
+
+fn now_context_path(_: &str) -> Result<String, String> {
+    Err("this flag is now --context-path".to_owned())
 }
 
 impl Expect {
     /// `service`, with these expectations declared.
     pub fn apply(&self, mut service: LanguageService) -> LanguageService {
-        if !self.result.is_empty() {
-            service = service.with_result_type(self.result.iter().copied());
+        if !self.result_type.is_empty() {
+            service = service.with_result_type(self.result_type.iter().copied());
         }
-        if let Some(context) = &self.context {
-            service = service.with_context(context);
+        if let Some(path) = &self.context_path {
+            service = service.with_context_path(path);
         }
         service
     }

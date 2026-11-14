@@ -83,11 +83,11 @@ class LanguageServiceTest {
         // As `jlens.json` declares them for `conditions/` and `lines/`.
         try (Schema schema = Schema.fromJson(workspace("order.schema.json"));
                 LanguageService conditions =
-                        LanguageService.builder().schema(schema).result("boolean").build();
+                        LanguageService.builder().schema(schema).resultType("boolean").build();
                 LanguageService lines = LanguageService.builder()
-                        .schema(schema).result("number").context("items[]").build();
+                        .schema(schema).resultType("number").contextPath("items[]").build();
                 LanguageService strings =
-                        LanguageService.builder().schema(schema).result("string").build();
+                        LanguageService.builder().schema(schema).resultType("string").build();
                 LanguageService plain = LanguageService.of(schema)) {
             assertEquals(List.of(), conditions.diagnostics(workspace("conditions/large.jsonata")));
             String vip = workspace("conditions/vip.jsonata");
@@ -108,13 +108,13 @@ class LanguageServiceTest {
             assertEquals(new ResultType(null, null, null, ResultType.Check.UNKNOWN),
                     conditions.resultType("a +"));
             assertEquals(List.of("number", "string"), LanguageService.builder()
-                    .result("number", "string").build().resultType("[1, 'a'][0]").types());
+                    .resultType("number", "string").build().resultType("[1, 'a'][0]").types());
         }
-        assertThrows(IllegalArgumentException.class, () -> LanguageService.builder().result());
+        assertThrows(IllegalArgumentException.class, () -> LanguageService.builder().resultType());
         assertThrows(IllegalArgumentException.class,
-                () -> LanguageService.builder().result("boolean", "text"));
+                () -> LanguageService.builder().resultType("boolean", "text"));
         assertThrows(NullPointerException.class,
-                () -> LanguageService.builder().result((String) null));
+                () -> LanguageService.builder().resultType((String) null));
     }
 
     @Test

@@ -557,27 +557,27 @@ input's schema alone. Both throw a `TypeError` for sources that are not in this 
 ### The type of the result, and the context
 
 The fifth argument of `LanguageService` says what the expressions are, besides what their
-schemas say: `result`, the type their result must have, and `context`, the path whose items
+schemas say: `resultType`, the type their result must have, and `contextPath`, the path whose items
 they are evaluated against, as the body of `items.( … )` (the
 [schema guide](schema.md#the-type-of-the-result)). They are those of `jlens.json` in an editor:
 
 ```js
-const conditions = new LanguageService(schema, null, null, null, { result: "boolean" });
+const conditions = new LanguageService(schema, null, null, null, { resultType: "boolean" });
 conditions.diagnostics('$contains(customer.name, "VIP")');
 // [{ severity: "warning", code: "W0214", span: {start: 10, end: 18},
 //    message: "The result may be undefined, not a boolean, because of customer" }]
 
-const lines = new LanguageService(schema, null, null, null, { result: ["number"], context: "items[]" });
+const lines = new LanguageService(schema, null, null, null, { resultType: ["number"], contextPath: "items[]" });
 lines.diagnostics("%.customer.login & ': ' & code");   // W0212: a string, never a number
 
 conditions.resultType('$contains(customer.name, "VIP")');
 // { types: ["boolean"], undefined: {start: 10, end: 18}, sequence: null, check: "maybe" }
 ```
 
-`result` is a type's name or an array of them, and `number` accepts an integer. `resultType`
-gives what the typing knows of the result: the types it may have (`null` where they are not
+`resultType` is a type's name or an array of them, and `number` accepts an integer. The method
+`resultType` gives what the typing knows of the result: the types it may have (`null` where they are not
 known, as without a schema or with a syntax error), and the spans, in UTF-16 units, of the
-operands that may make it undefined or several values. `check` compares it with `result`:
+operands that may make it undefined or several values. `check` compares it with the option:
 `always`, `never`, `maybe` or `unknown`, absent when the service expects no type. Options not
 in this form throw a `TypeError`.
 

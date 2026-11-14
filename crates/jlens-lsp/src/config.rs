@@ -16,7 +16,7 @@ pub const FILE_NAME: &str = "jlens.json";
 
 /// What applies to the files that match one pattern.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct Settings {
     /// A JSON Schema of the input documents, relative to the configuration's folder.
     pub schema: Option<PathBuf>,
@@ -27,17 +27,23 @@ pub struct Settings {
     /// The JSON types the result of an expression is expected to have, as the conditions of a
     /// rules engine must give a boolean (`LanguageService::with_result_type`): one type's name,
     /// or an array of them. Empty when none is expected.
+    /// `resultType` in the file.
     #[serde(deserialize_with = "one_or_more")]
-    pub result: Vec<JsonType>,
+    pub result_type: Vec<JsonType>,
     /// The path whose items the expressions are evaluated against, as the body of its steps
-    /// (`items[]`, `LanguageService::with_context`); none for the document.
-    pub context: Option<String>,
+    /// (`items[]`, `LanguageService::with_context_path`); none for the document. `contextPath`
+    /// in the file.
+    pub context_path: Option<String>,
 }
+
+/// The settings that 0.35 renamed, with their names since: a file that still has an old one is
+/// refused with the new one, where an unknown setting is only listed against all of them.
+const RENAMED: [(&str, &str); 2] = [("result", "resultType"), ("context", "contextPath")];
 
 /// Reads one JSON type's name, or a non-empty array of them.
 fn one_or_more<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<JsonType>, D::Error> {
     let value = Value::deserialize(deserializer)?;
-    JsonType::one_or_more(&value).map_err(|e| serde::de::Error::custom(format!("result {e}")))
+    JsonType::one_or_more(&value).map_err(|e| serde::de::Error::custom(format!("resultType {e}")))
 }
 
 /// One pattern of a configuration, with its settings.
@@ -74,7 +80,7 @@ impl Entry {
         self.settings.service(&self.root)
     }
 
-    /// Declares the variables, host functions, expected result type and context of these
+    /// Declares the variables, host functions, expected result type and context path of these
     /// settings to `service`, whatever its schema.
     pub fn declare(&self, service: LanguageService) -> Made {
         self.settings.declare(service, &self.root)
@@ -199,10 +205,10 @@ impl Settings {
         }
     }
 
-    /// Declares the variables, host functions, expected result type and context of these
-    /// settings to `service`, whatever its schema. A `$ref` to a file in a variable's schema is relative to `root`, the
-    /// configuration's folder ([`load_schema_in`]). Problems (an invalid variable schema) are
-    /// returned alongside.
+    /// Declares the variables, host functions, expected result type and context path of these
+    /// settings to `service`, whatever its schema. A `$ref` to a file in a variable's schema is
+    /// relative to `root`, the configuration's folder ([`load_schema_in`]). Problems (an invalid
+    /// variable schema) are returned alongside.
     pub fn declare(&self, mut service: LanguageService, root: &Path) -> Made {
         let mut problems = Vec::new();
         let mut notes = Vec::new();
@@ -227,11 +233,11 @@ impl Settings {
             decl.name = decl.name.trim_start_matches('$').to_owned();
             service = service.with_function(decl);
         }
-        if !self.result.is_empty() {
-            service = service.with_result_type(self.result.iter().copied());
+        if !self.result_type.is_empty() {
+            service = service.with_result_type(self.result_type.iter().copied());
         }
-        if let Some(context) = &self.context {
-            service = service.with_context(context);
+        if let Some(path) = &self.context_path {
+            service = service.with_context_path(path);
         }
         Made {
             service,
@@ -248,6 +254,13 @@ pub fn parse(value: &Value, root: &Path) -> Result<Vec<Entry>, String> {
     };
     map.iter()
         .map(|(pattern, settings)| {
+            for (old, new) in RENAMED {
+                if settings.get(old).is_some() {
+                    return Err(format!(
+                        "pattern {pattern:?}: the setting `{old}` is now `{new}`"
+                    ));
+                }
+            }
             Ok(Entry {
                 root: root.to_owned(),
                 pattern: Pattern::new(pattern).map_err(|e| format!("pattern {pattern:?}: {e}"))?,
@@ -282,12 +295,12 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn the_result_type_and_the_context_are_declared() {
+    fn the_result_type_and_the_context_path_are_declared() {
         let root = Path::new("/work");
         let entries = parse(
             &json!({
-                "conditions/*.jsonata": {"result": "boolean"},
-                "items/*.jsonata": {"result": ["number", "string"], "context": "items[]"},
+                "conditions/*.jsonata": {"resultType": "boolean"},
+                "items/*.jsonata": {"resultType": ["number", "string"], "contextPath": "items[]"},
                 "*.jsonata": {}
             }),
             root,
@@ -304,7 +317,7 @@ mod tests {
                 .map(|d| d.code)
                 .collect()
         };
-        assert_eq!(entries[0].settings.result, [JsonType::Boolean]);
+        assert_eq!(entries[0].settings.result_type, [JsonType::Boolean]);
         assert_eq!(codes(&entries[0], "total"), ["W0212"]);
         assert_eq!(codes(&entries[0], "total > 1"), [""; 0]);
         assert_eq!(codes(&entries[1], "price"), [""; 0]);
@@ -342,8 +355,13 @@ mod tests {
         let err = parse(&json!({"*.jsonata": {"schemas": "x"}}), root).unwrap_err();
         assert!(err.contains("schemas"), "{err}");
         for result in [json!("text"), json!([]), json!(["boolean", 1]), json!(true)] {
-            let err = parse(&json!({"*.jsonata": {"result": result}}), root).unwrap_err();
-            assert!(err.contains("result"), "{err}");
+            let err = parse(&json!({"*.jsonata": {"resultType": result}}), root).unwrap_err();
+            assert!(err.contains("resultType"), "{err}");
+        }
+        // The names of 0.34 are refused with the names since.
+        for (old, new) in [("result", "resultType"), ("context", "contextPath")] {
+            let err = parse(&json!({"*.jsonata": {old: "boolean"}}), root).unwrap_err();
+            assert!(err.contains(&format!("`{old}` is now `{new}`")), "{err}");
         }
         assert!(parse(&json!({"[": {}}), root).is_err());
     }

@@ -1617,7 +1617,7 @@ fn an_expression_is_typed_as_the_body_of_a_step() {
     use jlens_schema::JsonType::Boolean;
     use jlens_schema::ResultCheck::Always;
     // Each item of the order, as inside `items.( … )`: `%` is the order.
-    let svc = service().with_context("items[]");
+    let svc = service().with_context_path("items[]");
     let cases: &[(&str, &[&str])] = &[
         ("|", ITEM_FIELDS),
         ("t|", &["type", "tax"]),
@@ -1634,7 +1634,7 @@ fn an_expression_is_typed_as_the_body_of_a_step() {
     // `items` and `items[]` are the same context: a step reads the items of an array.
     assert_eq!(
         labels(
-            &service().with_context("items"),
+            &service().with_context_path("items"),
             "|",
             Some(CompletionKind::Field)
         ),
@@ -1681,7 +1681,7 @@ fn an_expression_is_typed_as_the_body_of_a_step() {
         "region": "south",
         "orders": [{"total": 10, "items": [{"price": 1}]}]
     })]);
-    let nested = LanguageService::new(Some(schema)).with_context("orders[].items[]");
+    let nested = LanguageService::new(Some(schema)).with_context_path("orders[].items[]");
     assert_eq!(
         labels(&nested, "|", None).first().map(String::as_str),
         Some("price")
@@ -1704,7 +1704,7 @@ fn an_expression_is_typed_as_the_body_of_a_step() {
 
     // The item is always there: a condition on its required fields is always a boolean.
     let boolean = order_service()
-        .with_context("lines[]")
+        .with_context_path("lines[]")
         .with_result_type([Boolean]);
     assert_eq!(located(&boolean, "price > 10 and %.total > 100"), []);
     assert_eq!(
@@ -1718,7 +1718,7 @@ fn an_expression_is_typed_as_the_body_of_a_step() {
 
     // A path the schema does not have: an unknown context, nothing warned; its parent, the
     // document, is known.
-    let unknown = service().with_context("nothing[]");
+    let unknown = service().with_context_path("nothing[]");
     assert!(unknown.diagnostics("anything.at.all").is_empty());
     assert!(unknown.diagnostics("%.customer.name").is_empty());
     assert_eq!(codes(&unknown, "%.anything"), ["W0201"]);

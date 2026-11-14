@@ -157,7 +157,7 @@ proptest! {
             "customer": {"login": "1", "name": "X"},
             "items": [{"type": "a", "unitPrice": 1.5, "tags": ["x"]}]
         })]);
-        let body = LanguageService::new(Some(schema.clone())).with_context("items[]");
+        let body = LanguageService::new(Some(schema.clone())).with_context_path("items[]");
         let found: Vec<_> = body
             .diagnostics(&text)
             .into_iter()

@@ -6,6 +6,29 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The expected result type and the path of the context are named `resultType` and
+  `contextPath` everywhere, in place of 0.34's `result` and `context`, which mean other things
+  elsewhere: `result` is the value a case of `jlens test` expects and the value in the CLI's
+  JSON output, and the context of JSONata is a value, not a path. The old names are removed
+  with no deprecated alias. See the migration notes below.
+
+### Migration from 0.34
+
+| Where | 0.34 | 0.35 |
+|---|---|---|
+| `jlens.json`, and the language server's initialization options | `"result"`, `"context"` | `"resultType"`, `"contextPath"` |
+| `jlens check`, `jlens schema result` | `--result`, `--context` | `--result-type`, `--context-path` |
+| WebAssembly, the options of `LanguageService` | `{result, context}` | `{resultType, contextPath}` |
+| Java, `LanguageService.Builder` | `result(types...)`, `context(path)` | `resultType(types...)`, `contextPath(path)` |
+| Rust, `jlens_schema::LanguageService` | `with_context`, `expected_result` | `with_context_path`, `expected_result_type` (`with_result_type` is unchanged) |
+| Rust, `jlens_lsp::config::Settings` | the fields `result`, `context` | `result_type`, `context_path` |
+
+An old setting in `jlens.json` fails the configuration with a message that names the new one,
+as a misspelt setting does, and an old flag fails with exit code 2 and the new flag's name. The
+WebAssembly options throw a `TypeError` for an old name, as for any name they do not have.
+
 ## [0.34.0]
 
 The types the diagnostics know. The diagnostics check the operands of operators, so that

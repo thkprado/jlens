@@ -93,7 +93,7 @@ pub struct ResultArgs {
     #[arg(long, value_name = "FILE")]
     schema: Option<PathBuf>,
     /// The configuration that gives files a schema, variables, host functions, an expected
-    /// result type and a context, as for `jlens check` [default: the `jlens.json` of the
+    /// result type and a context path, as for `jlens check` [default: the `jlens.json` of the
     /// current directory, if there is one].
     #[arg(long, value_name = "FILE")]
     config: Option<PathBuf>,
@@ -274,7 +274,7 @@ fn result(args: ResultArgs) -> Result<ExitCode> {
     }
     let result = service.result_type(&source);
     let mut json = serde_json::to_value(&result)?;
-    if let (Some(expected), Value::Object(object)) = (service.expected_result(), &mut json) {
+    if let (Some(expected), Value::Object(object)) = (service.expected_result_type(), &mut json) {
         object.insert(
             "check".into(),
             serde_json::to_value(result.check(expected))?,

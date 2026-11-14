@@ -65,7 +65,7 @@ The system property `jlens.library` points the package at a library outside the 
   and serve every thread. Diagnostics are records decoded from the C API's JSON reply by `Json`;
   their spans are UTF-16, converted by the C API. A service's declarations are written as JSON
   text, a variable's schema as its handle with `Long.toUnsignedString`; the expected result
-  type and the context are declared there too, and `ResultType` is decoded from the C API's
+  type and the context path are declared there too, and `ResultType` is decoded from the C API's
   JSON reply (0.34 #13). Completion, hover and signature help do not cross. A schema's other
   documents go each in a buffer of its own, named by handle in the sources (0.33 #10, ADR
   0025); the report of a load is read when the

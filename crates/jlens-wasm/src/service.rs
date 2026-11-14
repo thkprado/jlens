@@ -135,12 +135,12 @@ impl Sources {
 /// What the expressions of a service are: the types their result is expected to have, and the
 /// path whose items they are evaluated against.
 #[derive(Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct ServiceOptions {
     #[serde(default)]
-    result: Option<Value>,
+    result_type: Option<Value>,
     #[serde(default)]
-    context: Option<String>,
+    context_path: Option<String>,
 }
 
 impl ServiceOptions {
@@ -155,13 +155,14 @@ impl ServiceOptions {
                 .map_err(|e| type_error(&format!("invalid options: {e}")))?,
             Some(_) => return Err(type_error("options must be an object")),
         };
-        let result = match options.result {
+        let result_type = match options.result_type {
             None | Some(Value::Null) => None,
-            Some(result) => Some(
-                JsonType::one_or_more(&result).map_err(|e| type_error(&format!("result {e}")))?,
+            Some(types) => Some(
+                JsonType::one_or_more(&types)
+                    .map_err(|e| type_error(&format!("resultType {e}")))?,
             ),
         };
-        Ok((result, options.context))
+        Ok((result_type, options.context_path))
     }
 }
 
@@ -192,8 +193,8 @@ impl LanguageService {
     /// evaluated with, optionally with a schema for their values; `functions` declares the host
     /// functions they are evaluated with; `sources` gives the URI of `schema` and the other
     /// documents that the `$ref`s of the schemas lead to; `options` gives the types the result
-    /// of the expressions is expected to have (`result`) and the path whose items they are
-    /// evaluated against (`context`).
+    /// of the expressions is expected to have (`resultType`) and the path whose items they are
+    /// evaluated against (`contextPath`).
     #[wasm_bindgen(constructor, skip_typescript)]
     pub fn new(
         schema: Option<JsValue>,
@@ -204,7 +205,7 @@ impl LanguageService {
     ) -> Result<LanguageService, JsValue> {
         crate::convert::install_hooks();
         let sources = Sources::read(sources.as_ref())?;
-        let (result, context) = ServiceOptions::read(options.as_ref())?;
+        let (result_type, context_path) = ServiceOptions::read(options.as_ref())?;
         let schema = match &schema {
             Some(schema) if !schema.is_null() => match from_js(schema, "schema")? {
                 Some(doc) => Some(sources.load(&doc, true, "schema")?.0),
@@ -246,11 +247,11 @@ impl LanguageService {
                 Some(_) => return Err(type_error("functions must be an array")),
             }
         }
-        if let Some(result) = result {
-            inner = inner.with_result_type(result);
+        if let Some(types) = result_type {
+            inner = inner.with_result_type(types);
         }
-        if let Some(context) = &context {
-            inner = inner.with_context(context);
+        if let Some(path) = &context_path {
+            inner = inner.with_context_path(path);
         }
         Ok(LanguageService { inner })
     }
@@ -302,7 +303,7 @@ impl LanguageService {
                     convert_bounds(&offsets, span);
                 }
             }
-            if let Some(expected) = self.inner.expected_result() {
+            if let Some(expected) = self.inner.expected_result_type() {
                 let check = serde_json::to_value(result.check(expected)).expect("serializable");
                 object.insert("check".into(), check);
             }

@@ -32,9 +32,9 @@ import java.util.StringJoiner;
  * }
  *
  * <p>The builder also declares the types the result of the expressions must have, as the
- * conditions of a rules engine must give a boolean ({@link Builder#result(String...)}), and the
- * path whose items they are evaluated against ({@link Builder#context(String)}), as {@code
- * jlens.json} declares them for an editor.
+ * conditions of a rules engine must give a boolean ({@link Builder#resultType(String...)}), and
+ * the path whose items they are evaluated against ({@link Builder#contextPath(String)}), as
+ * {@code jlens.json} declares them for an editor.
  *
  * <p>A service never changes once built, and can be shared between threads, virtual threads
  * included: calls on several threads proceed in parallel. It keeps what it needs of its schemas,
@@ -115,7 +115,7 @@ public final class LanguageService implements AutoCloseable {
      * {@snippet :
      * try (LanguageService service = LanguageService.builder()
      *         .schema(order)
-     *         .result("boolean")
+     *         .resultType("boolean")
      *         .build()) {
      *     ResultType result = service.resultType("$contains(customer.name, 'VIP')");
      *     // check MAYBE: undefined, at "customer", for an order without one
@@ -218,9 +218,9 @@ public final class LanguageService implements AutoCloseable {
         /** The signature of each host function, {@code null} for none, by name. */
         private final Map<String, String> functions = new LinkedHashMap<>();
         /** The types the result is expected to have, {@code null} for none. */
-        private List<String> result;
+        private List<String> resultType;
         /** The path whose items the expressions are evaluated against, {@code null} for none. */
-        private String context;
+        private String contextPath;
 
         /** The names of the JSON types, as JSON Schema writes them. */
         private static final Set<String> TYPES =
@@ -307,7 +307,7 @@ public final class LanguageService implements AutoCloseable {
          * @return this builder
          * @throws IllegalArgumentException when there is none, or one is not a JSON type's name
          */
-        public Builder result(String... types) {
+        public Builder resultType(String... types) {
             if (types.length == 0) {
                 throw new IllegalArgumentException("jlens: a result type needs at least one type");
             }
@@ -316,7 +316,7 @@ public final class LanguageService implements AutoCloseable {
                     throw new IllegalArgumentException("jlens: not a JSON type: " + type);
                 }
             }
-            this.result = List.of(types);
+            this.resultType = List.of(types);
             return this;
         }
 
@@ -329,8 +329,8 @@ public final class LanguageService implements AutoCloseable {
          * @param path the path, {@code null} for the document
          * @return this builder
          */
-        public Builder context(String path) {
-            this.context = path;
+        public Builder contextPath(String path) {
+            this.contextPath = path;
             return this;
         }
 
@@ -361,12 +361,14 @@ public final class LanguageService implements AutoCloseable {
                         + "}"));
                 members.add(json.toString());
             }
-            if (result != null) {
-                StringJoiner json = new StringJoiner(",", "\"result\":[", "]");
-                result.forEach(type -> json.add(Json.quote(type)));
+            if (resultType != null) {
+                StringJoiner json = new StringJoiner(",", "\"resultType\":[", "]");
+                resultType.forEach(type -> json.add(Json.quote(type)));
                 members.add(json.toString());
             }
-            if (context != null) members.add("\"context\":" + Json.quote(context));
+            if (contextPath != null) {
+                members.add("\"contextPath\":" + Json.quote(contextPath));
+            }
             long declarations = members.length() == 2 ? 0 : Native.buffer(members.toString());
             try {
                 return new LanguageService(Native.handle(Native.serviceNew(input, declarations)));

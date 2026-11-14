@@ -55,7 +55,7 @@ const tests = {
     assert.deepEqual(diagnostics.map((d) => d.code).sort(), ["W0201", "W0202", "W0204"]);
   },
 
-  async "the expected result type and the context come from jlens.json"() {
+  async "the expected result type and the context path come from jlens.json"() {
     const codes = async (relative) => {
       const uri = file(relative);
       await open(uri);
@@ -117,9 +117,9 @@ const tests = {
        "summary": "Shipping cost of a weight to a region"}
     ]
   },
-  "conditions/*.jsonata": {"schema": "schemas/order.schema.json", "result": "boolean"},
+  "conditions/*.jsonata": {"schema": "schemas/order.schema.json", "resultType": "boolean"},
   "**/*.jsonata": {"schemas": "order.schema.json"},
-  "drafts/*.jsonata": {"result": ["bool"], "context": "items[]"}
+  "drafts/*.jsonata": {"resultType": ["bool"], "contextPath": "items[]"}
 }
 `,
       );

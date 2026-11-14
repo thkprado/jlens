@@ -311,14 +311,14 @@ export interface ServiceOptions {
    * them (`W0212`), may have another type (`W0213`) or may be undefined (`W0214`). `number`
    * accepts an integer too.
    */
-  result?: JsonType | JsonType[] | null;
+  resultType?: JsonType | JsonType[] | null;
   /**
    * The path whose items they are evaluated against, as the body of a step over it, written as
    * `uses()` writes paths (`items[]`, `orders[].items[]`): the item is their context and `%` its
    * parent. A path the schema does not have gives an unknown context, where no field is warned
    * about. Without one, the context is the document.
    */
-  context?: string | null;
+  contextPath?: string | null;
 }
 
 /**

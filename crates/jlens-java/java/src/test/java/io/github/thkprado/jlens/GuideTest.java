@@ -334,12 +334,12 @@ class GuideTest {
         try (Schema order = Schema.fromJson(orderSchema);
                 LanguageService conditions = LanguageService.builder()
                         .schema(order)
-                        .result("boolean")                      // a rule's condition
+                        .resultType("boolean")                  // a rule's condition
                         .build();
                 LanguageService lines = LanguageService.builder()
                         .schema(order)
-                        .result("number")
-                        .context("items[]")                     // evaluated on each item
+                        .resultType("number")
+                        .contextPath("items[]")                 // evaluated on each item
                         .build()) {
             String vip = "$contains(customer.name, 'VIP')";
             assertEquals("W0214", conditions.diagnostics(vip).getFirst().code());

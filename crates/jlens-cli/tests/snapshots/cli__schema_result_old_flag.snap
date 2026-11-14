@@ -1,0 +1,10 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"schema\", \"result\", \"--context\", \"items[]\", \"a\"], None)"
+---
+exit: 2
+--- stdout
+--- stderr
+error: invalid value 'items[]' for '--context <PATH>': this flag is now --context-path
+
+For more information, try '--help'.

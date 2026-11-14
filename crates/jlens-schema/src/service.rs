@@ -1158,14 +1158,14 @@ impl LanguageService {
     /// use serde_json::json;
     ///
     /// let schema = Schema::infer(&[json!({"customer": "c", "items": [{"price": 1}]})]);
-    /// let service = LanguageService::new(Some(schema)).with_context("items[]");
+    /// let service = LanguageService::new(Some(schema)).with_context_path("items[]");
     ///
     /// assert!(service.diagnostics("price > 10 and %.customer = 'c'").is_empty());
     /// assert_eq!(service.diagnostics("customer")[0].code, "W0201");
     /// let labels: Vec<_> = service.complete("%.", 2).items.into_iter().map(|i| i.label).collect();
     /// assert_eq!(labels, ["customer", "items"]);
     /// ```
-    pub fn with_context(mut self, path: &str) -> Self {
+    pub fn with_context_path(mut self, path: &str) -> Self {
         self.context = crate::shape::parse_path(path)
             .unwrap_or_default()
             .into_iter()
@@ -1197,7 +1197,7 @@ impl LanguageService {
 
     /// The types declared by [`LanguageService::with_result_type`], if any: those that
     /// [`ResultType::check`] compares a result with.
-    pub fn expected_result(&self) -> Option<&[JsonType]> {
+    pub fn expected_result_type(&self) -> Option<&[JsonType]> {
         self.result.as_deref()
     }
 

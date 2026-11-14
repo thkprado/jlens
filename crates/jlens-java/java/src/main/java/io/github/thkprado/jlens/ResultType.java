@@ -21,7 +21,7 @@ import java.util.Map;
  * @param sequence the operand that may make the result several values gathered in an array,
  *     and one value alone (a step over an array, a filter); {@code null} when it cannot
  * @param check how the result compares with the types the service expects ({@link
- *     LanguageService.Builder#result(String...)}); {@code null} when it expects none
+ *     LanguageService.Builder#resultType(String...)}); {@code null} when it expects none
  */
 public record ResultType(List<String> types, Span undefined, Span sequence, Check check) {
     /** Copies {@code types}, when there are some. */
