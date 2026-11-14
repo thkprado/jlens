@@ -97,6 +97,12 @@ pub struct Shape {
     /// The shape of array items.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub items: Option<Box<Shape>>,
+    /// The shapes of the first items of an array, each by its position: a tuple, as a JSON
+    /// Schema's `prefixItems` declares it (or `items` as an array until draft-07). A literal
+    /// index inside it, `point[1]`, has the shape of its position; `items` is the shape of
+    /// every item, these included, and is `None` where any item may follow them.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub prefix_items: Vec<Shape>,
     /// Smallest number seen.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub minimum: Option<f64>,
@@ -366,6 +372,30 @@ enum Step {
     Items,
 }
 
+impl Step {
+    /// The shape this step leads to from `shape`, created where `shape` does not have it.
+    fn or_created<'a>(&self, shape: &'a mut Shape) -> &'a mut Shape {
+        match self {
+            Step::Field(name) => {
+                if !shape.types.contains(&JsonType::Object) {
+                    shape.types.push(JsonType::Object);
+                }
+                let field = shape.fields.entry(name.clone()).or_insert_with(|| Field {
+                    presence: 0.0,
+                    ..Field::default()
+                });
+                &mut field.shape
+            }
+            Step::Items => {
+                if !shape.types.contains(&JsonType::Array) {
+                    shape.types.push(JsonType::Array);
+                }
+                shape.items.get_or_insert_with(Default::default)
+            }
+        }
+    }
+}
+
 /// Where a path leads: the definition it is in (`None` for the root), the steps from there,
 /// none of which goes through a reference, and the steps the schema does not have.
 struct Location {
@@ -537,41 +567,79 @@ impl Schema {
     }
 
     /// The shape at `location`, with what the schema does not have of it created.
-    fn shape_mut(&mut self, location: Location) -> Option<&mut Shape> {
+    fn shape_mut(&mut self, location: &Location) -> Option<&mut Shape> {
         let mut shape = match &location.base {
             None => &mut self.root,
             Some(name) => self.definitions.get_mut(name)?,
         };
-        for step in location.steps {
+        for step in &location.steps {
             shape = match step {
-                Step::Field(name) => &mut shape.fields.get_mut(&name)?.shape,
+                Step::Field(name) => &mut shape.fields.get_mut(name)?.shape,
                 Step::Items => shape.items.as_deref_mut()?,
             };
         }
-        for step in location.rest {
-            shape = match step {
-                Step::Field(name) => {
-                    if !shape.types.contains(&JsonType::Object) {
-                        shape.types.push(JsonType::Object);
-                    }
-                    &mut shape
-                        .fields
-                        .entry(name)
-                        .or_insert_with(|| Field {
-                            presence: 0.0,
-                            ..Field::default()
-                        })
-                        .shape
-                }
-                Step::Items => {
-                    if !shape.types.contains(&JsonType::Array) {
-                        shape.types.push(JsonType::Array);
-                    }
-                    shape.items.get_or_insert_with(Default::default)
-                }
-            };
+        for step in &location.rest {
+            shape = step.or_created(shape);
         }
         Some(shape)
+    }
+
+    /// The shapes at `location` that a literal index reads: where the path steps into the
+    /// items of a tuple, it also leads to each of its positions ([`Shape::prefix_items`]), and
+    /// from there to what the position has of the rest of the path, with what
+    /// [`Schema::shape_mut`] created of it created there too. A position that refers to a
+    /// definition is left as it is: the definition is what the path changes, where it leads
+    /// there.
+    fn positions_mut(&mut self, location: &Location) -> Vec<&mut Shape> {
+        let mut out = Vec::new();
+        let start = match &location.base {
+            None => &mut self.root,
+            Some(name) => match self.definitions.get_mut(name) {
+                Some(definition) => definition,
+                None => return out,
+            },
+        };
+        let existing = location.steps.iter().map(|step| (step, false));
+        let created = location.rest.iter().map(|step| (step, true));
+        let steps: Vec<(&Step, bool)> = existing.chain(created).collect();
+        // Iterative, so that a long path cannot overflow the stack.
+        let mut pending = vec![(start, 0, false)];
+        while let Some((shape, at, position)) = pending.pop() {
+            let Some(&(step, created)) = steps.get(at) else {
+                if position {
+                    out.push(shape);
+                }
+                continue;
+            };
+            if position && !shape.references.is_empty() {
+                continue;
+            }
+            if position && created {
+                pending.push((step.or_created(shape), at + 1, true));
+                continue;
+            }
+            match step {
+                Step::Field(name) => {
+                    if let Some(field) = shape.fields.get_mut(name) {
+                        pending.push((&mut field.shape, at + 1, position));
+                    }
+                }
+                Step::Items => {
+                    let Shape {
+                        items,
+                        prefix_items,
+                        ..
+                    } = shape;
+                    if let Some(items) = items {
+                        pending.push((items, at + 1, position));
+                    }
+                    for item in prefix_items {
+                        pending.push((item, at + 1, true));
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Applies overrides: a map from paths (see [`Schema::shape_at`]) to settings. Unknown
@@ -596,37 +664,20 @@ impl Schema {
     pub fn apply_overrides(&mut self, overrides: &BTreeMap<String, Override>) -> Vec<String> {
         let mut failed = Vec::new();
         for (path, o) in overrides {
-            let Some(shape) = self
-                .locate(path)
-                .and_then(|location| self.shape_mut(location))
-            else {
+            let Some(location) = self.locate(path) else {
                 failed.push(path.clone());
                 continue;
             };
-            if let Some(d) = &o.description {
-                shape.description = Some(d.clone());
+            match self.shape_mut(&location) {
+                Some(shape) => o.apply(shape),
+                None => {
+                    failed.push(path.clone());
+                    continue;
+                }
             }
-            if let Some(l) = &o.label {
-                shape.label = Some(l.clone());
-            }
-            if let Some(h) = o.hidden {
-                shape.hidden = h;
-            }
-            if let Some(e) = &o.enumeration {
-                shape.enumeration = Some(e.clone());
-                shape.enumeration_inferred = false;
-            }
-            if let Some(d) = &o.domain {
-                shape.domain = Some(d.clone());
-            }
-            if let Some(f) = &o.format {
-                shape.format = Some(f.clone());
-            }
-            if let Some(types) = &o.types {
-                shape.types = types.clone();
-            }
-            if let Some(examples) = &o.examples {
-                shape.examples = examples.clone();
+            // The items of a tuple are also read by position.
+            for position in self.positions_mut(&location) {
+                o.apply(position);
             }
         }
         failed
@@ -764,6 +815,37 @@ pub struct Override {
     pub types: Option<Vec<JsonType>>,
     /// Example values.
     pub examples: Option<Vec<JsonValue>>,
+}
+
+impl Override {
+    /// Sets on `shape` what this override gives.
+    fn apply(&self, shape: &mut Shape) {
+        if let Some(d) = &self.description {
+            shape.description = Some(d.clone());
+        }
+        if let Some(l) = &self.label {
+            shape.label = Some(l.clone());
+        }
+        if let Some(h) = self.hidden {
+            shape.hidden = h;
+        }
+        if let Some(e) = &self.enumeration {
+            shape.enumeration = Some(e.clone());
+            shape.enumeration_inferred = false;
+        }
+        if let Some(d) = &self.domain {
+            shape.domain = Some(d.clone());
+        }
+        if let Some(f) = &self.format {
+            shape.format = Some(f.clone());
+        }
+        if let Some(types) = &self.types {
+            shape.types = types.clone();
+        }
+        if let Some(examples) = &self.examples {
+            shape.examples = examples.clone();
+        }
+    }
 }
 
 /// Reads `type` as JSON Schema writes it: `"integer"` or `["string", "null"]`.

@@ -22,7 +22,8 @@ fn types(schema: &Schema, path: &str) -> Option<Vec<JsonType>> {
     schema.shape_at(path).map(|s| s.types.clone())
 }
 
-/// The schema of the property test: each keyword the load reads beyond those of 0.33.
+/// The schema of the property test: each keyword the load reads beyond those of 0.33, with
+/// tuples read by position: alone, as the items of an array, and inside two arrays.
 fn order() -> Value {
     json!({
         "type": "object",
@@ -36,7 +37,29 @@ fn order() -> Value {
             },
             "point": {"type": "array", "items": [{"type": "number"}, {"type": "number"}]},
             "note": {"type": "string", "nullable": true},
-            "extra": {"type": "object", "unevaluatedProperties": {"type": "integer"}}
+            "extra": {"type": "object", "unevaluatedProperties": {"type": "integer"}},
+            "rows": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "prefixItems": [{"type": "string"}, {"type": "number"}],
+                    "items": false
+                }
+            },
+            "cells": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {"point": {
+                            "type": "array",
+                            "prefixItems": [{"type": "string"}, {"type": "number"}]
+                        }}
+                    }
+                }
+            }
         },
         "if": {"properties": {"kind": {"const": "company"}}},
         "then": {"required": ["tax"], "properties": {"tax": {"type": "string"}}},
@@ -49,11 +72,12 @@ fn order_samples() -> [Value; 3] {
     [
         json!({
             "kind": "company", "tax": "X1", "lines": ["head", 1, 2.5], "point": [1, 2, "z"],
-            "note": null, "extra": {"a": 1}
+            "note": null, "extra": {"a": 1}, "rows": [["a", 1], ["b", 2]],
+            "cells": [[{"point": ["p"]}, {"point": ["q", 2]}], [{"point": ["r", 3, true]}]]
         }),
         json!({
             "kind": "person", "age": 30, "guardian": "Ann", "tax": 2, "lines": ["h"],
-            "point": [3], "note": "n"
+            "point": [3], "note": "n", "rows": [["c", 3]], "cells": [[{"point": ["s", 4]}]]
         }),
         json!({"kind": "person", "lines": [], "point": [], "note": "m"}),
     ]
@@ -401,9 +425,9 @@ fn types_of(value: &Value) -> Vec<JsonType> {
 
 #[rustfmt::skip]
 const TOKENS: &[&str] = &[
-    "kind", "tax", "age", "guardian", "lines", "point", "note", "extra", "a", ".", "[0]", "[1]",
-    "[", "]", "(", ")", "1", "'s'", "null", "+", ">", "=", "and", "&", "$sum(", "$count(",
-    "$exists(", "$string(", ",", " ",
+    "kind", "tax", "age", "guardian", "lines", "point", "note", "extra", "rows", "cells", "a", ".",
+    "[0]", "[1]", "[", "]", "(", ")", "1", "'s'", "null", "+", ">", "=", "and", "&", "$sum(",
+    "$count(", "$exists(", "$string(", ",", " ",
 ];
 
 fn text() -> impl Strategy<Value = String> {
@@ -477,7 +501,7 @@ proptest! {
     #[test]
     fn the_keywords_read_type_as_their_documents(text in text()) {
         // Each name of the schema is a field of the root in one of the samples.
-        types_hold(&order(), &order_samples(), (&TOKENS[..8], true), &text)?;
+        types_hold(&order(), &order_samples(), (&TOKENS[..10], true), &text)?;
     }
 
     /// The same for `anyOf` and `oneOf`, on a document of each branch.

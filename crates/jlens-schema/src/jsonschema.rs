@@ -60,7 +60,8 @@ impl Schema {
     }
 
     /// Reads a JSON Schema document. Supports `type`, `properties`, `required`,
-    /// `patternProperties`, `additionalProperties` ([`Shape::other_fields`]), `items`, `enum`,
+    /// `patternProperties`, `additionalProperties` ([`Shape::other_fields`]), `items`,
+    /// `prefixItems` ([`Shape::prefix_items`]), `enum`,
     /// `const`, `format`, `minimum`, `maximum`, `minItems`, `title`, `description`, `examples`,
     /// `$ref`, `$id`, `$anchor`, `allOf` (whose branches are merged), and `anyOf`/`oneOf` (whose
     /// values have the shape of one branch or another). Other keywords are ignored.
@@ -458,6 +459,12 @@ fn export(shape: &Shape, definitions: &Definitions) -> JsonValue {
                 out.insert("additionalProperties".into(), export(rest, definitions));
             }
         }
+    }
+    if !shape.prefix_items.is_empty() {
+        let positions: Vec<JsonValue> = (shape.prefix_items.iter())
+            .map(|p| export(p, definitions))
+            .collect();
+        out.insert("prefixItems".into(), positions.into());
     }
     if let Some(items) = &shape.items {
         out.insert("items".into(), export(items, definitions));
@@ -1149,7 +1156,8 @@ impl<'d> Importer<'d> {
     /// Reads the items of the array schema `map` into `shape`: one schema for every item
     /// (`items`), or one for each of the first items (`prefixItems`, or `items` as an array
     /// until draft-07) and one for the rest (`items` after `prefixItems`, `additionalItems`).
-    /// The first items and the rest are merged, as a step over the array takes them all.
+    /// The first items and the rest are merged, as a step over the array takes them all, and
+    /// the first items are kept by position too ([`Shape::prefix_items`]), for a literal index.
     fn import_items(
         &mut self,
         map: &'d Map<String, JsonValue>,
@@ -1183,25 +1191,36 @@ impl<'d> Importer<'d> {
             }
             return Ok(());
         };
-        let mut merged = Shape::default();
+        let mut positions = Vec::with_capacity(tuple.len());
         for item in tuple {
-            merge(&mut merged, self.import(item, depth + 1)?);
+            positions.push(self.import(item, depth + 1)?);
         }
         let closed = map
             .get("maxItems")
             .and_then(JsonValue::as_u64)
             .is_some_and(|n| n <= tuple.len() as u64);
-        match rest {
-            Some(rest @ JsonValue::Object(_)) => merge(&mut merged, self.import(rest, depth + 1)?),
-            Some(JsonValue::Bool(false)) => {}
+        let rest = match rest {
+            Some(rest @ JsonValue::Object(_)) => Some(Some(self.import(rest, depth + 1)?)),
+            Some(JsonValue::Bool(false)) => Some(None),
+            _ if closed => Some(None),
             // Any item may follow the first ones: what they are is not known.
-            _ if !closed => {
-                add_type(shape, "array");
-                return Ok(());
+            _ => None,
+        };
+        if let Some(rest) = rest {
+            // An item is at one position or another: where the items are tuples themselves, a
+            // position of theirs is known only where every one of them gives it.
+            let all: Vec<&Shape> = positions.iter().chain(&rest).collect();
+            let inner = positions_of_either(&all);
+            let mut merged = Shape::default();
+            for item in positions.iter().cloned().chain(rest) {
+                merge(&mut merged, item);
             }
-            _ => {}
+            merged.prefix_items = inner;
+            shape.items = Some(Box::new(merged));
         }
-        shape.items = Some(Box::new(merged));
+        // The positions of a `$ref` or of a branch hold beside these: a position has both.
+        let before = std::mem::replace(&mut shape.prefix_items, positions);
+        merge_positions(&mut shape.prefix_items, before);
         add_type(shape, "array");
         Ok(())
     }
@@ -1241,7 +1260,16 @@ fn add_conditions(shape: &mut Shape, conditions: Vec<Shape>) {
                 None => {}
             }
         }
-        items.extend(condition.items.map(|i| *i));
+        // The fields of a position are fields of the items, and of the position they are at.
+        for (index, position) in shape.prefix_items.iter_mut().enumerate() {
+            let at = condition.prefix_items.get(index);
+            let under = at.or(condition.items.as_deref()).cloned();
+            add_conditions(position, under.into_iter().collect());
+        }
+        match condition.items {
+            Some(i) => items.push(*i),
+            None => items.extend(condition.prefix_items),
+        }
         for name in condition.references {
             if !shape.references.contains(&name) {
                 shape.references.push(name);
@@ -1302,6 +1330,11 @@ fn either(mut branches: Vec<Shape>) -> Shape {
     let mut fields: IndexMap<String, (Vec<Shape>, bool)> = IndexMap::new();
     // The items of the branches that are arrays; `None` where one of them does not say.
     let mut items: Option<Vec<Shape>> = Some(Vec::new());
+    // A branch that gives no type may be an array too, of which nothing is known.
+    let arrays: Vec<&Shape> = (branches.iter())
+        .filter(|b| b.types.is_empty() || b.types.contains(&JsonType::Array))
+        .collect();
+    let positions = positions_of_either(&arrays);
     let mut out = Shape::default();
     for mut branch in branches {
         if branch.types.is_empty() {
@@ -1359,6 +1392,7 @@ fn either(mut branches: Vec<Shape>) -> Shape {
         }
     }
     out.items = items.filter(|i| !i.is_empty()).map(|i| Box::new(either(i)));
+    out.prefix_items = positions;
     if let Some(values) = values.filter(|_| listed) {
         out.enumeration = Some(values);
         out.enumeration_inferred = values_inferred;
@@ -1367,6 +1401,33 @@ fn either(mut branches: Vec<Shape>) -> Shape {
         out.types.clear();
     }
     out
+}
+
+/// The positions of an array that has the shape of one of `arrays` or another
+/// ([`Shape::prefix_items`]): each position that every one of them gives, by its tuple or else
+/// by the shape of all its items, up to the first that one of them does not give.
+fn positions_of_either(arrays: &[&Shape]) -> Vec<Shape> {
+    let length = arrays.iter().map(|a| a.prefix_items.len()).max();
+    let mut out = Vec::new();
+    for index in 0..length.unwrap_or(0) {
+        let at = |a: &&Shape| a.prefix_items.get(index).or(a.items.as_deref()).cloned();
+        match arrays.iter().map(at).collect::<Option<Vec<Shape>>>() {
+            Some(alternatives) => out.push(either(alternatives)),
+            None => break,
+        }
+    }
+    out
+}
+
+/// Merges the positions `other` into `positions`, as [`merge`] does the fields: a position
+/// both have is merged, and one that only one has is kept.
+fn merge_positions(positions: &mut Vec<Shape>, other: Vec<Shape>) {
+    for (index, position) in other.into_iter().enumerate() {
+        match positions.get_mut(index) {
+            Some(existing) => merge(existing, position),
+            None => positions.push(position),
+        }
+    }
 }
 
 /// The JSON Schema name of the type of `value`.
@@ -1435,6 +1496,7 @@ fn merge(shape: &mut Shape, other: Shape) {
         (slot @ None, Some(b)) => *slot = Some(b),
         _ => {}
     }
+    merge_positions(&mut shape.prefix_items, other.prefix_items);
     // An array of either shape: the fewer items, and only if both say.
     if !arrays {
         shape.min_items = other.min_items;
@@ -1489,6 +1551,7 @@ impl Shape {
             types: self.types.clone(),
             fields: Default::default(),
             items: self.items.as_ref().map(|i| Box::new(i.without_state())),
+            prefix_items: self.prefix_items.iter().map(Shape::without_state).collect(),
             minimum: self.minimum,
             maximum: self.maximum,
             format: self.format.clone(),

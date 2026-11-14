@@ -172,7 +172,12 @@ How some are read:
   those of the rest (`items` after `prefixItems`, `additionalItems`, `unevaluatedItems`), as
   a step over the array takes them all. With no schema for the rest, any item may follow, and
   the items are not known, unless `maxItems` keeps the array to the tuple or the rest is
-  `false`.
+  `false`. A literal index inside the tuple has the type of its position, whether items may
+  follow or not: with `point` a tuple of two numbers, `point[1]` is a number and `point[1] >
+  "a"` gets `W0208`, and after `entry[1].` completion offers the fields of the second item.
+  An index from the end, one past the tuple or a computed one (`point[-1]`, `point[2]`,
+  `point[$i]`) has the type of every item. An [override](#2-describe-the-fields) at `point[]`
+  sets each position as well.
 - **`nullable: true`** adds `null` to the types a schema gives, and to its `enum`.
 
 A reported keyword leaves the place of its schema unknown, as a `$ref` that was not followed

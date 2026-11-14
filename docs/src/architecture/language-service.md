@@ -84,7 +84,11 @@ a step that gave arrays, but for one whose filters are all numbers, `items[0]`),
 may keep several, `$filter`, `$keys`. `Ty::form` tells whether the value is the shapes
 themselves or an array of them (an array constructor, `$sort`, `$append`, `$split`), or either.
 Paths read the items of both. A filter's result is the items of its value, one level down (not
-every level, as a step's context is). A path with a tuple stream (`@$v`, `#$i`) gives what its
+every level, as a step's context is). A literal index takes one item, and an index after it
+an item of that item (`rows[0][1]`); of a tuple it takes the item at its position
+(`Shape::prefix_items`, `Ty::item_at`), where the value is one array: not a sequence, nor the
+result of a step over items that are arrays themselves, which reads the values of them all. A
+path with a tuple stream (`@$v`, `#$i`) gives what its
 steps run against, which the walker does not follow: its type is unknown. A built-in's result
 has the type of its signature (`n`, `s`, `b`).
 

@@ -144,6 +144,22 @@ impl<'s> Ty<'s> {
     /// value that is not an array as it is. [`Ty::elements`] goes down every level, as a path
     /// step does.
     fn items(&self) -> Ty<'s> {
+        self.items_at(None)
+    }
+
+    /// The item a literal index takes from this value, `point[1]`, where it is one array and
+    /// one of its shapes tells that position ([`Shape::prefix_items`]): the shape of the
+    /// position for a tuple that reaches it, and of every item for another array, as
+    /// [`Ty::items`] gives. `None` where no shape tells the position, and for an array of the
+    /// shapes or a sequence, whose items are not at the positions of the shapes.
+    fn item_at(&self, index: usize) -> Option<Ty<'s>> {
+        let one = self.form == Form::Value && self.sequence.is_none();
+        let told = |s: &Sh<'s>| s.shape.prefix_items.len() > index;
+        (one && self.shapes.iter().any(told)).then(|| self.items_at(Some(index)))
+    }
+
+    /// [`Ty::items`], with the item at `position` read by its position where a shape has it.
+    fn items_at(&self, position: Option<usize>) -> Ty<'s> {
         let mut out = Ty {
             partial: self.partial,
             ..Ty::default()
@@ -170,7 +186,8 @@ impl<'s> Ty<'s> {
                     continue;
                 }
                 if shape.types.contains(&JsonType::Array) {
-                    match &shape.shape.items {
+                    let at = position.and_then(|p| shape.shape.prefix_items.get(p));
+                    match at.or(shape.shape.items.as_deref()) {
                         Some(items) => {
                             let (items, unknown) = members_of(items, shape.defs);
                             out.partial |= unknown;
@@ -431,7 +448,13 @@ impl<'s> Ty<'s> {
             let mut below = Vec::new();
             let children = shape.shape.fields.values().map(|f| &f.shape);
             let others = shape.shape.other_shapes();
-            for child in children.chain(others).chain(shape.shape.items.as_deref()) {
+            // The items of a tuple that any item may follow are known by position only.
+            let positions: &[Shape] = match shape.shape.items {
+                Some(_) => &[],
+                None => &shape.shape.prefix_items,
+            };
+            let items = shape.shape.items.as_deref().into_iter().chain(positions);
+            for child in children.chain(others).chain(items) {
                 out.partial |= members(child, shape.defs, &mut below);
             }
             pending.extend(below.into_iter().rev());
@@ -575,6 +598,9 @@ impl<'s> Walker<'s, '_> {
                     ))
                 .then(|| steps.first().map_or(node.span, |s| s.span));
                 let mut sequence = None;
+                // A step before bound a variable (`@$v`): the steps after it are evaluated
+                // against the items of the step before it.
+                let mut bound = false;
                 let last = steps.len().saturating_sub(1);
                 for (i, step) in steps.iter().enumerate() {
                     // A step that a parent operator (`%`) refers to binds the item it is
@@ -595,21 +621,54 @@ impl<'s> Walker<'s, '_> {
                         several = several.or(Some(step.span));
                     }
                     several = several.or(res.sequence);
-                    let elements = res.elements();
-                    let mut filtered = false;
+                    let mut elements = res.elements();
+                    // What the filters keep. A literal index, `point[1]`, takes one item: of a
+                    // tuple, the item at its position, and an index after it takes an item
+                    // of that item, `rows[0][1]`. The position holds where the step gives one
+                    // array for each item it runs over: where those items are arrays
+                    // themselves, the step reads them all, and the index is one into all
+                    // their values.
+                    let mut kept: Option<Ty<'s>> = None;
+                    let mut literal_so_far = true;
+                    let mut one_array = None;
                     let holds_several = res.may_hold_several();
                     for stage in &step.attrs.stages {
                         if let Stage::Filter { expr, span, .. } = stage {
                             self.walk(expr, &elements, scope);
                             undefined = undefined.or(Some(*span));
-                            filtered = true;
                             if !index && holds_several {
                                 sequence = sequence.or(Some(*span));
+                            }
+                            let literal =
+                                Self::literal_index(Some(stage)).filter(|_| literal_so_far);
+                            literal_so_far = literal.is_some();
+                            let item = match (&kept, literal) {
+                                (Some(kept), Some(index)) => {
+                                    Some(kept.item_at(index).unwrap_or_else(|| kept.items()))
+                                }
+                                (None, Some(index)) => res.item_at(index).filter(|_| {
+                                    *one_array.get_or_insert_with(|| {
+                                        let over = if i == 0 { ctx } else { &result };
+                                        let whole = i == 0
+                                            && matches!(step.kind, NodeKind::Variable { .. });
+                                        !bound && (whole || !over.items().has_arrays())
+                                    })
+                                }),
+                                _ => None,
+                            };
+                            match item {
+                                // The filters after it, and the next step, read that item.
+                                Some(item) => {
+                                    elements = item.elements();
+                                    kept = Some(item);
+                                }
+                                None if kept.is_none() => kept = Some(res.items()),
+                                None => {}
                             }
                         }
                     }
                     // A filter gives the items it keeps.
-                    let res = if filtered { res.items() } else { res };
+                    let res = kept.unwrap_or(res);
                     // Other steps are walked whole, group-by included.
                     if let Some(group) = &step.attrs.group
                         && Self::is_simple_step(step)
@@ -627,6 +686,7 @@ impl<'s> Walker<'s, '_> {
                         Some(focus) => {
                             (self.visit)(Event::Bind { name: focus });
                             scope.push((focus.clone(), elements));
+                            bound = true;
                         }
                         None => cur = elements,
                     }
@@ -865,14 +925,26 @@ impl<'s> Walker<'s, '_> {
         let mut ty = ty;
         let elements = ty.elements();
         let index = Self::index_filter_of(&node.attrs.predicate);
+        // Whether the filters so far were literal indexes, each of which takes one item of
+        // one value: the next one takes an item of that item. A step read outside a path may
+        // read the items of several arrays.
+        let mut one = !Self::is_simple_step(node);
         for stage in &node.attrs.predicate {
             if let Stage::Filter { expr, span, .. } = stage {
                 self.walk(expr, &elements, scope);
                 // A filter gives the items it keeps: one for an index or of one value, a
-                // sequence otherwise.
+                // sequence otherwise. A literal index into a tuple gives the item at its
+                // position.
                 let undefined = ty.undefined.or(Some(*span));
-                let sequence = (!index && ty.may_hold_several()).then_some(*span);
-                ty = ty.selected(sequence);
+                let literal = Self::literal_index(Some(stage)).filter(|_| one);
+                one = literal.is_some();
+                ty = match literal.and_then(|index| ty.item_at(index)) {
+                    Some(item) => item,
+                    None => {
+                        let sequence = (!index && ty.may_hold_several()).then_some(*span);
+                        ty.selected(sequence)
+                    }
+                };
                 ty.undefined = undefined;
             }
         }
@@ -944,6 +1016,26 @@ impl<'s> Walker<'s, '_> {
         stages
             .iter()
             .any(|s| matches!(s, Stage::Filter { expr, .. } if number(expr)))
+    }
+
+    /// The position a filter takes when it is a literal index from the start, `[1]`: a whole
+    /// number that is not negative.
+    fn literal_index(stage: Option<&Stage>) -> Option<usize> {
+        let Stage::Filter { expr, .. } = stage? else {
+            return None;
+        };
+        match expr.kind {
+            NodeKind::Number { value }
+                if value >= 0.0
+                    && value.fract() == 0.0
+                    && value < 1e9
+                    && expr.attrs.predicate.is_empty()
+                    && expr.attrs.group.is_none() =>
+            {
+                Some(value as usize)
+            }
+            _ => None,
+        }
     }
 
     fn is_simple_step(step: &Node) -> bool {

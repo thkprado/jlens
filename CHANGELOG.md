@@ -6,6 +6,18 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The items of a tuple are typed by their position. A literal index inside a tuple
+  (`prefixItems`, or `items` as an array until draft-07) has the type of that position,
+  whether other items may follow the tuple or not: with `point` a tuple of two numbers,
+  `point[1]` is a number, `point[1] > "a"` gets `W0208`, and completion and hover after
+  `entry[1].` follow the second item. 0.34 left the items of a tuple that any item may follow
+  unknown, so nothing was warned about there. An index from the end, one past the tuple or a
+  computed one has the type of every item, as before. `Shape::prefix_items` holds the
+  positions, `prefixItems` in the JSON form of a shape and in what `to_json_schema` writes,
+  and an override at `point[]` sets each position too.
+
 ### Changed
 
 - The expected result type and the path of the context are named `resultType` and
@@ -35,6 +47,12 @@ as a misspelt setting does, and an old flag fails with exit code 2 and the new f
 WebAssembly constructor throws a `TypeError` for an old name, as for any option it does not
 have, and for a call with positional arguments: `new LanguageService(schema)` becomes `new
 LanguageService({ schema })`, and each argument after it a member of the same object.
+
+### Fixed
+
+- An index after an index reads an item of the item the first one took: with `rows` an array
+  of arrays of numbers, `rows[0][1]` is a number, where the diagnostics took it for an array
+  and warned that `rows[0][1] + 1` may be several values (`W0215`).
 
 ## [0.34.0]
 
