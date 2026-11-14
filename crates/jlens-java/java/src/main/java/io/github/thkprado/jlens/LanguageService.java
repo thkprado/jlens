@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.StringJoiner;
 
 /**
@@ -29,6 +30,11 @@ import java.util.StringJoiner;
  *     }
  * }
  * }
+ *
+ * <p>The builder also declares the types the result of the expressions must have, as the
+ * conditions of a rules engine must give a boolean ({@link Builder#result(String...)}), and the
+ * path whose items they are evaluated against ({@link Builder#context(String)}), as {@code
+ * jlens.json} declares them for an editor.
  *
  * <p>A service never changes once built, and can be shared between threads, virtual threads
  * included: calls on several threads proceed in parallel. It keeps what it needs of its schemas,
@@ -77,9 +83,11 @@ public final class LanguageService implements AutoCloseable {
      * The problems of an expression's text: its syntax errors, and warnings for a field the
      * schema does not have ({@code W0201}), a function that is not known ({@code W0202}) or is
      * given the wrong number or types of arguments ({@code W0203}, {@code W0205}), a variable
-     * that is not declared ({@code W0204}) and a value compared with an enumeration that does
-     * not list it ({@code W0206}). A text with a syntax error is not a failure: its errors are
-     * diagnostics.
+     * that is not declared ({@code W0204}), a value compared with an enumeration that does not
+     * list it ({@code W0206}), operands the operator cannot take ({@code W0207} to {@code
+     * W0211}, {@code W0215}) and, with a result type declared, a result that never has it
+     * ({@code W0212}), may have another ({@code W0213}) or may be undefined ({@code W0214}). A
+     * text with a syntax error is not a failure: its errors are diagnostics.
      *
      * @param text the expression's text
      * @return the diagnostics, which cannot be changed; empty when nothing was found
@@ -96,6 +104,39 @@ public final class LanguageService implements AutoCloseable {
             Reference.reachabilityFence(this);
         }
         return decode(json);
+    }
+
+    /**
+     * What the typing knows of the result of an expression's text: the types it may have, and
+     * whether it may be undefined or several values, with the operand that makes it so; with
+     * {@link ResultType#check()} when the service expects a result type. A text with a syntax
+     * error has unknown types: its errors are {@linkplain #diagnostics(String) diagnostics}.
+     *
+     * {@snippet :
+     * try (LanguageService service = LanguageService.builder()
+     *         .schema(order)
+     *         .result("boolean")
+     *         .build()) {
+     *     ResultType result = service.resultType("$contains(customer.name, 'VIP')");
+     *     // check MAYBE: undefined, at "customer", for an order without one
+     * }
+     * }
+     *
+     * @param text the expression's text
+     * @return what the typing knows of its result
+     * @throws IllegalStateException when the service was closed
+     */
+    public ResultType resultType(String text) {
+        long service = live();
+        long buffer = Native.buffer(text);
+        String json;
+        try {
+            json = Native.json(Native.serviceResultType(service, buffer));
+        } finally {
+            Native.free(buffer);
+            Reference.reachabilityFence(this);
+        }
+        return ResultType.of(json);
     }
 
     /**
@@ -176,6 +217,14 @@ public final class LanguageService implements AutoCloseable {
         private final Map<String, Schema> variables = new LinkedHashMap<>();
         /** The signature of each host function, {@code null} for none, by name. */
         private final Map<String, String> functions = new LinkedHashMap<>();
+        /** The types the result is expected to have, {@code null} for none. */
+        private List<String> result;
+        /** The path whose items the expressions are evaluated against, {@code null} for none. */
+        private String context;
+
+        /** The names of the JSON types, as JSON Schema writes them. */
+        private static final Set<String> TYPES =
+                Set.of("null", "boolean", "integer", "number", "string", "array", "object");
 
         private Builder() {}
 
@@ -248,6 +297,43 @@ public final class LanguageService implements AutoCloseable {
             return this;
         }
 
+        /**
+         * Declares the types the result of the expressions is expected to have, as JSON Schema
+         * names them ({@code "boolean"}): {@link LanguageService#diagnostics(String)} then warns
+         * about a result that never has one of them ({@code W0212}), may have another ({@code
+         * W0213}) or may be undefined ({@code W0214}). {@code "number"} accepts an integer too.
+         *
+         * @param types the types, at least one
+         * @return this builder
+         * @throws IllegalArgumentException when there is none, or one is not a JSON type's name
+         */
+        public Builder result(String... types) {
+            if (types.length == 0) {
+                throw new IllegalArgumentException("jlens: a result type needs at least one type");
+            }
+            for (String type : types) {
+                if (!TYPES.contains(Objects.requireNonNull(type, "type"))) {
+                    throw new IllegalArgumentException("jlens: not a JSON type: " + type);
+                }
+            }
+            this.result = List.of(types);
+            return this;
+        }
+
+        /**
+         * Declares the path whose items the expressions are evaluated against, as the body of a
+         * step over it: {@code items[]}, or {@code orders[].items[]}, as {@link Use} paths are
+         * written. The item is then their context, and {@code %} its parent. A path the schema
+         * does not have gives an unknown context, where no field is warned about.
+         *
+         * @param path the path, {@code null} for the document
+         * @return this builder
+         */
+        public Builder context(String path) {
+            this.context = path;
+            return this;
+        }
+
         private static String key(String name) {
             return name.startsWith("$") ? name.substring(1) : name;
         }
@@ -275,8 +361,13 @@ public final class LanguageService implements AutoCloseable {
                         + "}"));
                 members.add(json.toString());
             }
-            long declarations = variables.isEmpty() && functions.isEmpty()
-                    ? 0 : Native.buffer(members.toString());
+            if (result != null) {
+                StringJoiner json = new StringJoiner(",", "\"result\":[", "]");
+                result.forEach(type -> json.add(Json.quote(type)));
+                members.add(json.toString());
+            }
+            if (context != null) members.add("\"context\":" + Json.quote(context));
+            long declarations = members.length() == 2 ? 0 : Native.buffer(members.toString());
             try {
                 return new LanguageService(Native.handle(Native.serviceNew(input, declarations)));
             } finally {

@@ -53,7 +53,7 @@ pub fn convert_audit_spans(offsets: &Offsets, tree: &mut Value) {
 }
 
 /// Rewrites the `start` and `end` of a span from byte offsets to UTF-16 offsets.
-fn convert_bounds(offsets: &Offsets, span: &mut serde_json::Map<String, Value>) {
+pub fn convert_bounds(offsets: &Offsets, span: &mut serde_json::Map<String, Value>) {
     for bound in ["start", "end"] {
         if let Some(n) = span.get(bound).and_then(Value::as_u64) {
             span.insert(bound.into(), offsets.to_utf16(n as usize).into());

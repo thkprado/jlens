@@ -323,6 +323,39 @@ class GuideTest {
     }
 
     @Test
+    void resultType() {
+        String orderSchema = """
+                {"type": "object", "properties": {
+                    "customer": {"type": "object", "properties": {"name": {"type": "string"}}},
+                    "items": {"type": "array", "items": {"type": "object",
+                        "required": ["price", "quantity"],
+                        "properties": {"price": {"type": "number"}, "quantity": {"type": "integer"}}}}}}""";
+        // ANCHOR: result_type
+        try (Schema order = Schema.fromJson(orderSchema);
+                LanguageService conditions = LanguageService.builder()
+                        .schema(order)
+                        .result("boolean")                      // a rule's condition
+                        .build();
+                LanguageService lines = LanguageService.builder()
+                        .schema(order)
+                        .result("number")
+                        .context("items[]")                     // evaluated on each item
+                        .build()) {
+            String vip = "$contains(customer.name, 'VIP')";
+            assertEquals("W0214", conditions.diagnostics(vip).getFirst().code());
+            ResultType result = conditions.resultType(vip);
+            assertEquals(ResultType.Check.MAYBE, result.check());
+            assertEquals(List.of("boolean"), result.types());
+            Span cause = result.undefined();                    // undefined without a customer
+            assertEquals("customer", vip.substring(cause.start(), cause.end()));
+
+            assertEquals(List.of(), lines.diagnostics("price * quantity"));
+            assertEquals(ResultType.Check.ALWAYS, lines.resultType("price * quantity").check());
+        }
+        // ANCHOR_END: result_type
+    }
+
+    @Test
     void documents() {
         String orderSchema = """
                 {"$id": "https://example.com/schemas/order.json",

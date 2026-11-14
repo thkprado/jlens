@@ -303,6 +303,58 @@ export interface SchemaSources {
   documents?: Record<string, JsonSchema> | null;
 }
 
+/** What the expressions of a `LanguageService` are, besides what their schemas say. */
+export interface ServiceOptions {
+  /**
+   * The types their result is expected to have, as the conditions of a rules engine must give a
+   * boolean: one type, or several. `diagnostics()` then warns about a result that never has one of
+   * them (`W0212`), may have another type (`W0213`) or may be undefined (`W0214`). `number`
+   * accepts an integer too.
+   */
+  result?: JsonType | JsonType[] | null;
+  /**
+   * The path whose items they are evaluated against, as the body of a step over it, written as
+   * `uses()` writes paths (`items[]`, `orders[].items[]`): the item is their context and `%` its
+   * parent. A path the schema does not have gives an unknown context, where no field is warned
+   * about. Without one, the context is the document.
+   */
+  context?: string | null;
+}
+
+/**
+ * What the typing knows of the result of an expression, given by `resultType()`. Offsets are in
+ * UTF-16 code units.
+ */
+export interface ResultType {
+  /**
+   * The JSON types the result may have when it is defined; `null` when they are not known (a
+   * function the expression defines, an object constructor, no schema, a syntax error). An
+   * integer is also a number. Several values gathered in an array, as a path over several items
+   * gives them, count as an array.
+   */
+  types: JsonType[] | null;
+  /**
+   * The operand that may make the result undefined (a field that may be absent, a filter, an
+   * array that may be empty, a condition without `else`...); `null` when it is always defined, as
+   * far as the typing knows: with `types` unknown, it may be undefined too.
+   */
+  undefined: Span | null;
+  /**
+   * The operand that may make the result several values gathered in an array, and one value
+   * alone (a step over an array, a filter); `null` when it cannot.
+   */
+  sequence: Span | null;
+  /** How the result compares with the type the service expects; absent when it expects none. */
+  check?: ResultCheck;
+}
+
+/**
+ * How a result compares with the type expected of it: always one of the expected types and
+ * never undefined; never one of them, when it is defined; maybe another type, or undefined; or
+ * the typing does not know.
+ */
+export type ResultCheck = "always" | "never" | "maybe" | "unknown";
+
 /** What a load did not read of its JSON Schema, given by `schemaReport()`. */
 export interface LoadReport {
   /**
@@ -695,13 +747,16 @@ export class LanguageService {
    * or without `$`), optionally with a schema for their values. `functions` declares the host
    * functions they are evaluated with. `sources` gives the documents that the `$ref`s of the
    * schemas lead to, those of the variables included, and the URI of `schema`; a `$ref` that
-   * is not followed leaves its place unknown, and `schemaReport()` lists those.
+   * is not followed leaves its place unknown, and `schemaReport()` lists those. `options` gives
+   * the type the result of the expressions is expected to have and the path whose items they
+   * are evaluated against.
    */
   constructor(
     schema?: JsonSchema | null,
     variables?: Record<string, JsonSchema | null> | null,
     functions?: FunctionDeclaration[] | null,
     sources?: SchemaSources | null,
+    options?: ServiceOptions | null,
   );
   /** Suggestions for the word at `offset`, and the range they replace. */
   complete(text: string, offset: number): Completions;
@@ -709,6 +764,13 @@ export class LanguageService {
   diagnostics(text: string): Diagnostic[];
   /** The type and description of what is under `offset`, if anything. */
   hover(text: string, offset: number): Hover | undefined;
+  /**
+   * What the typing knows of the result of `text`: the types it may have, and whether it may be
+   * undefined or several values, with the operand that makes it so; with `check` when the
+   * service expects a result type. A text with a syntax error has unknown types: its errors are
+   * in `diagnostics()`.
+   */
+  resultType(text: string): ResultType;
   /** The parameters of the function call around `offset`, if any. */
   signatureHelp(text: string, offset: number): SignatureHelp | undefined;
   /**

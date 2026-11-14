@@ -407,6 +407,30 @@ written against a schema checks them again when a new version of the schema arri
   keeps what it needs of its schemas, which can be closed as soon as it is built; a new version
   of a schema is a new `Schema` and a new `LanguageService`.
 
+### The type of the result, and the context
+
+The builder also says what the expressions are, besides what their schemas say: the type their
+result must have, as the conditions of a rules engine must give a boolean, and the path whose
+items they are evaluated against, as the body of `items.( … )` (the
+[schema guide](schema.md#the-type-of-the-result)). They are those of `jlens.json` in an editor:
+
+```java
+{{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:result_type}}
+```
+
+- **`result(types...)`** takes one JSON type's name or several, as JSON Schema writes them;
+  `"number"` accepts an integer. The diagnostics then warn about a result that never has one
+  of them (`W0212`), may have another (`W0213`) or may be undefined (`W0214`). A name that is
+  not a JSON type throws an `IllegalArgumentException`.
+- **`context(path)`** takes the path as `Use` paths are written, `items[]` or
+  `orders[].items[]`: the item is the context of the expressions, and `%` its parent. A path
+  the schema does not have gives an unknown context, where no field is warned about.
+- **`resultType(text)`** returns a `ResultType` record: `types()`, the types the result may
+  have (`null` where they are not known, as without a schema or with a syntax error);
+  `undefined()` and `sequence()`, the spans, in UTF-16 offsets, of the operands that may make
+  it undefined or several values, `null` where none does; and `check()`, `ALWAYS`, `NEVER`,
+  `MAYBE` or `UNKNOWN` against the types of `result`, `null` when the service expects none.
+
 ### A schema in several documents
 
 A `$ref` may lead to another document. The package never fetches one: a `Schema.Loader` takes

@@ -64,6 +64,12 @@ All notable changes are recorded here. The format follows
   "items[]"` for the files of a pattern; `jlens check --result` and `--context` replace them.
   `jlens schema result` prints the result's type as JSON, with `check` where a type is
   expected; `LanguageService::expected_result` gives the declared types.
+- The expected result type and the context in the WebAssembly and Java packages: the fifth
+  argument of `LanguageService` in WebAssembly, `{result, context}`, and `result(...)` and
+  `context(...)` on the Java builder (`result` and `context` in the C API's declarations).
+  `resultType(text)` gives the result's type as `jlens schema result` prints it, with spans in
+  UTF-16 offsets: an object in WebAssembly, a `ResultType` record in Java (the C API's
+  `jlens_service_result_type`). `JsonType::one_or_more` reads `result` as every end takes it.
 
 ### Changed
 

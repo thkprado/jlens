@@ -46,6 +46,29 @@ impl JsonType {
         }
     }
 
+    /// Reads the types a result is expected to have, as `jlens.json`'s `result` and the
+    /// bindings declare them: one type's name (`"boolean"`), or a non-empty array of them. The
+    /// error says what the value should have been, to follow the name of what held it.
+    ///
+    /// ```
+    /// use jlens_schema::JsonType;
+    /// use serde_json::json;
+    ///
+    /// assert_eq!(JsonType::one_or_more(&json!("boolean")), Ok(vec![JsonType::Boolean]));
+    /// assert!(JsonType::one_or_more(&json!([])).is_err());
+    /// ```
+    pub fn one_or_more(value: &JsonValue) -> Result<Vec<JsonType>, String> {
+        let name = |value: &JsonValue| value.as_str().and_then(JsonType::from_name);
+        let types = match value {
+            JsonValue::Array(items) => items.iter().map(name).collect(),
+            value => name(value).map(|t| vec![t]),
+        };
+        match types {
+            Some(types) if !types.is_empty() => Ok(types),
+            _ => Err("must be a JSON type's name or a non-empty array of them".to_owned()),
+        }
+    }
+
     pub(crate) fn from_name(name: &str) -> Option<Self> {
         Some(match name {
             "null" => JsonType::Null,

@@ -64,9 +64,11 @@ The system property `jlens.library` points the package at a library outside the 
 - **Schemas and language services** (0.33 #4, ADR 0023) are native objects that never change
   and serve every thread. Diagnostics are records decoded from the C API's JSON reply by `Json`;
   their spans are UTF-16, converted by the C API. A service's declarations are written as JSON
-  text, a variable's schema as its handle with `Long.toUnsignedString`. Completion, hover and
-  signature help do not cross. A schema's other documents go each in a buffer of its own,
-  named by handle in the sources (0.33 #10, ADR 0025); the report of a load is read when the
+  text, a variable's schema as its handle with `Long.toUnsignedString`; the expected result
+  type and the context are declared there too, and `ResultType` is decoded from the C API's
+  JSON reply (0.34 #13). Completion, hover and signature help do not cross. A schema's other
+  documents go each in a buffer of its own, named by handle in the sources (0.33 #10, ADR
+  0025); the report of a load is read when the
   `Schema` is made, so that it needs no native call later. What an expression uses of its
   schema and what changed between two schemas (0.33 #7) are records with no native memory,
   read from and written to the JSON form of the other packages; `fixtures/uses/cases.json`,

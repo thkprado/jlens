@@ -940,6 +940,42 @@ export const cases = [
     throws(() => j.schemaReport(undefined), (e) => ok(e instanceof TypeError, "no schema"));
   }],
 
+  ["the result type and the context: the workspace every package checks alike", async (j, env) => {
+    const load = async (path) => env.load(`../../../fixtures/workspace/${path}`);
+    const schema = JSON.parse(await load("order.schema.json"));
+    const codes = (service, text) => service.diagnostics(text).map((d) => d.code);
+    // As `jlens.json` declares them for `conditions/` and `lines/`.
+    const conditions = new j.LanguageService(schema, null, null, null, { result: "boolean" });
+    const lines = new j.LanguageService(schema, null, null, null, { result: ["number"], context: "items[]" });
+    equal(codes(conditions, await load("conditions/large.jsonata")), []);
+    const vip = await load("conditions/vip.jsonata");
+    equal(codes(conditions, vip), ["W0214"]);
+    equal(codes(lines, await load("lines/subtotal.jsonata")), []);
+    equal(codes(lines, await load("lines/label.jsonata")), ["W0212"]);
+    equal(conditions.resultType(vip), {
+      types: ["boolean"],
+      undefined: { start: 10, end: 18 },
+      sequence: null,
+      check: "maybe",
+    }, "the result of vip.jsonata");
+    equal(lines.resultType("unitPrice * quantity").check, "always");
+    // The spans are in UTF-16 code units.
+    const strings = new j.LanguageService(schema, null, null, null, { result: "string" });
+    const text = "/* é😀 */ customer.name";
+    const { undefined: cause } = strings.resultType(text);
+    equal(text.slice(cause.start, cause.end), "customer", "a UTF-16 span");
+    equal(strings.resultType("items.code").sequence, { start: 0, end: 5 }, "a step over an array");
+    // No schema, no expected type, a syntax error: nothing is known, and nothing is checked.
+    const unknown = { types: null, undefined: null, sequence: null };
+    equal(new j.LanguageService().resultType("a.b"), unknown);
+    equal(new j.LanguageService(schema).resultType("a +"), unknown);
+    equal(new j.LanguageService(schema, null, null, null, {}).resultType("customer").check, undefined);
+    equal(new j.LanguageService(schema, null, null, null, null).resultType("1").types, ["number"]);
+    for (const bad of [[], 1, { results: "boolean" }, { result: "text" }, { result: [] }, { result: ["boolean", 1] }, { context: 1 }]) {
+      throws(() => new j.LanguageService(schema, null, null, null, bad), (e) => ok(e instanceof TypeError, `options ${JSON.stringify(bad)}`));
+    }
+  }],
+
   ["uses and usesChanges", (j) => {
     const schema = (active) => ({
       type: "object",

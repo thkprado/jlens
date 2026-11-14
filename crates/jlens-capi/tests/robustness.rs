@@ -739,6 +739,9 @@ fn schema_bytes() -> impl Strategy<Value = Vec<u8>> {
             "{\"variables\": {\"x\": 18446744073709551615}, \"functions\": null}",
             "{\"functions\": [{\"name\": \"$f\", \"signature\": \"<n-:n\", \"params\": [\"a\"]}, {\"name\": \"\"}]}",
             "{\"functions\": [[\"f\"]], \"variables\": {}}",
+            "{\"result\": \"boolean\", \"context\": \"items[]\"}",
+            "{\"result\": [\"number\", \"string\"], \"context\": \"a[].[\"}",
+            "{\"result\": [], \"context\": 1}",
             "a.nope = \"y\" and $f(1, items.price) ~> $g()",
             "items[price > $x.a].`a` & \"é😀\" & $y",
             "$f(",
@@ -753,7 +756,7 @@ fn schema_bytes() -> impl Strategy<Value = Vec<u8>> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(1000))]
 
-    /// Schemas, services, diagnostics, uses and changes of any bytes, with handles of any kind in each place,
+    /// Schemas, services, diagnostics, result types, uses and changes of any bytes, with handles of any kind in each place,
     /// are made or fail with an error, never a panic, and every handle made is freed once.
     #[test]
     fn schemas_and_services_of_any_bytes_fail_cleanly(
@@ -812,13 +815,14 @@ proptest! {
         }
         for &service in &services {
             for &text in &buffers {
-                // Diagnostics, or the error of a text that is not UTF-8.
+                // Diagnostics and the result's type, or the error of a text that is not UTF-8.
                 let replied = reply(jlens_service_diagnostics(service, text))?;
                 prop_assert!(
                     replied == Replied::Value || replied == Replied::Error("U2003".to_owned()),
                     "{:?}",
                     replied
                 );
+                prop_assert_eq!(reply(jlens_service_result_type(service, text))?, replied);
             }
             // What an expression uses, when a text compiles, and its changes against any text.
             for &text in &buffers {
@@ -833,10 +837,12 @@ proptest! {
             reply(jlens_uses_changes(service, service))?;
             reply(jlens_service_diagnostics(service, service))?;
             reply(jlens_service_diagnostics(buffer(4), buffer(5)))?;
+            reply(jlens_service_result_type(service, service))?;
             reply(jlens_schema_new(service, 0))?;
             prop_assert_eq!(jlens_service_free(service), 1);
             prop_assert_eq!(jlens_service_free(service), 0);
             prop_assert_eq!(reply(jlens_service_diagnostics(service, buffer(6)))?, unknown());
+            prop_assert_eq!(reply(jlens_service_result_type(service, buffer(6)))?, unknown());
         }
         for buffer in buffers {
             prop_assert_eq!(jlens_buffer_free(buffer), 1);

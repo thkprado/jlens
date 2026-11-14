@@ -436,7 +436,8 @@ it fails with `S0217`; `%.%` is the one before, for a path of two steps such as
 `items` and `items[]` are the same context, as a step reads the items of an array. A path the
 schema does not have gives an unknown context, where no field is warned about. In an editor and
 in `jlens check`, the [`context`](editors.md#configuration-jlensjson) of `jlens.json` declares
-it, or `jlens check --context 'items[]'`.
+it, or `jlens check --context 'items[]'`; in the [WebAssembly](wasm.md#the-type-of-the-result-and-the-context)
+and [Java](java.md#the-type-of-the-result-and-the-context) packages, the service's options.
 
 Missing fields are reported only where the context is fully known. Nothing is reported after a
 user-defined function, an object constructor or `$lookup`, so the warnings do not produce false
@@ -506,8 +507,10 @@ it with a list of types, and answers `Always`, `Never`, `Maybe` or `Unknown`.
 
 In an editor and in `jlens check`, the [`result`](editors.md#configuration-jlensjson) of
 `jlens.json` declares the type for the files of a pattern, as `"result": "boolean"`, or
-`jlens check --result boolean`. `jlens schema result` prints the result's type as JSON, with
-`check` where a type is expected:
+`jlens check --result boolean`; the [WebAssembly](wasm.md#the-type-of-the-result-and-the-context)
+and [Java](java.md#the-type-of-the-result-and-the-context) packages take it when a service is
+made, and their `resultType` gives the result's type in this JSON form, with UTF-16 spans.
+`jlens schema result` prints the result's type as JSON, with `check` where a type is expected:
 
 ```text
 $ jlens schema result --schema order.schema.json --result boolean '$contains(customer.name, "VIP")'

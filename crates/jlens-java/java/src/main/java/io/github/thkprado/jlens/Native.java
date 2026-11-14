@@ -88,6 +88,8 @@ final class Native {
     private static final MethodHandle SERVICE_FREE = function("jlens_service_free", U32, U64);
     private static final MethodHandle SERVICE_DIAGNOSTICS =
             function("jlens_service_diagnostics", U64, U64, U64);
+    private static final MethodHandle SERVICE_RESULT_TYPE =
+            function("jlens_service_result_type", U64, U64, U64);
     private static final MethodHandle SERVICE_USES =
             function("jlens_service_uses", U64, U64, U64);
     private static final MethodHandle USES_CHANGES =
@@ -397,6 +399,15 @@ final class Native {
     static long serviceDiagnostics(long service, long text) {
         try {
             return (long) SERVICE_DIAGNOSTICS.invokeExact(service, text);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /** What the typing knows of the result of the expression in buffer {@code text}: JSON. */
+    static long serviceResultType(long service, long text) {
+        try {
+            return (long) SERVICE_RESULT_TYPE.invokeExact(service, text);
         } catch (Throwable e) {
             throw failed(e);
         }

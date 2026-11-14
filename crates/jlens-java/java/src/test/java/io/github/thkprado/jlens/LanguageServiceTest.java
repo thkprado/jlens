@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -69,6 +71,50 @@ class LanguageServiceTest {
             assertEquals(new Span(14, 17), span);
             assertEquals("nme", text.substring(span.start(), span.end()));
         }
+    }
+
+    /** A file of the workspace every package checks alike, at the repository's root. */
+    private static String workspace(String path) throws Exception {
+        return Files.readString(Path.of("..", "..", "..", "fixtures", "workspace", path));
+    }
+
+    @Test
+    void theResultTypeAndTheContextAreThoseOfTheSharedWorkspace() throws Exception {
+        // As `jlens.json` declares them for `conditions/` and `lines/`.
+        try (Schema schema = Schema.fromJson(workspace("order.schema.json"));
+                LanguageService conditions =
+                        LanguageService.builder().schema(schema).result("boolean").build();
+                LanguageService lines = LanguageService.builder()
+                        .schema(schema).result("number").context("items[]").build();
+                LanguageService strings =
+                        LanguageService.builder().schema(schema).result("string").build();
+                LanguageService plain = LanguageService.of(schema)) {
+            assertEquals(List.of(), conditions.diagnostics(workspace("conditions/large.jsonata")));
+            String vip = workspace("conditions/vip.jsonata");
+            assertEquals(List.of("W0214"), codes(conditions.diagnostics(vip)));
+            assertEquals(List.of(), lines.diagnostics(workspace("lines/subtotal.jsonata")));
+            assertEquals(List.of("W0212"), codes(lines.diagnostics(workspace("lines/label.jsonata"))));
+            assertEquals(new ResultType(List.of("boolean"), new Span(10, 18), null,
+                    ResultType.Check.MAYBE), conditions.resultType(vip));
+            assertEquals(ResultType.Check.ALWAYS, lines.resultType("unitPrice * quantity").check());
+            // The spans count UTF-16 code units, as Java strings do.
+            String text = "/* é😀 */ customer.name";
+            Span cause = strings.resultType(text).undefined();
+            assertEquals("customer", text.substring(cause.start(), cause.end()));
+            assertEquals(new Span(0, 5), strings.resultType("items.code").sequence());
+            // With no type expected, nothing is checked; with a syntax error, nothing is known.
+            assertEquals(new ResultType(List.of("object"), new Span(0, 8), null, null),
+                    plain.resultType("customer"));
+            assertEquals(new ResultType(null, null, null, ResultType.Check.UNKNOWN),
+                    conditions.resultType("a +"));
+            assertEquals(List.of("number", "string"), LanguageService.builder()
+                    .result("number", "string").build().resultType("[1, 'a'][0]").types());
+        }
+        assertThrows(IllegalArgumentException.class, () -> LanguageService.builder().result());
+        assertThrows(IllegalArgumentException.class,
+                () -> LanguageService.builder().result("boolean", "text"));
+        assertThrows(NullPointerException.class,
+                () -> LanguageService.builder().result((String) null));
     }
 
     @Test
@@ -218,6 +264,7 @@ class LanguageServiceTest {
         service.close();
         service.close();
         assertThrows(IllegalStateException.class, () -> service.diagnostics("1"));
+        assertThrows(IllegalStateException.class, () -> service.resultType("1"));
     }
 
     @Test

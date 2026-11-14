@@ -36,24 +36,8 @@ pub struct Settings {
 
 /// Reads one JSON type's name, or a non-empty array of them.
 fn one_or_more<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<JsonType>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum OneOrMore {
-        One(JsonType),
-        More(Vec<JsonType>),
-    }
-    let types = match OneOrMore::deserialize(deserializer).map_err(|_| {
-        serde::de::Error::custom("result must be a JSON type's name or an array of them")
-    })? {
-        OneOrMore::One(one) => vec![one],
-        OneOrMore::More(more) => more,
-    };
-    if types.is_empty() {
-        return Err(serde::de::Error::custom(
-            "result must name at least one type",
-        ));
-    }
-    Ok(types)
+    let value = Value::deserialize(deserializer)?;
+    JsonType::one_or_more(&value).map_err(|e| serde::de::Error::custom(format!("result {e}")))
 }
 
 /// One pattern of a configuration, with its settings.

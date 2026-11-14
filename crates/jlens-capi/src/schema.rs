@@ -1,7 +1,9 @@
 //! Schemas and language services (ADR 0023): a schema read from JSON Schema text, a service
 //! made of a schema and the declarations of the variables and host functions its expressions
-//! are evaluated with, the diagnostics of an expression's text, what a compiled expression uses
-//! of the service's schemas, and what changed between two such answers.
+//! are evaluated with, of the type their result is expected to have and of their context, the
+//! diagnostics of an expression's text and what the typing knows of its result, what a
+//! compiled expression uses of the service's schemas, and what changed between two such
+//! answers.
 //!
 //! Both are known by handle and never change once made. One serves every thread: a call holds
 //! its table's lock only to find the object, and types the expression with no lock held. A
@@ -9,7 +11,9 @@
 //! costs about a sixth of the schema's load (roadmap 0.33 #3).
 
 use jlens_core::{Error, Offsets};
-use jlens_schema::{FunctionDecl, LanguageService, LoadReport, Schema, SchemaLoader, Uses};
+use jlens_schema::{
+    FunctionDecl, JsonType, LanguageService, LoadReport, Schema, SchemaLoader, Uses,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -30,6 +34,9 @@ static SCHEMAS: Table<Loaded> = Table::new();
 
 /// The live services. `LanguageService` is `Send` and `Sync`: one serves every thread.
 static SERVICES: Table<LanguageService> = Table::new();
+
+/// A live service, kept while a call uses it.
+type ServiceRef = std::sync::Arc<LanguageService>;
 
 /// Where the `$ref`s of a schema lead, as JSON text gives it. A member that is absent or
 /// `null` gives nothing; an unknown one is an error.
@@ -143,6 +150,13 @@ struct Declarations {
     variables: Option<Map<String, Value>>,
     #[serde(default)]
     functions: Option<Vec<FunctionDecl>>,
+    /// The types the result is expected to have: one type's name or an array of them, read by
+    /// `JsonType::one_or_more`.
+    #[serde(default)]
+    result: Option<Value>,
+    /// The path whose items the expressions are evaluated against.
+    #[serde(default)]
+    context: Option<String>,
 }
 
 /// Makes a language service for expressions over the documents that schema `schema` describes
@@ -151,8 +165,12 @@ struct Declarations {
 ///
 /// The declarations are an object with `variables`, an object from each variable's name to the
 /// handle of the schema of its value, a number, or `null` for a variable declared with no
-/// schema; and `functions`, an array of the host functions, each an object with `name` and,
-/// optionally, `signature`, `params` and `summary`. Names are taken with or without `$`. Text
+/// schema; `functions`, an array of the host functions, each an object with `name` and,
+/// optionally, `signature`, `params` and `summary`; `result`, the types the result of the
+/// expressions is expected to have, one type's name or an array of them
+/// (`LanguageService::with_result_type`); and `context`, the path whose items they are
+/// evaluated against (`items[]`, `LanguageService::with_context`). Names are taken with or
+/// without `$`. Text
 /// that is not JSON fails with `U2001`, declarations not in this form with `U2005` and the
 /// token `service`, and a variable's handle that names no live schema with `U2002`.
 pub fn service_new(schema: u64, declarations: u64) -> u64 {
@@ -213,6 +231,17 @@ fn service_text(schema: u64, declarations: u64) -> Result<Vec<u8>, Vec<u8>> {
         function.name = function.name.trim_start_matches('$').to_owned();
         service = service.with_function(function);
     }
+    match declarations.result {
+        None | Some(Value::Null) => {}
+        Some(result) => {
+            let types = JsonType::one_or_more(&result)
+                .map_err(|e| invalid("service", format!("result {e}")))?;
+            service = service.with_result_type(types);
+        }
+    }
+    if let Some(context) = &declarations.context {
+        service = service.with_context(context);
+    }
     handle_reply(SERVICES.insert(service))
 }
 
@@ -232,30 +261,69 @@ pub fn service_diagnostics(service: u64, text: u64) -> u64 {
 }
 
 fn diagnostics_text(service: u64, text: u64) -> Result<Vec<u8>, Vec<u8>> {
-    let service = SERVICES
-        .get(service)
-        .ok_or_else(|| unknown("service", service))?;
-    // The text is copied, so that its buffer is not locked while the expression is typed.
-    let text = buffers::with(text, |bytes| std::str::from_utf8(bytes).map(str::to_owned))
-        .ok_or_else(|| unknown("buffer", text))?
-        .map_err(|e| failure(&Error::new("U2003").with("message", e.to_string()), ""))?;
+    let (service, text) = service_and_text(service, text)?;
     let mut diagnostics = serde_json::to_value(service.diagnostics(&text)).unwrap_or_default();
     let offsets = Offsets::new(&text);
-    if !offsets.is_ascii()
-        && let Value::Array(diagnostics) = &mut diagnostics
-    {
+    if let Value::Array(diagnostics) = &mut diagnostics {
         for diagnostic in diagnostics {
-            let Some(Value::Object(span)) = diagnostic.get_mut("span") else {
-                continue;
-            };
-            for bound in ["start", "end"] {
-                if let Some(byte) = span.get(bound).and_then(Value::as_u64) {
-                    span.insert(bound.into(), offsets.to_utf16(byte as usize).into());
-                }
-            }
+            to_utf16(&offsets, diagnostic.get_mut("span"));
         }
     }
     Ok(json_reply(&diagnostics))
+}
+
+/// The service of handle `service` and a copy of the UTF-8 text in buffer `text`, so that the
+/// buffer is not locked while the expression is typed.
+fn service_and_text(service: u64, text: u64) -> Result<(ServiceRef, String), Vec<u8>> {
+    let service = SERVICES
+        .get(service)
+        .ok_or_else(|| unknown("service", service))?;
+    let text = buffers::with(text, |bytes| std::str::from_utf8(bytes).map(str::to_owned))
+        .ok_or_else(|| unknown("buffer", text))?
+        .map_err(|e| failure(&Error::new("U2003").with("message", e.to_string()), ""))?;
+    Ok((service, text))
+}
+
+/// Rewrites a span of the JSON form, `{start, end}`, from byte offsets to UTF-16 offsets.
+fn to_utf16(offsets: &Offsets, span: Option<&mut Value>) {
+    if offsets.is_ascii() {
+        return;
+    }
+    let Some(Value::Object(span)) = span else {
+        return;
+    };
+    for bound in ["start", "end"] {
+        if let Some(byte) = span.get(bound).and_then(Value::as_u64) {
+            span.insert(bound.into(), offsets.to_utf16(byte as usize).into());
+        }
+    }
+}
+
+/// Replies with what the typing knows of the result of the UTF-8 expression in buffer `text`,
+/// which stays the caller's, as service `service` gives it (`LanguageService::result_type`):
+/// the JSON object `{"types": [...] or null, "undefined": span or null, "sequence": span or
+/// null}`, the spans' `start` and `end` in UTF-16 code units, with `"check"` (`always`,
+/// `never`, `maybe` or `unknown`) when the service was declared a result type. A text with a
+/// syntax error is not a failure: its types are unknown, and its errors are diagnostics. Text
+/// that is not UTF-8 fails with `U2003`.
+pub fn service_result_type(service: u64, text: u64) -> u64 {
+    reply(result_type_text(service, text))
+}
+
+fn result_type_text(service: u64, text: u64) -> Result<Vec<u8>, Vec<u8>> {
+    let (service, text) = service_and_text(service, text)?;
+    let result = service.result_type(&text);
+    let mut json = serde_json::to_value(&result).unwrap_or_default();
+    let offsets = Offsets::new(&text);
+    if let Value::Object(object) = &mut json {
+        to_utf16(&offsets, object.get_mut("undefined"));
+        to_utf16(&offsets, object.get_mut("sequence"));
+        if let Some(expected) = service.expected_result() {
+            let check = serde_json::to_value(result.check(expected)).unwrap_or_default();
+            object.insert("check".into(), check);
+        }
+    }
+    Ok(json_reply(&json))
 }
 
 /// Replies with what expression `expression` uses of the schemas of service `service`

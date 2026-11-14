@@ -2,12 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use jlens_schema::{FunctionDecl, LoadReport, Override, Schema, SchemaLoader};
+use jlens_schema::{FunctionDecl, JsonType, LoadReport, Override, Schema, SchemaLoader};
 use serde::Deserialize;
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
-use crate::convert::{convert_spans, from_js, ser_to_js, to_js, type_error};
+use crate::convert::{convert_bounds, convert_spans, from_js, ser_to_js, to_js, type_error};
 use jlens_core::Offsets;
 
 /// Infers a JSON Schema (2020-12, with `x-jlens-*` annotations) from sample documents.
@@ -132,6 +132,39 @@ impl Sources {
     }
 }
 
+/// What the expressions of a service are: the types their result is expected to have, and the
+/// path whose items they are evaluated against.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ServiceOptions {
+    #[serde(default)]
+    result: Option<Value>,
+    #[serde(default)]
+    context: Option<String>,
+}
+
+impl ServiceOptions {
+    fn read(options: Option<&JsValue>) -> Result<(Option<Vec<JsonType>>, Option<String>), JsValue> {
+        let Some(options) = options else {
+            return Ok((None, None));
+        };
+        let options: ServiceOptions = match from_js(options, "options")? {
+            None | Some(Value::Null) => return Ok((None, None)),
+            // A derived `Deserialize` would take an array for its fields in order.
+            Some(options @ Value::Object(_)) => serde_json::from_value(options)
+                .map_err(|e| type_error(&format!("invalid options: {e}")))?,
+            Some(_) => return Err(type_error("options must be an object")),
+        };
+        let result = match options.result {
+            None | Some(Value::Null) => None,
+            Some(result) => Some(
+                JsonType::one_or_more(&result).map_err(|e| type_error(&format!("result {e}")))?,
+            ),
+        };
+        Ok((result, options.context))
+    }
+}
+
 /// What a load of `schema` does not read (the `$ref`s it does not follow), with the documents
 /// that `sources` gives: `{}` when it reads everything. A `LanguageService` made of the same
 /// schema and sources leaves the places of those `$ref`s unknown. Throws a `TypeError` for a
@@ -158,16 +191,20 @@ impl LanguageService {
     /// variables are still completed); `variables` declares the bindings the expressions are
     /// evaluated with, optionally with a schema for their values; `functions` declares the host
     /// functions they are evaluated with; `sources` gives the URI of `schema` and the other
-    /// documents that the `$ref`s of the schemas lead to.
+    /// documents that the `$ref`s of the schemas lead to; `options` gives the types the result
+    /// of the expressions is expected to have (`result`) and the path whose items they are
+    /// evaluated against (`context`).
     #[wasm_bindgen(constructor, skip_typescript)]
     pub fn new(
         schema: Option<JsValue>,
         variables: Option<JsValue>,
         functions: Option<JsValue>,
         sources: Option<JsValue>,
+        options: Option<JsValue>,
     ) -> Result<LanguageService, JsValue> {
         crate::convert::install_hooks();
         let sources = Sources::read(sources.as_ref())?;
+        let (result, context) = ServiceOptions::read(options.as_ref())?;
         let schema = match &schema {
             Some(schema) if !schema.is_null() => match from_js(schema, "schema")? {
                 Some(doc) => Some(sources.load(&doc, true, "schema")?.0),
@@ -209,6 +246,12 @@ impl LanguageService {
                 Some(_) => return Err(type_error("functions must be an array")),
             }
         }
+        if let Some(result) = result {
+            inner = inner.with_result_type(result);
+        }
+        if let Some(context) = &context {
+            inner = inner.with_context(context);
+        }
         Ok(LanguageService { inner })
     }
 
@@ -243,6 +286,28 @@ impl LanguageService {
             }
             None => JsValue::UNDEFINED,
         }
+    }
+
+    /// What the typing knows of the result of `text`: `{types, undefined, sequence}`, with
+    /// `check` when the service expects a result type. `undefined` and `sequence` are the
+    /// spans of the operands that make the result so.
+    #[wasm_bindgen(js_name = resultType, skip_typescript)]
+    pub fn result_type(&self, text: &str) -> JsValue {
+        let offsets = Offsets::new(text);
+        let result = self.inner.result_type(text);
+        let mut out = serde_json::to_value(&result).expect("serializable");
+        if let Value::Object(object) = &mut out {
+            for key in ["undefined", "sequence"] {
+                if let Some(Value::Object(span)) = object.get_mut(key) {
+                    convert_bounds(&offsets, span);
+                }
+            }
+            if let Some(expected) = self.inner.expected_result() {
+                let check = serde_json::to_value(result.check(expected)).expect("serializable");
+                object.insert("check".into(), check);
+            }
+        }
+        to_js(&out)
     }
 
     /// The parameters of the function call around `offset`, if any.

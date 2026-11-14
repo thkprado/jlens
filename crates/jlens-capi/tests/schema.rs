@@ -273,6 +273,11 @@ fn failures_use_the_codes_of_the_c_api() {
         b"{\"functions\": {}}",
         b"{\"functions\": [{\"name\": \"f\", \"arity\": 1}]}",
         b"{\"functions\": [{\"name\": 1}]}",
+        b"{\"result\": \"text\"}",
+        b"{\"result\": []}",
+        b"{\"result\": [\"boolean\", 1]}",
+        b"{\"results\": \"boolean\"}",
+        b"{\"context\": 1}",
     ] {
         assert_eq!(
             error(new(declarations)),
@@ -287,7 +292,7 @@ fn failures_use_the_codes_of_the_c_api() {
         ("U2002".to_owned(), Some("schema".to_owned()))
     );
     // Members that are null declare nothing.
-    let nothing = json!({"variables": null, "functions": null});
+    let nothing = json!({"variables": null, "functions": null, "result": null, "context": null});
     let service = handle(service(schema, Some(&nothing)));
 
     // Diagnostics.
@@ -298,6 +303,22 @@ fn failures_use_the_codes_of_the_c_api() {
     assert_eq!(
         code(with_buffer(&[b'a', 0xff], |buffer| {
             jlens_service_diagnostics(service, buffer)
+        })),
+        "U2003"
+    );
+
+    // The result's type.
+    assert_eq!(
+        error(reply(jlens_service_result_type(service, 0))),
+        ("U2002".to_owned(), Some("buffer".to_owned()))
+    );
+    assert_eq!(
+        error(reply(jlens_service_result_type(service ^ (1 << 40), 0))),
+        ("U2002".to_owned(), Some("service".to_owned()))
+    );
+    assert_eq!(
+        code(with_buffer(&[b'a', 0xff], |buffer| {
+            jlens_service_result_type(service, buffer)
         })),
         "U2003"
     );
@@ -593,4 +614,72 @@ fn sources_fail_with_the_codes_of_the_c_api() {
     assert_eq!(jlens_schema_free(any), 1);
     assert_eq!(jlens_buffer_free(not_json), 1);
     assert_eq!(jlens_buffer_free(text), 1);
+}
+
+/// What the typing knows of the result of `text`.
+fn result_type(service: u64, text: &str) -> Value {
+    json(with_buffer(text.as_bytes(), |buffer| {
+        jlens_service_result_type(service, buffer)
+    }))
+}
+
+#[test]
+fn the_result_type_and_the_context_are_those_of_the_shared_workspace() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/workspace/");
+    let read = |path: &str| std::fs::read_to_string(format!("{dir}{path}")).unwrap();
+    let schema = schema(&serde_json::from_str(&read("order.schema.json")).unwrap());
+    // As `jlens.json` declares them for `conditions/` and `lines/`.
+    let conditions = handle(service(schema, Some(&json!({"result": "boolean"}))));
+    let lines = handle(service(
+        schema,
+        Some(&json!({"result": ["number"], "context": "items[]"})),
+    ));
+    let codes_of = |service, path: &str| {
+        let found = diagnostics(service, &read(path));
+        codes(&found)
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    assert!(codes_of(conditions, "conditions/large.jsonata").is_empty());
+    assert_eq!(codes_of(conditions, "conditions/vip.jsonata"), ["W0214"]);
+    assert!(codes_of(lines, "lines/subtotal.jsonata").is_empty());
+    assert_eq!(codes_of(lines, "lines/label.jsonata"), ["W0212"]);
+    assert_eq!(
+        result_type(conditions, &read("conditions/vip.jsonata")),
+        json!({
+            "types": ["boolean"],
+            "undefined": {"start": 10, "end": 18},
+            "sequence": null,
+            "check": "maybe"
+        })
+    );
+    assert_eq!(
+        result_type(lines, "unitPrice * quantity")["check"],
+        "always"
+    );
+    // The spans count UTF-16 code units: "é" is one, "😀" two.
+    let strings = handle(service(schema, Some(&json!({"result": "string"}))));
+    assert_eq!(
+        result_type(strings, "/* é😀 */ customer.name")["undefined"],
+        json!({"start": 10, "end": 18})
+    );
+    assert_eq!(
+        result_type(strings, "/* é */ items.code")["sequence"],
+        json!({"start": 8, "end": 13})
+    );
+    // With no type expected, nothing is checked; with a syntax error, nothing is known.
+    let plain = handle(service(schema, None));
+    assert_eq!(
+        result_type(plain, "customer"),
+        json!({"types": ["object"], "undefined": {"start": 0, "end": 8}, "sequence": null})
+    );
+    assert_eq!(
+        result_type(conditions, "a +"),
+        json!({"types": null, "undefined": null, "sequence": null, "check": "unknown"})
+    );
+    for service in [conditions, lines, strings, plain] {
+        assert_eq!(jlens_service_free(service), 1);
+    }
+    assert_eq!(jlens_schema_free(schema), 1);
 }
