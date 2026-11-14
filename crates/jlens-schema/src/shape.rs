@@ -1,6 +1,8 @@
 //! The structural metadata model and its inference from sample documents.
 
-use std::collections::{BTreeMap, HashSet};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use indexmap::IndexMap;
@@ -206,7 +208,24 @@ const PATTERN_BUDGET: u32 = 4;
 /// Whether `pattern` matches `name`; `None` when that cannot be told: the pattern is not a
 /// regular expression, or it runs out of steps.
 fn pattern_matches(pattern: &str, name: &str) -> Option<bool> {
-    let re = regress::Regex::with_flags(pattern, "u").ok()?;
+    /// Patterns compiled on this thread, `None` for one that is not a regular expression:
+    /// compiling took most of a field's look-up, made at each keystroke. Emptied when full.
+    type Compiled = HashMap<String, Option<Rc<regress::Regex>>>;
+    const CAPACITY: usize = 256;
+    thread_local! {
+        static COMPILED: RefCell<Compiled> = RefCell::default();
+    }
+    let re = COMPILED.with_borrow_mut(|compiled| {
+        if let Some(re) = compiled.get(pattern) {
+            return re.clone();
+        }
+        if compiled.len() >= CAPACITY {
+            compiled.clear();
+        }
+        let re = regress::Regex::with_flags(pattern, "u").ok().map(Rc::new);
+        compiled.insert(pattern.to_owned(), re.clone());
+        re
+    })?;
     let mut budget = PATTERN_BUDGET;
     let found = re.find_from_interruptible(name, 0, || {
         budget = budget.saturating_sub(1);

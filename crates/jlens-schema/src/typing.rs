@@ -14,6 +14,14 @@ use jlens_core::ast::{BinaryOp, FallbackOp, LambdaDef, Node, NodeKind, Span, Sta
 
 use crate::shape::{Definitions, Field, JsonType, NO_DEFINITIONS, Sh, Shape, members, members_of};
 
+/// The catalog of built-in functions, built once: [`jlens_core::function_catalog`] copies every
+/// signature at each call, which the diagnostics paid at each keystroke.
+pub(crate) fn built_ins() -> &'static [jlens_core::FunctionInfo] {
+    static CATALOG: LazyLock<Vec<jlens_core::FunctionInfo>> =
+        LazyLock::new(jlens_core::function_catalog);
+    &CATALOG
+}
+
 /// The type of a value: the shapes it may have.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Ty<'s> {
@@ -1002,7 +1010,7 @@ impl<'s> Walker<'s, '_> {
         }
         let types: Vec<Ty<'s>> = typed.into_iter().map(|(_, t)| t).collect();
         let builtin = name.is_some_and(|n| {
-            jlens_core::function_catalog().iter().any(|f| f.name == n)
+            built_ins().iter().any(|f| f.name == n)
                 && !scope.iter().any(|(v, _)| v == n)
                 && !self.externals.iter().any(|(v, _)| v == n)
         });
@@ -1079,9 +1087,7 @@ impl<'s> Walker<'s, '_> {
 /// The symbol of the result type in the signature of the built-in function `name`, `<s-:n>` for
 /// `$length`, when it is one letter.
 fn result_symbol(name: &str) -> Option<char> {
-    let f = jlens_core::function_catalog()
-        .into_iter()
-        .find(|f| f.name == name)?;
+    let f = built_ins().iter().find(|f| f.name == name)?;
     let result = f.signature.strip_suffix('>')?.rsplit_once(':')?.1;
     let mut chars = result.chars();
     let c = chars.next()?;

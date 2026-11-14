@@ -85,6 +85,11 @@ All notable changes are recorded here. The format follows
   that needs it now gets `W0214`), a branch that gives no type (`{}`) leaves the type unknown
   instead of adding nothing (`anyOf: [{"type": "string"}, {}]` no longer warns `c = 1` with
   `W0210`), and an `enum` or a `const` lists the values of every branch, not those of the first.
+- The diagnostics are faster, as they run at each keystroke: their fixed part, which copied the
+  catalog of built-in functions, is gone (6.5 µs to 0.26 µs for `1` on an Apple M1), a
+  condition such as `$count(items) > 2` takes 2.2 µs instead of 9 in 0.33.0, a field of an object
+  with `patternProperties` no longer compiles the patterns at each look-up, and the suggestion
+  for an unknown field among 2,000 takes 0.15 ms instead of 0.63.
 
 ### Fixed
 

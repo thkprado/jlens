@@ -13,7 +13,7 @@ use serde_json::Value as JsonValue;
 use std::collections::HashSet;
 
 use crate::shape::{Definitions, Field, JsonType, Schema, Sh, Shape, members_of, summary};
-use crate::typing::{Event, Form, Scope, Symbols, Ty, Walker};
+use crate::typing::{Event, Form, Scope, Symbols, Ty, Walker, built_ins};
 
 /// The identifier substituted for the word under the cursor before parsing.
 const PLACEHOLDER: &str = "__jlens_cursor__";
@@ -412,6 +412,26 @@ struct FunctionView {
     signature: String,
     params: Vec<String>,
     summary: String,
+}
+
+impl FunctionView {
+    fn declared(f: &FunctionDecl) -> Self {
+        FunctionView {
+            name: f.name.clone(),
+            signature: f.signature.clone().unwrap_or_default(),
+            params: f.params.clone(),
+            summary: f.summary.clone(),
+        }
+    }
+
+    fn built_in(b: &jlens_core::FunctionInfo) -> Self {
+        FunctionView {
+            name: b.name.to_owned(),
+            signature: b.signature.clone(),
+            params: b.params.iter().map(|p| (*p).to_owned()).collect(),
+            summary: b.summary.to_owned(),
+        }
+    }
 }
 
 /// A call found by the walk, checked once every binding is known.
@@ -1231,26 +1251,27 @@ impl LanguageService {
 
     /// The declared functions, then the built-in functions they do not replace.
     fn functions(&self) -> Vec<FunctionView> {
-        let declared = self.functions.iter().map(|f| FunctionView {
-            name: f.name.clone(),
-            signature: f.signature.clone().unwrap_or_default(),
-            params: f.params.clone(),
-            summary: f.summary.clone(),
-        });
-        let built_in = jlens_core::function_catalog()
-            .into_iter()
+        let declared = self.functions.iter().map(FunctionView::declared);
+        let built_in = built_ins()
+            .iter()
             .filter(|b| self.functions.iter().all(|f| f.name != b.name))
-            .map(|b| FunctionView {
-                name: b.name.to_owned(),
-                signature: b.signature,
-                params: b.params.iter().map(|p| (*p).to_owned()).collect(),
-                summary: b.summary.to_owned(),
-            });
+            .map(FunctionView::built_in);
         declared.chain(built_in).collect()
     }
 
     fn function(&self, name: &str) -> Option<FunctionView> {
-        self.functions().into_iter().find(|f| f.name == name)
+        match self.functions.iter().find(|f| f.name == name) {
+            Some(f) => Some(FunctionView::declared(f)),
+            None => built_ins()
+                .iter()
+                .find(|b| b.name == name)
+                .map(FunctionView::built_in),
+        }
+    }
+
+    /// Whether `name` is a declared or built-in function.
+    fn is_function(&self, name: &str) -> bool {
+        self.functions.iter().any(|f| f.name == name) || built_ins().iter().any(|b| b.name == name)
     }
 
     fn root_ty(&self) -> Ty<'_> {
@@ -1774,7 +1795,6 @@ impl LanguageService {
     /// expression, `W0203` for calls with a number of arguments their signature rejects, and
     /// `W0205` for arguments whose known types their signature rejects.
     fn call_diagnostics(&self, calls: &[CallSite], bound: &[String]) -> Vec<Diagnostic> {
-        let functions = self.functions();
         let mut out = Vec::new();
         for CallSite {
             span,
@@ -1790,7 +1810,8 @@ impl LanguageService {
             {
                 continue;
             }
-            let Some(function) = functions.iter().find(|f| f.name == *name) else {
+            let Some(function) = self.function(name) else {
+                let functions = self.functions();
                 let known: Vec<&str> = functions.iter().map(|f| f.name.as_str()).collect();
                 out.push(Diagnostic::new(
                     Severity::Warning,
@@ -1858,7 +1879,6 @@ impl LanguageService {
         if self.variables.is_empty() {
             return Vec::new();
         }
-        let functions = self.functions();
         let mut known: Vec<&str> = self.variables.iter().map(|(n, _)| n.as_str()).collect();
         known.extend(bound.iter().map(String::as_str));
         references
@@ -1867,7 +1887,7 @@ impl LanguageService {
                 !name.is_empty()
                     && name != "$"
                     && !known.contains(&name.as_str())
-                    && functions.iter().all(|f| f.name != *name)
+                    && !self.is_function(name)
                     // A call of an unknown name already has `W0202`.
                     && calls.iter().all(|c| c.span != *span)
             })
@@ -2157,25 +2177,138 @@ fn did_you_mean(name: &str, candidates: &[&str], prefix: &str) -> String {
 
 /// The candidate within edit distance 2 of `name`, if any.
 pub(crate) fn closest<'a>(name: &str, candidates: &[&'a str]) -> Option<&'a str> {
-    fn distance(a: &str, b: &str) -> usize {
-        let a: Vec<char> = a.to_lowercase().chars().collect();
-        let b: Vec<char> = b.to_lowercase().chars().collect();
-        let mut prev: Vec<usize> = (0..=b.len()).collect();
+    const MAX: usize = 2;
+    let a: Vec<char> = name.chars().flat_map(char::to_lowercase).collect();
+    // The buffers are reused across the candidates: an object may have thousands of fields,
+    // each read at every keystroke while an unknown one is typed.
+    let (mut b, mut prev, mut cur) = (Vec::new(), Vec::new(), Vec::new());
+    // The edit distance of `a` and `b` when it is at most `MAX`.
+    let mut distance = |candidate: &str| -> Option<usize> {
+        b.clear();
+        if candidate.is_ascii() {
+            // Most names: their length is known before they are lowercased.
+            if a.len().abs_diff(candidate.len()) > MAX {
+                return None;
+            }
+            b.extend(
+                candidate
+                    .bytes()
+                    .map(|c| char::from(c.to_ascii_lowercase())),
+            );
+        } else {
+            b.extend(candidate.chars().flat_map(char::to_lowercase));
+            if a.len().abs_diff(b.len()) > MAX {
+                return None;
+            }
+        }
+        prev.clear();
+        prev.extend(0..=b.len());
         for (i, ca) in a.iter().enumerate() {
-            let mut cur = vec![i + 1; b.len() + 1];
+            cur.clear();
+            cur.push(i + 1);
             for (j, cb) in b.iter().enumerate() {
-                cur[j + 1] = (prev[j] + usize::from(ca != cb))
+                let d = (prev[j] + usize::from(ca != cb))
                     .min(prev[j + 1] + 1)
                     .min(cur[j] + 1);
+                cur.push(d);
             }
-            prev = cur;
+            // No cell of a row is below the smallest of the row above it.
+            if cur.iter().all(|d| *d > MAX) {
+                return None;
+            }
+            std::mem::swap(&mut prev, &mut cur);
         }
-        prev[b.len()]
-    }
+        Some(prev[b.len()]).filter(|d| *d <= MAX)
+    };
     candidates
         .iter()
-        .map(|c| (distance(name, c), *c))
-        .filter(|(d, _)| *d <= 2)
+        .filter_map(|c| distance(c).map(|d| (d, *c)))
         .min_by_key(|(d, _)| *d)
         .map(|(_, c)| c)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::closest;
+
+    /// `closest` as it was before it skipped candidates by their length (0.34 #14).
+    fn reference<'a>(name: &str, candidates: &[&'a str]) -> Option<&'a str> {
+        fn distance(a: &str, b: &str) -> usize {
+            let a: Vec<char> = a.chars().flat_map(char::to_lowercase).collect();
+            let b: Vec<char> = b.chars().flat_map(char::to_lowercase).collect();
+            let mut prev: Vec<usize> = (0..=b.len()).collect();
+            for (i, ca) in a.iter().enumerate() {
+                let mut cur = vec![i + 1; b.len() + 1];
+                for (j, cb) in b.iter().enumerate() {
+                    cur[j + 1] = (prev[j] + usize::from(ca != cb))
+                        .min(prev[j + 1] + 1)
+                        .min(cur[j] + 1);
+                }
+                prev = cur;
+            }
+            prev[b.len()]
+        }
+        candidates
+            .iter()
+            .map(|c| (distance(name, c), *c))
+            .filter(|(d, _)| *d <= 2)
+            .min_by_key(|(d, _)| *d)
+            .map(|(_, c)| c)
+    }
+
+    #[test]
+    fn closest_is_the_nearest_within_two_edits() {
+        let candidates = [
+            "unitPrice",
+            "quantity",
+            "type",
+            "code",
+            "id",
+            "ÁREA",
+            "área",
+            "naïve",
+            "İd",
+            "x",
+            "customerName",
+            "customer",
+            "abc",
+            "abcde",
+            "",
+        ];
+        let names = [
+            "unitprice",
+            "UNITPRICE",
+            "unitPric",
+            "quantty",
+            "qty",
+            "typ",
+            "tpe",
+            "codes",
+            "Id",
+            "ID",
+            "area",
+            "AREA",
+            "naive",
+            "id",
+            "y",
+            "",
+            "xx",
+            "custmer",
+            "customerNam",
+            "ab",
+            "abcd",
+            "abcdefg",
+            "zzzzzz",
+            "İ",
+        ];
+        for name in names {
+            assert_eq!(
+                closest(name, &candidates),
+                reference(name, &candidates),
+                "{name}"
+            );
+        }
+        assert_eq!(closest("unitprice", &candidates), Some("unitPrice"));
+        assert_eq!(closest("zzzzzz", &candidates), None);
+    }
 }
