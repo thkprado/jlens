@@ -41,7 +41,7 @@ ahead of the release that will ship the fixes.
 
 | # | Item | Done when | Status |
 |---|---|---|---|
-| 1 | The dependencies at their newest versions and the upstream watch, before the rest | As 0.33 #1 | planned |
+| 1 | The dependencies at their newest versions and the upstream watch, before the rest | The dependencies of step 1 of the release checklist; stacker, `regress` and jsonata-js checked, and the commit of jsonata-js's main that #8 vendors from chosen | planned |
 | 2 | `resultType` and `contextPath` in place of `result` and `context` | Renamed in `jlens.json`, the CLI (`--result-type`, `--context-path`), the language server's settings, the VS Code extension, the WebAssembly options, the Java builder and the C API, and in Rust (`with_context_path`, `expected_result_type`), with no deprecated alias, as 0.34 has had no time to be adopted: an old key in `jlens.json` or an old flag fails with a message that names the new one; the changelog's migration notes; the guides | planned |
 | 3 | The WebAssembly constructor with one options object | `{schema, variables, functions, sources, resultType, contextPath}` in one object, in place of the positional arguments, with no deprecated form; a call in the old form, whose first argument is a JSON Schema and so an object too, or more than one argument, throws a `TypeError` that names the new form instead of being misread; `types.d.ts`; the JS suite; the WebAssembly guide and the changelog's migration notes | planned |
 | 4 | `jlens schema result` on a syntax error, documented | Exit code 1 kept, as `jlens schema uses` and `jlens check` do; the CLI guide's exit codes and the command's help say so, and that the WebAssembly and Java `resultType` give unknown types instead | planned |
