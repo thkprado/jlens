@@ -1175,6 +1175,12 @@ impl LanguageService {
         self
     }
 
+    /// The types declared by [`LanguageService::with_result_type`], if any: those that
+    /// [`ResultType::check`] compares a result with.
+    pub fn expected_result(&self) -> Option<&[JsonType]> {
+        self.result.as_deref()
+    }
+
     /// What the typing knows of the result of the expression `text`: the types it may have,
     /// and whether it may be undefined or several values, with the operand that makes it so.
     /// See [`ResultType`].

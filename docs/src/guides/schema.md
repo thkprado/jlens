@@ -434,7 +434,9 @@ let diagnostics = service.diagnostics("price > 10 and %.customer.vip");
 it fails with `S0217`; `%.%` is the one before, for a path of two steps such as
 `orders[].items[]`. `$$` stays the document. The path is written as for `Schema::shape_at`;
 `items` and `items[]` are the same context, as a step reads the items of an array. A path the
-schema does not have gives an unknown context, where no field is warned about.
+schema does not have gives an unknown context, where no field is warned about. In an editor and
+in `jlens check`, the [`context`](editors.md#configuration-jlensjson) of `jlens.json` declares
+it, or `jlens check --context 'items[]'`.
 
 Missing fields are reported only where the context is fully known. Nothing is reported after a
 user-defined function, an object constructor or `$lookup`, so the warnings do not produce false
@@ -501,6 +503,26 @@ shape, a field without a schema, the parent of a step inside parentheses. `Langu
 with no expected type: the types the result may have (`None` where they are not known) and the
 spans of the operands that may make it undefined or a sequence. `ResultType::check` compares
 it with a list of types, and answers `Always`, `Never`, `Maybe` or `Unknown`.
+
+In an editor and in `jlens check`, the [`result`](editors.md#configuration-jlensjson) of
+`jlens.json` declares the type for the files of a pattern, as `"result": "boolean"`, or
+`jlens check --result boolean`. `jlens schema result` prints the result's type as JSON, with
+`check` where a type is expected:
+
+```text
+$ jlens schema result --schema order.schema.json --result boolean '$contains(customer.name, "VIP")'
+{
+  "types": [
+    "boolean"
+  ],
+  "undefined": {
+    "start": 10,
+    "end": 18
+  },
+  "sequence": null,
+  "check": "maybe"
+}
+```
 
 ## What an expression uses of its schema
 

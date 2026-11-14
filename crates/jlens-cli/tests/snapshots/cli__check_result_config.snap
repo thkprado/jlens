@@ -1,0 +1,22 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens_in(\"fixtures/workspace\", args, None)"
+---
+exit: 0
+--- stdout
+--- stderr
+conditions/large.jsonata: ok
+warning[W0214]: The result may be undefined, not a boolean, because of customer
+ --> conditions/vip.jsonata:1:11
+  |
+1 | $contains(customer.name, "VIP")
+  |           ^^^^^^^^
+conditions/vip.jsonata: 0 error(s), 1 warning(s)
+warning[W0212]: The result is a string, never a number
+ --> lines/label.jsonata:1:1
+  |
+1 | %.customer.login & ": " & code
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+lines/label.jsonata: 0 error(s), 1 warning(s)
+lines/subtotal.jsonata: ok
+4 file(s): 0 error(s), 2 warning(s)

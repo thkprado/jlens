@@ -27,7 +27,7 @@ exit: 0
       "types": [
         "integer"
       ],
-      "required": false
+      "required": true
     },
     "items[].type": {
       "whole": true,
@@ -41,7 +41,7 @@ exit: 0
       "types": [
         "number"
       ],
-      "required": false
+      "required": true
     }
   },
   "bindings": {

@@ -59,6 +59,11 @@ All notable changes are recorded here. The format follows
   place of its schema (`LoadReport::unread`, `UnreadKeyword`). The JSON form of every package
   has it as `unread`; Java has `Schema.unread()` and `UnreadKeyword`; the CLI and the language
   server warn about each.
+- The expected result type and the context in `jlens.json`, for the language server, the VS Code
+  extension and `jlens check`: `"result": "boolean"` (or an array of types) and `"context":
+  "items[]"` for the files of a pattern; `jlens check --result` and `--context` replace them.
+  `jlens schema result` prints the result's type as JSON, with `check` where a type is
+  expected; `LanguageService::expected_result` gives the declared types.
 
 ### Changed
 

@@ -55,6 +55,20 @@ const tests = {
     assert.deepEqual(diagnostics.map((d) => d.code).sort(), ["W0201", "W0202", "W0204"]);
   },
 
+  async "the expected result type and the context come from jlens.json"() {
+    const codes = async (relative) => {
+      const uri = file(relative);
+      await open(uri);
+      const found = await until("diagnostics", () => {
+        const found = vscode.languages.getDiagnostics(uri);
+        return found.length > 0 && found;
+      });
+      return found.map((d) => d.code);
+    };
+    assert.deepEqual(await codes("conditions/vip.jsonata"), ["W0214"]);
+    assert.deepEqual(await codes("lines/label.jsonata"), ["W0212"]);
+  },
+
   async "completion offers the fields of the schema"() {
     const uri = file("rules/discount.jsonata");
     await open(uri);
@@ -87,7 +101,8 @@ const tests = {
   },
 
   async "jlens.json is checked by its JSON Schema"() {
-    // The editors guide's example, then a pattern with a misspelled setting on line 9.
+    // The editors guide's example, then a pattern with a misspelled setting on line 10 and a
+    // type that JSON does not have on line 11.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jlens-vscode-"));
     try {
       const config = path.join(dir, "jlens.json");
@@ -102,7 +117,9 @@ const tests = {
        "summary": "Shipping cost of a weight to a region"}
     ]
   },
-  "**/*.jsonata": {"schemas": "order.schema.json"}
+  "conditions/*.jsonata": {"schema": "schemas/order.schema.json", "result": "boolean"},
+  "**/*.jsonata": {"schemas": "order.schema.json"},
+  "drafts/*.jsonata": {"result": ["bool"], "context": "items[]"}
 }
 `,
       );
@@ -112,7 +129,7 @@ const tests = {
       // Let a late diagnostic of the valid part arrive, if there were one.
       await new Promise((resolve) => setTimeout(resolve, 1000));
       const lines = vscode.languages.getDiagnostics(uri).map((d) => d.range.start.line);
-      assert.deepEqual(lines, [9]);
+      assert.deepEqual(lines.sort(), [10, 11]);
       await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

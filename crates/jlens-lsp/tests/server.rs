@@ -462,14 +462,19 @@ fn the_workspace_fixture_is_checked_as_by_the_cli() {
         .join("fixtures/workspace");
     let (mut client, _) = Client::start(Some(&root), json!({}), Value::Null);
     let mut codes = |name: &str| {
-        let path = root.join("rules").join(name);
+        let path = root.join(name);
         let uri = uri(&path);
         client.open(&uri, &std::fs::read_to_string(&path).unwrap());
         let codes: Vec<String> = client.diagnostics(&uri).into_iter().map(|d| d.0).collect();
         codes
     };
-    assert!(codes("discount.jsonata").is_empty());
-    assert_eq!(codes("mistakes.jsonata"), ["W0201", "W0204", "W0202"]);
+    assert!(codes("rules/discount.jsonata").is_empty());
+    assert_eq!(codes("rules/mistakes.jsonata"), ["W0201", "W0204", "W0202"]);
+    // The expected result type and the context of `jlens.json`.
+    assert!(codes("conditions/large.jsonata").is_empty());
+    assert_eq!(codes("conditions/vip.jsonata"), ["W0214"]);
+    assert!(codes("lines/subtotal.jsonata").is_empty());
+    assert_eq!(codes("lines/label.jsonata"), ["W0212"]);
     client.shutdown();
 }
 

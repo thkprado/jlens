@@ -255,7 +255,15 @@ jlens check --path rules/discount.jsonata '$rate(type) * unitPrice'
 ```
 
 `--schema` replaces the schema that the configuration gives a
-file, and keeps its variables and functions. A configuration that cannot be read, or whose
+file, and keeps its variables and functions. `--result` and `--context` replace its `result`
+and `context`: `--result boolean`, or several types, `--result number,null`, warns about a
+result that may not have one of them, and `--context 'items[]'` checks each expression as the
+body of the steps of that path:
+
+```sh
+jlens check --schema order.schema.json --result number --context 'items[]' 'unitPrice * quantity'
+```
+ A configuration that cannot be read, or whose
 schema cannot be, ends with exit code 2.
 
 A schema whose `$ref`s lead to other files is read with them, when they are at the same
@@ -422,6 +430,7 @@ The [error reference](../language/errors.md) is generated from the same catalog.
 | `jlens schema infer SAMPLES… [--each] [--overrides FILE] [-o SCHEMA]` | Infer a JSON Schema from sample documents |
 | `jlens schema complete <EXPR> --schema SCHEMA [--cursor N] [--json]` | List completions at a cursor position, given in characters (default: the end) |
 | `jlens schema uses <EXPR> [--schema SCHEMA] [--config FILE] [--path FILE]` | Print what an expression uses of its schema, as JSON: what the schema says of each field it reads. The schema, the variables and the host functions are found as `jlens check` finds them; a call to a declared host function reads its arguments alone |
+| `jlens schema result <EXPR> [--schema SCHEMA] [--config FILE] [--path FILE] [--result TYPES] [--context PATH]` | Print what the typing knows of the expression's result, as JSON: `types` (`null` where they are not known), and the spans, in byte offsets, of the operands that may make it `undefined` or a `sequence`; with an expected type, from `--result` or the configuration, `check`: `always`, `never`, `maybe` or `unknown`. An expression with a syntax error prints it and exits with code 1 |
 | `jlens schema changes OLD NEW [--json]` | Print what changed between two answers of `jlens schema uses` for one expression, that of the schema it was written against and that of a new version; `no change`, or `{}` with `--json`, when nothing did |
 
 All are described in the [schema guide](schema.md); the last two in

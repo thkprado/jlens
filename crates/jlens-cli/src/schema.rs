@@ -29,6 +29,10 @@ pub enum SchemaCommand {
     /// Print what changed between two answers of `schema uses` for one expression: that of
     /// the schema it was written against, and that of a new version.
     Changes(ChangesArgs),
+    /// Print what the typing knows of an expression's result, as JSON: the types it may have,
+    /// and what may make it undefined or several values; with an expected type, how the result
+    /// compares with it.
+    Result(ResultArgs),
 }
 
 #[derive(Args)]
@@ -81,6 +85,27 @@ pub struct UsesArgs {
 }
 
 #[derive(Args)]
+pub struct ResultArgs {
+    #[command(flatten)]
+    source: ExprSource,
+    /// The schema of the input (JSON Schema, e.g. from `jlens schema infer`). It replaces the
+    /// schema that the configuration gives the file.
+    #[arg(long, value_name = "FILE")]
+    schema: Option<PathBuf>,
+    /// The configuration that gives files a schema, variables, host functions, an expected
+    /// result type and a context, as for `jlens check` [default: the `jlens.json` of the
+    /// current directory, if there is one].
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
+    /// Give the expression of the argument the configuration of this file, as if it were its
+    /// contents. The file need not exist.
+    #[arg(long, value_name = "FILE", conflicts_with = "file")]
+    path: Option<PathBuf>,
+    #[command(flatten)]
+    expect: crate::Expect,
+}
+
+#[derive(Args)]
 pub struct ChangesArgs {
     /// The answer of `jlens schema uses` with the schema the expression was written against.
     #[arg(value_name = "OLD")]
@@ -99,6 +124,7 @@ pub fn run(cmd: SchemaCommand) -> Result<ExitCode> {
         SchemaCommand::Complete(args) => complete(args),
         SchemaCommand::Uses(args) => uses(args),
         SchemaCommand::Changes(args) => changes(args),
+        SchemaCommand::Result(args) => result(args),
     }
 }
 
@@ -228,6 +254,34 @@ fn uses(args: UsesArgs) -> Result<ExitCode> {
             Ok(ExitCode::from(1))
         }
     }
+}
+
+fn result(args: ResultArgs) -> Result<ExitCode> {
+    let (source, name) = args.source.read()?;
+    let file = args.source.file.as_deref().or(args.path.as_deref());
+    let service = crate::service_for(file, args.schema.as_ref(), args.config.as_ref())?;
+    let service = args.expect.apply(service);
+    let errors: Vec<Diagnostic> = service
+        .diagnostics(&source)
+        .into_iter()
+        .filter(|d| d.severity == jlens_core::Severity::Error)
+        .collect();
+    if !errors.is_empty() {
+        for error in &errors {
+            eprint!("{}", report::render(&source, &name, error));
+        }
+        return Ok(ExitCode::from(1));
+    }
+    let result = service.result_type(&source);
+    let mut json = serde_json::to_value(&result)?;
+    if let (Some(expected), Value::Object(object)) = (service.expected_result(), &mut json) {
+        object.insert(
+            "check".into(),
+            serde_json::to_value(result.check(expected))?,
+        );
+    }
+    print_json(&json)?;
+    Ok(ExitCode::SUCCESS)
 }
 
 fn changes(args: ChangesArgs) -> Result<ExitCode> {

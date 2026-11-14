@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use glob::{MatchOptions, Pattern};
-use jlens_schema::{FunctionDecl, LanguageService, LoadReport, Schema, SchemaLoader};
-use serde::Deserialize;
+use jlens_schema::{FunctionDecl, JsonType, LanguageService, LoadReport, Schema, SchemaLoader};
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use crate::uri::uri_of;
@@ -24,6 +24,36 @@ pub struct Settings {
     pub variables: serde_json::Map<String, Value>,
     /// The host functions the expressions are evaluated with.
     pub functions: Vec<FunctionDecl>,
+    /// The JSON types the result of an expression is expected to have, as the conditions of a
+    /// rules engine must give a boolean (`LanguageService::with_result_type`): one type's name,
+    /// or an array of them. Empty when none is expected.
+    #[serde(deserialize_with = "one_or_more")]
+    pub result: Vec<JsonType>,
+    /// The path whose items the expressions are evaluated against, as the body of its steps
+    /// (`items[]`, `LanguageService::with_context`); none for the document.
+    pub context: Option<String>,
+}
+
+/// Reads one JSON type's name, or a non-empty array of them.
+fn one_or_more<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<JsonType>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMore {
+        One(JsonType),
+        More(Vec<JsonType>),
+    }
+    let types = match OneOrMore::deserialize(deserializer).map_err(|_| {
+        serde::de::Error::custom("result must be a JSON type's name or an array of them")
+    })? {
+        OneOrMore::One(one) => vec![one],
+        OneOrMore::More(more) => more,
+    };
+    if types.is_empty() {
+        return Err(serde::de::Error::custom(
+            "result must name at least one type",
+        ));
+    }
+    Ok(types)
 }
 
 /// One pattern of a configuration, with its settings.
@@ -60,8 +90,8 @@ impl Entry {
         self.settings.service(&self.root)
     }
 
-    /// Declares the variables and host functions of these settings to `service`, whatever its
-    /// schema.
+    /// Declares the variables, host functions, expected result type and context of these
+    /// settings to `service`, whatever its schema.
     pub fn declare(&self, service: LanguageService) -> Made {
         self.settings.declare(service, &self.root)
     }
@@ -185,8 +215,8 @@ impl Settings {
         }
     }
 
-    /// Declares the variables and host functions of these settings to `service`, whatever its
-    /// schema. A `$ref` to a file in a variable's schema is relative to `root`, the
+    /// Declares the variables, host functions, expected result type and context of these
+    /// settings to `service`, whatever its schema. A `$ref` to a file in a variable's schema is relative to `root`, the
     /// configuration's folder ([`load_schema_in`]). Problems (an invalid variable schema) are
     /// returned alongside.
     pub fn declare(&self, mut service: LanguageService, root: &Path) -> Made {
@@ -212,6 +242,12 @@ impl Settings {
             let mut decl = decl.clone();
             decl.name = decl.name.trim_start_matches('$').to_owned();
             service = service.with_function(decl);
+        }
+        if !self.result.is_empty() {
+            service = service.with_result_type(self.result.iter().copied());
+        }
+        if let Some(context) = &self.context {
+            service = service.with_context(context);
         }
         Made {
             service,
@@ -262,6 +298,38 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn the_result_type_and_the_context_are_declared() {
+        let root = Path::new("/work");
+        let entries = parse(
+            &json!({
+                "conditions/*.jsonata": {"result": "boolean"},
+                "items/*.jsonata": {"result": ["number", "string"], "context": "items[]"},
+                "*.jsonata": {}
+            }),
+            root,
+        )
+        .unwrap();
+        let schema = Schema::infer(&[json!({"total": 1, "items": [{"price": 2}]})]);
+        let codes = |entry: &Entry, text: &str| -> Vec<String> {
+            let service = entry
+                .declare(LanguageService::new(Some(schema.clone())))
+                .service;
+            service
+                .diagnostics(text)
+                .into_iter()
+                .map(|d| d.code)
+                .collect()
+        };
+        assert_eq!(entries[0].settings.result, [JsonType::Boolean]);
+        assert_eq!(codes(&entries[0], "total"), ["W0212"]);
+        assert_eq!(codes(&entries[0], "total > 1"), [""; 0]);
+        assert_eq!(codes(&entries[1], "price"), [""; 0]);
+        assert_eq!(codes(&entries[1], "total"), ["W0201", "W0214"]);
+        assert_eq!(codes(&entries[1], "price > 1"), ["W0212"]);
+        assert_eq!(codes(&entries[2], "total"), [""; 0]);
+    }
+
+    #[test]
     fn patterns_match_paths_relative_to_the_root() {
         let root = Path::new("/work");
         let entries = parse(
@@ -289,6 +357,10 @@ mod tests {
         assert!(parse(&json!([]), root).is_err());
         let err = parse(&json!({"*.jsonata": {"schemas": "x"}}), root).unwrap_err();
         assert!(err.contains("schemas"), "{err}");
+        for result in [json!("text"), json!([]), json!(["boolean", 1]), json!(true)] {
+            let err = parse(&json!({"*.jsonata": {"result": result}}), root).unwrap_err();
+            assert!(err.contains("result"), "{err}");
+        }
         assert!(parse(&json!({"[": {}}), root).is_err());
     }
 

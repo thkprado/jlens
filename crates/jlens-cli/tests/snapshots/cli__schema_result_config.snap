@@ -1,0 +1,18 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens_in(\"fixtures/workspace\", args, None)"
+---
+exit: 0
+--- stdout
+{
+  "types": [
+    "boolean"
+  ],
+  "undefined": {
+    "start": 10,
+    "end": 18
+  },
+  "sequence": null,
+  "check": "maybe"
+}
+--- stderr

@@ -1,0 +1,12 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"schema\", \"result\", \"a.b\"], None)"
+---
+exit: 0
+--- stdout
+{
+  "types": null,
+  "undefined": null,
+  "sequence": null
+}
+--- stderr

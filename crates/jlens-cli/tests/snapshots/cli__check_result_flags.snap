@@ -1,0 +1,8 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens_in(\"fixtures/workspace\", args, None)"
+---
+exit: 0
+--- stdout
+[{"line":1,"column":1,"severity":"warning","code":"W0214","message":"The result may be undefined, not a string or null, because of login","span":{"start":0,"end":5}}]
+--- stderr

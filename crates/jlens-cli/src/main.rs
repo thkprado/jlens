@@ -21,7 +21,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use jlens_core::{Diagnostic, Severity};
 use jlens_lsp::config;
-use jlens_schema::LanguageService;
+use jlens_schema::{JsonType, LanguageService};
 use serde_json::Value;
 
 // Evaluation allocates for most of its work. The default allocators of musl (the Linux release
@@ -117,6 +117,42 @@ struct CheckArgs {
     /// contents. The file need not exist.
     #[arg(long, value_name = "FILE", conflicts_with = "files")]
     path: Option<PathBuf>,
+    #[command(flatten)]
+    expect: Expect,
+}
+
+/// What the expressions are expected to give, and where they run, beyond the configuration.
+#[derive(Args)]
+pub struct Expect {
+    /// The JSON types the result is expected to have (`boolean`, or `number,string`): a result
+    /// that never, or not always, has one is warned about. It replaces the configuration's
+    /// `result`.
+    #[arg(long, value_name = "TYPES", value_delimiter = ',', value_parser = json_type)]
+    result: Vec<JsonType>,
+    /// Check each expression as the body of the steps of this path (`items[]`), with an item as
+    /// its context. It replaces the configuration's `context`.
+    #[arg(long, value_name = "PATH")]
+    context: Option<String>,
+}
+
+impl Expect {
+    /// `service`, with these expectations declared.
+    pub fn apply(&self, mut service: LanguageService) -> LanguageService {
+        if !self.result.is_empty() {
+            service = service.with_result_type(self.result.iter().copied());
+        }
+        if let Some(context) = &self.context {
+            service = service.with_context(context);
+        }
+        service
+    }
+}
+
+/// Reads a JSON type's name, as JSON Schema writes it.
+fn json_type(name: &str) -> Result<JsonType, String> {
+    serde_json::from_value(Value::String(name.to_owned())).map_err(|_| {
+        "expected one of null, boolean, integer, number, string, array, object".to_owned()
+    })
 }
 
 #[derive(Args)]
@@ -261,7 +297,8 @@ fn check(args: CheckArgs) -> Result<ExitCode> {
             }
             (Some(i), None) => entries[i].service(),
             (None, schema) => {
-                services.insert(key, LanguageService::new(schema.clone()));
+                let service = args.expect.apply(LanguageService::new(schema.clone()));
+                services.insert(key, service);
                 continue;
             }
         };
@@ -273,7 +310,7 @@ fn check(args: CheckArgs) -> Result<ExitCode> {
             anyhow::bail!("{}: {}", name.display(), made.problems.join("; "));
         }
         schema::warn(&made.notes);
-        services.insert(key, made.service);
+        services.insert(key, args.expect.apply(made.service));
     }
     let (mut errors, mut warnings) = (0, 0);
     let mut json = Vec::new();

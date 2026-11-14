@@ -5,5 +5,14 @@
     "functions": [
       {"name": "rate", "signature": "<s:n>", "summary": "The discount rate of a product type"}
     ]
+  },
+  "conditions/*.jsonata": {
+    "schema": "order.schema.json",
+    "result": "boolean"
+  },
+  "lines/*.jsonata": {
+    "schema": "order.schema.json",
+    "result": "number",
+    "context": "items[]"
   }
 }

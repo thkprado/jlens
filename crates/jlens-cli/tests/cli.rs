@@ -39,6 +39,8 @@ fn jlens_in(dir: &str, args: &[&str], stdin: Option<&str>) -> String {
             .replace(r"fixtures\workspace\", "fixtures/workspace/")
             .replace(r"rules\\", "rules/")
             .replace(r"rules\", "rules/")
+            .replace(r"conditions\", "conditions/")
+            .replace(r"lines\", "lines/")
     };
     format!(
         "exit: {}\n--- stdout\n{}--- stderr\n{}",
@@ -755,6 +757,55 @@ fn schema_uses_and_changes_of_the_shared_recursive_schema() {
         let changes: Value = serde_json::from_str(&stdout(&dir, &args)).unwrap();
         assert_eq!(changes, case["changes"], "{expression}");
     }
+}
+
+/// The expected result type and the context, from `jlens.json` and from the flags.
+#[test]
+fn result_type_and_context() {
+    let workspace = |name: &str, args: &[&str]| {
+        insta::assert_snapshot!(name, jlens_in("fixtures/workspace", args, None));
+    };
+    workspace(
+        "check_result_config",
+        &["check", "-f", "conditions/*.jsonata", "lines/*.jsonata"],
+    );
+    // The flags replace the configuration's `result` and `context`.
+    workspace(
+        "check_result_flags",
+        &[
+            "check",
+            "--json",
+            "--path",
+            "lines/new.jsonata",
+            "--result",
+            "string,null",
+            "--context",
+            "customer",
+            "login",
+        ],
+    );
+    workspace(
+        "schema_result_config",
+        &["schema", "result", "-f", "conditions/vip.jsonata"],
+    );
+    workspace(
+        "schema_result_flags",
+        &[
+            "schema",
+            "result",
+            "--schema",
+            "order.schema.json",
+            "--result",
+            "number",
+            "items.quantity",
+        ],
+    );
+    snapshot!("schema_result_no_schema", &["schema", "result", "a.b"]);
+    snapshot!("schema_result_syntax_error", &["schema", "result", "a +"]);
+    snapshot!(
+        "check_result_unknown_type",
+        &["check", "--result", "bool", "a"]
+    );
 }
 
 #[test]

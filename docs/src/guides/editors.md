@@ -20,7 +20,8 @@ jlens lsp          # what editors run; it speaks LSP on standard input and outpu
 ## Configuration: `jlens.json`
 
 A `jlens.json` at the root of a workspace folder says which schema, variables and
-[host functions](crate.md#host-functions) apply to which expression files:
+[host functions](crate.md#host-functions) apply to which expression files, and what their
+expressions must give:
 
 ```json
 {
@@ -32,6 +33,7 @@ A `jlens.json` at the root of a workspace folder says which schema, variables an
        "summary": "Shipping cost of a weight to a region"}
     ]
   },
+  "conditions/*.jsonata": {"schema": "schemas/order.schema.json", "result": "boolean"},
   "**/*.jsonata": {}
 }
 ```
@@ -51,6 +53,14 @@ A `jlens.json` at the root of a workspace folder says which schema, variables an
   file there is relative to the folder of `jlens.json`.
 - **`functions`** declares the host functions: `name`, and optionally `signature`, `params` and
   `summary`.
+- **`result`** is the JSON type the result of an expression must have, or an array of them
+  (`["number", "null"]`), as the conditions of a rules engine must give a boolean. A result
+  that never has one is warned about (`W0212`), as is one that may have another type (`W0213`)
+  or be undefined (`W0214`); see [The type of the result](schema.md#the-type-of-the-result).
+- **`context`** is a path, such as `items[]`, for expressions that run as the body of its steps,
+  as a rule on each line of an order runs inside `items.( … )`: they are completed and checked
+  with an item as their context, and `%` is the order
+  ([An expression that is the body of a step](schema.md#an-expression-that-is-the-body-of-a-step)).
 
 All settings are optional. When `jlens.json` or a JSON file changes, the server reloads the
 configuration and the schemas, and checks the open files again. It relies on the editor's file

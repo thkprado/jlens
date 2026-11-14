@@ -1,0 +1,10 @@
+---
+source: crates/jlens-cli/tests/cli.rs
+expression: "jlens(&[\"check\", \"--result\", \"bool\", \"a\"], None)"
+---
+exit: 2
+--- stdout
+--- stderr
+error: invalid value 'bool' for '--result <TYPES>': expected one of null, boolean, integer, number, string, array, object
+
+For more information, try '--help'.
