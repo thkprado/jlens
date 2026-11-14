@@ -3,7 +3,7 @@
 
 use jlens_core::audit::AuditOptions;
 use jlens_core::{Bindings, Document, Expression};
-use jlens_schema::{FunctionDecl, LanguageService, Schema, Uses};
+use jlens_schema::{FunctionDecl, JsonType, LanguageService, Schema, Uses};
 use serde_json::json;
 
 use crate::{bindings, default_input, on_small_stack, options, record};
@@ -255,6 +255,55 @@ pub fn language_service(data: &[u8]) {
         }
         let _ = recursive.complete(text, offset);
         let _ = recursive.hover(text, offset);
+
+        // The typing of roadmap 0.34: a result expected to be a boolean, the text as the body of
+        // `lines[]`, and the keywords it reads, `anyOf` and `oneOf` as one branch or another, open
+        // objects, tuples and conditional fields.
+        let typed = LanguageService::new(Some(
+            Schema::from_json_schema(&json!({
+                "type": "object",
+                "required": ["lines", "status"],
+                "properties": {
+                    "status": {"anyOf": [{"type": "string"}, {"const": 1}, {}]},
+                    "lines": {"type": "array", "minItems": 1, "items": {
+                        "oneOf": [
+                            {"type": "object", "required": ["qty"],
+                             "properties": {"qty": {"type": "integer"}, "tags": {"type": "array"}}},
+                            {"type": "object", "properties": {"note": {"type": ["string", "null"]}}}
+                        ]
+                    }},
+                    "attrs": {"type": "object",
+                              "patternProperties": {"^x-": {"type": "string"}, "(": {}},
+                              "additionalProperties": {"type": "number"}},
+                    "pair": {"type": "array", "prefixItems": [{"type": "string"}],
+                             "items": {"type": "number"}},
+                    "kind": {"type": "string"}
+                },
+                "if": {"properties": {"kind": {"const": "a"}}},
+                "then": {"properties": {"extra": {"type": "boolean"}}},
+                "else": {"properties": {"other": {"type": "string"}}}
+            }))
+            .expect("a schema"),
+        ));
+        for service in [
+            typed.clone().with_result_type([JsonType::Boolean]),
+            typed
+                .with_context("lines[]")
+                .with_result_type([JsonType::Number]),
+        ] {
+            for d in service.diagnostics(text) {
+                assert!(
+                    d.span.start <= d.span.end && d.span.end <= text.len(),
+                    "{d:?}"
+                );
+            }
+            let result = service.result_type(text);
+            for span in [result.undefined, result.sequence].into_iter().flatten() {
+                assert!(span.start <= span.end && span.end <= text.len(), "{span:?}");
+            }
+            let _ = service.complete(text, offset);
+            let _ = service.hover(text, offset);
+        }
 
         // What the expression uses of each schema reads back from its JSON form, and compared
         // with itself has no change (roadmap 0.33 #5 and #6).
