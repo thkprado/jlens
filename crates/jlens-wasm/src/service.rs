@@ -97,11 +97,9 @@ struct Sources {
 }
 
 impl Sources {
-    fn read(sources: Option<&JsValue>) -> Result<Sources, JsValue> {
-        let Some(sources) = sources else {
-            return Ok(Sources::default());
-        };
-        match from_js(sources, "sources")? {
+    /// The sources in `sources`, as JSON: none in `null`, or in none at all.
+    fn read(sources: Option<Value>) -> Result<Sources, JsValue> {
+        match sources {
             None | Some(Value::Null) => Ok(Sources::default()),
             // A derived `Deserialize` would take an array for its fields in order.
             Some(sources @ Value::Object(_)) => serde_json::from_value(sources)
@@ -132,37 +130,41 @@ impl Sources {
     }
 }
 
-/// What the expressions of a service are: the types their result is expected to have, and the
-/// path whose items they are evaluated against.
-#[derive(Default, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct ServiceOptions {
-    #[serde(default)]
-    result_type: Option<Value>,
-    #[serde(default)]
-    context_path: Option<String>,
-}
+/// The members of the object a `LanguageService` is made from.
+const OPTIONS: [&str; 6] = [
+    "schema",
+    "variables",
+    "functions",
+    "sources",
+    "resultType",
+    "contextPath",
+];
 
-impl ServiceOptions {
-    fn read(options: Option<&JsValue>) -> Result<(Option<Vec<JsonType>>, Option<String>), JsValue> {
-        let Some(options) = options else {
-            return Ok((None, None));
-        };
-        let options: ServiceOptions = match from_js(options, "options")? {
-            None | Some(Value::Null) => return Ok((None, None)),
-            // A derived `Deserialize` would take an array for its fields in order.
-            Some(options @ Value::Object(_)) => serde_json::from_value(options)
-                .map_err(|e| type_error(&format!("invalid options: {e}")))?,
-            Some(_) => return Err(type_error("options must be an object")),
-        };
-        let result_type = match options.result_type {
-            None | Some(Value::Null) => None,
-            Some(types) => Some(
-                JsonType::one_or_more(&types)
-                    .map_err(|e| type_error(&format!("resultType {e}")))?,
-            ),
-        };
-        Ok((result_type, options.context_path))
+/// The form of a `LanguageService`'s argument, for the messages of the calls that do not have it.
+const OPTIONS_FORM: &str = "{schema, variables, functions, sources, resultType, contextPath}";
+
+/// The options of a `LanguageService`, as JSON: an object with members of `OPTIONS` only, empty
+/// for no options or `null`. A JSON Schema given in their place, as the constructor took it
+/// before 0.35, is an object too: its keywords are refused here, as any other name is.
+fn read_options(options: &JsValue) -> Result<serde_json::Map<String, Value>, JsValue> {
+    let options = match from_js(options, "options")? {
+        None | Some(Value::Null) => return Ok(serde_json::Map::new()),
+        Some(Value::Object(options)) => options,
+        Some(_) => {
+            return Err(type_error(&format!(
+                "LanguageService takes one object, {OPTIONS_FORM}"
+            )));
+        }
+    };
+    let unknown = options
+        .keys()
+        .find(|name| !OPTIONS.contains(&name.as_str()));
+    match unknown {
+        Some(name) => Err(type_error(&format!(
+            "LanguageService has no option `{name}`: it takes one object, {OPTIONS_FORM}, \
+             with the schema of the input as its `schema`"
+        ))),
+        None => Ok(options),
     }
 }
 
@@ -173,7 +175,10 @@ impl ServiceOptions {
 #[wasm_bindgen(js_name = schemaReport, skip_typescript)]
 pub fn schema_report(schema: JsValue, sources: Option<JsValue>) -> Result<JsValue, JsValue> {
     crate::convert::install_hooks();
-    let sources = Sources::read(sources.as_ref())?;
+    let sources = match &sources {
+        Some(sources) => Sources::read(from_js(sources, "sources")?)?,
+        None => Sources::default(),
+    };
     let doc = from_js(&schema, "schema")?.ok_or_else(|| type_error("schema has no JSON form"))?;
     let (_, report) = sources.load(&doc, true, "schema")?;
     Ok(ser_to_js(&report))
@@ -188,70 +193,72 @@ pub struct LanguageService {
 
 #[wasm_bindgen]
 impl LanguageService {
-    /// Creates a service. `schema` describes the input documents (without it, functions and
-    /// variables are still completed); `variables` declares the bindings the expressions are
-    /// evaluated with, optionally with a schema for their values; `functions` declares the host
-    /// functions they are evaluated with; `sources` gives the URI of `schema` and the other
-    /// documents that the `$ref`s of the schemas lead to; `options` gives the types the result
-    /// of the expressions is expected to have (`resultType`) and the path whose items they are
-    /// evaluated against (`contextPath`).
-    #[wasm_bindgen(constructor, skip_typescript)]
-    pub fn new(
-        schema: Option<JsValue>,
-        variables: Option<JsValue>,
-        functions: Option<JsValue>,
-        sources: Option<JsValue>,
-        options: Option<JsValue>,
-    ) -> Result<LanguageService, JsValue> {
+    /// Creates a service from one object of options, each optional. `schema` describes the
+    /// input documents (without it, functions and variables are still completed); `variables`
+    /// declares the bindings the expressions are evaluated with, optionally with a schema for
+    /// their values; `functions` declares the host functions they are evaluated with; `sources`
+    /// gives the URI of `schema` and the other documents that the `$ref`s of the schemas lead
+    /// to; `resultType` gives the types the result of the expressions is expected to have, and
+    /// `contextPath` the path whose items they are evaluated against.
+    ///
+    /// Throws a `TypeError` for a member the options do not have, and for a second argument:
+    /// before 0.35 these were positional arguments, the first of them the schema.
+    #[wasm_bindgen(constructor, variadic, skip_typescript)]
+    pub fn new(options: JsValue, rest: Vec<JsValue>) -> Result<LanguageService, JsValue> {
         crate::convert::install_hooks();
-        let sources = Sources::read(sources.as_ref())?;
-        let (result_type, context_path) = ServiceOptions::read(options.as_ref())?;
-        let schema = match &schema {
-            Some(schema) if !schema.is_null() => match from_js(schema, "schema")? {
-                Some(doc) => Some(sources.load(&doc, true, "schema")?.0),
-                None => None,
-            },
-            _ => None,
+        if !rest.is_empty() {
+            return Err(type_error(&format!(
+                "LanguageService takes one object, {OPTIONS_FORM}, in place of several arguments"
+            )));
+        }
+        let mut options = read_options(&options)?;
+        let sources = Sources::read(options.remove("sources"))?;
+        let schema = match options.remove("schema") {
+            None | Some(Value::Null) => None,
+            Some(doc) => Some(sources.load(&doc, true, "schema")?.0),
         };
         let mut inner = jlens_schema::LanguageService::new(schema);
-        if let Some(variables) = &variables {
-            match from_js(variables, "variables")? {
-                None | Some(Value::Null) => {}
-                Some(Value::Object(map)) => {
-                    for (name, doc) in map {
-                        let name = name.trim_start_matches('$').to_owned();
-                        inner = match doc {
-                            Value::Null => inner.with_variable(name, None),
-                            doc => {
-                                let what = format!("variable ${name}");
-                                let schema = sources.load(&doc, false, &what)?.0;
-                                inner.with_variable_schema(name, schema)
-                            }
-                        };
-                    }
+        match options.remove("variables") {
+            None | Some(Value::Null) => {}
+            Some(Value::Object(map)) => {
+                for (name, doc) in map {
+                    let name = name.trim_start_matches('$').to_owned();
+                    inner = match doc {
+                        Value::Null => inner.with_variable(name, None),
+                        doc => {
+                            let what = format!("variable ${name}");
+                            let schema = sources.load(&doc, false, &what)?.0;
+                            inner.with_variable_schema(name, schema)
+                        }
+                    };
                 }
-                Some(_) => return Err(type_error("variables must be an object")),
+            }
+            Some(_) => return Err(type_error("variables must be an object")),
+        }
+        match options.remove("functions") {
+            None | Some(Value::Null) => {}
+            Some(list @ Value::Array(_)) => {
+                let list: Vec<FunctionDecl> = serde_json::from_value(list)
+                    .map_err(|e| type_error(&format!("invalid function declaration: {e}")))?;
+                for mut decl in list {
+                    decl.name = decl.name.trim_start_matches('$').to_owned();
+                    inner = inner.with_function(decl);
+                }
+            }
+            Some(_) => return Err(type_error("functions must be an array")),
+        }
+        match options.remove("resultType") {
+            None | Some(Value::Null) => {}
+            Some(types) => {
+                let types = JsonType::one_or_more(&types)
+                    .map_err(|e| type_error(&format!("resultType {e}")))?;
+                inner = inner.with_result_type(types);
             }
         }
-        if let Some(functions) = &functions {
-            match from_js(functions, "functions")? {
-                None | Some(Value::Null) => {}
-                Some(list @ Value::Array(_)) => {
-                    let list: Vec<FunctionDecl> = serde_json::from_value(list)
-                        .map_err(|e| type_error(&format!("invalid function declaration: {e}")))?;
-                    for mut decl in list {
-                        decl.name = decl.name.trim_start_matches('$').to_owned();
-                        inner = inner.with_function(decl);
-                    }
-                }
-                Some(_) => return Err(type_error("functions must be an array")),
-            }
-        }
-        if let Some(types) = result_type {
-            inner = inner.with_result_type(types);
-        }
-        if let Some(path) = &context_path {
-            inner = inner.with_context_path(path);
+        match options.remove("contextPath") {
+            None | Some(Value::Null) => {}
+            Some(Value::String(path)) => inner = inner.with_context_path(&path),
+            Some(_) => return Err(type_error("contextPath must be a string")),
         }
         Ok(LanguageService { inner })
     }

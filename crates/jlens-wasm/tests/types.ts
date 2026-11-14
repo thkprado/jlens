@@ -96,10 +96,10 @@ export async function check(): Promise<void> {
   const { ast, diagnostics } = parseRecover("a +");
   const d: Diagnostic | undefined = diagnostics[0];
   const schema: JsonSchema = inferSchema([{ a: 1 }], { a: { description: "A", enum: [1, 2] } });
-  const service = new LanguageService(schema, { limit: { type: "number" }, other: null });
+  const service = new LanguageService({ schema, variables: { limit: { type: "number" }, other: null } });
   const plain = new LanguageService();
   const declared: FunctionDeclaration[] = [{ name: "tax", signature: "<n:n>" }, { name: "now" }];
-  const withFunctions = new LanguageService(schema, null, declared);
+  const withFunctions = new LanguageService({ schema, functions: declared });
   const completions: Completions = service.complete("a", 1);
   const kinds = completions.items.map((i) => i.kind);
   const value: CompletionKind = "value";
@@ -120,20 +120,25 @@ export async function check(): Promise<void> {
   const typesBefore: string[] | undefined = changes.input?.changed?.["a"]?.types?.old;
   const valuesAdded: unknown[] | undefined = changes.input?.changed?.["a"]?.enum?.added;
   const sources: SchemaSources = { uri: "https://example.com/a.json", documents: { "b.json": {} } };
-  const located = new LanguageService({ $ref: "b.json" }, null, null, sources);
+  const located = new LanguageService({ schema: { $ref: "b.json" }, sources });
   const report: LoadReport = schemaReport({ $ref: "c.json" }, sources);
   const unresolved: UnresolvedRef | undefined = report.unresolved?.[0];
   const missingDocument: string | undefined = unresolved?.document;
   const unread: UnreadKeyword | undefined = report.unread?.[0];
   const keyword: string | undefined = unread?.keyword;
   console.log(required, usesOfLimit, typesBefore, valuesAdded, located, missingDocument, keyword);
-  const options: ServiceOptions = { resultType: ["number", "string"], contextPath: "items[]" };
-  const expecting = new LanguageService(schema, null, null, null, options);
+  const options: ServiceOptions = { schema, resultType: ["number", "string"], contextPath: "items[]" };
+  const expecting = new LanguageService(options);
+  // @ts-expect-error: the arguments are not positional, as they were before 0.35
+  new LanguageService(schema, { limit: null });
+  // @ts-expect-error: a schema is not the options
+  new LanguageService({ type: "object" });
+  const none = new LanguageService(null);
   const result: ResultType = expecting.resultType("a");
   const resultTypes: JsonType[] | null = result.types;
   const cause: Span | null = result.undefined;
-  const check: ResultCheck | undefined = new LanguageService(schema, null, null, null, { resultType: "boolean" }).resultType("a").check;
-  console.log(resultTypes, cause, result.sequence, check);
+  const check: ResultCheck | undefined = new LanguageService({ schema, resultType: "boolean" }).resultType("a").check;
+  console.log(resultTypes, cause, result.sequence, check, none);
   const help = plain.signatureHelp("$sum(", 5)?.activeParam;
   const catalog: FunctionInfo[] = functions();
   console.log(v, source, r1, r2, r3, r4, r5, r6, r7, withFunctions, every, fields, text, failed, start, type, ast.id, d, kinds, value, request, literal, conditions, several, listed, domain, hover, help, catalog);

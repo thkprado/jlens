@@ -62,7 +62,7 @@ function updateService() {
     Object.entries(bindings).map(([name, value]) => [name, inferSchema([value])]),
   );
   service.free();
-  service = new LanguageService(schema, variables, hostDeclarations);
+  service = new LanguageService({ schema, variables, functions: hostDeclarations });
   $("schema").textContent = JSON.stringify(schema, null, 2);
 }
 

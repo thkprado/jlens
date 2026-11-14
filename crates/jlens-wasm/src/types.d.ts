@@ -303,20 +303,42 @@ export interface SchemaSources {
   documents?: Record<string, JsonSchema> | null;
 }
 
-/** What the expressions of a `LanguageService` are, besides what their schemas say. */
+/**
+ * What a `LanguageService` is made from, the one argument of its constructor: the schemas of
+ * what the expressions read, and what the expressions are. Every member is optional, and a
+ * member the options do not have throws a `TypeError`.
+ */
 export interface ServiceOptions {
   /**
-   * The types their result is expected to have, as the conditions of a rules engine must give a
-   * boolean: one type, or several. `diagnostics()` then warns about a result that never has one of
-   * them (`W0212`), may have another type (`W0213`) or may be undefined (`W0214`). `number`
-   * accepts an integer too.
+   * Describes the input documents. Without it, functions and variables are still completed, and
+   * no field is warned about.
+   */
+  schema?: JsonSchema | null;
+  /**
+   * The bindings the expressions are evaluated with, by name (with or without `$`), each with a
+   * schema for its value, or `null` for a value of which nothing is known.
+   */
+  variables?: Record<string, JsonSchema | null> | null;
+  /** The host functions the expressions are evaluated with. */
+  functions?: FunctionDeclaration[] | null;
+  /**
+   * The documents that the `$ref`s of the schemas lead to, those of the variables included, and
+   * the URI of `schema`. A `$ref` that is not followed leaves its place unknown, and
+   * `schemaReport()` lists those.
+   */
+  sources?: SchemaSources | null;
+  /**
+   * The types the result of the expressions is expected to have, as the conditions of a rules
+   * engine must give a boolean: one type, or several. `diagnostics()` then warns about a result
+   * that never has one of them (`W0212`), may have another type (`W0213`) or may be undefined
+   * (`W0214`). `number` accepts an integer too.
    */
   resultType?: JsonType | JsonType[] | null;
   /**
-   * The path whose items they are evaluated against, as the body of a step over it, written as
-   * `uses()` writes paths (`items[]`, `orders[].items[]`): the item is their context and `%` its
-   * parent. A path the schema does not have gives an unknown context, where no field is warned
-   * about. Without one, the context is the document.
+   * The path whose items the expressions are evaluated against, as the body of a step over it,
+   * written as `uses()` writes paths (`items[]`, `orders[].items[]`): the item is their context
+   * and `%` its parent. A path the schema does not have gives an unknown context, where no field
+   * is warned about. Without one, the context is the document.
    */
   contextPath?: string | null;
 }
@@ -742,22 +764,12 @@ export class Document {
  */
 export class LanguageService {
   /**
-   * `schema` describes the input documents; without it, functions and variables are still
-   * completed. `variables` declares the bindings the expressions are evaluated with (names with
-   * or without `$`), optionally with a schema for their values. `functions` declares the host
-   * functions they are evaluated with. `sources` gives the documents that the `$ref`s of the
-   * schemas lead to, those of the variables included, and the URI of `schema`; a `$ref` that
-   * is not followed leaves its place unknown, and `schemaReport()` lists those. `options` gives
-   * the type the result of the expressions is expected to have and the path whose items they
-   * are evaluated against.
+   * A service made from one object of options, each optional: `new LanguageService({ schema })`.
+   * With no options, functions and variables are still completed. Throws a `TypeError` for
+   * options not in their form, and for a call in the form before 0.35, whose arguments were
+   * positional: a schema in place of the options, or more than one argument.
    */
-  constructor(
-    schema?: JsonSchema | null,
-    variables?: Record<string, JsonSchema | null> | null,
-    functions?: FunctionDeclaration[] | null,
-    sources?: SchemaSources | null,
-    options?: ServiceOptions | null,
-  );
+  constructor(options?: ServiceOptions | null);
   /** Suggestions for the word at `offset`, and the range they replace. */
   complete(text: string, offset: number): Completions;
   /** Syntax errors, and references to fields the schema does not have. */

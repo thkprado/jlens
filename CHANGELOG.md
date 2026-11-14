@@ -13,6 +13,11 @@ All notable changes are recorded here. The format follows
   elsewhere: `result` is the value a case of `jlens test` expects and the value in the CLI's
   JSON output, and the context of JSONata is a value, not a path. The old names are removed
   with no deprecated alias. See the migration notes below.
+- WebAssembly: the constructor of `LanguageService` takes one object of options, `{schema,
+  variables, functions, sources, resultType, contextPath}`, each optional, in place of five
+  positional arguments, of which the first four were often `null`. A call in the old form
+  throws a `TypeError` instead of being misread: a JSON Schema in place of the options, as its
+  keywords are not options, or more than one argument. `ServiceOptions` declares the object.
 
 ### Migration from 0.34
 
@@ -20,14 +25,16 @@ All notable changes are recorded here. The format follows
 |---|---|---|
 | `jlens.json`, and the language server's initialization options | `"result"`, `"context"` | `"resultType"`, `"contextPath"` |
 | `jlens check`, `jlens schema result` | `--result`, `--context` | `--result-type`, `--context-path` |
-| WebAssembly, the options of `LanguageService` | `{result, context}` | `{resultType, contextPath}` |
+| WebAssembly, the constructor of `LanguageService` | `new LanguageService(schema, variables, functions, sources, {result, context})` | `new LanguageService({schema, variables, functions, sources, resultType, contextPath})` |
 | Java, `LanguageService.Builder` | `result(types...)`, `context(path)` | `resultType(types...)`, `contextPath(path)` |
 | Rust, `jlens_schema::LanguageService` | `with_context`, `expected_result` | `with_context_path`, `expected_result_type` (`with_result_type` is unchanged) |
 | Rust, `jlens_lsp::config::Settings` | the fields `result`, `context` | `result_type`, `context_path` |
 
 An old setting in `jlens.json` fails the configuration with a message that names the new one,
 as a misspelt setting does, and an old flag fails with exit code 2 and the new flag's name. The
-WebAssembly options throw a `TypeError` for an old name, as for any name they do not have.
+WebAssembly constructor throws a `TypeError` for an old name, as for any option it does not
+have, and for a call with positional arguments: `new LanguageService(schema)` becomes `new
+LanguageService({ schema })`, and each argument after it a member of the same object.
 
 ## [0.34.0]
 

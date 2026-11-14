@@ -401,7 +401,7 @@ missingOverridePaths([order], { "items.type": { enum: ["apparel"] }, "customer.v
 ### The language service
 
 ```js
-const service = new LanguageService(schema, { limit: { type: "number" } });
+const service = new LanguageService({ schema, variables: { limit: { type: "number" } } });
 
 const text = "items[type = 'a'].p";
 service.complete(text, text.length);
@@ -419,20 +419,30 @@ service.signatureHelp("$substring(name, ", 17);
 // { name: "$substring", signature: "<s-nn?:s>", params: ["$str", "$start", "$length"], activeParam: 1, ... }
 ```
 
-`schema` is optional: without one, functions and variables are still completed. The second
-argument declares the variables the expressions are evaluated with. Its keys are variable
-names, with or without `$`, and its values are schemas, or `null` when the shape is unknown.
-The third argument declares host functions, as `{name, signature, params, summary}` objects.
-They are completed first, and hover and signature help show them:
+The constructor takes one object of options, each optional:
+
+| Option | What it gives |
+|---|---|
+| `schema` | The JSON Schema of the input documents. Without one, functions and variables are still completed |
+| `variables` | The variables the expressions are evaluated with: its keys are their names, with or without `$`, and its values are schemas, or `null` when the shape is unknown |
+| `functions` | The host functions, as `{name, signature, params, summary}` objects. They are completed first, and hover and signature help show them |
+| `sources` | The documents that the `$ref`s of the schemas lead to, [below](#a-schema-in-several-documents) |
+| `resultType`, `contextPath` | What the expressions are, [below](#the-type-of-the-result-and-the-context) |
 
 ```js
-new LanguageService(schema, null, [
-  { name: "shipping", signature: "<ns:n>", params: ["weight", "region"], summary: "Shipping cost" },
-]);
+new LanguageService({
+  schema,
+  functions: [
+    { name: "shipping", signature: "<ns:n>", params: ["weight", "region"], summary: "Shipping cost" },
+  ],
+});
 ```
 
-Create a new service when the schema, the variables or the functions change. Construction is
-cheap.
+Create a new service when an option changes. Construction is cheap.
+
+An option the constructor does not have throws a `TypeError`, a misspelt one included. So does
+a call in the form before 0.35, whose arguments were positional, the schema first: a schema is
+not taken for the options, and neither is a second argument.
 
 Completion items are ranked best first, and `insertText` replaces `range`. Field names that are
 not plain identifiers come quoted with backquotes. `kind` is `field`, `variable`, `function`,
@@ -447,7 +457,7 @@ overrides) takes values only the application can fetch. Where its values are com
 
 ```js
 const schema = inferSchema([order], { "customer.login": { domain: "customers" } });
-const service = new LanguageService(schema);
+const service = new LanguageService({ schema });
 const text = "customer.login = 'al";
 const { range, items, valueRequest } = service.complete(text, text.length);
 // valueRequest: { domain: "customers", path: "customer.login", prefix: "al",
@@ -528,7 +538,7 @@ monaco.languages.registerCompletionItemProvider("jsonata", {
 ### A schema in several documents
 
 A `$ref` may lead to another document. jlens never fetches one: the application gives each
-document with its URI, as the fourth argument of `LanguageService` (the
+document with its URI, as the `sources` of `LanguageService` (the
 [schema guide](schema.md#a-schema-in-several-documents)):
 
 ```js
@@ -536,7 +546,7 @@ const sources = {
   uri: "https://example.com/schemas/order.json",   // of the schema, when it has no $id
   documents: { "https://example.com/schemas/common.json": common },
 };
-const service = new LanguageService(order, null, null, sources);
+const service = new LanguageService({ schema: order, sources });
 
 const report = schemaReport(order, sources);
 // { unresolved: [{ place: "https://example.com/schemas/order.json#/properties/carrier",
@@ -556,18 +566,18 @@ input's schema alone. Both throw a `TypeError` for sources that are not in this 
 
 ### The type of the result, and the context
 
-The fifth argument of `LanguageService` says what the expressions are, besides what their
-schemas say: `resultType`, the type their result must have, and `contextPath`, the path whose items
+Two options of `LanguageService` say what the expressions are, besides what their schemas
+say: `resultType`, the type their result must have, and `contextPath`, the path whose items
 they are evaluated against, as the body of `items.( … )` (the
 [schema guide](schema.md#the-type-of-the-result)). They are those of `jlens.json` in an editor:
 
 ```js
-const conditions = new LanguageService(schema, null, null, null, { resultType: "boolean" });
+const conditions = new LanguageService({ schema, resultType: "boolean" });
 conditions.diagnostics('$contains(customer.name, "VIP")');
 // [{ severity: "warning", code: "W0214", span: {start: 10, end: 18},
 //    message: "The result may be undefined, not a boolean, because of customer" }]
 
-const lines = new LanguageService(schema, null, null, null, { resultType: ["number"], contextPath: "items[]" });
+const lines = new LanguageService({ schema, resultType: ["number"], contextPath: "items[]" });
 lines.diagnostics("%.customer.login & ': ' & code");   // W0212: a string, never a number
 
 conditions.resultType('$contains(customer.name, "VIP")');
@@ -589,7 +599,7 @@ one, what it uses of the schema, and compares it when a new version arrives (the
 
 ```js
 const expression = new Expression('$sum(items[type = "book"].price)');
-const uses = new LanguageService(schema).uses(expression.reads());
+const uses = new LanguageService({ schema }).uses(expression.reads());
 // { input: { "$": { types: ["object"] },
 //            "items": { types: ["array"], required: true },
 //            "items[]": { types: ["object"] },
@@ -600,7 +610,7 @@ const uses = new LanguageService(schema).uses(expression.reads());
 const kept = JSON.stringify(uses);
 
 // Later, with the new version of the schema:
-const changes = usesChanges(JSON.parse(kept), new LanguageService(newSchema).uses(expression.reads()));
+const changes = usesChanges(JSON.parse(kept), new LanguageService({ schema: newSchema }).uses(expression.reads()));
 // { input: { changed: { "items[].price": { types: { old: ["number"], new: ["integer", "string"] } } } } }
 // {} when nothing the expression uses changed
 ```

@@ -762,7 +762,7 @@ export const cases = [
   }],
 
   ["completion", (j) => {
-    const service = new j.LanguageService(j.inferSchema([order]), { minimum: { type: "number" } });
+    const service = new j.LanguageService({ schema: j.inferSchema([order]), variables: { minimum: { type: "number" } } });
     let text = "items[type = 'electronic'].";
     let c = service.complete(text, text.length);
     equal(
@@ -778,9 +778,9 @@ export const cases = [
     text = "$mi";
     equal(service.complete(text, 3).items[0].label, "$minimum", "variables");
     // Values of an enumeration; inside quotes the whole literal is replaced, in UTF-16 units.
-    const typed = new j.LanguageService(
-      j.inferSchema([order], { "items[].type": { enum: ["apparel", "electronic"] } }),
-    );
+    const typed = new j.LanguageService({
+      schema: j.inferSchema([order], { "items[].type": { enum: ["apparel", "electronic"] } }),
+    });
     text = "'𝄞' & items[type = \"el\"]";
     c = typed.complete(text, text.length - 2);
     equal(c.items.map((i) => [i.label, i.kind, i.insertText]), [['"electronic"', "value", '"electronic"']], "values");
@@ -788,9 +788,9 @@ export const cases = [
   }],
 
   ["open domains: the value request and valueLiteral", (j) => {
-    const service = new j.LanguageService(
-      j.inferSchema([order], { "customer.country": { domain: "countries" } }),
-    );
+    const service = new j.LanguageService({
+      schema: j.inferSchema([order], { "customer.country": { domain: "countries" } }),
+    });
     // The request's range is in UTF-16 units, as every range is.
     let text = "'𝄞' = 'x' or customer.country = 'Br";
     let c = service.complete(text, text.length);
@@ -830,7 +830,7 @@ export const cases = [
   }],
 
   ["diagnostics, hover and signature help", (j) => {
-    const service = new j.LanguageService(j.inferSchema([order]));
+    const service = new j.LanguageService({ schema: j.inferSchema([order]) });
     const diagnostics = service.diagnostics("'é' & customer.Login");
     equal(diagnostics.map((d) => d.code), ["W0201"], "codes");
     ok(diagnostics[0].message.includes("did you mean `login`"), diagnostics[0].message);
@@ -845,22 +845,24 @@ export const cases = [
   }],
 
   ["declared host functions in the language service", (j) => {
-    const service = new j.LanguageService(null, null, [
-      { name: "$shipping", signature: "<ns?:n>", params: ["weight", "region"], summary: "Shipping cost" },
-      { name: "sum" },
-    ]);
+    const service = new j.LanguageService({
+      functions: [
+        { name: "$shipping", signature: "<ns?:n>", params: ["weight", "region"], summary: "Shipping cost" },
+        { name: "sum" },
+      ],
+    });
     const items = service.complete("$s", 2).items.filter((i) => i.kind === "function");
     equal(items.slice(0, 2).map((i) => [i.label, i.detail ?? null]), [["$shipping", "<ns?:n>"], ["$sum", null]]);
     const help = service.signatureHelp("$shipping(3, ", 13);
     equal([help.params, help.activeParam, help.summary], [["$weight", "$region"], 1, "Shipping cost"]);
-    throws(() => new j.LanguageService(null, null, [{ name: "x", sig: "<n>" }]), (e) => ok(e instanceof TypeError, "unknown field"));
-    throws(() => new j.LanguageService(null, null, {}), (e) => ok(e instanceof TypeError, "not an array"));
+    throws(() => new j.LanguageService({ functions: [{ name: "x", sig: "<n>" }] }), (e) => ok(e instanceof TypeError, "unknown field"));
+    throws(() => new j.LanguageService({ functions: {} }), (e) => ok(e instanceof TypeError, "not an array"));
   }],
 
   ["uses and usesChanges: the cases every package answers the same", async (j, env) => {
     const fixture = JSON.parse(await env.load("../../../fixtures/uses/cases.json"));
-    const old = new j.LanguageService(fixture.schema, fixture.variables, fixture.functions);
-    const current = new j.LanguageService(fixture.newSchema, fixture.newVariables, fixture.functions);
+    const old = new j.LanguageService({ schema: fixture.schema, variables: fixture.variables, functions: fixture.functions });
+    const current = new j.LanguageService({ schema: fixture.newSchema, variables: fixture.newVariables, functions: fixture.functions });
     // A JavaScript function receives its arguments and nothing else: `reads` is told so by
     // the bindings, here the functions declared to the service.
     const bindings = Object.fromEntries(fixture.functions.map(({ name }) => [name, () => 0]));
@@ -879,8 +881,8 @@ export const cases = [
       JSON.parse(await env.load("../../../fixtures/uses/cases.json")).references;
     equal(j.schemaReport(schema, { documents }), report, "the report with the document");
     equal(j.schemaReport(schema), reportAlone, "the report alone");
-    const service = new j.LanguageService(schema, null, null, { documents });
-    const alone = new j.LanguageService(schema);
+    const service = new j.LanguageService({ schema, sources: { documents } });
+    const alone = new j.LanguageService({ schema });
     for (const { expression, uses, changes } of cases) {
       const reads = new j.Expression(expression).reads();
       equal(service.uses(reads), uses, `uses of ${expression}`);
@@ -891,8 +893,8 @@ export const cases = [
   ["a recursive schema: the case every package answers the same", async (j, env) => {
     const { schema, newSchema, cases } =
       JSON.parse(await env.load("../../../fixtures/uses/cases.json")).recursive;
-    const old = new j.LanguageService(schema);
-    const current = new j.LanguageService(newSchema);
+    const old = new j.LanguageService({ schema });
+    const current = new j.LanguageService({ schema: newSchema });
     ok(cases.length > 0, "cases");
     for (const { expression, uses, changes } of cases) {
       const reads = new j.Expression(expression).reads();
@@ -908,11 +910,11 @@ export const cases = [
     const sources = { uri: "https://example.com/s/order.json", documents };
     const codes = (service, text) => service.diagnostics(text).map((d) => d.code);
     // The URI is that of the input's schema; the documents serve the variables' schemas too.
-    const service = new j.LanguageService(schema, { buyer: { $ref: "https://example.com/s/common.json#/$defs/person" } }, null, sources);
+    const service = new j.LanguageService({ schema, variables: { buyer: { $ref: "https://example.com/s/common.json#/$defs/person" } }, sources });
     equal(codes(service, "customer.nme"), ["W0201"]);
     equal(codes(service, "$buyer.nme"), ["W0201"]);
     equal(codes(service, "carrier.anything & customer.name & $buyer.name"), []);
-    equal(codes(new j.LanguageService(schema), "customer.nme"), [], "unknown without the document");
+    equal(codes(new j.LanguageService({ schema }), "customer.nme"), [], "unknown without the document");
     equal(j.schemaReport(schema, sources), {
       unresolved: [{
         place: "https://example.com/s/order.json#/properties/carrier",
@@ -929,12 +931,12 @@ export const cases = [
         { place: "#/properties/code", keyword: "type" },
       ],
     }, "keywords not read");
-    equal(codes(new j.LanguageService(tree), "[children.anything, code + 1]"), [], "unknown under them");
+    equal(codes(new j.LanguageService({ schema: tree }), "[children.anything, code + 1]"), [], "unknown under them");
     equal(j.schemaReport(person, null), {});
     equal(j.schemaReport(person, { uri: null, documents: null }), {});
     for (const bad of [[], 1, { url: "a" }, { uri: 1 }, { documents: [] }]) {
       throws(() => j.schemaReport(person, bad), (e) => ok(e instanceof TypeError, `sources ${JSON.stringify(bad)}`));
-      throws(() => new j.LanguageService(person, null, null, bad), (e) => ok(e instanceof TypeError, `sources ${JSON.stringify(bad)}`));
+      throws(() => new j.LanguageService({ schema: person, sources: bad }), (e) => ok(e instanceof TypeError, `sources ${JSON.stringify(bad)}`));
     }
     throws(() => j.schemaReport([1]), (e) => ok(e instanceof TypeError, "not a schema"));
     throws(() => j.schemaReport(undefined), (e) => ok(e instanceof TypeError, "no schema"));
@@ -945,8 +947,8 @@ export const cases = [
     const schema = JSON.parse(await load("order.schema.json"));
     const codes = (service, text) => service.diagnostics(text).map((d) => d.code);
     // As `jlens.json` declares them for `conditions/` and `lines/`.
-    const conditions = new j.LanguageService(schema, null, null, null, { resultType: "boolean" });
-    const lines = new j.LanguageService(schema, null, null, null, { resultType: ["number"], contextPath: "items[]" });
+    const conditions = new j.LanguageService({ schema, resultType: "boolean" });
+    const lines = new j.LanguageService({ schema, resultType: ["number"], contextPath: "items[]" });
     equal(codes(conditions, await load("conditions/large.jsonata")), []);
     const vip = await load("conditions/vip.jsonata");
     equal(codes(conditions, vip), ["W0214"]);
@@ -960,7 +962,7 @@ export const cases = [
     }, "the result of vip.jsonata");
     equal(lines.resultType("unitPrice * quantity").check, "always");
     // The spans are in UTF-16 code units.
-    const strings = new j.LanguageService(schema, null, null, null, { resultType: "string" });
+    const strings = new j.LanguageService({ schema, resultType: "string" });
     const text = "/* é😀 */ customer.name";
     const { undefined: cause } = strings.resultType(text);
     equal(text.slice(cause.start, cause.end), "customer", "a UTF-16 span");
@@ -968,12 +970,38 @@ export const cases = [
     // No schema, no expected type, a syntax error: nothing is known, and nothing is checked.
     const unknown = { types: null, undefined: null, sequence: null };
     equal(new j.LanguageService().resultType("a.b"), unknown);
-    equal(new j.LanguageService(schema).resultType("a +"), unknown);
-    equal(new j.LanguageService(schema, null, null, null, {}).resultType("customer").check, undefined);
-    equal(new j.LanguageService(schema, null, null, null, null).resultType("1").types, ["number"]);
-    for (const bad of [[], 1, { resultTypes: "boolean" }, { resultType: "text" }, { resultType: [] }, { resultType: ["boolean", 1] }, { contextPath: 1 }, { result: "boolean" }, { context: "items[]" }]) {
-      throws(() => new j.LanguageService(schema, null, null, null, bad), (e) => ok(e instanceof TypeError, `options ${JSON.stringify(bad)}`));
+    equal(new j.LanguageService({ schema }).resultType("a +"), unknown);
+    equal(new j.LanguageService({ schema }).resultType("customer").check, undefined);
+    equal(new j.LanguageService({ schema, resultType: null, contextPath: null }).resultType("1").types, ["number"]);
+    for (const bad of [{ resultTypes: "boolean" }, { resultType: "text" }, { resultType: [] }, { resultType: ["boolean", 1] }, { contextPath: 1 }, { result: "boolean" }, { context: "items[]" }]) {
+      throws(() => new j.LanguageService({ schema, ...bad }), (e) => ok(e instanceof TypeError, `options ${JSON.stringify(bad)}`));
     }
+  }],
+
+  ["the options of LanguageService: one object, and the form before 0.35 refused", (j) => {
+    const schema = { type: "object", properties: { a: { type: "string" } } };
+    const codes = (service, text) => service.diagnostics(text).map((d) => d.code);
+    // No options, in each of their forms: no schema, so nothing is known of a field.
+    for (const none of [[], [undefined], [null], [{}], [{ schema: null, variables: null, functions: null, sources: null }], [{ schema: undefined }]]) {
+      equal(codes(new j.LanguageService(...none), "b + $sum(1)"), [], `no options: ${JSON.stringify(none)}`);
+    }
+    equal(codes(new j.LanguageService({ schema }), "b"), ["W0201"]);
+    // Before 0.35 the arguments were positional, the first of them the schema: an object too,
+    // which is not taken for the options, and neither is a call with more than one argument.
+    const refused = (args, what) => throws(() => new j.LanguageService(...args), (e) => {
+      ok(e instanceof TypeError, `${what}: a TypeError`);
+    });
+    refused([schema], "a schema");
+    refused([{ $ref: "#/$defs/a" }], "a schema of one keyword");
+    refused([true], "a boolean schema");
+    refused([[]], "an array");
+    refused([1], "a number");
+    refused([schema, { limit: null }], "a schema and variables");
+    refused([null, null, [{ name: "rate" }]], "functions as the third argument");
+    refused([undefined, undefined], "two arguments, both undefined");
+    refused([{ schema }, undefined], "the options and another argument");
+    refused([{ schema }, { resultType: "boolean" }], "the options in two objects");
+    refused([{ schema, option: 1 }], "a member the options do not have");
   }],
 
   ["uses and usesChanges", (j) => {
@@ -983,7 +1011,7 @@ export const cases = [
       properties: { active: { type: active }, "odd name": { enum: ["é", null, 1.5] } },
     });
     const expression = new j.Expression("active = true and `odd name` = 'é' and $rate(1) > $limit.max");
-    const service = (active) => new j.LanguageService(schema(active), { limit: null }, [{ name: "rate" }]);
+    const service = (active) => new j.LanguageService({ schema: schema(active), variables: { limit: null }, functions: [{ name: "rate" }] });
     const uses = service("boolean").uses(expression.reads());
     equal(uses.input.$, { whole: true, types: ["object"] }, "a host function reads its context");
     equal(uses.input["`odd name`"], { enum: ["é", null, 1.5], closed: true, required: false });

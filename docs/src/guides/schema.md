@@ -99,7 +99,7 @@ described [below](#the-keywords-jlens-reads)):
 | Where | The documents | The report |
 |---|---|---|
 | Rust | `SchemaLoader::document`, or `load_asking` with a function that gives them | `LoadReport` |
-| [WebAssembly](wasm.md#a-schema-in-several-documents) | `new LanguageService(schema, variables, functions, { uri, documents })` | `schemaReport(schema, { uri, documents })` |
+| [WebAssembly](wasm.md#a-schema-in-several-documents) | `new LanguageService({ schema, sources: { uri, documents } })` | `schemaReport(schema, { uri, documents })` |
 | [Java](java.md#a-schema-in-several-documents) | `Schema.loader().document(uri, text).load(text)` | `schema.unresolved()`, `schema.missingDocuments()`, `schema.unread()` |
 | CLI and language server | the files beside the schema's | a warning for each document not found, and for each keyword not read |
 
