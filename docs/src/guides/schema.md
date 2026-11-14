@@ -527,6 +527,11 @@ $ jlens schema result --schema order.schema.json --result-type boolean '$contain
 }
 ```
 
+An expression with a syntax error has no answer from the command: it prints the error on
+standard error and ends with exit code 1, as `jlens check` and `jlens schema uses` do. The
+`resultType` of the packages does not fail: its types are not known, and the service's
+diagnostics have the error.
+
 ## What an expression uses of its schema
 
 An application may store expressions written against a schema that changes. When a new version

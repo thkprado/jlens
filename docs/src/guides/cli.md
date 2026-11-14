@@ -36,6 +36,12 @@ work in every shell.
 | `1` | The expression has errors: a syntax error, an evaluation error, or (with `--ndjson`) at least one line that failed; `test`: at least one case failed |
 | `2` | Usage or I/O problem: unreadable file, invalid JSON input, an invalid case file, bad arguments, a terminal on standard input |
 
+A syntax error ends with code 1 every command that needs the whole expression: `eval`, `check`,
+`reads`, `ast`, `jlens schema uses` and `jlens schema result`. The two of `jlens schema` then
+print the error on standard error and nothing on standard output, as their JSON has no place
+for an error. `jlens schema complete` is the exception: it completes an unfinished expression,
+and ends with 0.
+
 Writing to a closed pipe, as in `jlens functions | head`, ends quietly with code 0.
 
 ## For scripts and agents
@@ -429,8 +435,8 @@ The [error reference](../language/errors.md) is generated from the same catalog.
 |---|---|
 | `jlens schema infer SAMPLES… [--each] [--overrides FILE] [-o SCHEMA]` | Infer a JSON Schema from sample documents |
 | `jlens schema complete <EXPR> --schema SCHEMA [--cursor N] [--json]` | List completions at a cursor position, given in characters (default: the end) |
-| `jlens schema uses <EXPR> [--schema SCHEMA] [--config FILE] [--path FILE]` | Print what an expression uses of its schema, as JSON: what the schema says of each field it reads. The schema, the variables and the host functions are found as `jlens check` finds them; a call to a declared host function reads its arguments alone |
-| `jlens schema result <EXPR> [--schema SCHEMA] [--config FILE] [--path FILE] [--result-type TYPES] [--context-path PATH]` | Print what the typing knows of the expression's result, as JSON: `types` (`null` where they are not known), and the spans, in byte offsets, of the operands that may make it `undefined` or a `sequence`; with an expected type, from `--result-type` or the configuration, `check`: `always`, `never`, `maybe` or `unknown`. An expression with a syntax error prints it and exits with code 1 |
+| `jlens schema uses <EXPR> [--schema SCHEMA] [--config FILE] [--path FILE]` | Print what an expression uses of its schema, as JSON: what the schema says of each field it reads. The schema, the variables and the host functions are found as `jlens check` finds them; a call to a declared host function reads its arguments alone. An expression with a syntax error has no answer: the error is printed and the exit code is 1 |
+| `jlens schema result <EXPR> [--schema SCHEMA] [--config FILE] [--path FILE] [--result-type TYPES] [--context-path PATH]` | Print what the typing knows of the expression's result, as JSON: `types` (`null` where they are not known), and the spans, in byte offsets, of the operands that may make it `undefined` or a `sequence`; with an expected type, from `--result-type` or the configuration, `check`: `always`, `never`, `maybe` or `unknown`. An expression with a syntax error has no answer: the error is printed and the exit code is 1, as for `jlens check`. The `resultType` of the [WebAssembly](wasm.md#the-type-of-the-result-and-the-context) and [Java](java.md#the-type-of-the-result-and-the-context) packages answers with types that are not known instead |
 | `jlens schema changes OLD NEW [--json]` | Print what changed between two answers of `jlens schema uses` for one expression, that of the schema it was written against and that of a new version; `no change`, or `{}` with `--json`, when nothing did |
 
 All are described in the [schema guide](schema.md); the last two in

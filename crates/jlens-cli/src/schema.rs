@@ -25,6 +25,9 @@ pub enum SchemaCommand {
     Complete(CompleteArgs),
     /// Print what an expression uses of its schema, as JSON: what the schema says of each
     /// field the expression reads. Keep it to compare when the schema changes.
+    ///
+    /// An expression with a syntax error has no answer: the error is printed on standard
+    /// error, nothing on standard output, and the exit code is 1, as for `jlens check`.
     Uses(UsesArgs),
     /// Print what changed between two answers of `schema uses` for one expression: that of
     /// the schema it was written against, and that of a new version.
@@ -32,6 +35,11 @@ pub enum SchemaCommand {
     /// Print what the typing knows of an expression's result, as JSON: the types it may have,
     /// and what may make it undefined or several values; with an expected type, how the result
     /// compares with it.
+    ///
+    /// An expression with a syntax error has no answer: the error is printed on standard
+    /// error, nothing on standard output, and the exit code is 1, as for `jlens check` and
+    /// `jlens schema uses`. The `resultType` of the WebAssembly and Java packages answers
+    /// with types that are not known instead, as a service has `diagnostics` for the error.
     Result(ResultArgs),
 }
 
