@@ -6,6 +6,21 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.34.0]
+
+The types the diagnostics know. The diagnostics check the operands of operators, so that
+`total > 1000` with `total` a string is warned about before it fails, and know whether a value
+may be undefined or several values. An application declares the type an expression's result
+must have, as the conditions of a rules engine must give a boolean, and the language service
+tells a result that is never, or not always, of that type, at the operand that makes it so;
+the expression may also be the body of a step, with an item as its context. The typing follows
+the parent operator, the objects of a schema open to other fields, `anyOf` and `oneOf` as one
+branch or another, and more of JSON Schema, and the load reports the keywords it leaves unread.
+The result type and the context reach `jlens.json`, the CLI, the language server and the VS Code
+extension, and the WebAssembly and Java packages. The diagnostics are faster than 0.33.0's, as
+they run at each keystroke. Two date fixes of `$fromMillis` and `$toMillis` follow jsonata-js's
+pull requests #855 and #856.
+
 ### Added
 
 - The diagnostics check the operands of operators, where their types are known: `total > 1000`
@@ -39,7 +54,6 @@ All notable changes are recorded here. The format follows
   context, at the offsets of the text, and `%` is the order, where alone it fails with `S0217`.
   `jlens_core::parse_recover_as_body` parses such a body, and `Slot::enclosing` tells which step
   a `%` refers to.
-
 - Objects open to other fields: an object with `additionalProperties` other than `false`, with
   `patternProperties`, or with no field listed at all, such as `{"type": "object"}`, gets no
   `W0201` for a field it does not list, and `additionalProperties`, or the pattern a name
@@ -1680,7 +1694,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/thkprado/jlens/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/thkprado/jlens/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/thkprado/jlens/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/thkprado/jlens/compare/v0.30.0...v0.31.0

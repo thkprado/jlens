@@ -3,7 +3,8 @@
 How the measurements of roadmap 0.34 were made: methods, traps and intermediate numbers that the
 [performance page](../src/architecture/performance.md) leaves out. The item numbers are those of
 the plan, whose table the tag keeps in
-[the roadmap](https://github.com/thkprado/jlens/blob/v0.34.0/docs/src/architecture/roadmap.md#034-the-types-the-diagnostics-know).
+[the roadmap](https://github.com/thkprado/jlens/blob/v0.34.0/docs/src/architecture/roadmap.md#034-the-types-the-diagnostics-know);
+[the roadmap's history](../src/architecture/roadmap-history.md#034) sums it up.
 The plan's work is
 in the typing of `jlens-schema`; in `jlens-core`, only the parse of a body (#8) and the two date
 fixes (#2) changed, neither on the path the tables measure.

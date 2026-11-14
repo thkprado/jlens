@@ -375,3 +375,32 @@ looked at in 0.34. `jlens-core` did not change, and no case of the tables moved 
 it was measured is in
 [`docs/notes/perf-0.33.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.33.md).
 ([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0330))
+
+## 0.34
+
+*The types the diagnostics know.* The diagnostics checked a function's arguments and the fields
+an expression reads, but not the operands of an operator, and not the type of a result: with
+`total` a string, `total > 1000` fails with `T2009` only when it runs, and a rules engine learns
+that a condition is not always a boolean only from the document that makes it undefined. 0.34
+warns about operands whose types the operator cannot take (`W0207` to `W0211`) and about one that
+may be several values (`W0215`: `items.qty > 1` is true for an order of one item and fails for
+two), where the types are known and never without a schema. The typing tells a value that is
+always there from one that may be undefined, at the operand that makes it so, and a path that
+gives one value or an array from an array; built-ins are typed by their signatures and a table
+checked against the engine. An application declares the type a result must have, and gets
+`W0212` (never), `W0213` (another type too) or `W0214` (maybe undefined), and the result's type as
+a value; over the suite, 805 results proved always defined were each checked against the case's
+result. An expression may be the body of a step, typed with an item as its context and the
+parent operator followed. The typing stopped less often at the schema: objects open to other
+fields, `then`/`else`, `dependentSchemas`, tuples and `nullable` read, `anyOf` and `oneOf` read
+as one branch or another instead of merged as `allOf` (found on the way, a change in what is
+warned), and the keywords left unread reported by the load. The result type and the context
+reach `jlens.json`, the CLI (`jlens schema result`), the language server, the VS Code extension
+and the WebAssembly and Java packages, alike on a shared fixture. Measuring found the typing had
+made the diagnostics up to 21% slower; a copy of the catalog of built-in functions at each call
+removed, they ended faster than 0.33.0's on every case. Two date bugs of jsonata-js 2.2.2 are
+fixed as its open pull requests #855 and #856 fix them. `jlens-core` changed only in parsing a
+body and in the dates; the tables moved only with the M1's newer Rust (`transform` 18% faster,
+for 0.33.0's code as well). How it was measured is in
+[`docs/notes/perf-0.34.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.34.md).
+([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0340))
