@@ -8,19 +8,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.AbstractMap;
+import java.util.AbstractSet;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /** Java objects as input, read one level at a time through the C API's reader (0.25 #6). */
@@ -147,6 +153,105 @@ class SourceTest {
         Map<String, Object> merged = new LinkedHashMap<>();
         merged.put("a", 1L);
         assertEquals(merged, evaluate("$merge([$])", Map.of("a", 1)), "a new map");
+    }
+
+    /**
+     * A view of {@code stored} with one more field, {@code name}, whose value is computed each
+     * time it is asked for. {@link AbstractMap} makes {@code get}, {@code containsKey} and
+     * {@code size} from {@code entrySet}, so that the four agree, and its {@code get} computes
+     * the value of the field it is asked for alone.
+     */
+    private static final class View extends AbstractMap<String, Object> {
+        private final Map<String, Object> stored;
+        private final String name;
+        private final Supplier<Object> value;
+        /** How many times the field was computed. */
+        private int computed;
+
+        View(Map<String, Object> stored, String name, Supplier<Object> value) {
+            this.stored = stored;
+            this.name = name;
+            this.value = value;
+        }
+
+        @Override
+        public Set<Entry<String, Object>> entrySet() {
+            Entry<String, Object> field = new Entry<>() {
+                @Override
+                public String getKey() {
+                    return name;
+                }
+
+                @Override
+                public Object getValue() {
+                    computed++;
+                    return value.get();
+                }
+
+                @Override
+                public Object setValue(Object replaced) {
+                    throw new UnsupportedOperationException();
+                }
+            };
+            return new AbstractSet<>() {
+                @Override
+                public Iterator<Entry<String, Object>> iterator() {
+                    return Stream.concat(stored.entrySet().stream(), Stream.of(field)).iterator();
+                }
+
+                @Override
+                public int size() {
+                    return stored.size() + 1;
+                }
+            };
+        }
+    }
+
+    @Test
+    void aMapMayComputeItsValuesWhenAskedForThem() {
+        // A small map is written with its contents; a larger one is asked for each field, or
+        // for all of them.
+        for (int fields : new int[] {2, 40}) {
+            Map<String, Object> stored = new LinkedHashMap<>();
+            for (int i = 0; i < fields; i++) stored.put("f" + i, (long) i);
+            View view = new View(stored, "total", () -> 7L);
+            String size = fields + " fields";
+            long all = fields + 1;
+
+            assertEquals(1L, evaluate("f1", view), size);
+            assertEquals(0, view.computed, size + ": a field read by name asks for no other");
+            assertEquals(7L, evaluate("total", view), size);
+            assertEquals(8L, evaluate("total + f1", view), size);
+            // Read whole, the map lists the computed field, and gives it by name before and
+            // after that.
+            assertEquals(all, evaluate("$count($keys($))", view), size);
+            assertEquals(List.of(all, 7L), evaluate("[$count($keys($)), total]", view), size);
+            assertEquals(List.of(7L, all), evaluate("[total, $count($keys($))]", view), size);
+            assertEquals(7L + fields * (fields - 1) / 2, evaluate("$sum(*)", view), size);
+            assertSame(view, evaluate("$", view), size);
+        }
+    }
+
+    @Test
+    void aComputedFieldIsReadWhereAFunctionReadsItsContextWhole() {
+        // The analysis does not know $below, so it takes each item as read whole: an item is
+        // read from its entries, and `product` is among them.
+        Map<String, Object> catalog = Map.of("A1", Map.of("list", 10L), "B2", Map.of("list", 3L));
+        List<Object> items = new ArrayList<>();
+        for (String sku : List.of("A1", "B2")) {
+            Map<String, Object> stored = new LinkedHashMap<>();
+            stored.put("sku", sku);
+            stored.put("price", 8L);
+            items.add(new View(stored, "product", () -> catalog.get(sku)));
+        }
+        try (Bindings bindings = Bindings.builder()
+                        .function("below", 2, args -> ((Number) args.get(0)).doubleValue()
+                                < ((Number) args.get(1)).doubleValue())
+                        .build();
+                Expression expression =
+                        Expression.compile("[items[$below(price, product.list)].sku]")) {
+            assertEquals(List.of("A1"), expression.evaluate(Map.of("items", items), bindings));
+        }
     }
 
     @Test

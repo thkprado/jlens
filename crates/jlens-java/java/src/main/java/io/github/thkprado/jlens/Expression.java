@@ -148,7 +148,9 @@ public final class Expression implements AutoCloseable {
      *
      * <p>A map or list of the input that the result holds unchanged is returned as itself, not
      * copied, as {@code $} returns the input: modifying it modifies the input. The objects must
-     * not change during the evaluation.
+     * not change during the evaluation. A map may compute its values when it is asked for them:
+     * a field is read with {@code get} and {@code containsKey}, a map whole with {@code size}
+     * and {@code entrySet}, and the four must agree.
      *
      * @param input the input
      * @return the result as Java objects, {@code null} when it is undefined or {@code null}

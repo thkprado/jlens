@@ -113,13 +113,23 @@ a list.
 
 Anything else, such as a `Date`, a key that is not a `String`, or a map or list inside itself,
 has no JSON form, and a map or list nested more than 1,000 levels deep is not read, as JSON text
-that deep is not parsed. Two consequences follow from reading the input as the expression goes:
+that deep is not parsed. Three consequences follow from reading the input as the expression goes:
 
 - **Errors appear when their part is read.** A value that cannot be read stops the evaluation
   with `U1004` when the expression reads it; one it never reaches does no harm.
 - **The input must not change during the evaluation.** A [host function](#host-functions), or
   another thread, that modifies it can change what the rest of the evaluation reads. Copy the
   input first if something must modify it.
+- **A map may compute its values.** The input can be a view of the application's own data: a
+  map that computes, or fetches, the value of a field when it is asked for it. A field read by
+  name asks for that field alone, with `get`, and with `containsKey` where `get` gives `null`.
+  A map read whole (by `$keys`, by `*`, or as the context of a call to a function that is not
+  built in) is read once, from `size` and `entrySet`, and is not asked again. So the four must
+  agree: a field that `get` answers and `entrySet` does not list is found or not according to
+  how the expression reads the map, with no error. A class that extends `AbstractMap` and
+  writes `entrySet` alone, with entries that compute in `getValue`, keeps them in agreement.
+  What a view answers must not change during the evaluation, as for any input; a cache behind
+  it may fill.
 
 ```java
 {{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:input}}
