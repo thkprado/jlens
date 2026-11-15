@@ -1029,6 +1029,13 @@ impl<'s> Walker<'s, '_> {
                 held = Held::after(expr, &test, *constant, chained);
             }
         }
+        // `[]` keeps what a filter gives an array, of one item too, as in a path: `1[][0]` is
+        // `[1]`, and an index that selects an array gives that array (0.35 #9). Without a
+        // filter, the value is kept as it is unless it is a sequence, which it may not be.
+        if node.attrs.keep_array && stages.iter().any(|s| matches!(s, Stage::Filter { .. })) {
+            let undefined = ty.undefined;
+            ty = ty.items().into_array().or_undefined(undefined);
+        }
         if let Some(group) = &node.attrs.group {
             for (k, v) in &group.pairs {
                 self.walk(k, &elements, scope);

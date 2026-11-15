@@ -586,11 +586,16 @@ pub(crate) fn evaluate<'a, 'v, R>(
         functions: bindings.shared_functions(),
     });
     // The host functions are looked up on a miss: a variable, bound to a document or in
-    // `bindings`, takes the place of a function of the same name.
-    for (name, value) in variables {
-        // The input takes the place of a variable named `$`, as it did when it was bound.
-        if name != "$" {
-            ev.bind(&env, name, value);
+    // `bindings`, takes the place of a function of the same name. Each value comes from JSON
+    // or a document and holds no frame, so the root frame goes on `cyclic` only when the
+    // expression binds a function in it (0.35 #9).
+    {
+        let mut vars = env.vars.borrow_mut();
+        for (name, value) in variables {
+            // The input takes the place of a variable named `$`, as it did when it was bound.
+            if name != "$" {
+                vars.set(name, value);
+            }
         }
     }
     if let Value::Array(a) = &input

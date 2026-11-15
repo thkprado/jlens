@@ -74,7 +74,10 @@ pub fn evaluate(data: &[u8]) {
         let bindings = bindings();
         let _ = expr.evaluate_with(Some(&input), &bindings, &options);
         let _ = expr.evaluate_with(None, &bindings, &options);
-        let _ = expr.evaluate_document(&Document::new(&input), &bindings, &options);
+        let document = Document::new(&input);
+        let _ = expr.evaluate_document(&document, &bindings, &options);
+        // The document bound to a variable as well, as the packages bind documents (0.35 #7).
+        let _ = expr.evaluate_document_with(&document, &[("doc", &document)], &bindings, &options);
         let _ = expr.evaluate_audited(Some(&input), &bindings, &options, &AuditOptions::full());
     });
 }
@@ -258,7 +261,8 @@ pub fn language_service(data: &[u8]) {
 
         // The typing of roadmap 0.34: a result expected to be a boolean, the text as the body of
         // `lines[]`, and the keywords it reads, `anyOf` and `oneOf` as one branch or another, open
-        // objects, tuples and conditional fields.
+        // objects, tuples and conditional fields; and of 0.35, the positions of tuples, read
+        // after an index (`rows[0][1]`, `rows[$i][1]`) and through `anyOf`.
         let typed = LanguageService::new(Some(
             Schema::from_json_schema(&json!({
                 "type": "object",
@@ -277,6 +281,13 @@ pub fn language_service(data: &[u8]) {
                               "additionalProperties": {"type": "number"}},
                     "pair": {"type": "array", "prefixItems": [{"type": "string"}],
                              "items": {"type": "number"}},
+                    "rows": {"type": "array", "items": {"type": "array",
+                             "prefixItems": [{"type": "string"}, {"type": "number"}],
+                             "items": false}},
+                    "point": {"anyOf": [
+                        {"type": "array", "prefixItems": [{"type": "number"}, {"type": "string"}]},
+                        {"type": "array", "prefixItems": [{"type": "integer"}]}
+                    ]},
                     "kind": {"type": "string"}
                 },
                 "if": {"properties": {"kind": {"const": "a"}}},

@@ -181,6 +181,31 @@ fn an_index_after_a_computed_index_reads_the_item_it_selects() {
     assert_eq!(result(&service, "$arr[$i][0]"), either);
 }
 
+/// `[]` before a filter outside a path keeps what the filter gives an array, as jsonata-js
+/// does: `1[][0]` is `[1]`, and an index that selects an array gives that array. Without a
+/// filter, `1[]` is `1`; `1[][0] + 1` fails with `T2001`, as `[1] + 1` does.
+#[test]
+fn a_kept_array_before_a_filter_outside_a_path_is_an_array() {
+    let service = service();
+    let array = Some(vec![JsonType::Array]);
+    for text in [
+        "1[][0]",
+        r#""a"[][0]"#,
+        "1[][0][0]",
+        "(1)[][0]",
+        "[1, 2][][$ > 1]",
+        "(grid)[][0]",
+        "(point)[][0]",
+    ] {
+        assert_eq!(result(&service, text), array, "{text}");
+    }
+    assert_eq!(result(&service, "1[]"), Some(vec![JsonType::Number]));
+    assert_eq!(result(&service, "1[0]"), Some(vec![JsonType::Number]));
+    assert_eq!(codes(&service, "1[][0] + 1"), codes(&service, "[1] + 1"));
+    assert_eq!(codes(&service, "1[][0] + 1"), ["W0215"]);
+    assert!(codes(&service, "1[0] + 1").is_empty());
+}
+
 #[test]
 fn completion_and_hover_follow_the_position() {
     let service = service();

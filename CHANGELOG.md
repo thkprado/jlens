@@ -87,6 +87,13 @@ LanguageService({ schema })`, and each argument after it a member of the same ob
 - An index after an index reads an item of the item the first one took: with `rows` an array
   of arrays of numbers, `rows[0][1]` is a number, where the diagnostics took it for an array
   and warned that `rows[0][1] + 1` may be several values (`W0215`).
+- `[]` before a filter outside a path types the result as the array it keeps: `1[][0]` is
+  `[1]`, so `1[][0] + 1`, which fails with `T2001`, is warned about as `[1] + 1` is. The
+  diagnostics took it for a number since before 0.34.
+- An evaluation with a variable that holds an array or an object, bound in `Bindings` or to a
+  document, is about 17 ns faster, in every package: the variables of the evaluation's first
+  frame no longer go on the list of frames that may be part of a cycle, as a value of the
+  input holds no frame.
 
 ## [0.34.0]
 

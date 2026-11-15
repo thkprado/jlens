@@ -50,10 +50,27 @@ const PICTURES: &[(&str, &str)] = &[
     ("[[[D]]]", ""),
 ];
 
+/// Expressions over the fields of the `language_service` target's schemas, which the suite does
+/// not name: the tuples and the indexes of roadmap 0.35.
+const SERVICES: &[&str] = &[
+    r#"rows[0][1] > "a""#,
+    "rows[$x][1] + rows[0][0]",
+    "rows[$[1] > 1][0][1]",
+    "point[1] & point[0] + 1",
+    "(point)[][0] + 1",
+    "pair[0] & pair[2] + lines[0].qty",
+    "1[][0] + 1",
+];
+
+/// Expressions over a variable bound to the input as a document, which the `evaluate` target
+/// binds as `$doc`.
+const EVALUATIONS: &[&str] = &["$doc.a + $count($doc.*)", "($doc[0].a := 1; $doc)"];
+
 /// Writes the expressions of the suite to `fuzz/corpus/parse` and `fuzz/corpus/parse_recover`;
 /// each expression followed by a NUL byte and its input document to `fuzz/corpus/evaluate`; each
 /// expression after its length, as the offset, to `fuzz/corpus/language_service` (the input
-/// formats of those targets); and the regular expressions and pictures above to theirs.
+/// formats of those targets), with [`EVALUATIONS`] and [`SERVICES`]; and the regular
+/// expressions and pictures above to theirs.
 pub fn seed() -> Result<()> {
     let mut expressions = BTreeSet::new();
     let mut evaluations = BTreeSet::new();
@@ -70,6 +87,17 @@ pub fn seed() -> Result<()> {
         }
         evaluations.insert(evaluation);
         // Completion and hover at the end of the expression, where an editor's cursor is.
+        let mut service = u16::try_from(expr.len())
+            .unwrap_or(0)
+            .to_le_bytes()
+            .to_vec();
+        service.extend(expr.as_bytes());
+        services.insert(service);
+    }
+    for expr in EVALUATIONS {
+        evaluations.insert(expr.as_bytes().to_vec());
+    }
+    for expr in SERVICES {
         let mut service = u16::try_from(expr.len())
             .unwrap_or(0)
             .to_le_bytes()
