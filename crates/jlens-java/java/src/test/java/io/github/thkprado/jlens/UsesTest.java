@@ -143,7 +143,7 @@ class UsesTest {
         }
     }
 
-    /** What a schema did not follow or read, in the JSON form of the other packages. */
+    /** What the load of a schema tells, in the JSON form of the other packages. */
     private static Map<String, Object> report(Schema schema) {
         List<Object> unresolved = new ArrayList<>();
         for (UnresolvedRef reference : schema.unresolved()) {
@@ -161,6 +161,11 @@ class UsesTest {
         Map<String, Object> report = new java.util.LinkedHashMap<>();
         if (!unresolved.isEmpty()) report.put("unresolved", unresolved);
         if (!unread.isEmpty()) report.put("unread", unread);
+        List<Object> openTuples = new ArrayList<>();
+        for (OpenTuple tuple : schema.openTuples()) {
+            openTuples.add(Map.of("place", tuple.place()));
+        }
+        if (!openTuples.isEmpty()) report.put("openTuples", openTuples);
         return report;
     }
 

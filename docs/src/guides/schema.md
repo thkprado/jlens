@@ -93,15 +93,16 @@ document that is not a schema, or one nested more than 64 levels deep, fails to 
 
 Every package that reads a schema takes its documents and gives the report, in the same JSON
 form (`{"unresolved": [{"place", "reference", "uri", "document"}], "unread": [{"place",
-"keyword"}]}`, `{}` when every `$ref` was followed and every keyword read; `unread` is
-described [below](#the-keywords-jlens-reads)):
+"keyword"}], "openTuples": [{"place"}]}`, `{}` when every `$ref` was followed, every keyword
+read and no tuple open; `unread` and `openTuples` are described
+[below](#the-keywords-jlens-reads)):
 
 | Where | The documents | The report |
 |---|---|---|
 | Rust | `SchemaLoader::document`, or `load_asking` with a function that gives them | `LoadReport` |
 | [WebAssembly](wasm.md#a-schema-in-several-documents) | `new LanguageService({ schema, sources: { uri, documents } })` | `schemaReport(schema, { uri, documents })` |
-| [Java](java.md#a-schema-in-several-documents) | `Schema.loader().document(uri, text).load(text)` | `schema.unresolved()`, `schema.missingDocuments()`, `schema.unread()` |
-| CLI and language server | the files beside the schema's | a warning for each document not found, and for each keyword not read |
+| [Java](java.md#a-schema-in-several-documents) | `Schema.loader().document(uri, text).load(text)` | `schema.unresolved()`, `schema.missingDocuments()`, `schema.unread()`, `schema.openTuples()` |
+| CLI and language server | the files beside the schema's | a warning for each document not found and for each keyword not read, and one for the open tuples |
 
 The CLI and the language server read a document from a file, and never from the network. The
 file is the one at the same relative path from the schema's file as between the two URIs:
@@ -112,8 +113,8 @@ path between `https://example.com/schemas/order.json` and
 host, or one with no file there, is not read. A variable's schema in `jlens.json` refers to
 files from the folder of `jlens.json`. For each document that was not found, each `$ref`
 to a place its document does not have, and each keyword not read, `jlens check`, `jlens schema uses` and
-`jlens schema complete` print a `warning:` line on standard error, and the language server
-shows a message; the exit code does not change, and `--deny-warnings` counts the warnings of
+`jlens schema complete` print a `warning:` line on standard error, and one more that names the
+open tuples, and the language server shows a message for each line; the exit code does not change, and `--deny-warnings` counts the warnings of
 expressions only. A file that is there and is not JSON fails the command, as a schema that
 is not JSON does.
 
@@ -185,6 +186,15 @@ does: nothing is completed or warned about under it. The report beside the schem
 one under `unread`, with `place`, the schema that has it (`#/properties/children/items`), and
 `keyword`. The CLI and the language server warn about each, as they do about a document not
 found.
+
+A tuple with no schema for the rest and no `maxItems` that keeps the array to it is read, and
+its positions are typed, but it may say less than its author meant: JSON Schema allows any item
+after it, so `point.($ > "a")` and `point[2]` are not checked for a `point` meant as two
+numbers. The report lists each one under `openTuples`, with its `place` (`#/properties/point`),
+and the CLI and the language server name them in one warning. `"items": false` after
+`prefixItems`, `"additionalItems": false` in draft-07, or `maxItems` closes the tuple; `true`
+in place of `false` says that it is open on purpose, and it is no longer listed. Nor is a tuple
+whose schema knows its items by a `$ref` or a branch of `allOf`.
 
 Left out, a narrowing keyword can still leave the typing less sure than the schema is: with
 `not: {"type": "null"}`, a field may still be `null` to it, and a field that `then` requires

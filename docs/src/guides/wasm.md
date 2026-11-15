@@ -554,14 +554,18 @@ const report = schemaReport(order, sources);
 //                  uri: "https://example.com/schemas/carrier.json",
 //                  document: "https://example.com/schemas/carrier.json" }] }
 // {} when every $ref was followed; `unread` lists the keywords not read, as
-// [{ place: "#/properties/code", keyword: "type" }] for a type that names no JSON type
+// [{ place: "#/properties/code", keyword: "type" }] for a type that names no JSON type,
+// and `openTuples` the tuples that any item may follow, as [{ place: "#/properties/point" }]
 ```
 
 A `$ref` that is not followed does not fail the service: its place is unknown, and nothing is
 completed or warned about under it. `schemaReport` lists those `$ref`s, each with the
 `document` to add to `documents`; an application that can fetch them does, and makes the
 service again. A keyword the load does not read leaves its place unknown too, and `unread`
-lists it (the [schema guide](schema.md#the-keywords-jlens-reads) lists the keywords). The documents serve the schemas of the variables too; `uri` is that of the
+lists it (the [schema guide](schema.md#the-keywords-jlens-reads) lists the keywords). A tuple
+that says nothing of the items after it is read, and `openTuples` lists it: its items are
+checked only at a literal index inside it, which may be less than the schema's author meant.
+The documents serve the schemas of the variables too; `uri` is that of the
 input's schema alone. Both throw a `TypeError` for sources that are not in this form.
 
 ### The type of the result, and the context

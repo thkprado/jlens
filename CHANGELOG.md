@@ -17,6 +17,17 @@ All notable changes are recorded here. The format follows
   computed one has the type of every item, as before. `Shape::prefix_items` holds the
   positions, `prefixItems` in the JSON form of a shape and in what `to_json_schema` writes,
   and an override at `point[]` sets each position too.
+- The load of a JSON Schema tells the tuples that say nothing of the items after them: a
+  tuple with no `items` after `prefixItems`, no `additionalItems`, no `unevaluatedItems` and
+  no `maxItems` that keeps the array to it. JSON Schema allows any item after such a tuple, so
+  its items are checked only at a literal index inside it, which may be less than its author
+  meant. The report lists each with the place of its schema (`LoadReport::open_tuples`,
+  `OpenTuple`), apart from the keywords not read, as the tuple is read. The JSON form of every
+  package has them as `openTuples`; Java has `Schema.openTuples()` and `OpenTuple`; the CLI
+  and the language server name them in one warning for each schema, which does not change the
+  exit code. `false` for the rest or `maxItems` closes a tuple, and `true` for the rest says
+  that it is open on purpose: neither is listed. `LoadReport::is_empty` is `false` for a
+  report with such a tuple.
 
 ### Changed
 

@@ -477,11 +477,14 @@ fn documents() -> impl Strategy<Value = (Value, Value)> {
         "other.json#missing",
         "%zz#%FF",
     ]);
-    let place = (target, 0..5u8).prop_map(|(target, form)| match form {
+    let place = (target, 0..7u8).prop_map(|(target, form)| match form {
         0 => json!({"$ref": target}),
         1 => json!({"$ref": target, "type": "object", "properties": {"own": {"type": "string"}}}),
         2 => json!({"anyOf": [{"$ref": target}, {"type": "null"}]}),
         3 => json!({"type": "array", "items": {"$ref": target}}),
+        // Tuples that say nothing of the items after them, beside a `$ref` and alone.
+        4 => json!({"$ref": target, "prefixItems": [{"$ref": target}, {"type": "string"}]}),
+        5 => json!({"type": "array", "items": [{"$ref": target}]}),
         _ => json!({"type": "string", "enum": ["a", "b"]}),
     });
     prop::collection::vec(place, 10).prop_map(|p| {
@@ -524,6 +527,16 @@ proptest! {
             };
             for unresolved in &report.unresolved {
                 prop_assert!(unresolved.place.contains("#/"), "{:?}", unresolved);
+            }
+            // An open tuple is told at the place of a schema that has one.
+            for tuple in &report.open_tuples {
+                let (uri, pointer) = tuple.place.split_once('#').unwrap();
+                let document = if uri == "main.json" { &main } else { &other };
+                let schema = document.pointer(pointer);
+                let is_tuple = |s: &Value| {
+                    s.get("prefixItems").is_some() || s.get("items").is_some_and(Value::is_array)
+                };
+                prop_assert!(schema.is_some_and(is_tuple), "{:?}", tuple);
             }
             let service = LanguageService::new(Some(schema.clone()));
             for d in service.diagnostics(&text) {

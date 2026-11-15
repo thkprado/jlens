@@ -522,7 +522,8 @@ fn a_schema_follows_the_files_beside_it() {
         "schemas/order.json",
         r#"{"$id": "https://example.com/s/order.json", "type": "object", "properties": {
             "customer": {"$ref": "../shared/common.json#/$defs/person"},
-            "carrier": {"$ref": "carrier.json"}}}"#,
+            "carrier": {"$ref": "carrier.json"},
+            "point": {"type": "array", "prefixItems": [{"type": "number"}]}}}"#,
     );
     folder.write(
         "shared/common.json",
@@ -544,9 +545,14 @@ fn a_schema_follows_the_files_beside_it() {
         .filter(|n| n.method == "window/showMessage")
         .map(|n| n.params["message"].as_str().unwrap())
         .collect();
-    assert_eq!(shown.len(), 1, "{shown:?}");
+    // And the schema's tuple, which says nothing of the items after it (roadmap 0.35 #6).
+    assert_eq!(shown.len(), 2, "{shown:?}");
     assert!(
         shown[0].contains("https://example.com/s/carrier.json"),
+        "{shown:?}"
+    );
+    assert!(
+        shown[1].contains("1 tuple(s)") && shown[1].contains("#/properties/point"),
         "{shown:?}"
     );
     client.shutdown();

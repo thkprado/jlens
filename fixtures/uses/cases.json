@@ -1063,6 +1063,17 @@
                   "string",
                   "int"
                 ]
+              },
+              "point": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
               }
             }
           }
@@ -1093,6 +1104,11 @@
         {
           "place": "https://example.com/schemas/common.json#/$defs/person/properties/code",
           "keyword": "type"
+        }
+      ],
+      "openTuples": [
+        {
+          "place": "https://example.com/schemas/common.json#/$defs/person/properties/point"
         }
       ]
     },

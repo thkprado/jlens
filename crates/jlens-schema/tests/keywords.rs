@@ -1,5 +1,6 @@
 //! The JSON Schema keywords a load reads, those it leaves out because they only narrow what a
-//! place may hold, and those it reports as not read ([`LoadReport::unread`]).
+//! place may hold, and those it reports as not read ([`LoadReport::unread`]); and the tuples
+//! it tells are open ([`LoadReport::open_tuples`]).
 
 use jlens_schema::{JsonType, LanguageService, LoadReport, Schema, SchemaLoader};
 use proptest::prelude::*;
@@ -86,7 +87,11 @@ fn order_samples() -> [Value; 3] {
 #[test]
 fn conditional_fields_are_optional_fields() {
     let (service, report) = load(&order());
-    assert!(report.is_empty(), "{report:?}");
+    // Everything is read; its two open tuples are told (`open_tuples_are_told`).
+    assert!(
+        report.unread.is_empty() && report.unresolved.is_empty(),
+        "{report:?}"
+    );
     for text in ["tax", "age", "guardian", "age + 1", "guardian & 'x'"] {
         assert!(
             codes(&service, text).is_empty(),
@@ -202,7 +207,7 @@ fn the_items_of_a_tuple() {
 #[test]
 fn nullable_adds_null() {
     let (service, report) = load(&order());
-    assert!(report.is_empty());
+    assert!(report.unread.is_empty());
     assert!(codes(&service, "note = null").is_empty());
     let schema = Schema::from_json_schema(&json!({
         "properties": {
@@ -334,6 +339,110 @@ fn keywords_not_read_are_reported() {
         report.unread[0].place,
         "https://example.com/a.json#/$defs/d"
     );
+}
+
+#[test]
+fn open_tuples_are_told() {
+    // `point` and the `point` of the cells say nothing of the items after them; `lines` has
+    // `items` for the rest, and `rows` closes its tuple.
+    let (service, report) = load(&order());
+    let places: Vec<&str> = (report.open_tuples.iter())
+        .map(|t| t.place.as_str())
+        .collect();
+    let cell = "#/properties/cells/items/items/properties/point";
+    assert_eq!(places, ["#/properties/point", cell]);
+    assert!(!report.is_empty());
+    // The JSON form every package gives.
+    assert_eq!(
+        serde_json::to_value(&report).unwrap(),
+        json!({"openTuples": [{"place": "#/properties/point"}, {"place": cell}]})
+    );
+    // The tuple is read all the same: a literal index inside it is checked, and nothing else.
+    assert_eq!(codes(&service, "point[1] > 'a'"), ["W0208"]);
+    assert!(codes(&service, "point[2] > 'a'").is_empty());
+    assert!(codes(&service, "point.($ > 'a')").is_empty());
+
+    // What says what follows the tuple, or that it is all there is, leaves nothing to tell;
+    // `true` says that the tuple is open on purpose.
+    let pair = json!([{"type": "number"}, {"type": "number"}]);
+    for (rest, open) in [
+        (json!({"items": pair}), true),
+        (json!({"items": pair, "maxItems": 3}), true),
+        (json!({"items": pair, "minItems": 2}), true),
+        (json!({"items": pair, "contains": {"const": 1}}), true),
+        (json!({"items": pair, "maxItems": 2}), false),
+        (json!({"items": pair, "maxItems": 1}), false),
+        (json!({"items": pair, "additionalItems": false}), false),
+        (json!({"items": pair, "additionalItems": true}), false),
+        (
+            json!({"items": pair, "additionalItems": {"type": "string"}}),
+            false,
+        ),
+        (json!({"items": pair, "unevaluatedItems": false}), false),
+        (
+            json!({"items": pair, "unevaluatedItems": false, "contains": {"const": 1}}),
+            false,
+        ),
+        // The items a branch gives are known, whatever follows the tuple.
+        (
+            json!({"items": pair, "allOf": [{"items": {"type": "number"}}]}),
+            false,
+        ),
+        (json!({"prefixItems": pair}), true),
+        (json!({"prefixItems": pair, "items": false}), false),
+        (json!({"prefixItems": pair, "items": true}), false),
+        (
+            json!({"prefixItems": pair, "items": {"type": "number"}}),
+            false,
+        ),
+        (json!({"prefixItems": []}), false),
+        (json!({"items": {"type": "number"}}), false),
+    ] {
+        let (_, report) = load(&json!({"properties": {"point": rest}}));
+        let places: Vec<&str> = (report.open_tuples.iter())
+            .map(|t| t.place.as_str())
+            .collect();
+        let expected: &[&str] = if open { &["#/properties/point"] } else { &[] };
+        assert_eq!(places, expected, "{rest}");
+        assert!(report.unread.is_empty() && report.unresolved.is_empty());
+    }
+
+    // A tuple met twice, through two `$ref`s, is told once, at its place in a document given
+    // with a URI; one that nothing of the schema leads to is not read, and so not told.
+    let (_, report) = SchemaLoader::new()
+        .load_at(
+            "https://example.com/a.json",
+            &json!({
+                "properties": {"x": {"$ref": "#/$defs/d"}, "y": {"$ref": "#/$defs/d"}},
+                "$defs": {"d": {"prefixItems": pair}, "unused": {"prefixItems": pair}}
+            }),
+        )
+        .unwrap();
+    assert_eq!(report.open_tuples.len(), 1);
+    assert_eq!(
+        report.open_tuples[0].place,
+        "https://example.com/a.json#/$defs/d"
+    );
+
+    // Beside a `$ref` that is not followed and a keyword that is not read, each in its list.
+    let (_, report) = load(&json!({
+        "properties": {
+            "a": {"$ref": "gone.json", "prefixItems": pair},
+            "b": {"type": "int", "prefixItems": pair},
+            "c": {"type": "array", "items": {"prefixItems": pair}}
+        }
+    }));
+    let places: Vec<&str> = (report.open_tuples.iter())
+        .map(|t| t.place.as_str())
+        .collect();
+    assert_eq!(places, ["#/properties/a", "#/properties/c/items"]);
+    assert_eq!(report.unresolved[0].place, "#/properties/a");
+    assert_eq!(report.unread[0].place, "#/properties/b");
+
+    // What `to_json_schema` writes of an open tuple is read back as one.
+    let schema = Schema::from_json_schema(&json!({"properties": {"point": {"items": pair}}}));
+    let (_, report) = load(&schema.unwrap().to_json_schema());
+    assert_eq!(report.open_tuples[0].place, "#/properties/point");
 }
 
 /// The schema of the second property test: `anyOf` and `oneOf`, whose values have the shape of

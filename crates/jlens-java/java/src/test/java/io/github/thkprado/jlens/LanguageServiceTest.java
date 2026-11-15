@@ -225,6 +225,7 @@ class LanguageServiceTest {
             assertEquals(List.of(), whole.unresolved());
             assertEquals(List.of(), whole.missingDocuments());
             assertEquals(List.of(), whole.unread());
+            assertEquals(List.of(), whole.openTuples());
         }
 
         // A keyword the load does not read leaves its place unknown, and is listed.
@@ -241,6 +242,24 @@ class LanguageServiceTest {
             assertEquals(List.of(), service.diagnostics("[children.anything, code + 1]"));
             assertThrows(UnsupportedOperationException.class, () -> unread.unread().clear());
         }
+
+        // A tuple that says nothing of the items after it is read, and listed: a literal index
+        // inside it is checked, and a step over its items is not.
+        String tuples = """
+                {"type": "object", "properties": {
+                    "point": {"type": "array", "prefixItems": [{"type": "number"}]},
+                    "pair": {"type": "array", "prefixItems": [{"type": "number"}], "items": false},
+                    "any": {"type": "array", "prefixItems": [{"type": "number"}], "items": true}}}""";
+        try (Schema open = Schema.fromJson(tuples);
+             LanguageService service = LanguageService.of(open)) {
+            assertEquals(List.of(new OpenTuple("#/properties/point")), open.openTuples());
+            assertEquals(List.of(), open.unread());
+            assertEquals(List.of("W0208"),
+                    service.diagnostics("point[0] > 'a'").stream().map(Diagnostic::code).toList());
+            assertEquals(List.of(), service.diagnostics("point[1] > 'a'"));
+            assertThrows(UnsupportedOperationException.class, () -> open.openTuples().clear());
+        }
+        assertThrows(NullPointerException.class, () -> new OpenTuple(null));
 
         JlensException notJson = assertThrows(JlensException.class,
                 () -> Schema.loader().document("a.json", "{\"type\": ").load("{}"));

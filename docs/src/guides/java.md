@@ -465,7 +465,12 @@ each document with its URI (the [schema guide](schema.md#a-schema-in-several-doc
 - **`schema.unread()`** lists the keywords the load did not read, whose places are unknown as
   well, as `UnreadKeyword` records: `place()`, the schema that has one, and `keyword()`
   (`$dynamicRef`, `$recursiveRef`, or a `type` that names no JSON type; the
-  [schema guide](schema.md#the-keywords-jlens-reads) lists the keywords). The three lists are
+  [schema guide](schema.md#the-keywords-jlens-reads) lists the keywords).
+- **`schema.openTuples()`** lists the tuples that say nothing of the items after them, as
+  `OpenTuple` records with their `place()`. They are read, unlike the places above, but any
+  item may follow them, so their items are checked only at a literal index inside the tuple,
+  which may be less than the schema's author meant (the
+  [schema guide](schema.md#the-keywords-jlens-reads) says what closes one). These lists are
   read with the schema, and are there after it is closed.
 
 ## What an expression uses of its schema

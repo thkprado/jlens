@@ -377,7 +377,10 @@ export interface ResultType {
  */
 export type ResultCheck = "always" | "never" | "maybe" | "unknown";
 
-/** What a load did not read of its JSON Schema, given by `schemaReport()`. */
+/**
+ * What a load has to tell of its JSON Schema, given by `schemaReport()`: what it did not read,
+ * and the tuples it read that say nothing of the items after them.
+ */
 export interface LoadReport {
   /**
    * The `$ref`s that were not followed, in the order the load met them; absent when every one
@@ -391,6 +394,24 @@ export interface LoadReport {
    * out without a word, as they cannot.
    */
   unread?: UnreadKeyword[];
+  /**
+   * The tuples that say nothing of the items after them, in the order the load met them; absent
+   * when there is none. Any item may follow such a tuple, so the items of its array are checked
+   * only at a literal index inside it. Unlike the places of the other two lists, these were
+   * read: the list tells where a schema may say less than its author meant.
+   */
+  openTuples?: OpenTuple[];
+}
+
+/**
+ * A tuple that says nothing of the items after it: `prefixItems`, or `items` as an array until
+ * draft-07, with no schema for the rest (`items`, `additionalItems`, `unevaluatedItems`) and no
+ * `maxItems` that keeps the array to the tuple. `false` for the rest, or `maxItems`, closes the
+ * tuple, and `true` says that it is open on purpose: neither is listed.
+ */
+export interface OpenTuple {
+  /** Where the schema that has the tuple is, as `UnresolvedRef.place` gives it. */
+  place: string;
 }
 
 /** A keyword that a load did not read: the place of the schema that has it is unknown. */

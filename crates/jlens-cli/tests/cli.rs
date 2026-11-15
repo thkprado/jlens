@@ -919,14 +919,15 @@ fn a_schema_follows_the_files_beside_it() {
             let (code, uses, warned) = run(&["schema", "uses", "--schema", &schema, expression]);
             assert_eq!(code, Some(0), "{warned}");
             // One line for each document that was not found, one for the place that the
-            // document found does not have, and one for the `type` of `code` in that document,
-            // which names no JSON type (roadmap 0.34 #10).
+            // document found does not have, one for the `type` of `code` in that document,
+            // which names no JSON type (roadmap 0.34 #10), and one for its open tuple (0.35 #6).
             let missing: &[&str] = match folder {
                 "schemas" => &[
                     "address.json",
                     "carrier.json",
                     "common.json#/$defs/discount",
                     "common.json#/$defs/person/properties/code",
+                    "common.json#/$defs/person/properties/point",
                 ],
                 _ => &["common.json", "carrier.json"],
             };
@@ -981,9 +982,16 @@ fn a_schema_follows_the_files_beside_it() {
         "rules/a.jsonata",
     ]);
     assert_eq!(code, Some(1), "two unknown fields: {warned}");
-    // Each of the schema and `$buyer` reads the `code` of `person`, whose `type` is not read.
-    assert_eq!(warned.lines().count(), 7, "{warned}");
+    // Each of the schema and `$buyer` reads the `code` of `person`, whose `type` is not read,
+    // and its `point`, a tuple that says nothing of the items after it.
+    assert_eq!(warned.lines().count(), 9, "{warned}");
     assert_eq!(warned.matches("names what is not a JSON type").count(), 2);
+    assert_eq!(
+        warned
+            .matches("1 tuple(s) say nothing of the items after them")
+            .count(),
+        2
+    );
     assert!(warned.contains("warning: variable $seller: "), "{warned}");
     assert!(warned.contains("warning: variable $buyer: "), "{warned}");
     let (code, found, _) = run(&["check", "--json", "-f", "rules/a.jsonata"]);
@@ -1000,8 +1008,8 @@ fn a_schema_follows_the_files_beside_it() {
     assert_eq!(code, Some(0), "{warned}");
     assert_eq!(
         warned.lines().count(),
-        5,
-        "four warnings and `ok`: {warned}"
+        6,
+        "five warnings and `ok`: {warned}"
     );
 
     // A file beside the schema that is not JSON fails the command.

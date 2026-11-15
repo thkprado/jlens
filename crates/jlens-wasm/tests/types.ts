@@ -22,6 +22,7 @@ import init, {
   type LoadReport,
   type UnresolvedRef,
   type UnreadKeyword,
+  type OpenTuple,
   type JsonType,
   type ResultCheck,
   type ResultType,
@@ -126,7 +127,9 @@ export async function check(): Promise<void> {
   const missingDocument: string | undefined = unresolved?.document;
   const unread: UnreadKeyword | undefined = report.unread?.[0];
   const keyword: string | undefined = unread?.keyword;
-  console.log(required, usesOfLimit, typesBefore, valuesAdded, located, missingDocument, keyword);
+  const openTuple: OpenTuple | undefined = report.openTuples?.[0];
+  const tuplePlace: string | undefined = openTuple?.place;
+  console.log(required, usesOfLimit, typesBefore, valuesAdded, located, missingDocument, keyword, tuplePlace);
   const options: ServiceOptions = { schema, resultType: ["number", "string"], contextPath: "items[]" };
   const expecting = new LanguageService(options);
   // @ts-expect-error: the arguments are not positional, as they were before 0.35

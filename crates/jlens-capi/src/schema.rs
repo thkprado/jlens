@@ -112,14 +112,15 @@ fn schema_text(text: u64, sources: u64) -> Result<Vec<u8>, Vec<u8>> {
     handle_reply(SCHEMAS.insert(Loaded { schema, report }))
 }
 
-/// Replies with what the load of schema `schema` did not read (ADR 0025), as JSON text: an
+/// Replies with what the load of schema `schema` tells (ADR 0025), as JSON text: an
 /// object whose `unresolved` lists the `$ref`s that were not followed, in the order the load
 /// met them, each with `place` (where it is written: its document's URI and a JSON Pointer),
 /// `reference` (its text), `uri` (what it resolves to) and `document`, the URI of the document
 /// that was not given, absent when the document is there without that place; and whose
 /// `unread` lists the keywords that were not read, each with `place` (the schema that has it)
-/// and `keyword` (`$dynamicRef`, `$recursiveRef`, or a `type` that names no JSON type). `{}`
-/// when everything was read.
+/// and `keyword` (`$dynamicRef`, `$recursiveRef`, or a `type` that names no JSON type); and
+/// whose `openTuples` lists the tuples that were read and say nothing of the items after them,
+/// each with `place`. `{}` when everything was read and no tuple is open.
 pub fn schema_report(schema: u64) -> u64 {
     reply(report_text(schema))
 }

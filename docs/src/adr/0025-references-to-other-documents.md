@@ -81,7 +81,9 @@ each refer twice to the next double at each level: 20 levels, a document of 1.9 
 - **One JSON form of the report**, that of `LoadReport`: `{"unresolved": [{"place",
   "reference", "uri", "document"}]}`, `document` absent when the document is there without
   the place, and `{}` when every `$ref` was followed. 0.34 #10 added a second member,
-  `"unread": [{"place", "keyword"}]`, the keywords not read whose places are left unknown. `fixtures/uses/cases.json` has, under
+  `"unread": [{"place", "keyword"}]`, the keywords not read whose places are left unknown, and
+  0.35 #6 a third, `"openTuples": [{"place"}]`, the tuples that are read and say nothing of
+  the items after them. `fixtures/uses/cases.json` has, under
   `references`, a schema of two documents, its report with the other document and alone, and
   for two expressions what each uses and what giving the document changes; the Rust crate,
   the C API, the Java package, the WebAssembly package and the CLI each answer it.

@@ -47,6 +47,7 @@ public final class Schema implements AutoCloseable {
     private final Cleaner.Cleanable cleanable;
     private final List<UnresolvedRef> unresolved;
     private final List<UnreadKeyword> unread;
+    private final List<OpenTuple> openTuples;
     private volatile boolean closed;
 
     private Schema(long handle) {
@@ -56,6 +57,7 @@ public final class Schema implements AutoCloseable {
             String report = Native.json(Native.schemaReport(handle));
             this.unresolved = report(report, "unresolved", UnresolvedRef::of);
             this.unread = report(report, "unread", UnreadKeyword::of);
+            this.openTuples = report(report, "openTuples", OpenTuple::of);
         } catch (RuntimeException | Error e) {
             cleanable.clean();
             throw e;
@@ -150,6 +152,24 @@ public final class Schema implements AutoCloseable {
      */
     public List<UnreadKeyword> unread() {
         return unread;
+    }
+
+    /**
+     * The tuples that say nothing of the items after them, in the order the load met them:
+     * {@code prefixItems}, or {@code items} as an array until draft-07, with no schema for the
+     * rest and no {@code maxItems} that keeps the array to the tuple. Any item may follow such
+     * a tuple, so the items of its array are checked only at a literal index inside it. Unlike
+     * the places of {@link #unresolved()} and {@link #unread()}, these were read: the list
+     * tells where the schema may say less than its author meant. {@code false} for the rest,
+     * or {@code maxItems}, closes a tuple, and {@code true} says that it is open on purpose:
+     * neither is listed.
+     *
+     * <p>The list is read when the schema is made: it is there after the schema is closed.
+     *
+     * @return the tuples, which cannot be changed; empty when none is open
+     */
+    public List<OpenTuple> openTuples() {
+        return openTuples;
     }
 
     /**

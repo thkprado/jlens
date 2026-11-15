@@ -14,9 +14,9 @@
 //! | `x-jlens-domain` | An open domain: an identifier the application fetches the values of |
 //! | `x-jlens-samples` | (root) Number of sample documents inferred from |
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use serde::Serialize;
 use serde_json::{Map, Value as JsonValue, json};
 
@@ -269,7 +269,8 @@ impl<'d> SchemaLoader<'d> {
     }
 }
 
-/// What a load did not read of its JSON Schema ([`SchemaLoader::load`]).
+/// What a load has to tell of its JSON Schema ([`SchemaLoader::load`]): what it did not read,
+/// and the tuples it read that say nothing of the items after them.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct LoadReport {
@@ -283,12 +284,18 @@ pub struct LoadReport {
     /// without a word, as they cannot.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unread: Vec<UnreadKeyword>,
+    /// The tuples that say nothing of the items after them, in the order the load met them:
+    /// any item may follow, so the items of the array are known only at a literal index inside
+    /// the tuple. Unlike the places of the other two lists, these were read: the list tells
+    /// where a schema may say less than its author meant.
+    #[serde(rename = "openTuples", skip_serializing_if = "Vec::is_empty")]
+    pub open_tuples: Vec<OpenTuple>,
 }
 
 impl LoadReport {
-    /// Whether everything was read.
+    /// Whether the load has nothing to tell: everything was read, and no tuple is open.
     pub fn is_empty(&self) -> bool {
-        self.unresolved.is_empty() && self.unread.is_empty()
+        self.unresolved.is_empty() && self.unread.is_empty() && self.open_tuples.is_empty()
     }
 
     /// The URIs of the documents that were not given, each once: with them, the load would
@@ -341,6 +348,30 @@ pub struct UnreadKeyword {
     /// The keyword: `$dynamicRef` or `$recursiveRef`, which the scope of a validation
     /// resolves, or `type` with a name that is not a JSON type.
     pub keyword: String,
+}
+
+/// A tuple that says nothing of the items after it: `prefixItems`, or `items` as an array
+/// until draft-07, with no schema for the rest (`items`, `additionalItems`,
+/// `unevaluatedItems`) and no `maxItems` that keeps the array to the tuple. JSON Schema then
+/// allows any item after the tuple, so a step over the array, an index past the tuple and a
+/// computed one are not checked; a literal index inside the tuple is. `false` for the rest, or
+/// `maxItems`, closes the tuple, and `true` says that it is open on purpose: neither is listed.
+///
+/// ```
+/// use jlens_schema::SchemaLoader;
+/// use serde_json::json;
+///
+/// let point = json!({"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}]});
+/// let (_, report) = SchemaLoader::new()
+///     .load(&json!({"properties": {"point": point}}))
+///     .unwrap();
+/// assert_eq!(report.open_tuples[0].place, "#/properties/point");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct OpenTuple {
+    /// Where the schema that has the tuple is, as [`UnresolvedRef::place`] gives it.
+    pub place: String,
 }
 
 /// The `$ref` to the document itself.
@@ -781,6 +812,9 @@ struct Importer<'d> {
     /// The schemas the import met with a keyword it does not read: their addresses, and the
     /// keyword.
     unread: IndexMap<usize, &'static str>,
+    /// The schemas the import met with a tuple that says nothing of the items after it: their
+    /// addresses.
+    open_tuples: IndexSet<usize>,
     definitions: Definitions,
     /// The definitions still to read: their names and their targets.
     pending: Vec<(String, &'d JsonValue)>,
@@ -853,6 +887,7 @@ impl<'d> Importer<'d> {
             missing,
             unresolved: IndexMap::new(),
             unread: IndexMap::new(),
+            open_tuples: IndexSet::new(),
             definitions: Definitions::new(),
             pending: Vec::new(),
         }
@@ -912,21 +947,19 @@ impl<'d> Importer<'d> {
         })
     }
 
-    /// What the import did not follow or read, with the place of each schema.
+    /// What the import did not follow or read, and the open tuples it met, with the place of
+    /// each schema.
     fn report(&self) -> LoadReport {
         let mut report = LoadReport::default();
-        if self.unresolved.is_empty() && self.unread.is_empty() {
+        // The places are looked for only now, as most loads have nothing to report.
+        let wanted: HashSet<usize> = (self.unresolved.keys())
+            .chain(self.unread.keys())
+            .chain(&self.open_tuples)
+            .copied()
+            .collect();
+        if wanted.is_empty() {
             return report;
         }
-        // The places are looked for only now, as most loads have nothing to report.
-        let wanted =
-            |node: usize| self.unresolved.contains_key(&node) || self.unread.contains_key(&node);
-        let count = self
-            .unread
-            .keys()
-            .filter(|node| !self.unresolved.contains_key(*node))
-            .count()
-            + self.unresolved.len();
         let mut places: HashMap<usize, String> = HashMap::new();
         'documents: for (uri, document) in &self.documents {
             let mut pending = vec![(*document, String::new())];
@@ -946,11 +979,11 @@ impl<'d> Importer<'d> {
                         .collect(),
                     _ => continue,
                 };
-                if wanted(address(node)) {
+                if wanted.contains(&address(node)) {
                     places
                         .entry(address(node))
                         .or_insert_with(|| format!("{uri}#{pointer}"));
-                    if places.len() == count {
+                    if places.len() == wanted.len() {
                         break 'documents;
                     }
                 }
@@ -973,6 +1006,11 @@ impl<'d> Importer<'d> {
             report.unread.push(UnreadKeyword {
                 place: places.get(node).cloned().unwrap_or_default(),
                 keyword: (*keyword).to_owned(),
+            });
+        }
+        for node in &self.open_tuples {
+            report.open_tuples.push(OpenTuple {
+                place: places.get(node).cloned().unwrap_or_default(),
             });
         }
         report
@@ -1077,7 +1115,9 @@ impl<'d> Importer<'d> {
             }
             add_type(&mut shape, "object");
         }
-        self.import_items(map, &mut shape, depth)?;
+        if self.import_items(map, &mut shape, depth)? {
+            self.open_tuples.insert(address(node));
+        }
         // What holds for some of the values only: the fields it declares may be there.
         let mut conditions = Vec::new();
         if map.contains_key("if") {
@@ -1158,12 +1198,15 @@ impl<'d> Importer<'d> {
     /// until draft-07) and one for the rest (`items` after `prefixItems`, `additionalItems`).
     /// The first items and the rest are merged, as a step over the array takes them all, and
     /// the first items are kept by position too ([`Shape::prefix_items`]), for a literal index.
+    ///
+    /// Answers whether the schema has an open tuple to report ([`OpenTuple`]): one with
+    /// nothing that says what follows it, in a schema that does not know its items otherwise.
     fn import_items(
         &mut self,
         map: &'d Map<String, JsonValue>,
         shape: &mut Shape,
         depth: usize,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         let (tuple, rest) = match (map.get("prefixItems"), map.get("items")) {
             (Some(JsonValue::Array(tuple)), rest) => (Some(tuple), rest),
             (_, Some(JsonValue::Array(tuple))) => (Some(tuple), map.get("additionalItems")),
@@ -1189,7 +1232,7 @@ impl<'d> Importer<'d> {
                 }
                 add_type(shape, "array");
             }
-            return Ok(());
+            return Ok(false);
         };
         let mut positions = Vec::with_capacity(tuple.len());
         for item in tuple {
@@ -1199,6 +1242,13 @@ impl<'d> Importer<'d> {
             .get("maxItems")
             .and_then(JsonValue::as_u64)
             .is_some_and(|n| n <= tuple.len() as u64);
+        // Nothing says what follows the tuple, not even an `unevaluatedItems` that `contains`
+        // keeps from being the rest; the items a `$ref` or a branch gives are known all the same.
+        let open = rest.is_none()
+            && !closed
+            && !tuple.is_empty()
+            && !map.contains_key("unevaluatedItems")
+            && shape.items.is_none();
         let rest = match rest {
             Some(rest @ JsonValue::Object(_)) => Some(Some(self.import(rest, depth + 1)?)),
             Some(JsonValue::Bool(false)) => Some(None),
@@ -1222,7 +1272,7 @@ impl<'d> Importer<'d> {
         let before = std::mem::replace(&mut shape.prefix_items, positions);
         merge_positions(&mut shape.prefix_items, before);
         add_type(shape, "array");
-        Ok(())
+        Ok(open)
     }
 }
 

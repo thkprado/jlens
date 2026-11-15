@@ -932,6 +932,18 @@ export const cases = [
       ],
     }, "keywords not read");
     equal(codes(new j.LanguageService({ schema: tree }), "[children.anything, code + 1]"), [], "unknown under them");
+    // A tuple that says nothing of the items after it is read, and told: `false` or `true` for the rest says it.
+    const number = { type: "number" };
+    const tuples = { properties: {
+      point: { type: "array", prefixItems: [number] },
+      pair: { type: "array", prefixItems: [number], items: false },
+      any: { type: "array", items: [number], additionalItems: true },
+      old: { type: "array", items: [number] },
+    } };
+    equal(j.schemaReport(tuples), {
+      openTuples: [{ place: "#/properties/point" }, { place: "#/properties/old" }],
+    }, "open tuples");
+    equal(codes(new j.LanguageService({ schema: tuples }), "[point[0] > 'a', point[1] > 'a']"), ["W0208"], "checked inside the tuple");
     equal(j.schemaReport(person, null), {});
     equal(j.schemaReport(person, { uri: null, documents: null }), {});
     for (const bad of [[], 1, { url: "a" }, { uri: 1 }, { documents: [] }]) {

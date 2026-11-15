@@ -95,7 +95,8 @@ pub struct Made {
     /// What could not be read, which left a part of the settings out: a missing schema, an
     /// invalid variable schema.
     pub problems: Vec<String>,
-    /// What the schemas did not follow ([`notes`]): the service leaves those places unknown.
+    /// What the loads of the schemas tell ([`notes`]): the places the service leaves unknown,
+    /// and the tuples that are open.
     pub notes: Vec<String>,
 }
 
@@ -140,8 +141,9 @@ fn read(path: &Path) -> Result<Value, String> {
 }
 
 /// What a load did not follow or read, for a person: a line for each document that was not
-/// found, one for each `$ref` to a place its document does not have, and one for each keyword
-/// that was not read. `what` names the schema.
+/// found, one for each `$ref` to a place its document does not have, one for each keyword
+/// that was not read, and one for the tuples that say nothing of the items after them. `what`
+/// names the schema.
 pub fn notes(what: &str, report: &LoadReport) -> Vec<String> {
     let mut notes = Vec::new();
     for document in report.documents() {
@@ -170,6 +172,24 @@ pub fn notes(what: &str, report: &LoadReport) -> Vec<String> {
         notes.push(format!(
             "{what}: {} at {} {why}: nothing is checked under it",
             unread.keyword, unread.place
+        ));
+    }
+    // One line for them all: a schema may be full of tuples that are open on purpose.
+    if let Some(first) = report.open_tuples.first() {
+        /// The places one line names.
+        const NAMED: usize = 3;
+        let count = report.open_tuples.len();
+        let mut places = first.place.clone();
+        for tuple in report.open_tuples.iter().take(NAMED).skip(1) {
+            places.push_str(", ");
+            places.push_str(&tuple.place);
+        }
+        if count > NAMED {
+            places.push_str(&format!(" and {} more", count - NAMED));
+        }
+        notes.push(format!(
+            "{what}: {count} tuple(s) say nothing of the items after them, at {places}: their \
+             items are checked only at a literal index inside the tuple"
         ));
     }
     notes
@@ -364,6 +384,36 @@ mod tests {
             assert!(err.contains(&format!("`{old}` is now `{new}`")), "{err}");
         }
         assert!(parse(&json!({"[": {}}), root).is_err());
+    }
+
+    #[test]
+    fn open_tuples_share_one_note() {
+        let tuple = json!({"prefixItems": [{"type": "number"}]});
+        let schema = |count: usize| {
+            let properties: serde_json::Map<String, Value> = (0..count)
+                .map(|i| (format!("p{i}"), tuple.clone()))
+                .collect();
+            json!({"properties": properties})
+        };
+        let note = |count: usize| {
+            let (_, report) = SchemaLoader::new().load(&schema(count)).unwrap();
+            notes("schema s.json", &report)
+        };
+        assert_eq!(note(0), [""; 0]);
+        assert_eq!(
+            note(2),
+            [
+                "schema s.json: 2 tuple(s) say nothing of the items after them, at \
+              #/properties/p0, #/properties/p1: their items are checked only at a literal \
+              index inside the tuple"
+            ]
+        );
+        let many = note(5);
+        assert_eq!(many.len(), 1);
+        assert!(
+            many[0].contains("at #/properties/p0, #/properties/p1, #/properties/p2 and 2 more:"),
+            "{many:?}"
+        );
     }
 
     #[test]
