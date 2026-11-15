@@ -2,7 +2,9 @@
 
 How the measurements of roadmap 0.35 were made: methods, traps and intermediate numbers that the
 [performance page](../src/architecture/performance.md) leaves out. The item numbers are those of
-the plan, in [the roadmap](../src/architecture/roadmap.md#035-the-choices-of-034-reviewed).
+the plan, whose table the tag keeps in
+[the roadmap](https://github.com/thkprado/jlens/blob/v0.35.0/docs/src/architecture/roadmap.md#035-the-choices-of-034-reviewed);
+[the roadmap's history](../src/architecture/roadmap-history.md#035) sums it up.
 
 ## #7: documents as variables in the Java package
 

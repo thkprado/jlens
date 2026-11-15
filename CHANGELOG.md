@@ -6,6 +6,19 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.35.0]
+
+The choices of 0.34 reviewed. The expected result type and the path of the context are named
+`resultType` and `contextPath` everywhere, and the WebAssembly `LanguageService` takes one object
+of options: both break 0.34's forms, with no alias, and the migration notes below give each
+change. The items of a tuple are typed by their position, and the load of a schema tells the
+tuples that leave the items after them open. The Java package evaluates with documents as
+variables, so that two documents received as JSON text, such as two versions of a record, are
+compared with neither made into Java objects. jlens gives three results that jsonata-js 2.2.2
+gets wrong as its main branch, or a pull request approved for it, fixes them, ahead of its next
+release; the official suite now holds 1,736 cases. An evaluation with an array or an object as a
+variable is about 15 ns faster in every package.
+
 ### Added
 
 - The items of a tuple are typed by their position. A literal index inside a tuple
@@ -1783,7 +1796,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/thkprado/jlens/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/thkprado/jlens/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/thkprado/jlens/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/thkprado/jlens/compare/v0.31.0...v0.32.0

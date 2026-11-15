@@ -77,7 +77,7 @@ fn is_link_definition(line: &str) -> bool {
 }
 
 /// Joins the hard-wrapped lines of paragraphs and list items, which GitHub would show as line
-/// breaks. Code blocks are kept as they are.
+/// breaks. Code blocks and the rows of tables are kept as they are.
 fn unwrap(lines: &[&str]) -> String {
     let mut out: Vec<String> = Vec::new();
     let mut fenced = false;
@@ -88,7 +88,7 @@ fn unwrap(lines: &[&str]) -> String {
             fenced = !fenced;
             joinable = false;
             out.push(line.to_string());
-        } else if fenced || text.is_empty() || text.starts_with('#') {
+        } else if fenced || text.is_empty() || text.starts_with(['#', '|']) {
             joinable = false;
             out.push(line.to_string());
         } else if joinable && !text.starts_with("- ") && !text.starts_with("* ") {
@@ -233,6 +233,29 @@ release.
              jlens/blob/v0.3.0/docs/src/guide.md#top).\n\
              - Kept: [site](https://example.com/a), [anchor](#install), `[code](docs/x.md)`.\n\n\
              ```md\n[block](docs/x.md)\n```"
+        );
+    }
+
+    #[test]
+    fn keeps_the_rows_of_a_table() {
+        let changelog = "\
+## [0.3.0]
+
+### Migration
+
+| Where | Before |
+|---|---|
+| CLI | `--result` |
+
+The old
+flag fails.
+";
+        let notes = notes(changelog, "0.3.0").unwrap();
+        let (body, _) = notes.split_once("\n\n### Install").unwrap();
+        assert_eq!(
+            body,
+            "### Migration\n\n| Where | Before |\n|---|---|\n| CLI | `--result` |\n\n\
+             The old flag fails."
         );
     }
 

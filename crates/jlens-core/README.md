@@ -4,7 +4,7 @@ A [JSONata](https://jsonata.org/) engine in Rust, with evaluation audits. It is 
 core of [jlens](https://github.com/thkprado/jlens). Try expressions in the
 [web editor](https://thkprado.github.io/jlens/editor/), which runs jlens in your browser.
 
-- **Complete JSONata 2.2.** Every operator and built-in function. It passes 1,688 of the 1,690
+- **Complete JSONata 2.2.** Every operator and built-in function. It passes 1,734 of the 1,736
   cases of the official test suite; the other two are documented.
 - **Explainable.** `evaluate_audited` records which comparisons passed or failed, which items
   filters rejected and which values were bound. Labels in ordinary comments

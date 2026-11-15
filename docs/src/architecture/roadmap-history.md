@@ -404,3 +404,27 @@ body and in the dates; the tables moved only with the M1's newer Rust (`transfor
 for 0.33.0's code as well). How it was measured is in
 [`docs/notes/perf-0.34.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.34.md).
 ([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0340))
+
+## 0.35
+
+*The choices of 0.34 reviewed.* 0.34 left choices that no one had reviewed before its release,
+and four of them changed. The result type and the context took the names `resultType` and
+`contextPath` everywhere, as `result` and `context` meant other things elsewhere, with no
+deprecated alias, since 0.34 had had no time to be adopted; the WebAssembly `LanguageService`
+took one object of options in place of five positional arguments, and throws a `TypeError` for
+the old form; `jlens schema result` kept exit code 1 on a syntax error, now documented. The
+items of a tuple are typed by their position, open tuple or closed, and the load reports the
+tuples that leave the items after them open (`LoadReport::open_tuples`), in every package and
+as one warning of the CLI and the language server. Two items were not reviews. The Java package
+evaluates with documents as variables (`jlens_evaluate_document_with` in the C API), so that
+two documents received as JSON text are compared with neither made into Java objects: a field
+of a 100,000-item table read in 0.8 µs from a document, 8.3 ms from `Bindings`. And jlens took
+three fixes of jsonata-js made after 2.2.2, ahead of its release: #861 and #841 from its main
+branch, from which the suite was vendored (46 cases more), and #838, approved and not merged,
+whose cases live in `jlens-core`'s tests; the differential test runs against a checkout of
+jsonata-js too (`--jsonata-js`). Measuring #7 found that the variables of an evaluation went on
+the list of frames that may be part of a cycle: off it, an array or object as a variable costs
+about 15 ns less in every package. Nothing in the tables moved past 2.6% slower; `recursion` is
+6 to 8% faster natively. How it was measured is in
+[`docs/notes/perf-0.35.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.35.md).
+([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0350))
