@@ -1,8 +1,10 @@
 # Conformance testing
 
 jlens vendors the language-neutral test suite of the reference implementation
-([jsonata-js](https://github.com/jsonata-js/jsonata) **2.2.2**, MIT) in `tests/jsonata-suite/`.
-That covers 102 groups and about 1,690 cases. The harness lives in
+([jsonata-js](https://github.com/jsonata-js/jsonata), MIT) in `tests/jsonata-suite/`, from
+commit `6d9d829` of its main branch: the suite of 2.2.2 and the cases of the fixes made after it,
+which jlens gives ([Fixed in jsonata-js after 2.2.2](../language/compatibility.md#fixed-in-jsonata-js-after-222)).
+That covers 102 groups and about 1,740 cases. The harness lives in
 `crates/jlens-core/tests/conformance.rs` and mirrors `test/run-test-suite.js`:
 
 - Each case is one test, named `<group>/<file>`, or `<group>/<file>#<index>` for files that hold
@@ -43,6 +45,7 @@ cargo xtask conformance --update-baseline  # also rewrites baseline.txt
 | Case | Reason |
 |---|---|
 | `function-encodeUrl/case002`, `function-encodeUrlComponent/case002` | The data contains a lone UTF-16 surrogate (U+D800), which Rust's UTF-8 strings cannot represent. |
+| `boolean-expresssions/issue765#10` to `#13` | `1e308 * 10` overflows to infinity: jlens fails with `D1001` at the `*`, jsonata-js at the `and` or `or` that converts the infinity to a boolean. The code is the same, the token and position are not. |
 
 ## Property tests
 
@@ -138,6 +141,7 @@ result or, when the expression fails, on the error code.
 (cd benches/compare && npm install)
 cargo xtask differential                     # 1,000 cases, from a seed it prints
 cargo xtask differential --cases 10000 --seed 42
+cargo xtask differential --jsonata-js ../jsonata   # a checkout of jsonata-js, run from its sources
 ```
 
 The expressions come from a grammar like that of the property tests, without the functions that
@@ -157,7 +161,7 @@ that reaches either limit is skipped. The divergences are printed and written to
 `target/differential/divergences.json`. The command fails when there are any. A seed
 reproduces a run.
 
-Twelve kinds of disagreement are known differences of jsonata-js, listed in the
+Thirteen kinds of disagreement are known differences of jsonata-js, listed in the
 [compatibility notes](../language/compatibility.md). They are not divergences; the command
 counts them apart:
 
@@ -210,6 +214,12 @@ counts them apart:
   computed picture, which may hold a marker with an unknown component and a presentation, or a
   left side of `??` or `?:` that binds a name it reads, which jsonata-js evaluates twice
   (`$count($x := [$x, 1]) ?: 0`).
+- **Fixed after 2.2.2**: the expression may meet one of the fixes that jsonata-js made after
+  2.2.2, which jlens has: a predicate after one that is not a number literal, which may be a
+  computed index (`$arr[$i][$j]`); an array constructor as a step of a path that binds `@`, `#`
+  or a parent, in that step or before it; a step after a group-by. A run against a checkout
+  (`--jsonata-js`) does not count them apart, so a checkout whose main branch has the fixes must
+  agree on them.
 - **Overflow to infinity**: jlens failed with `D1001`, which it raises only where a number
   overflows to infinity (`1 / 0`). jsonata-js passes the infinity on, to its result or to an
   operator that fails later.

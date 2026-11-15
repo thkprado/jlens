@@ -52,6 +52,18 @@ All notable changes are recorded here. The format follows
   positional arguments, of which the first four were often `null`. A call in the old form
   throws a `TypeError` instead of being misread: a JSON Schema in place of the options, as its
   keywords are not options, or more than one argument. `ServiceOptions` declares the object.
+- Three results that jsonata-js 2.2.2 gets wrong are now the ones jsonata-js fixed after it,
+  ahead of its next release (see "Fixed in jsonata-js after 2.2.2" in the compatibility
+  notes). A predicate after a computed index that selects an array reads the items of that
+  array, as after a literal index: `$arr[$i][$j]` is an item, where it was nothing (jsonata-js
+  pull request #861). An array constructor as a step of a path that binds `@`, `#` or a parent
+  gives one array for each tuple, where its arrays were flattened: `orders#$i.[items.sku]` is
+  `[["p", "q"], [], ["r"]]` (#841). And a step after a group-by reads the object it builds, as
+  the group-by ends its path: `items{k: $sum(v)}.x` is the sum, where it was `{}` (#838,
+  approved and not merged). The diagnostics type `$arr[$i][0]` as an item or an array, and as
+  an item where `$i` is known to be a number. The official suite is vendored from jsonata-js's
+  main branch at `6d9d829`, with 46 cases more; `cargo xtask differential --jsonata-js
+  <checkout>` runs the cases in a checkout of jsonata-js, such as its main branch.
 
 ### Migration from 0.34
 

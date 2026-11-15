@@ -480,7 +480,16 @@ impl<'a> Processor<'a> {
             NodeKind::Parent { slot, .. } => Some(slot),
             _ => None,
         };
-        let mut result = if matches!(lstep.kind, NodeKind::Path { .. }) {
+        // A group-by ends its path, so a path that has one is the first step of a new path,
+        // which reads its result (jsonata-js#838, after 2.2.2): its steps are not carried on,
+        // which would group after them. The parents it still seeks are sought by the new path.
+        let grouped = matches!(lstep.kind, NodeKind::Path { .. }) && lstep.attrs.group.is_some();
+        let mut result = if grouped {
+            let seeking = ancestry(&lstep);
+            let mut path = Node::path(vec![lstep]);
+            path.attrs.seeking_parent = seeking;
+            path
+        } else if matches!(lstep.kind, NodeKind::Path { .. }) {
             lstep
         } else {
             Node::path(vec![lstep])

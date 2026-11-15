@@ -38,9 +38,10 @@ commands:
   doc-check                         run the examples of the book and check its links
   mdbook-dedent                     the book's mdBook preprocessor (docs/book.toml): removes the
                                     indentation every line of a code block shares
-  differential [--cases N] [--seed S]
+  differential [--cases N] [--seed S] [--jsonata-js <checkout>]
                                     run N generated expressions (1000) in jlens and jsonata-js
-                                    and report where they differ (needs benches/compare installed)
+                                    and report where they differ (needs benches/compare installed,
+                                    or a checkout of jsonata-js to run from its sources)
   regex-corpus [<test262 commit>]   rebuild jlens-regress's corpus of V8's answers from test262's
                                     RegExp tests at the commit (the corpus's, or e.g. main) and
                                     from jlens-regress's tests (needs git and Node.js)

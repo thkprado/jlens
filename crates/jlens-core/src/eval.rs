@@ -1134,14 +1134,16 @@ impl<'a> Evaluator<'_, 'a> {
             NodeKind::Error { .. } => return Err(Error::new("S0500").at(expr.span, 0)),
         };
 
-        for stage in &expr.attrs.predicate {
+        let predicates = &expr.attrs.predicate;
+        for (ii, stage) in predicates.iter().enumerate() {
             if let Stage::Filter {
                 expr: predicate,
                 constant,
                 ..
             } = stage
             {
-                result = self.filter(predicate, *constant, result, env)?;
+                let chained = ii + 1 < predicates.len();
+                result = self.filter(predicate, *constant, result, env, chained)?;
             }
         }
         if !matches!(expr.kind, NodeKind::Path { .. })
@@ -1235,6 +1237,13 @@ impl<'a> Evaluator<'_, 'a> {
             }
             if ii == 0 && step.attrs.cons_array {
                 result_seq = self.eval(step, &input_seq, env)?;
+            } else if ii == 0
+                && step.attrs.group.is_some()
+                && matches!(step.kind, NodeKind::Path { .. })
+            {
+                // A group-by ends its path: the path is evaluated once, on the whole input,
+                // and the steps after it read its result (jsonata-js#838, after 2.2.2).
+                result_seq = Value::sequence(vec![self.eval(step, &input_seq, env)?]);
             } else if is_tuple {
                 tuple_bindings =
                     Some(self.tuple_step(step, &input_seq, tuple_bindings.as_ref(), env)?);
@@ -1342,9 +1351,10 @@ impl<'a> Evaluator<'_, 'a> {
                 Some(v) => v,
                 None => self.eval(step, item, env)?,
             };
-            for stage in &step.attrs.stages {
+            let stages = &step.attrs.stages;
+            for (ss, stage) in stages.iter().enumerate() {
                 if let Stage::Filter { expr, constant, .. } = stage {
-                    res = self.filter(expr, *constant, res, env)?;
+                    res = self.filter(expr, *constant, res, env, ss + 1 < stages.len())?;
                 }
             }
             if !res.is_undefined() {
@@ -1386,10 +1396,11 @@ impl<'a> Evaluator<'_, 'a> {
 
     fn stages(&mut self, stages: &[Stage], input: Value<'a>, env: &Env<'a>) -> Result<Value<'a>> {
         let mut result = input;
-        for stage in stages {
+        for (ss, stage) in stages.iter().enumerate() {
             match stage {
                 Stage::Filter { expr, constant, .. } => {
-                    result = self.filter(expr, *constant, result, env)?;
+                    let chained = matches!(stages.get(ss + 1), Some(Stage::Filter { .. }));
+                    result = self.filter(expr, *constant, result, env, chained)?;
                 }
                 Stage::Index { var, .. } => {
                     if let Value::Array(a) = &result {
@@ -1489,9 +1500,13 @@ impl<'a> Evaluator<'_, 'a> {
             if res.is_undefined() {
                 continue;
             }
-            // A value that is not an array is its one item, without a list of its own.
+            // A value that is not an array is its one item, without a list of its own, and
+            // so is an array the step constructs, unless the step filters its items
+            // (`orders#$i.[items.sku]`, jsonata-js#841, after 2.2.2).
             let (items, res_is_tuple): (&[Value<'a>], bool) = match &res {
-                Value::Array(a) => (a.items(), a.is_tuple_stream()),
+                Value::Array(a) if !(a.has(CONS) && step.attrs.stages.is_empty()) => {
+                    (a.items(), a.is_tuple_stream())
+                }
                 other => (std::slice::from_ref(other), false),
             };
             self.check_array(out.len() + items.len())?;
@@ -1531,6 +1546,11 @@ impl<'a> Evaluator<'_, 'a> {
 
     /// Applies a predicate to a sequence (jsonata-js `evaluateFilter`). It is kept out of
     /// `eval`, which it made 3% slower on `customer.name` when inlined there.
+    ///
+    /// `chained` says that another predicate follows. A predicate that gives the same number
+    /// for every item then selects an array as a literal index does: the array itself, whose
+    /// items the next predicate reads, where a sequence that holds it would give the next one
+    /// the array as its one item (`$arr[$i][$j]`, jsonata-js#861, after 2.2.2).
     #[inline(never)]
     fn filter(
         &mut self,
@@ -1538,6 +1558,7 @@ impl<'a> Evaluator<'_, 'a> {
         constant: bool,
         input: Value<'a>,
         env: &Env<'a>,
+        chained: bool,
     ) -> Result<Value<'a>> {
         let is_tuple = input.has_flag(TUPLE_STREAM);
         let flags = SEQUENCE | if is_tuple { TUPLE_STREAM } else { 0 };
@@ -1572,8 +1593,8 @@ impl<'a> Evaluator<'_, 'a> {
             && self.tracer.is_none()
             && (!is_tuple || crate::process::constant_from(predicate, false))
         {
-            self.filter_constant(predicate, &input, env, &mut results)?;
-            return Ok(Value::array(results, flags));
+            let position = self.filter_constant(predicate, &input, env, &mut results)?;
+            return Ok(selected(results, flags, chained && position && !is_tuple));
         }
 
         // The items are read where they are: copying them would cost more than an index takes
@@ -1589,11 +1610,13 @@ impl<'a> Evaluator<'_, 'a> {
         if let Some(t) = self.tracer.as_deref_mut() {
             t.filter_end(predicate);
         }
-        tested?;
-        Ok(Value::array(results, flags))
+        let position = tested?;
+        Ok(selected(results, flags, chained && position))
     }
 
-    /// Tests each item against a predicate, collecting those that pass.
+    /// Tests each item against a predicate, collecting those that pass. The answer is whether
+    /// the predicate gave one number for each item, and the same position for them all: never
+    /// for a tuple stream, whose items are not indexed that way.
     fn filter_items(
         &mut self,
         predicate: &Node,
@@ -1601,8 +1624,10 @@ impl<'a> Evaluator<'_, 'a> {
         is_tuple: bool,
         env: &Env<'a>,
         results: &mut Vec<Value<'a>>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let len = items.len() as f64;
+        let mut same_position = !is_tuple;
+        let mut position = f64::NAN;
         for (index, item) in items.iter().enumerate() {
             let before = results.len();
             let (context, frame) = if is_tuple {
@@ -1617,6 +1642,8 @@ impl<'a> Evaluator<'_, 'a> {
             let mut res = res?;
             if res.is_numeric()? {
                 res = Value::array(vec![res], 0);
+            } else {
+                same_position = false;
             }
             if res.is_array_of_numbers()? {
                 for n in res.items_or_self() {
@@ -1624,6 +1651,10 @@ impl<'a> Evaluator<'_, 'a> {
                     if ii < 0.0 {
                         ii += len;
                     }
+                    if index > 0 && ii != position {
+                        same_position = false;
+                    }
+                    position = ii;
                     if ii == index as f64 {
                         results.push(item.clone());
                     }
@@ -1635,25 +1666,26 @@ impl<'a> Evaluator<'_, 'a> {
                 t.filter_item(predicate, index, ValueRef(item), results.len() > before);
             }
         }
-        Ok(())
+        Ok(same_position)
     }
 
     /// Tests the items against a predicate that gives the same value for each: evaluated once,
     /// and not at all when there is no item, as when each item is tested.
-    /// The items pass in their order, an item given by several indexes once for each.
+    /// The items pass in their order, an item given by several indexes once for each. The
+    /// answer is whether the predicate gave one number, the position of the item it selects.
     fn filter_constant(
         &mut self,
         predicate: &Node,
         input: &Value<'a>,
         env: &Env<'a>,
         results: &mut Vec<Value<'a>>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let (len, array) = match input {
             Value::Array(a) => (a.len(), Some(a)),
             _ => (1, None),
         };
         if len == 0 {
-            return Ok(());
+            return Ok(false);
         }
         let before = self.steps_taken();
         // The predicate reads nothing from the items, so none is read for it.
@@ -1662,7 +1694,8 @@ impl<'a> Evaluator<'_, 'a> {
         // read of the clock inside the predicate refills `steps`.
         let each = self.steps_taken() - before;
         self.charge(each.saturating_mul(len as u64 - 1))?;
-        if res.is_numeric()? {
+        let position = res.is_numeric()?;
+        if position {
             res = Value::array(vec![res], 0);
         }
         if res.is_array_of_numbers()? {
@@ -1682,7 +1715,7 @@ impl<'a> Evaluator<'_, 'a> {
                 None => results.push(input.clone()),
             }
         }
-        Ok(())
+        Ok(position)
     }
 
     // -----------------------------------------------------------------------------------------
@@ -2949,6 +2982,15 @@ fn plain_fields<'a>(steps: &[Node], input: &Value<'a>, env: &Env<'a>) -> Option<
         }
     }
     Some((value, taken))
+}
+
+/// What a predicate gives of the items it kept, `results`: a sequence with `flags`, or the one
+/// array it selected by its position when `unwrap` says that another predicate reads it.
+fn selected<'a>(mut results: Vec<Value<'a>>, flags: u8, unwrap: bool) -> Value<'a> {
+    if unwrap && results.len() == 1 && results[0].is_array() {
+        return results.pop().unwrap_or_default();
+    }
+    Value::array(results, flags)
 }
 
 fn is_sequence(value: &Value) -> bool {

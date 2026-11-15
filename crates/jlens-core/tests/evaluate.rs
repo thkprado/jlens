@@ -856,6 +856,32 @@ fn date_bugs_fixed_by_jsonata_js_pull_requests_are_fixed() {
     }
 }
 
+/// A group-by ends its path, so a step after it reads its result, where jsonata-js 2.2.2 and
+/// its main branch take the step before grouping (`items{k: $sum(v)}.x` is `{}` there). jlens
+/// follows jsonata-js's pull request #838 at 662db05, approved and not merged when 0.35 took
+/// it. `grouping_fixed_upstream.json` holds the cases the pull request adds to the suite.
+#[test]
+fn a_step_after_a_group_by_reads_its_result_as_a_jsonata_js_pull_request_does() {
+    let cases: Vec<Value> =
+        serde_json::from_str(include_str!("grouping_fixed_upstream.json")).unwrap();
+    assert_eq!(cases.len(), 5);
+    for case in &cases {
+        let expr = case["expr"].as_str().unwrap();
+        match case.get("code").and_then(Value::as_str) {
+            Some(code) => {
+                let error = Expression::compile(expr).unwrap_err();
+                assert_eq!(error.code(), code, "{}: {expr}", case["description"]);
+            }
+            None => assert_eq!(
+                eval(expr, case["data"].clone()).as_ref(),
+                Some(&case["result"]),
+                "{}: {expr}",
+                case["description"]
+            ),
+        }
+    }
+}
+
 #[test]
 fn quirks_found_by_the_differential_tests_match_jsonata_js() {
     // `$base64decode` reads each UTF-16 code unit as its low byte, as Node's `Buffer` does:
@@ -1025,13 +1051,19 @@ fn a_tuple_binds_each_of_its_fields() {
             .join(".");
         let last = &names[k - 1];
         let all = names.join(", ");
-        // Each tuple, in order, the first name the outermost; the filter binds them too.
-        let expected: Vec<i64> = (0..1 << k)
+        // Each tuple, in order, the first name the outermost; the filter binds them too. Each
+        // tuple gives its own array, as in jsonata-js since its pull request #841 (2.2.2
+        // flattened them); a single tuple's array is the path's one value.
+        let tuples: Vec<Vec<i64>> = (0..1 << k)
             .filter(|t| t & 1 == 1)
-            .flat_map(|t| (0..k).rev().map(move |i| 3 + (t >> i & 1)))
+            .map(|t| (0..k).rev().map(move |i| 3 + (t >> i & 1)).collect())
             .collect();
+        let expected = match tuples.as_slice() {
+            [one] => json!(one),
+            _ => json!(tuples),
+        };
         let expr = format!("[{steps}[{last} = 4].[{all}]]");
-        assert_eq!(eval(&expr, input.clone()), Some(json!(expected)), "{expr}");
+        assert_eq!(eval(&expr, input.clone()), Some(expected), "{expr}");
         // A group's frame binds each field of the tuples it merges.
         let expr = format!("{steps}{{$string($x1): $count({last})}}");
         let half = 1 << (k - 1);

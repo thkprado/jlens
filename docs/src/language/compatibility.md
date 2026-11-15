@@ -129,6 +129,22 @@ functions in the bindings object or `registerFunction` in the WebAssembly packag
 | A function that returns a promise | The evaluation awaits it | `U1002`, on purpose: see [Not planned](../architecture/roadmap.md#not-planned) |
 | An exception thrown by the function | Rethrown, with the `position` and `token` of the call | Rethrown as is in WebAssembly; `position` and `token` are added when missing |
 
+### Fixed in jsonata-js after 2.2.2
+
+jsonata-js fixed these results after 2.2.2, and jlens gives the fixed ones ahead of the release
+that will ship them. The first two are in jsonata-js's main branch at `6d9d829`, whose suite jlens
+vendors. The third is pull request #838, approved and not merged when jlens took it, at
+`662db05`: it gives what JSONata's processing model says, and jlens keeps its cases in
+`jlens-core`'s tests until the suite has them. The differential test counts these cases apart
+when it runs against 2.2.2 ("fixed after 2.2.2"), and runs against main with
+`--jsonata-js <checkout>`.
+
+| Topic | jsonata-js 2.2.2 | jlens, and jsonata-js since |
+|---|---|---|
+| A predicate after a computed index that selects an array (`$arr[$i][$j]`, with `$arr` an array of arrays and `$i` a number) | The index gives a sequence that holds the array, so the next predicate indexes that sequence: `$arr[$i][$j]` is nothing for `$j` > 0, and `$arr[$i][0]` the whole array | The array, as a literal index gives it, so the next predicate reads its items: `$arr[$i][$j]` is the item, as `$arr[1][$j]` is. It holds where the predicate gives the same number for every item; a test (`$arr[$[0] > 1][0]`) or an index that differs per item still filters the sequence. Main since pull request #861 ([jsonata-js#766](https://github.com/jsonata-js/jsonata/issues/766)) |
+| An array constructor as a step of a path that binds `@`, `#` or a parent (`orders#$i.[items.sku]`) | The arrays are flattened into the result: `["p", "q", "r"]` | One array for each tuple, as without the binding: `[["p", "q"], [], ["r"]]`, and `Account.Order.Product.[`Product Name`, %.OrderID]` gives a pair for each product. A filter on the constructor (`[$][$ > 1]`) still reads its items. Main since pull request #841 |
+| A step after a group-by (`items{k: $sum(v)}.x`) | The group-by is applied after the step: the step reads each item (`items.x`, nothing here), and the group-by groups what it gives, `{}` | The group-by ends its path, as the processing model says: the step reads the object it builds, so `items{k: $sum(v)}.x` is the sum for `"x"`, and a grouping inside an array context (`orders{c: lines{p: $sum(q)}.w}`) groups the whole sequence once. Pull request #838, not merged |
+
 ## Extensions
 
 These features exist only in jlens. Except for the regex flags, they live in comments or in the

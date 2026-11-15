@@ -86,3 +86,25 @@ in the core.
   0.34.0's runs spread by 9.8%) to +1.4%, one is marked: `regex` on a `Document`, 51.4 → 48.6 µs
   (−5.4%), faster, in code that no item of 0.35 has touched so far; the same case from JSON
   text moves −1.8%. `path` on a `Document` 0.201 → 0.200 µs.
+
+## #8: three fixes of jsonata-js after 2.2.2
+
+The fixes touch the evaluation of paths: each filter is told whether another follows it, the
+filter of a constant or a computed index answers whether it selected one position, a tuple step
+looks at whether an array was constructed, and the first step of a path whether it is a path
+with a group-by. On the M1, idle, thermal pressure nominal, `cargo xtask ab f51d97c .` (#7's
+commit against it with the item's changes), 10 rounds, twice in each mode:
+
+- `evaluate`: every case within ±1.7% of its median in both runs, but two. `strings` is 4.5%
+  and 4.7% faster in both, in code the item does not touch: layout. `index in a variable`
+  (`($i := 0; items[$i].code)`, a constant filter, the one case on the code that changed) is
+  +3.2% and +0.0%, its fastest round +0.2% and −0.6%.
+- `document`: every case within ±1.3%, but `index in a variable`, +2.0% and +1.5% (fastest
+  +1.5% and +1.7%), 410 → 418 ns.
+
+Again with functions and blocks aligned (`RUSTFLAGS="-C llvm-args=-align-all-functions=6 -C
+llvm-args=-align-all-nofallthru-blocks=5"`, the cached programs moved aside), on that case and
+two controls, twice in each mode: `index in a variable` is +1.0% and +1.2% (418 → 423 ns)
+against a document, +0.3% and −1.3% from JSON values; `path` and `index into 10,000 items` are
+within ±1% but one run at −2.0%. So about 4 ns of a constant filter on a document is the
+work of the item, the boolean of a selected position; the rest moved with the layout.

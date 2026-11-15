@@ -45,6 +45,65 @@ pub(crate) struct Ty<'s> {
     pub form: Form,
 }
 
+/// What a filter leaves for the filter after it to read, as the evaluation gives it: the one
+/// value it selected by position, whose items the next filter reads when it is an array
+/// (`rows[0][1]`, and `rows[$i][$j]` where `$i` is a number), or the values its test kept,
+/// which the next filter reads as they are (`rows[$[0] > 1][0]` is a row).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Held {
+    /// One value, selected by its position; also what the first filter reads.
+    Value,
+    /// The values a test kept.
+    Sequence,
+    /// Either: the filter may be a position, the same for every item, or a test.
+    Either,
+}
+
+impl Held {
+    /// What the filter after one that held this reads of `ty`, the values that one gave.
+    fn read<'s>(self, ty: &Ty<'s>) -> Ty<'s> {
+        let kept = || Ty {
+            shapes: ty.shapes.clone(),
+            partial: ty.partial,
+            form: ty.form,
+            ..Ty::default()
+        };
+        match self {
+            Held::Value => ty.items(),
+            Held::Sequence => kept(),
+            Held::Either => kept().union(ty.items()),
+        }
+    }
+
+    /// What the filter `expr` holds for the next one, when `chained` says there is one: `test`
+    /// is the type of the filter's expression, and `constant` whether it gives the same value
+    /// for every item. A number literal selects by position; another expression does where it
+    /// gives one number, the same for every item, which only a constant expression always
+    /// does.
+    fn after(expr: &Node, test: &Ty<'_>, constant: bool, chained: bool) -> Held {
+        if !chained || matches!(expr.kind, NodeKind::Number { .. }) {
+            return Held::Value;
+        }
+        let numeric = |t: &JsonType| matches!(t, JsonType::Number | JsonType::Integer);
+        let number = |s: &Sh<'_>| s.types.iter().any(numeric);
+        let unknown = test.partial || test.shapes.iter().any(|s| s.types.is_empty());
+        let may = unknown
+            || test.shapes.is_empty()
+            || (test.form != Form::Array && test.shapes.iter().any(number));
+        let always = constant
+            && !unknown
+            && test.form == Form::Value
+            && test.sequence.is_none()
+            && !test.shapes.is_empty()
+            && test.shapes.iter().all(|s| s.types.iter().all(numeric));
+        match (may, always) {
+            (false, _) => Held::Sequence,
+            (true, true) => Held::Value,
+            (true, false) => Held::Either,
+        }
+    }
+}
+
 /// Whether a value is what its shapes describe or an array of such values: an array constructor
 /// gives one, as do built-in functions such as `$sort`. Paths read the items of either.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -627,14 +686,23 @@ impl<'s> Walker<'s, '_> {
                     // of that item, `rows[0][1]`. The position holds where the step gives one
                     // array for each item it runs over: where those items are arrays
                     // themselves, the step reads them all, and the index is one into all
-                    // their values.
+                    // their values. A filter after another reads what that one held
+                    // ([`Held`]): the items of the one array a position selected,
+                    // `rows[$i][$j]`, or the values a test kept.
                     let mut kept: Option<Ty<'s>> = None;
+                    let mut held = Held::Value;
                     let mut literal_so_far = true;
                     let mut one_array = None;
                     let holds_several = res.may_hold_several();
-                    for stage in &step.attrs.stages {
-                        if let Stage::Filter { expr, span, .. } = stage {
-                            self.walk(expr, &elements, scope);
+                    let stages = &step.attrs.stages;
+                    for (ss, stage) in stages.iter().enumerate() {
+                        if let Stage::Filter {
+                            expr,
+                            span,
+                            constant,
+                        } = stage
+                        {
+                            let test = self.walk(expr, &elements, scope);
                             undefined = undefined.or(Some(*span));
                             if !index && holds_several {
                                 sequence = sequence.or(Some(*span));
@@ -642,10 +710,8 @@ impl<'s> Walker<'s, '_> {
                             let literal =
                                 Self::literal_index(Some(stage)).filter(|_| literal_so_far);
                             literal_so_far = literal.is_some();
-                            let item = match (&kept, literal) {
-                                (Some(kept), Some(index)) => {
-                                    Some(kept.item_at(index).unwrap_or_else(|| kept.items()))
-                                }
+                            let position = match (&kept, literal) {
+                                (Some(kept), Some(index)) => kept.item_at(index),
                                 (None, Some(index)) => res.item_at(index).filter(|_| {
                                     *one_array.get_or_insert_with(|| {
                                         let over = if i == 0 { ctx } else { &result };
@@ -656,15 +722,18 @@ impl<'s> Walker<'s, '_> {
                                 }),
                                 _ => None,
                             };
-                            match item {
-                                // The filters after it, and the next step, read that item.
-                                Some(item) => {
-                                    elements = item.elements();
-                                    kept = Some(item);
-                                }
-                                None if kept.is_none() => kept = Some(res.items()),
-                                None => {}
+                            let item = match position {
+                                Some(item) => item,
+                                None => held.read(kept.as_ref().unwrap_or(&res)),
+                            };
+                            // The filters after a literal index, and the next step, read the
+                            // item it took.
+                            if literal.is_some() {
+                                elements = item.elements();
                             }
+                            kept = Some(item);
+                            let chained = matches!(stages.get(ss + 1), Some(Stage::Filter { .. }));
+                            held = Held::after(expr, &test, *constant, chained);
                         }
                     }
                     // A filter gives the items it keeps.
@@ -929,12 +998,19 @@ impl<'s> Walker<'s, '_> {
         // one value: the next one takes an item of that item. A step read outside a path may
         // read the items of several arrays.
         let mut one = !Self::is_simple_step(node);
-        for stage in &node.attrs.predicate {
-            if let Stage::Filter { expr, span, .. } = stage {
-                self.walk(expr, &elements, scope);
+        let mut held = Held::Value;
+        let stages = &node.attrs.predicate;
+        for (ss, stage) in stages.iter().enumerate() {
+            if let Stage::Filter {
+                expr,
+                span,
+                constant,
+            } = stage
+            {
+                let test = self.walk(expr, &elements, scope);
                 // A filter gives the items it keeps: one for an index or of one value, a
                 // sequence otherwise. A literal index into a tuple gives the item at its
-                // position.
+                // position. A filter after another reads what that one held ([`Held`]).
                 let undefined = ty.undefined.or(Some(*span));
                 let literal = Self::literal_index(Some(stage)).filter(|_| one);
                 one = literal.is_some();
@@ -942,10 +1018,15 @@ impl<'s> Walker<'s, '_> {
                     Some(item) => item,
                     None => {
                         let sequence = (!index && ty.may_hold_several()).then_some(*span);
-                        ty.selected(sequence)
+                        let mut kept = held.read(&ty);
+                        kept.undefined = ty.undefined;
+                        kept.sequence = sequence;
+                        kept
                     }
                 };
                 ty.undefined = undefined;
+                let chained = matches!(stages.get(ss + 1), Some(Stage::Filter { .. }));
+                held = Held::after(expr, &test, *constant, chained);
             }
         }
         if let Some(group) = &node.attrs.group {

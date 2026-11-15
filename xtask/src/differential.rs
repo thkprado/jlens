@@ -19,6 +19,7 @@
 //! of a value the expression holds; a
 //! wildcard that gives jsonata-js's internal flag `sequence` as a `true` item; an expression
 //! that may meet one of the jsonata-js quirks that jlens dropped; a number that overflows to
+//! that may meet one of the fixes jsonata-js made after 2.2.2, which jlens has; a number that overflows to
 //! infinity, where jlens fails and jsonata-js goes on, or that `$round` shifts to infinity and
 //! back to NaN, where jlens keeps it; and a large number whose digits jlens writes exactly.
 
@@ -50,8 +51,21 @@ pub fn run(args: &[String]) -> Result<()> {
         Some(seed) => seed,
         None => SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as u64,
     };
+    // A checkout of jsonata-js to run the cases in, from its sources, in place of the version
+    // installed in benches/compare.
+    let checkout = match args.iter().position(|a| a == "--jsonata-js") {
+        None => None,
+        Some(i) => {
+            let path = args.get(i + 1).context("--jsonata-js needs a path")?;
+            let path = std::path::absolute(path)?;
+            if !path.join("src/jsonata.js").is_file() {
+                bail!("{} does not contain src/jsonata.js", path.display());
+            }
+            Some(path)
+        }
+    };
     let compare = root().join("benches/compare");
-    if !compare.join("node_modules/jsonata").is_dir() {
+    if checkout.is_none() && !compare.join("node_modules/jsonata").is_dir() {
         bail!("jsonata-js is not installed: run `npm install` in benches/compare");
     }
 
@@ -84,11 +98,16 @@ pub fn run(args: &[String]) -> Result<()> {
     });
     fs::write(&cases_path, serde_json::to_string_pretty(&file)?)?;
 
-    let status = Command::new("node")
-        .current_dir(&compare)
+    let mut node = Command::new("node");
+    node.current_dir(&compare)
         .arg("differential.mjs")
         .arg(&cases_path)
-        .arg(&outcomes_path)
+        .arg(&outcomes_path);
+    match &checkout {
+        Some(path) => node.env("JSONATA_JS", path),
+        None => node.env_remove("JSONATA_JS"),
+    };
+    let status = node
         .status()
         .context("running node (Node.js 20+ is needed)")?;
     if !status.success() {
@@ -113,6 +132,7 @@ pub fn run(args: &[String]) -> Result<()> {
     let (mut agreed, mut limits, mut crashed, mut hung, mut split) = (0, 0, 0, 0, 0);
     let (mut mangled, mut raced, mut mutated, mut flagged, mut dropped) = (0, 0, 0, 0, 0);
     let (mut overflowed, mut exact, mut timezone, mut shared, mut ordered) = (0, 0, 0, 0, 0);
+    let mut fixed = 0;
     let mut divergences = Vec::new();
     for ((expr, input), expected) in cases.iter().zip(&mut reference) {
         let changed_input = expected
@@ -165,6 +185,9 @@ pub fn run(args: &[String]) -> Result<()> {
             flagged += 1;
         } else if dropped_quirk(expr) {
             dropped += 1;
+        } else if checkout.is_none() && fixed_after_2_2_2(expr) {
+            // A checkout is compared without this rule, so it tells which of the fixes it has.
+            fixed += 1;
         } else if exact_digits(expr, &actual, expected) {
             exact += 1;
         } else if actual["error"] == "D1001" || rounded_past_infinity(expr, &actual, expected) {
@@ -206,7 +229,8 @@ pub fn run(args: &[String]) -> Result<()> {
          {split} (jsonata-js split a character), {mangled} (regex left of ?? or ?:), \
          {raced} (concurrent errors), {shared} (name shared by concurrent items), \
          {mutated} (jsonata-js changed its input), {flagged} (wildcard over a sequence), \
-         {dropped} (dropped quirk), {overflowed} (number out of range), \
+         {dropped} (dropped quirk), {fixed} (fixed after 2.2.2), \
+         {overflowed} (number out of range), \
          {exact} (exact digits of a large number), {timezone} (timezone not a number)"
     );
     if !divergences.is_empty() {
@@ -530,6 +554,40 @@ fn dropped_quirk(expr: &str) -> bool {
             }
             _ => false,
         };
+    });
+    found
+}
+
+/// Whether `expr` may meet one of the three fixes that jsonata-js made after 2.2.2 and jlens
+/// has (see "Fixed in jsonata-js after 2.2.2" in `docs/src/language/compatibility.md`): a
+/// predicate after a predicate that is not a number literal, which may be a computed index
+/// (`$arr[$i][$j]`, jsonata-js#861); an array constructor as a step of a path that binds `@`,
+/// `#` or an ancestor in that step or before it, with no predicate of its own
+/// (`orders#$i.[items.sku]`, jsonata-js#841); and a step after a group-by
+/// (`items{k: $sum(v)}.x`, jsonata-js#838).
+fn fixed_after_2_2_2(expr: &str) -> bool {
+    let Ok(compiled) = Expression::compile(expr) else {
+        return false;
+    };
+    let chained = |stages: &[Stage]| {
+        stages.windows(2).any(|pair| {
+            matches!(&pair[0], Stage::Filter { expr, .. } if !matches!(expr.kind, NodeKind::Number { .. }))
+                && matches!(pair[1], Stage::Filter { .. })
+        })
+    };
+    let mut found = false;
+    compiled.ast().root.walk(&mut |node: &Node| {
+        found |= chained(&node.attrs.predicate) || chained(&node.attrs.stages);
+        if let NodeKind::Path { steps, .. } = &node.kind {
+            let mut tuple = false;
+            for (ii, step) in steps.iter().enumerate() {
+                tuple |= step.attrs.tuple;
+                found |= tuple && ii > 0 && step.attrs.cons_array && step.attrs.stages.is_empty();
+            }
+            found |= steps.first().is_some_and(|first| {
+                matches!(first.kind, NodeKind::Path { .. }) && first.attrs.group.is_some()
+            });
+        }
     });
     found
 }

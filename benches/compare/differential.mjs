@@ -4,6 +4,10 @@
 //
 //   node differential.mjs <cases.json> <outcomes.json>
 //
+// The cases run in the jsonata-js installed here, the version jlens follows, or in the sources
+// of the checkout that the environment variable JSONATA_JS names
+// (`cargo xtask differential --jsonata-js <checkout>`), such as its main branch.
+//
 // An outcome is {"value": <JSON>}, {"undefined": true} or {"error": <code>}. Functions are
 // dropped as `JSON.stringify` drops them, as jlens does when it converts a result to JSON. An
 // outcome also has "mutated": true when the evaluation changed its input document (a group-by
@@ -19,8 +23,13 @@
 // a new worker goes on with the next case.
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
 import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
-import jsonata from "jsonata";
+
+const jsonata = process.env.JSONATA_JS
+  ? createRequire(import.meta.url)(join(process.env.JSONATA_JS, "src", "jsonata.js"))
+  : (await import("jsonata")).default;
 
 // How long a case may run before it is taken as hung: ten times the timeout of the cases.
 const HUNG_FACTOR = 10;

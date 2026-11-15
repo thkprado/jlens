@@ -148,6 +148,39 @@ fn an_index_after_an_index_reads_the_item() {
     assert!(codes(&service, "grid.pair[0] > 1").is_empty());
 }
 
+/// A predicate after a computed index reads the item the index selects where the index is a
+/// number, the same for every item, as after a literal one (jsonata-js#861, after 2.2.2), and
+/// the sequence it keeps otherwise: an index the typing cannot tell is either.
+#[test]
+fn an_index_after_a_computed_index_reads_the_item_it_selects() {
+    let shape = |schema: Value| Some(Schema::from_json_schema(&schema).unwrap().root);
+    let numbers = json!({"type": "array", "items": {"type": "number"}});
+    let schema = json!({
+        "type": "object",
+        "required": ["rows"],
+        "properties": {"rows": {"type": "array", "items": numbers}}
+    });
+    let service = LanguageService::new(Some(Schema::from_json_schema(&schema).unwrap()))
+        .with_variable("arr", shape(json!({"type": "array", "items": numbers})))
+        .with_variable("k", shape(json!({"type": "integer"})))
+        .with_variable("i", None);
+    let number = Some(vec![JsonType::Number]);
+    let row = Some(vec![JsonType::Array]);
+    let either = Some(vec![JsonType::Number, JsonType::Array]);
+    // `$k` is a number: a row, then an item of it.
+    assert_eq!(result(&service, "$arr[$k][0]"), number);
+    assert_eq!(result(&service, "rows[$k][0]"), number);
+    assert_eq!(result(&service, "rows[$k + 1][0]"), number);
+    assert!(codes(&service, "rows[$k][0] + 1").is_empty());
+    assert_eq!(codes(&service, r#"rows[$k][0] > "a""#), ["W0208"]);
+    // A test keeps rows, and the index takes the first of them.
+    assert_eq!(result(&service, "rows[$[0] > 1][0]"), row);
+    assert_eq!(result(&service, "rows[true][0]"), row);
+    // `$i` may be anything: a row, or an item of one.
+    assert_eq!(result(&service, "rows[$i][0]"), either);
+    assert_eq!(result(&service, "$arr[$i][0]"), either);
+}
+
 #[test]
 fn completion_and_hover_follow_the_position() {
     let service = service();

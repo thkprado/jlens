@@ -11,5 +11,21 @@
   "function-encodeUrlComponent/case002": {
     "reason": "The case file contains a lone UTF-16 surrogate (U+D800). Rust strings are UTF-8 and cannot represent it, so neither the test data nor a jlens input can carry this value.",
     "skip": true
+  },
+  "boolean-expresssions/issue765#10": {
+    "reason": "`1e308 * 10` overflows to infinity: jlens raises D1001 at the `*`, where jsonata-js passes Infinity on and raises D1001 at the `and` that converts it to a boolean (see \"A number that overflows to infinity\" in docs/src/language/compatibility.md). The code is the same; the token and the position are those of the operator that overflowed.",
+    "alternateCode": "D1001"
+  },
+  "boolean-expresssions/issue765#11": {
+    "reason": "`1e308 * 10` overflows to infinity: jlens raises D1001 at the `*`, where jsonata-js passes Infinity on and raises D1001 at the `and` that converts it to a boolean (see \"A number that overflows to infinity\" in docs/src/language/compatibility.md). The code is the same; the token and the position are those of the operator that overflowed.",
+    "alternateCode": "D1001"
+  },
+  "boolean-expresssions/issue765#12": {
+    "reason": "`1e308 * 10` overflows to infinity: jlens raises D1001 at the `*`, where jsonata-js passes Infinity on and raises D1001 at the `or` that converts it to a boolean (see \"A number that overflows to infinity\" in docs/src/language/compatibility.md). The code is the same; the token and the position are those of the operator that overflowed.",
+    "alternateCode": "D1001"
+  },
+  "boolean-expresssions/issue765#13": {
+    "reason": "`1e308 * 10` overflows to infinity: jlens raises D1001 at the `*`, where jsonata-js passes Infinity on and raises D1001 at the `or` that converts it to a boolean (see \"A number that overflows to infinity\" in docs/src/language/compatibility.md). The code is the same; the token and the position are those of the operator that overflowed.",
+    "alternateCode": "D1001"
   }
 }
