@@ -397,8 +397,8 @@ jobs:
           distribution: temurin
           java-version: "25"
           server-id: central
-          server-username: MAVEN_CENTRAL_USERNAME
-          server-password: MAVEN_CENTRAL_PASSWORD
+          server-username-env-var: MAVEN_CENTRAL_USERNAME
+          server-password-env-var: MAVEN_CENTRAL_PASSWORD
       - name: The tag matches the workspace and pom.xml versions
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' ../../../Cargo.toml | head -1)
