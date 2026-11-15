@@ -579,25 +579,23 @@ pub(crate) fn evaluate<'a, 'v, R>(
         stack_floor: crate::stack::floor(),
     };
     let mut input = input;
+    // The host functions are looked up on a miss: a variable, bound to a document or in
+    // `bindings`, takes the place of a function of the same name. Each value comes from JSON
+    // or a document and holds no frame, so the variables are set before the frame is made, and
+    // the frame goes on `cyclic` only when the expression binds a function in it (0.35 #9).
+    let mut vars = Vars::Empty;
+    for (name, value) in variables {
+        // The input takes the place of a variable named `$`, as it did when it was bound.
+        if name != "$" {
+            vars.set(name, value);
+        }
+    }
     let env = Rc::new(Frame {
-        vars: RefCell::new(Vars::Empty),
+        vars: RefCell::new(vars),
         parent: None,
         input: input.clone(),
         functions: bindings.shared_functions(),
     });
-    // The host functions are looked up on a miss: a variable, bound to a document or in
-    // `bindings`, takes the place of a function of the same name. Each value comes from JSON
-    // or a document and holds no frame, so the root frame goes on `cyclic` only when the
-    // expression binds a function in it (0.35 #9).
-    {
-        let mut vars = env.vars.borrow_mut();
-        for (name, value) in variables {
-            // The input takes the place of a variable named `$`, as it did when it was bound.
-            if name != "$" {
-                vars.set(name, value);
-            }
-        }
-    }
     if let Value::Array(a) = &input
         && !a.is_sequence()
     {
