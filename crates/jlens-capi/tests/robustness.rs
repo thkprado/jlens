@@ -21,6 +21,8 @@ fn bytes() -> impl Strategy<Value = Vec<u8>> {
             "$count($)",
             "$string($)",
             "$random()",
+            "$x.a",
+            "$count($x.items) + $count(items)",
             "{\"a\": 1, \"items\": [{\"price\": 2, \"name\": \"x\"}]}",
             "[1, 2, 3]",
             "\"é😀\"",
@@ -63,6 +65,9 @@ enum Call {
     Evaluate(usize, Option<usize>, Option<usize>),
     /// Evaluates one of the expressions against one of the documents.
     EvaluateDocument(usize, usize, Option<usize>),
+    /// Evaluates one of the expressions against one of the documents, or no input, with
+    /// documents as variables.
+    EvaluateWith(usize, Option<usize>, Listed, Option<usize>),
     /// What one of the expressions reads.
     Reads(usize),
     /// The union of the reads in one of the buffers.
@@ -73,6 +78,26 @@ enum Call {
     FreeDocument(usize),
     /// A handle that was never made, passed where any handle goes.
     Stranger(u32, u32, u8),
+}
+
+/// The documents an evaluation binds to variables.
+#[derive(Debug, Clone)]
+enum Listed {
+    /// No list.
+    None,
+    /// One of the buffers as the list, whatever it holds.
+    Buffer(usize),
+    /// A list in its form, of some of the documents made, by name.
+    Documents(Vec<(&'static str, usize)>),
+}
+
+fn listed() -> impl Strategy<Value = Listed> {
+    let name = prop::sample::select(vec!["x", "a", "items", "sum", "", "é😀"]);
+    prop_oneof![
+        1 => Just(Listed::None),
+        1 => any::<usize>().prop_map(Listed::Buffer),
+        3 => prop::collection::vec((name, any::<usize>()), 0..4).prop_map(Listed::Documents),
+    ]
 }
 
 fn call() -> impl Strategy<Value = Call> {
@@ -86,6 +111,8 @@ fn call() -> impl Strategy<Value = Call> {
             .prop_map(|(e, i, o)| Call::Evaluate(e, i, o)),
         3 => (any::<usize>(), any::<usize>(), any::<Option<usize>>())
             .prop_map(|(e, d, o)| Call::EvaluateDocument(e, d, o)),
+        3 => (any::<usize>(), any::<Option<usize>>(), listed(), any::<Option<usize>>())
+            .prop_map(|(e, d, l, o)| Call::EvaluateWith(e, d, l, o)),
         1 => any::<usize>().prop_map(Call::Reads),
         1 => any::<usize>().prop_map(Call::UnionReads),
         2 => any::<usize>().prop_map(Call::FreeBuffer),
@@ -256,6 +283,47 @@ proptest! {
                         prop_assert!(!matches!(replied, Replied::Handle(_)));
                     }
                 }
+                Call::EvaluateWith(expression, document, listed, given) => {
+                    let Some(expression) = pick(&expressions, expression) else { continue };
+                    let (document, document_live) = optional(&documents, document);
+                    let (given, given_live) = optional(&options, given);
+                    // The list, whether its handles are all live, and whether it is in its form.
+                    let (list, mut live, formed, made) = match listed {
+                        Listed::None => (0, true, true, false),
+                        Listed::Buffer(index) => {
+                            let Some(buffer) = pick(&buffers_made, index) else { continue };
+                            (buffer.handle, buffer.live, false, false)
+                        }
+                        Listed::Documents(named) if documents.is_empty() && !named.is_empty() => continue,
+                        Listed::Documents(named) => {
+                            let mut list = (named.len() as u32).to_le_bytes().to_vec();
+                            let mut live = true;
+                            for (name, index) in named {
+                                let Some(document) = pick(&documents, index) else { continue };
+                                live &= document.live;
+                                list.extend_from_slice(&document.handle.to_le_bytes());
+                                list.extend_from_slice(&(name.len() as u32).to_le_bytes());
+                                list.extend_from_slice(name.as_bytes());
+                            }
+                            (buffers::insert(list), live, true, true)
+                        }
+                    };
+                    live &= expression.live && document_live && given_live;
+                    let replied = reply(jlens_evaluate_document_with(
+                        expression.handle, document, list, 0, given, 0, 0,
+                    ))?;
+                    if made {
+                        prop_assert_eq!(jlens_buffer_free(list), 1);
+                    }
+                    match (live, formed) {
+                        (false, _) => prop_assert_eq!(replied, unknown()),
+                        (true, true) => {
+                            prop_assert!(!matches!(replied, Replied::Handle(_)));
+                            prop_assert_ne!(replied, Replied::Error("U2005".to_owned()));
+                        }
+                        (true, false) => prop_assert!(!matches!(replied, Replied::Handle(_))),
+                    }
+                }
                 Call::Reads(index) => {
                     let Some(expression) = pick(&expressions, index) else { continue };
                     let replied = reply(jlens_reads(expression.handle, 0))?;
@@ -312,6 +380,12 @@ proptest! {
                             prop_assert_eq!(reply(jlens_evaluate(expression, handle, 0, 0, 0, 0))?, unknown());
                             let replied = reply(jlens_evaluate_document(expression, handle, 0, 0, 0, 0))?;
                             prop_assert_eq!(replied, unknown());
+                            let replied = reply(jlens_evaluate_document_with(expression, handle, 0, 0, 0, 0, 0))?;
+                            prop_assert_eq!(replied, unknown());
+                            let replied = reply(jlens_evaluate_document_with(expression, 0, handle, 0, 0, 0, 0))?;
+                            prop_assert_eq!(replied, unknown());
+                            let replied = reply(jlens_evaluate_document_with(expression, 0, 0, 0, handle, 1, 0))?;
+                            prop_assert_eq!(replied, unknown());
                         }
                         _ => {
                             let Some(expression) = expression else { continue };
@@ -347,6 +421,7 @@ proptest! {
         reply(jlens_evaluate(source, input, 0, 0, u32::MAX, 0))?;
         reply(jlens_evaluate(input, 0, 0, source, 0, 0))?;
         reply(jlens_evaluate_document(source, input, 0, 0, 0, 0))?;
+        reply(jlens_evaluate_document_with(source, input, input, input, input, 0, input))?;
         reply(jlens_evaluate_audited(source, input, 0, 0, input))?;
         reply(jlens_reads(source, 0))?;
         reply(jlens_reads(source, input))?;
@@ -365,6 +440,9 @@ proptest! {
             reply(jlens_evaluate(expression, expression, 0, expression, 0, 0))?;
             reply(jlens_evaluate(expression, 0, 0, 0, 1, 0))?;
             reply(jlens_evaluate_document(expression, expression, 0, expression, 0, 0))?;
+            reply(jlens_evaluate_document_with(expression, 0, input, 0, 0, 0, input))?;
+            reply(jlens_evaluate_document_with(expression, 0, source, 0, 0, 1, 0))?;
+            reply(jlens_evaluate_document_with(expression, expression, expression, 0, 0, 0, 0))?;
             reply(jlens_evaluate_audited(expression, input, 0, 0, source))?;
             reply(jlens_evaluate_audited(expression, 0, 0, 0, input))?;
             reply(jlens_evaluate_audited(expression, expression, expression, expression, expression))?;

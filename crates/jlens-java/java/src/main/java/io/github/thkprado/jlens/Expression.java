@@ -129,6 +129,72 @@ public final class Expression implements AutoCloseable {
     }
 
     /**
+     * Evaluates the expression against a document, with other documents bound to variables:
+     * each is the value of {@code $name}, read where it is, never copied nor made into Java
+     * objects. Use it for an expression that reads more than one document, such as two versions
+     * of a record, or a record and a table it refers to.
+     *
+     * {@snippet :
+     * try (Expression grew = Expression.compile("total > $before.total");
+     *      Document before = Document.fromJson(stored);
+     *      Document after = Document.fromJson(received)) {
+     *     Object answer = grew.evaluate(after, Map.of("before", before));
+     * }
+     * }
+     *
+     * <p>A name is given with or without its leading {@code $}. One document may be bound to
+     * several names, and be the input too. The documents may each keep only the fields the
+     * expression reads of its variable, which {@link #reads()} gives by name ({@link
+     * Reads#bindings()}).
+     *
+     * @param input the document, {@code null} for no input: the expression then runs on its
+     *     variables alone
+     * @param documents the documents bound to variables, by name
+     * @return the result as Java objects, {@code null} when it is undefined or {@code null}
+     * @throws JlensException when the evaluation fails
+     * @throws IllegalStateException when the expression or a document was closed
+     */
+    public Object evaluate(Document input, Map<String, Document> documents) {
+        return evaluate(input, documents, Bindings.NONE, Options.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against a document, with other documents bound to variables, as
+     * {@link #evaluate(Document, Map)} does, and with bindings. A document takes the place of a
+     * variable or a host function of the same name in the bindings, for this evaluation: the
+     * bindings stay as they are, built once for every evaluation.
+     *
+     * @param input the document, {@code null} for no input
+     * @param documents the documents bound to variables, by name
+     * @param bindings the variables and host functions of the evaluation
+     * @return the result as Java objects, {@code null} when it is undefined or {@code null}
+     * @throws JlensException when the evaluation fails
+     * @throws IllegalStateException when the expression, a document or the bindings were closed
+     */
+    public Object evaluate(Document input, Map<String, Document> documents, Bindings bindings) {
+        return evaluate(input, documents, bindings, Options.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against a document, with other documents bound to variables, as
+     * {@link #evaluate(Document, Map, Bindings)} does, with bindings ({@link Bindings#NONE} for
+     * none) and options.
+     *
+     * @param input the document, {@code null} for no input
+     * @param documents the documents bound to variables, by name
+     * @param bindings the variables and host functions of the evaluation
+     * @param options the options of the evaluation
+     * @return the result as Java objects, {@code null} when it is undefined or {@code null}
+     * @throws JlensException when the evaluation fails
+     * @throws IllegalStateException when the expression, a document or the bindings were closed
+     */
+    public Object evaluate(Document input, Map<String, Document> documents, Bindings bindings,
+            Options options) {
+        return onDocuments(input, documents, bindings, options, Native.VALUES,
+                reply -> Native.values(reply, null));
+    }
+
+    /**
      * Evaluates the expression against Java objects, read as JSON values one level at a time as
      * the evaluation reaches them: a path reads one entry of a map, an index one item of a list.
      * The objects read are:
@@ -472,6 +538,55 @@ public final class Expression implements AutoCloseable {
     }
 
     /**
+     * Evaluates the expression against a document, with other documents bound to variables, as
+     * {@link #evaluate(Document, Map)} does.
+     *
+     * @param input the document, {@code null} for no input
+     * @param documents the documents bound to variables, by name
+     * @return the result as JSON text, {@code null} when it is undefined
+     * @throws JlensException when the evaluation fails
+     * @throws IllegalStateException when the expression or a document was closed
+     */
+    public String evaluateJson(Document input, Map<String, Document> documents) {
+        return evaluateJson(input, documents, Bindings.NONE, Options.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against a document, with other documents bound to variables and
+     * with bindings, as {@link #evaluate(Document, Map, Bindings)} does.
+     *
+     * @param input the document, {@code null} for no input
+     * @param documents the documents bound to variables, by name
+     * @param bindings the variables and host functions of the evaluation
+     * @return the result as JSON text, {@code null} when it is undefined
+     * @throws JlensException when the evaluation fails
+     * @throws IllegalStateException when the expression, a document or the bindings were closed
+     */
+    public String evaluateJson(Document input, Map<String, Document> documents,
+            Bindings bindings) {
+        return evaluateJson(input, documents, bindings, Options.DEFAULTS);
+    }
+
+    /**
+     * Evaluates the expression against a document, with other documents bound to variables,
+     * with bindings ({@link Bindings#NONE} for none) and options, as {@link #evaluate(Document,
+     * Map, Bindings)} does.
+     *
+     * @param input the document, {@code null} for no input
+     * @param documents the documents bound to variables, by name
+     * @param bindings the variables and host functions of the evaluation
+     * @param options the options of the evaluation
+     * @return the result as JSON text, {@code null} when it is undefined
+     * @throws JlensException when the evaluation fails
+     * @throws IllegalStateException when the expression, a document or the bindings were closed
+     */
+    public String evaluateJson(Document input, Map<String, Document> documents, Bindings bindings,
+            Options options) {
+        return onDocuments(input, documents, bindings, options, Native.JSON,
+                (byte[] reply) -> Native.json(reply));
+    }
+
+    /**
      * Evaluates the expression against Java objects and records how the result was reached, at
      * {@link AuditLevel#DECISIONS}. The input is written whole first, as the audit hashes it; the
      * objects read are those of {@link #evaluate(Object)}. An error of the evaluation does not
@@ -617,6 +732,30 @@ public final class Expression implements AutoCloseable {
         } finally {
             Reference.reachabilityFence(this);
             Reference.reachabilityFence(input);
+            Reference.reachabilityFence(bindings);
+        }
+    }
+
+    /**
+     * Evaluates against a document, or no input, with {@code documents} bound to variables, in
+     * {@code format}, and decodes the reply.
+     */
+    private <T> T onDocuments(Document input, Map<String, Document> documents, Bindings bindings,
+            Options options, int format, Function<byte[], T> decode) {
+        long expression = live();
+        long document = input == null ? 0 : input.live();
+        byte[] list = Document.listed(documents);
+        long bound = bindings.live();
+        try {
+            return run(bindings,
+                    () -> options.evaluate(o -> Native.evaluateDocumentWith(expression, document,
+                            list, bound, o, format)),
+                    decode);
+        } finally {
+            Reference.reachabilityFence(this);
+            Reference.reachabilityFence(input);
+            // The map keeps its documents.
+            Reference.reachabilityFence(documents);
             Reference.reachabilityFence(bindings);
         }
     }

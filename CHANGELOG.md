@@ -28,6 +28,17 @@ All notable changes are recorded here. The format follows
   exit code. `false` for the rest or `maxItems` closes a tuple, and `true` for the rest says
   that it is open on purpose: neither is listed. `LoadReport::is_empty` is `false` for a
   report with such a tuple.
+- Java: an evaluation takes documents as variables, as `evaluate_document_with` does in Rust
+  since 0.21. `expression.evaluate(input, Map.of("before", before))`, and `evaluateJson` with
+  the same arguments, bind each `Document` to its name, with or without bindings and options
+  after them; the input may be `null`, and the expression then runs on its variables alone. A
+  document bound to a variable is read where it is: it is not copied, no Java objects are
+  built from it, and no evaluation converts it, where a variable of `Bindings` is converted at
+  each evaluation as far as the expression reads it. An application that receives two
+  documents as JSON text, such as two versions of a record, or a record and a table it refers
+  to, compares them with neither made into Java objects, and each may keep only the fields
+  that `reads().bindings()` gives for its name. A document takes the place of a variable or a
+  host function of the same name in the bindings, for that evaluation.
 
 ### Changed
 

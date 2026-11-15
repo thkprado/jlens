@@ -8,6 +8,9 @@ repository-wide rules are in the root [AGENTS.md](../../AGENTS.md).
 - Buffers, expressions, options, documents and bindings are known by handle.
 - The host's own values are read through a reader it calls back (`src/source.rs`); host
   functions are called back too (`src/host.rs`).
+- An evaluation against a document, or with no input, takes documents as variables in a list
+  of names and handles (`src/documents.rs`, 0.35 #7), which may be written in the scratch
+  buffer of the same call.
 - Audits are replied as values (`src/audit.rs`); replies carry a status byte.
 - Schemas and language services are known by handle too. A schema is made from its text and,
   optionally, its sources: its own URI and its other documents, each a buffer's handle by

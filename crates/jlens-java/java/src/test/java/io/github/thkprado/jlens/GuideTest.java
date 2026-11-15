@@ -126,6 +126,33 @@ class GuideTest {
     }
 
     @Test
+    void documentVariables() {
+        String stored = """
+                {"id": 7, "lines": [{"sku": "a", "qty": 1}], "history": ["..."]}""";
+        String received = """
+                {"id": 7, "lines": [{"sku": "a", "qty": 1}, {"sku": "b", "qty": 2}]}""";
+        // ANCHOR: document_variables
+        try (Expression added = Expression.compile("lines[$not(sku in $before.lines.sku)].sku");
+                Document before = Document.fromJson(stored);
+                Document after = Document.fromJson(received)) {
+            assertEquals("b", added.evaluate(after, Map.of("before", before)));
+        }
+        // ANCHOR_END: document_variables
+
+        // ANCHOR: document_variables_read
+        try (Expression added = Expression.compile("lines[$not(sku in $before.lines.sku)].sku")) {
+            Reads reads = added.reads();
+            assertFalse(reads.everyBinding());
+            Read read = reads.bindings().get("before");   // "id", "qty" and "history" skipped
+            try (Document before = Document.fromJson(stored, read);
+                    Document after = Document.fromJson(received, reads.input())) {
+                assertEquals("b", added.evaluate(after, Map.of("before", before)));
+            }
+        }
+        // ANCHOR_END: document_variables_read
+    }
+
+    @Test
     void threads() throws Exception {
         // ANCHOR: threads
         try (Expression total = Expression.compile("$sum(items.price)");

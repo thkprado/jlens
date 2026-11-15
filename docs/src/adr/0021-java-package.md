@@ -1310,3 +1310,65 @@ by every thread.
   within the spread of their runs (`customer.name` 97 to 109 µs before, 102 to 105 µs after;
   the indexes 1.7 to 2.1 ms in both), where the scratch reply alone had measured
   `customer.name` 7% faster.
+
+## Amendment: documents as variables (0.35 #7)
+
+### Context
+
+An evaluation took one `Document`, its input. An application that receives two documents as
+JSON text, such as two versions of a record, or a record and a table it refers to, had to give
+the other as a variable of `Bindings`: parsed into Java maps and lists, written to native memory
+when the bindings are built, and converted at each evaluation as far as the expression reads it
+([ADR 0019](0019-documents-from-rust-values.md#variables-of-evaluate_document)). That builds
+bindings for each pair of documents, where bindings are made once to serve every evaluation, and
+a field read of each item of an array converts the array. The core has bound documents to
+variables since 0.21 (`evaluate_document_with`), with none of it.
+
+### Decision
+
+1. **The call** is `Expression.evaluate(Document input, Map<String, Document> documents)`, then
+   with `Bindings`, then with `Bindings` and `Options`, and `evaluateJson` with the same
+   arguments. A map, not a builder or a type of its own: the documents change from one
+   evaluation to the next, so there is nothing to build ahead, and a map is what an application
+   holds. A name is given with or without its `$`, as `Bindings.Builder` takes it. `null` as
+   the input is no input, as `Document::undefined()` in the core: the expression runs on its
+   variables alone.
+2. **Precedence** is the core's: a document takes the place of a variable or a host function of
+   the same name in the bindings, for that evaluation, and the bindings are not changed.
+3. **The C API** gets one export, `jlens_evaluate_document_with(expression, document,
+   documents, bindings, options, result, scratch)`, with `document` 0 for no input;
+   `jlens_evaluate_document` stays as it is. `documents` is a buffer that lists the documents:
+   their number, then the handle and the name of each. It is binary, not JSON text as the
+   declarations of a language service are, as it is written and read at each evaluation. A list
+   not in its form fails with `U2005`, and a document it names that was freed with `U2002`.
+4. **The list may be the scratch buffer** of the same call: it is read whole before the
+   evaluation starts and the reply is written after it, and the bytes after the last document
+   are not read. Java writes the list at the start of the scratch it takes from its pool, so the
+   documents cost no call beyond the evaluation's; a list of more than 4 KiB goes in a buffer of
+   its own.
+5. **Threads.** A thread converts a document the first time it evaluates with it, as the input
+   or as a variable, and keeps the conversion until the document is closed, as before
+   (0.25 #3): bound to a variable, a document is an `Rc` clone of that conversion.
+6. **Left out.** Audits keep their variables in the bindings, as the core audits JSON values.
+   An evaluation over Java objects takes no documents, as `evaluate_source` takes none in the
+   core. A part of a document as a variable (`Document::pointer`) is not in the package either.
+   The Python and WebAssembly packages are items of their own, when one is asked for.
+
+### Consequences
+
+- **What a `Document` saves is the conversion**, at each evaluation, of what the expression
+  reads of the variable. On the M1, with `$table` the spike's document and a small document as
+  the input (`cargo xtask java-compare variables`, a part of the harness run when named):
+  `$table.items[0].name` takes 68 µs with the variable in `Bindings` and 0.6 µs with it a
+  `Document` on 1,000 items, 8.3 ms and 0.8 µs on 100,000; `$sum($table.items.price)` 69 and
+  8.3 µs, 9.2 and 3.4 ms.
+- **A bound document costs 50 to 75 ns of a call**, read or not, timed from Rust: `1` takes
+  129 ns against a document, 219 ns with one more bound and 269 ns with two. The list is copied
+  in two allocations however many documents it names. About 17 ns are the core's, which puts
+  the root frame on its list of frames that may be part of a cycle for any array or object
+  bound there; the roadmap keeps that for the plan's last check.
+- **`evaluate(Document)` with no documents** measures as in 0.34.0: `java-compare ab` on the
+  documents and the cases marks no difference but `regex`, 5.4% faster
+  ([`perf-0.35.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.35.md)).
+- The robustness properties of the C API call the export with lists in their form, of
+  documents live and freed, and with any bytes as the list.

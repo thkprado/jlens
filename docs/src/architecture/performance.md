@@ -27,7 +27,7 @@ order and an array of 10,000 items:
 The numbers are meant for comparing alternatives on one machine. They are not guarantees, and
 your hardware will give different absolute values. How each change was measured (methods, traps,
 intermediate numbers) is kept outside the book, in
-[`docs/notes/`](https://github.com/thkprado/jlens/tree/main/docs/notes): `perf-0.34.md`, `perf-0.33.md`,
+[`docs/notes/`](https://github.com/thkprado/jlens/tree/main/docs/notes): `perf-0.35.md`, `perf-0.34.md`, `perf-0.33.md`,
 `perf-0.32.md`, `perf-0.31.md`, `perf-0.30.md`, `perf-0.29.md`, `perf-0.28.md`, `perf-0.27.md`, `perf-0.26.md` and
 `perf-earlier.md`.
 
@@ -710,6 +710,9 @@ What is still slower than a lazy read is an array read for a few of its items:
 To read a large variable for a few of its parts, bind a part of a `Document` instead
 (`evaluate_document_with` and `Document::pointer`, above), which converts nothing. The Python and
 Java packages evaluate this way too: from Java, `$v.total` takes 0.83 µs where it took 630.
+From 0.35 the Java package binds a `Document` to a variable as well
+(`evaluate(input, Map.of("table", document))`): on the M1, `$table.items[0].name` over 100,000
+items takes 0.8 µs, and 8.3 ms with the variable in `Bindings`.
 
 ## Where the time goes
 

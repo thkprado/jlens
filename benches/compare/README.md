@@ -97,6 +97,11 @@ The parts (the first three when none is given):
   30 seconds, and the table says what came out: a result, an error code, an exception, the
   JVM's exit code, or still running. jlens reads Java objects there, as cyclic input needs;
   jsonata-jvm-compiler gets a Jackson tree built the same way.
+- `variables`, run only when named: jlens alone, on expressions that read a large variable, the
+  spike's documents again (`--sizes`), with a small document as the input. The variable is
+  bound in `Bindings`, of which each evaluation converts what the expression reads, and then as
+  a `Document` (`evaluate(input, Map.of("table", document))`), which no evaluation converts. It
+  needs the package from 0.35 on, so `java-compare ab` against an older JAR cannot name it.
 
 `documents` and `cases` print microseconds per evaluation, the best of five runs of 0.3 s after
 a second of warm-up, with two columns per engine: on the input converted once, and on JSON text

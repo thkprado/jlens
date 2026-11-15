@@ -4,6 +4,7 @@
 use std::any::Any;
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::{Arc, LazyLock, OnceLock};
 
 use jlens_core::input::{Sink, Source};
@@ -12,7 +13,7 @@ use jlens_core::reads::{Read, Reads};
 use jlens_core::{Bindings, Document, Error, Expression, Options};
 use serde_json::{Map, Value};
 
-use crate::documents::{self, DOCUMENTS};
+use crate::documents::{self, DOCUMENTS, Named, NotNamed};
 use crate::handles::{Cache, Found, Table};
 use crate::host::{self, BINDINGS, Bound};
 use crate::options::{self, OPTIONS};
@@ -256,7 +257,7 @@ fn evaluate_text(
         }
     };
     let input = match &document {
-        Some(document) => Input::Document(document),
+        Some(document) => Input::Document(document, &[]),
         None => Input::None,
     };
     run(
@@ -345,11 +346,83 @@ fn evaluate_on_document(
     let document = documents::converted(text.arc()).map_err(|e| not_json(e.to_string()))?;
     run(
         &compiled,
-        Input::Document(&document),
+        Input::Document(&document, &[]),
         bindings.as_deref(),
         options.as_deref().unwrap_or(&DEFAULTS),
         format,
     )
+}
+
+/// Evaluates expression `expression` against document `document` (0 for no input), as
+/// [`evaluate_document`] does, with the documents that buffer `documents` lists bound to
+/// variables too (0 for none; [`documents`] gives its form): each is the value of its name,
+/// which takes the place of a variable or a host function of the same name in `bindings`, and a
+/// later document the place of an earlier one of the same name. None is copied, as
+/// `Expression::evaluate_document_with` binds them (ADR 0019). The buffer stays the caller's, and
+/// may be `scratch`: it is read before the reply is written.
+///
+/// A list not in its form fails with `U2005`, and a document it lists that is unknown or freed
+/// with `U2002`, after the handles of the other arguments were checked.
+pub fn evaluate_document_with(
+    expression: u64,
+    document: u64,
+    documents: u64,
+    bindings: u64,
+    options: u64,
+    result: u32,
+    scratch: u64,
+) -> u64 {
+    reply_into(
+        Format::named(result).and_then(|format| {
+            evaluate_on_documents(expression, document, documents, bindings, options, format)
+        }),
+        scratch,
+    )
+}
+
+fn evaluate_on_documents(
+    expression: u64,
+    document: u64,
+    listed: u64,
+    bindings: u64,
+    options: u64,
+    format: Format,
+) -> Result<Vec<u8>, Vec<u8>> {
+    let compiled = find_expression(expression)?;
+    let bindings = find_bindings(bindings)?;
+    let options = find_options(options)?;
+    let input = match document {
+        0 => None,
+        document => Some(documents::find(document).ok_or_else(|| unknown("document", document))?),
+    };
+    let named = match listed {
+        0 => Named::default(),
+        // Copied out, so that the buffer is not held while the expression runs.
+        listed => buffers::with_cached(listed, |bytes| documents::named(bytes))
+            .ok_or_else(|| unknown("buffer", listed))?
+            .map_err(|error| match error {
+                NotNamed::Form(message) => invalid("documents", message),
+                NotNamed::Unknown(handle) => unknown("document", handle),
+                NotNamed::NotJson(message) => not_json(message),
+            })?,
+    };
+    let variables = named.variables();
+    let input = match &input {
+        Some(text) => documents::converted(text.arc()).map_err(|e| not_json(e.to_string()))?,
+        None => NO_DOCUMENT.with(Rc::clone),
+    };
+    run(
+        &compiled,
+        Input::Document(&input, &variables),
+        bindings.as_deref(),
+        options.as_deref().unwrap_or(&DEFAULTS),
+        format,
+    )
+}
+
+thread_local! {
+    /// No input, for an evaluation on its variables alone.
+    static NO_DOCUMENT: Rc<Document> = Rc::new(Document::undefined());
 }
 
 /// Evaluates expression `expression` against the host's own values, read through `reader`
@@ -434,7 +507,8 @@ pub(crate) static DEFAULTS: LazyLock<Options> = LazyLock::new(Options::default);
 /// The input of an evaluation.
 enum Input<'i> {
     None,
-    Document(&'i Document),
+    /// A document, and the documents bound to variables, by name.
+    Document(&'i Document, &'i [(&'i str, &'i Document)]),
     /// The host's values, read through its reader.
     Source(source::Input<'i>),
 }
@@ -469,7 +543,9 @@ fn evaluate_with(
     let expression = &compiled.expression;
     let result = match format {
         Format::Json => match &input {
-            Input::Document(document) => expression.evaluate_document(document, bindings, options),
+            Input::Document(document, variables) => {
+                expression.evaluate_document_with(document, variables, bindings, options)
+            }
             Input::None => expression.evaluate_with(None, bindings, options),
             Input::Source(source) => expression.evaluate_source(source, bindings, options),
         }
@@ -487,9 +563,8 @@ fn evaluate_with(
                     .map(|()| std::mem::take(&mut encoder.out)))
             };
             match &input {
-                Input::Document(document) => {
-                    expression.evaluate_document_to(document, bindings, options, write)
-                }
+                Input::Document(document, variables) => expression
+                    .evaluate_document_with_to(document, variables, bindings, options, write),
                 Input::None => expression.evaluate_source_to(&NoInput, bindings, options, write),
                 Input::Source(source) => {
                     expression.evaluate_source_to(source, bindings, options, write)
@@ -577,7 +652,7 @@ pub(crate) fn not_json(message: String) -> Vec<u8> {
 }
 
 /// The `U2005` reply for an argument (`options`, `read`, `reads`, `result`, `reader`,
-/// `functions`, `variables`, `function`) that is not in its form.
+/// `functions`, `variables`, `function`, `documents`) that is not in its form.
 pub(crate) fn invalid(kind: &str, message: String) -> Vec<u8> {
     failure(
         &Error::new("U2005")

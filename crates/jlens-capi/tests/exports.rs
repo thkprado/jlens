@@ -437,6 +437,213 @@ fn documents_are_evaluated_and_freed_once() {
     );
 }
 
+/// The list of the documents an evaluation binds to variables, as the `documents` module
+/// describes it.
+fn listed(documents: &[(&str, u64)]) -> Vec<u8> {
+    let mut list = (documents.len() as u32).to_le_bytes().to_vec();
+    for (name, handle) in documents {
+        list.extend_from_slice(&handle.to_le_bytes());
+        list.extend_from_slice(&(name.len() as u32).to_le_bytes());
+        list.extend_from_slice(name.as_bytes());
+    }
+    list
+}
+
+/// Evaluates against `document` (0 for no input) with the documents of `list` as variables.
+fn with_list(expression: u64, document: u64, list: Vec<u8>, result: u32) -> Reply {
+    let list = buffers::insert(list);
+    let replied = reply(jlens_evaluate_document_with(
+        expression, document, list, 0, 0, result, 0,
+    ));
+    assert_eq!(jlens_buffer_free(list), 1);
+    replied
+}
+
+fn with_documents(expression: u64, document: u64, documents: &[(&str, u64)]) -> Reply {
+    with_list(expression, document, listed(documents), 0)
+}
+
+#[test]
+fn documents_are_variables_of_an_evaluation() {
+    let before = document(r#"{"total": 10, "lines": [1, 2]}"#, None);
+    let after = document(r#"{"total": 12, "lines": [1, 2, 3]}"#, None);
+    let grew = compile("total - $before.total");
+    assert_eq!(
+        with_documents(grew, after, &[("before", before)]),
+        Reply::Json("2".into())
+    );
+    // One document as the input and as a variable, and under two names.
+    let twice = [("before", after), ("é😀", after)];
+    assert_eq!(with_documents(grew, after, &twice), Reply::Json("0".into()));
+    // With no input, the expression runs on its variables alone.
+    let both = compile("[$count($a.lines), $count($b.lines), $]");
+    assert_eq!(
+        with_documents(both, 0, &[("a", before), ("b", after)]),
+        Reply::Json("[2,3]".into())
+    );
+    // A later document takes the place of an earlier one of the same name.
+    let named = compile("$x.total");
+    assert_eq!(
+        with_documents(named, 0, &[("x", before), ("x", after)]),
+        Reply::Json("12".into())
+    );
+    // A variable that is not bound is undefined; no list, or an empty one, binds none.
+    assert_eq!(with_documents(named, after, &[]), Reply::Undefined);
+    let none = jlens_evaluate_document_with(named, after, 0, 0, 0, 0, 0);
+    assert_eq!(reply(none), Reply::Undefined);
+    let total = compile("total");
+    let none = jlens_evaluate_document_with(total, after, 0, 0, 0, 0, 0);
+    assert_eq!(reply(none), Reply::Json("12".into()));
+    // As values, within the options.
+    let Reply::Values(bytes) = with_list(both, 0, listed(&[("a", before), ("b", after)]), 1) else {
+        panic!("not values")
+    };
+    assert_eq!(values::decode(&bytes), json!([2, 3]));
+    let list = buffers::insert(listed(&[("a", before), ("b", after)]));
+    let few = options(r#"{"maxSteps": 2}"#);
+    let stopped = reply(jlens_evaluate_document_with(both, 0, list, 0, few, 0, 0));
+    assert_eq!(code(&stopped), "U1006");
+    assert_eq!(jlens_buffer_free(list), 1);
+
+    // This thread converted each document once, and drops both once they are freed.
+    assert_eq!(jlens_capi::documents::cached(), 2);
+    assert_eq!(jlens_document_free(before), 1);
+    let Reply::Error(error) = with_documents(named, after, &[("x", before)]) else {
+        panic!("a freed document")
+    };
+    assert_eq!(
+        (&error["code"], &error["token"]),
+        (&json!("U2002"), &json!("document"))
+    );
+    assert_eq!(jlens_document_free(after), 1);
+    assert_eq!(jlens_buffer_len(0), 0);
+    assert_eq!(jlens_capi::documents::cached(), 0);
+    for expression in [grew, both, named, total] {
+        assert_eq!(jlens_expression_free(expression), 1);
+    }
+    assert_eq!(jlens_options_free(few), 1);
+}
+
+#[test]
+fn the_list_of_documents_may_be_the_scratch_buffer() {
+    let table = document(r#"{"rates": {"BR": 0.5}}"#, None);
+    let order = document(r#"{"country": "BR", "price": 8}"#, None);
+    let expression = compile("price * $lookup($table.rates, country)");
+    let list = listed(&[("table", table)]);
+    let scratch = jlens_buffer_new(64);
+    let evaluate = || {
+        buffers::with(scratch, |bytes| bytes[..list.len()].copy_from_slice(&list)).unwrap();
+        jlens_evaluate_document_with(expression, order, scratch, 0, 0, 0, scratch)
+    };
+    // The reply is written over the list, which was read first; twice, as the host does.
+    for _ in 0..2 {
+        let replied = evaluate();
+        assert_eq!(replied as u32, 0, "a length, not a handle");
+        let reply = buffers::with(scratch, |bytes| bytes[..(replied >> 32) as usize].to_vec());
+        assert_eq!(reply.unwrap(), [&[REPLY_JSON][..], b"4"].concat());
+    }
+    assert_eq!(jlens_buffer_free(scratch), 1);
+    assert_eq!(jlens_document_free(table), 1);
+    assert_eq!(jlens_document_free(order), 1);
+    assert_eq!(jlens_expression_free(expression), 1);
+}
+
+#[test]
+fn a_list_of_documents_not_in_its_form_fails_with_u2005() {
+    let doc = document("{}", None);
+    let expression = compile("$x");
+    let whole = listed(&[("x", doc), ("y", doc)]);
+    let mut not_utf8 = listed(&[("x", doc)]);
+    *not_utf8.last_mut().unwrap() = 0xff;
+    let mut lists = vec![
+        Vec::new(),
+        vec![1, 0, 0],
+        // More documents than the list holds, as many as a count can say.
+        1u32.to_le_bytes().to_vec(),
+        u32::MAX.to_le_bytes().to_vec(),
+        [&3u32.to_le_bytes()[..], &whole[4..]].concat(),
+        not_utf8,
+    ];
+    // Cut anywhere before its end.
+    lists.extend((4..whole.len()).map(|end| whole[..end].to_vec()));
+    for list in lists {
+        let Reply::Error(error) = with_list(expression, doc, list.clone(), 0) else {
+            panic!("{list:?}")
+        };
+        assert_eq!(
+            (&error["code"], &error["token"]),
+            (&json!("U2005"), &json!("documents")),
+            "{list:?}"
+        );
+    }
+    // The bytes after the last document are not read.
+    let longer = [&whole[..], &[0xff, 1, 2]].concat();
+    assert_eq!(
+        with_list(expression, doc, longer, 0),
+        Reply::Json("{}".into())
+    );
+
+    // An unknown handle is told before the list's form, and a document of the list after it.
+    let unknown = |replied: Reply, kind: &str| {
+        let Reply::Error(error) = replied else {
+            panic!("not an error")
+        };
+        assert_eq!(
+            (&error["code"], &error["token"]),
+            (&json!("U2002"), &json!(kind))
+        );
+    };
+    let freed = buffer("");
+    assert_eq!(jlens_buffer_free(freed), 1);
+    unknown(
+        reply(jlens_evaluate_document_with(
+            expression, doc, freed, 0, 0, 0, 0,
+        )),
+        "buffer",
+    );
+    unknown(with_list(expression, freed, vec![1, 0, 0], 0), "document");
+    unknown(with_list(freed, doc, vec![1, 0, 0], 0), "expression");
+    unknown(with_documents(expression, doc, &[("x", freed)]), "document");
+    unknown(with_documents(expression, doc, &[("x", 0)]), "document");
+    unknown(
+        with_documents(expression, 0, &[("x", doc), ("y", freed)]),
+        "document",
+    );
+    let Reply::Error(error) = reply(jlens_evaluate_document_with(expression, doc, 0, 0, 0, 2, 0))
+    else {
+        panic!("no result format 2")
+    };
+    assert_eq!(error["code"], "U2005");
+    assert_eq!(jlens_document_free(doc), 1);
+    assert_eq!(jlens_expression_free(expression), 1);
+}
+
+#[test]
+fn threads_share_the_documents_of_variables() {
+    let table = document(r#"{"rates": [1, 2, 3]}"#, None);
+    let order = document(r#"{"index": 2}"#, None);
+    let expression = compile("$table.rates[$$.index]");
+    let workers: Vec<_> = (0..4)
+        .map(|_| {
+            std::thread::spawn(move || {
+                for _ in 0..100 {
+                    assert_eq!(
+                        with_documents(expression, order, &[("table", table)]),
+                        Reply::Json("3".into())
+                    );
+                }
+                jlens_capi::documents::cached()
+            })
+        })
+        .collect();
+    for worker in workers {
+        assert_eq!(worker.join().unwrap(), 2, "each thread converts each once");
+    }
+    assert_eq!(jlens_document_free(table), 1);
+    assert_eq!(jlens_document_free(order), 1);
+    assert_eq!(jlens_expression_free(expression), 1);
+}
+
 #[test]
 fn a_document_that_is_not_json_or_not_utf8_fails_with_u2001() {
     let error = with_buffer("{\"a\": ", |text| jlens_document_new(text, 0));

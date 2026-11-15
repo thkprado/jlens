@@ -77,6 +77,8 @@ final class Native {
             function("jlens_evaluate", U64, U64, U64, U64, U64, U32, U64);
     private static final MethodHandle EVALUATE_DOCUMENT =
             function("jlens_evaluate_document", U64, U64, U64, U64, U64, U32, U64);
+    private static final MethodHandle EVALUATE_DOCUMENT_WITH =
+            function("jlens_evaluate_document_with", U64, U64, U64, U64, U64, U64, U32, U64);
     private static final MethodHandle EVALUATE_SOURCE = function("jlens_evaluate_source",
             U64, U64, U64, ValueLayout.ADDRESS, U64, U64, U64, U32, U64);
     private static final MethodHandle EVALUATE_AUDITED =
@@ -261,6 +263,34 @@ final class Native {
         } catch (Throwable e) {
             throw failed(e);
         } finally {
+            release(slot, scratch);
+        }
+    }
+
+    /**
+     * Evaluates against a document (0 for no input), with the documents that {@code list} names
+     * bound to variables ({@link Document#listed}): the reply's bytes. The list goes at the
+     * start of the scratch buffer, which the C API reads before it replies there, so that it
+     * costs no call; one that does not fit goes in a buffer of its own.
+     */
+    static byte[] evaluateDocumentWith(long expression, long document, byte[] list,
+            long bindings, long options, int format) {
+        int slot = slot();
+        Scratch scratch = acquire(slot);
+        long own = 0;
+        try {
+            if (list.length > SCRATCH) {
+                own = buffer(list);
+            } else {
+                MemorySegment.copy(list, 0, scratch.bytes(), ValueLayout.JAVA_BYTE, 0, list.length);
+            }
+            long listed = own == 0 ? scratch.handle() : own;
+            return reply((long) EVALUATE_DOCUMENT_WITH.invokeExact(expression, document, listed,
+                    bindings, options, format, scratch.handle()), scratch);
+        } catch (Throwable e) {
+            throw failed(e);
+        } finally {
+            if (own != 0) free(own);
             release(slot, scratch);
         }
     }

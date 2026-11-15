@@ -52,6 +52,11 @@ The system property `jlens.library` points the package at a library outside the 
 - **Every call back into Java goes through `upcall` in `jlens-capi`**, which keeps 256 KiB of
   stack free for the JVM: with the 16 KiB pages of macOS on ARM, Java needs more below the caller
   than the core keeps, and a `StackOverflowError` that leaves an upcall aborts the JVM.
+- **Documents as variables** (0.35 #7): `evaluate(Document, Map<String, Document>, ...)` writes
+  the names and handles as a list (`Document.listed`) at the start of the evaluation's scratch
+  buffer, which the C API reads before it replies there, so that the list costs no call; a list
+  larger than the scratch goes in a buffer of its own. The map is kept reachable until the call
+  returns, and with it its documents.
 - **Host functions** (0.25 #7) are run by `Host`, called back on the evaluating thread, which
   finds the evaluation's `Host` in a `ScopedValue` and the function by its `Bindings`' context.
   The upcall never throws: an exception becomes an error reply with its number, and `evaluate`

@@ -16,8 +16,8 @@ import java.util.concurrent.atomic.LongAdder;
  * Compares jlens's Java package with the other JSONata implementations for the JVM, in
  * microseconds per evaluation and in evaluations per second on many threads. Run by
  * {@code cargo xtask java-compare}, in this project's directory; the arguments are the parts to
- * run ({@code documents}, {@code cases}, {@code threads}, all three when none is given, and
- * {@code limits}), then optionally {@code --engines jlens,jsonata-java,...} and {@code --sizes
+ * run ({@code documents}, {@code cases}, {@code threads}, all three when none is given,
+ * {@code limits} and {@code variables}), then optionally {@code --engines jlens,jsonata-java,...} and {@code --sizes
  * 1000,100000}. With {@code --exact}, as {@code cargo xtask java-compare ab} runs it, the tables
  * hold the numbers alone, to the tenth of a nanosecond.
  *
@@ -28,6 +28,8 @@ import java.util.concurrent.atomic.LongAdder;
  *       hardware threads and on 1,000 virtual threads.
  *   <li>{@code limits}: how each engine behaves at the limits ({@link Limits}), each case in a
  *       JVM of its own.
+ *   <li>{@code variables}: jlens alone, a large variable in {@code Bindings} and as a {@code
+ *       Document} ({@link Variables}).
  * </ul>
  *
  * <p>Each engine is timed on an input converted once and on JSON text parsed at each call,
@@ -55,7 +57,7 @@ public final class Compare {
                 case "--sizes" ->
                     sizes = Arrays.stream(args[++i].split(",")).mapToInt(Integer::parseInt).toArray();
                 case "--exact" -> exact = true;
-                case "documents", "cases", "threads", "limits" -> parts.add(args[i]);
+                case "documents", "cases", "threads", "limits", "variables" -> parts.add(args[i]);
                 default -> throw new IllegalArgumentException("unknown argument " + args[i]);
             }
         }
@@ -69,6 +71,7 @@ public final class Compare {
                 case "documents" -> documents(engines, sizes);
                 case "cases" -> cases(engines);
                 case "limits" -> Limits.run(engines);
+                case "variables" -> Variables.run(sizes);
                 default -> threads(engines);
             }
         }

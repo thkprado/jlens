@@ -35,8 +35,8 @@
 //! `U2002` for an unknown or freed handle, `U2003` for an expression that is not UTF-8,
 //! `U2004` for a panic, `U2005` for an argument that is not in its form (its `token` says
 //! which: `options`, `read`, `reads`, `result`, `reader`, `functions`, `variables`, `values`,
-//! `function`, `reply`, `audit`, `schema`, `sources`, `service` or `uses`), and `U1001` when a
-//! table of handles is full. An unknown handle is reported before anything wrong with what the other
+//! `function`, `reply`, `audit`, `schema`, `sources`, `service`, `uses` or `documents`), and
+//! `U1001` when a table of handles is full. An unknown handle is reported before anything wrong with what the other
 //! handles hold. A reply handle of 0 means that no buffer could be made for the reply. A
 //! reader that fails, or writes a level not in its form, fails the evaluation with `U1004`.
 //!
@@ -54,7 +54,9 @@
 //! package's ([`api::options_new`]), and an evaluation takes their handle, or 0 for the
 //! defaults. A document is JSON text parsed once, kept behind an `Arc` and converted once per
 //! thread that evaluates against it ([`documents`]); it can be pruned to the fields that
-//! [`api::reads`] or [`api::union_reads`] give.
+//! [`api::reads`] or [`api::union_reads`] give. An evaluation against a document, or with no
+//! input, takes documents as variables too, by name, none of them copied
+//! ([`api::evaluate_document_with`]).
 //!
 //! The host's own values can be the input too, read one level at a time as the evaluation
 //! reaches them, through a function of the host that Rust calls back ([`source`]).

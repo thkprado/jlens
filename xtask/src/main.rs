@@ -71,7 +71,7 @@ commands:
                                     as the site assembles it
   java [<maven argument>...]        build the C API and test the Java package with the Maven
                                     Wrapper (`verify`, or the arguments given); needs a JDK 25+
-  java-compare [documents|cases|threads|limits]... [--engines NAMES] [--sizes N,N]
+  java-compare [documents|cases|threads|limits|variables]... [--engines NAMES] [--sizes N,N]
                                     compare the Java package with the other JSONata
                                     implementations for the JVM (benches/compare/java)
   java-compare ab <A.jar> <B.jar> [--rounds N] [<part>...] [--engines NAMES] [--sizes N,N]

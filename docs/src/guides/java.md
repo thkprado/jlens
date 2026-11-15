@@ -168,6 +168,42 @@ Java objects, so it is the fastest input: `items[0].name` takes under a microsec
 document ([Performance](../architecture/performance.md#java-against-the-other-implementations)).
 Evaluations never modify a document.
 
+### Documents as variables
+
+An expression that reads more than one document, such as two versions of a record, or a record
+and a table it refers to, takes the others as variables. An evaluation against a `Document`
+binds documents by name, each the value of its `$name`:
+
+```java
+{{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:document_variables}}
+```
+
+- **Nothing is copied.** A document bound to a variable is read where it is, as the input is:
+  no Java objects are built from it, and the evaluation converts nothing. A variable of
+  `Bindings` is converted at each evaluation, as far as the expression reads it, which for a
+  field of each item of a large array is that field of every item. With a variable of 100,000
+  items, `$table.items[0].name` takes 8.3 ms from `Bindings` and 0.8 µs from a `Document`
+  (macOS, Apple M1).
+- **The names** are given with or without their `$`. One document may be bound to several
+  names, and be the input too. With `null` as the input, the expression runs on its variables
+  alone.
+- **Bindings** go with them: `evaluate(input, documents, bindings)`. A document takes the place
+  of a variable or a host function of the same name in the bindings, for that evaluation. The
+  bindings stay as they are, built once for every evaluation.
+- **`evaluateJson`** takes the same arguments and returns JSON text. An audit
+  (`evaluateWithAudit`) takes no documents: its variables go in its `Bindings`.
+
+Each document can keep only the fields the expression
+[reads](#the-fields-an-expression-reads) of its variable, which `reads().bindings()` gives by
+name:
+
+```java
+{{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:document_variables_read}}
+```
+
+A name that `bindings()` does not list is a variable the expression does not read, and when
+`everyBinding()` is true the expression may read any of them whole: keep those documents whole.
+
 ## Native objects
 
 `Expression`, `Document`, `Bindings`, `Schema` and `LanguageService` hold native memory. They are `AutoCloseable`: close them

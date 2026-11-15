@@ -206,6 +206,58 @@ fn bindings_hold_variables_and_host_functions() {
     );
 }
 
+/// A document bound to a variable takes the place of a variable or a host function of the
+/// same name, for that evaluation: the bindings stay as they are (roadmap 0.35 #7).
+#[test]
+fn a_document_takes_the_place_of_a_binding_of_its_name() {
+    let bindings = bindings();
+    let text = buffer(br#"{"x": 3}"#);
+    let document = match reply(jlens_document_new(text, 0)) {
+        Reply::Handle(handle) => handle,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(jlens_buffer_free(text), 1);
+    let with = |source: &str, names: &[&str]| {
+        let mut list = (names.len() as u32).to_le_bytes().to_vec();
+        for name in names {
+            list.extend_from_slice(&document.to_le_bytes());
+            list.extend_from_slice(&(name.len() as u32).to_le_bytes());
+            list.extend_from_slice(name.as_bytes());
+        }
+        let list = buffer(&list);
+        let text = buffer(source.as_bytes());
+        let expression = match reply(jlens_compile(text)) {
+            Reply::Handle(handle) => handle,
+            other => panic!("{source}: {other:?}"),
+        };
+        let result = reply(jlens_evaluate_document_with(
+            expression, 0, list, bindings, 0, 0, 0,
+        ));
+        for buffer in [list, text] {
+            assert_eq!(jlens_buffer_free(buffer), 1);
+        }
+        assert_eq!(jlens_expression_free(expression), 1);
+        result
+    };
+    // Beside the bindings, whose host functions run as in any evaluation.
+    assert_eq!(
+        with("$add($doc.x, $rate)", &["doc"]),
+        Reply::Json(json!(3.5))
+    );
+    // In place of a variable, and of a host function.
+    assert_eq!(with("$add($rate.x, 1)", &["rate"]), Reply::Json(json!(4)));
+    assert_eq!(with("$add.x + $rate", &["add"]), Reply::Json(json!(3.5)));
+    let Reply::Error(error) = with("$add(1, 2)", &["add"]) else {
+        panic!("a document is not a function")
+    };
+    assert_eq!(error["code"], "T1006");
+    // The bindings are as they were.
+    assert_eq!(with("$add($rate, 1)", &[]), Reply::Json(json!(1.5)));
+    assert_eq!(ok("$add($rate, 1)", bindings), json!(1.5));
+    assert_eq!(jlens_document_free(document), 1);
+    assert_eq!(jlens_bindings_free(bindings), 1);
+}
+
 /// A host function receives its arguments and nothing else, so with the bindings a call to
 /// one reads them alone (roadmap 0.33 #11).
 #[test]

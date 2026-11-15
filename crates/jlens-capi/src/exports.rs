@@ -65,6 +65,12 @@ export! {
     /// options `options` (0 for the defaults): a reply with the result, as JSON text (`result`
     /// 0) or values (`result` 1), or the error, in buffer `scratch` when it fits.
     jlens_evaluate_document(expression: u64, document: u64, bindings: u64, options: u64, result: u32, scratch: u64) -> u64 = crate::api::evaluate_document_into, crate::api::panicked;
+    /// Evaluates an expression against a document (0 for no input), with the documents that
+    /// buffer `documents` lists bound to variables (0 for none; the `documents` module gives its
+    /// form), bindings `bindings` (0 for none) and options `options` (0 for the defaults): a
+    /// reply with the result, as JSON text (`result` 0) or values (`result` 1), or the error, in
+    /// buffer `scratch` when it fits; `documents` may be `scratch`.
+    jlens_evaluate_document_with(expression: u64, document: u64, documents: u64, bindings: u64, options: u64, result: u32, scratch: u64) -> u64 = crate::api::evaluate_document_with, crate::api::panicked;
     /// Evaluates an expression against the host's own values: buffer `input` holds the input
     /// as a level, and `reader`, given `context`, writes the levels of its arrays and objects
     /// (the `source` module). With bindings `bindings` (0 for none) and options `options` (0
