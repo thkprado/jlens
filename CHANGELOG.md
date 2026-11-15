@@ -91,7 +91,7 @@ LanguageService({ schema })`, and each argument after it a member of the same ob
   `[1]`, so `1[][0] + 1`, which fails with `T2001`, is warned about as `[1] + 1` is. The
   diagnostics took it for a number since before 0.34.
 - An evaluation with a variable that holds an array or an object, bound in `Bindings` or to a
-  document, is about 17 ns faster, in every package: the variables of the evaluation's first
+  document, is about 15 ns faster, in every package: the variables of the evaluation's first
   frame no longer go on the list of frames that may be part of a cycle, as a value of the
   input holds no frame.
 

@@ -1364,9 +1364,9 @@ variables since 0.21 (`evaluate_document_with`), with none of it.
   8.3 µs, 9.2 and 3.4 ms.
 - **A bound document costs 50 to 75 ns of a call**, read or not, timed from Rust: `1` takes
   129 ns against a document, 219 ns with one more bound and 269 ns with two. The list is copied
-  in two allocations however many documents it names. About 17 ns are the core's, which puts
+  in two allocations however many documents it names. About 17 ns were the core's, which put
   the root frame on its list of frames that may be part of a cycle for any array or object
-  bound there; the roadmap keeps that for the plan's last check.
+  bound there; 0.35 #9 binds them without it, about 15 ns less for each evaluation.
 - **`evaluate(Document)` with no documents** measures as in 0.34.0: `java-compare ab` on the
   documents and the cases marks no difference but `regex`, 5.4% faster
   ([`perf-0.35.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.35.md)).
