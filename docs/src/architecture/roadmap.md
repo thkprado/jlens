@@ -21,6 +21,32 @@ For ad-hoc JSON queries, `jq` remains the usual tool. jlens is for JSONata that 
 somewhere else, such as a rules engine or a jsonata-js service. It checks those expressions,
 tests them and explains their results before they ship.
 
+## 0.36: what adoption asks
+
+jlens now has its first users outside its own repository, and they ask for things 35 releases did
+not. A rule author follows a warning to the letter and gets another wrong expression. An
+application in Java evaluates rules against large documents from a pool of threads, where each
+thread converts its own copy of a document, and it compares two versions of a record through an
+index that every rule builds again. A crate uses `jlens-regress` alone, pinned to one version,
+and skips text it cannot search with a step budget. And an adopter needs a version to pin,
+releases it can plan for, and to know which parts of the API are meant to last.
+
+From this plan on, an item names in its status the choices it made that the maintainer has not
+reviewed, so that they are reviewed with the item and not a release later.
+
+| # | Item | Done when | Status |
+|---|---|---|---|
+| 1 | The dependencies at their newest versions and the upstream watch, before the rest | The dependencies of step 1 of the release checklist; stacker, `regress`, jsonata-js (npm, main, #838) checked | planned |
+| 2 | `W0215` that says which case it is, and shows the rewrite | The same code and severity, with a text for a side that is always an array (`tags = "x"` is always false) apart from one that may be several values; the hint writes the expression with `in`, sides swapped where the array is on the left (`"x" in tags`), and for `!=` a form that keeps what it gives for an absent field; tests; `gen-docs`; the schema guide | planned |
+| 3 | What a document costs a pool of threads | The C API converts a document once per thread that evaluates it: memory measured with 1 to 16 threads on a large document; the Java guide states the cost; a change, if the numbers ask for one, decided with them (an ADR if the core's `Document` must be shared between threads) | planned |
+| 4 | An evaluation's result kept as a `Document` | In the core, the C API and Java: a result used as the input or a variable of later evaluations with no conversion, such as an index of a record's items by key built once for many rules; measured against the index built by each rule | planned |
+| 5 | ADR 0015 proposed: what 1.0 will promise | Item #1 of the deferred plan below, with no change to the API: the inventory of public items and contracts, each stable, hidden or `#[non_exhaustive]`, and the gaps adopters logged (host function context, offset conversion, a diagnostic's details as data, a quick fix as data, such as `W0215`'s rewrite); the ADR left proposed for the maintainer | planned |
+| 6 | `jlens-regress` versioned on its own | A version of its own, raised only when the crate changes; the release workflow publishes it only then; `CONTRIBUTING.md`; its README says how upstream fixes are ported | planned |
+| 7 | Searches of UTF-16 text with a budget in `jlens-regress` | Interruptible forms of `find_from_utf16` and `find_from_ucs2`, as `find_from_interruptible`; tests with the `utf16` feature; released as #6 says | planned |
+| 8 | A release cadence and tiers of channels | `CONTRIBUTING.md`: a minor release every two or three weeks, patches for fixes in between; the channels in two tiers (crates.io, npm, Maven Central, PyPI first; Homebrew, Scoop, ghcr.io and the binaries after), and what the release checks of each | planned |
+| 9 | The plan's code checked whole, and the release's measure | The robustness properties with `PROPTEST_CASES=100000` and the fuzz workflow on the final code; the performance page's tables from the M1 | planned |
+| 10 | Release 0.36.0 | The release checklist; the channels checked | planned |
+
 ## Next: the jsonata-js release after 2.2.2
 
 jlens follows jsonata-js 2.2.2, the version on npm. Its main branch has since merged fixes, and
@@ -67,11 +93,12 @@ promise down. It takes the number of the next release when it starts. Applicatio
 application does, and what they lack comes back here as general features.
 
 **Deferred** until applications built on jlens have used it: what to keep stable is decided
-from what they needed, missed or worked around, not guessed beforehand.
+from what they needed, missed or worked around, not guessed beforehand. They have now, and #1
+starts as 0.36 #5; the rest waits for the ADR.
 
 | # | Deliverable | Definition of done | Status |
 |---|---|---|---|
-| 1 | ADR 0015, what 1.0 promises: what is stable, hidden or `#[non_exhaustive]`, below | The ADR accepted, with the list of changes that #2 to #4 make | |
+| 1 | ADR 0015, what 1.0 promises: what is stable, hidden or `#[non_exhaustive]`, below | The ADR accepted, with the list of changes that #2 to #4 make | proposed in 0.36 #5 |
 | 2 | `jlens-core` changes as ADR 0015 says, in one breaking batch | `cargo semver-checks` reports only the intended breaks; the changelog has a migration section; the crate guide's snippets updated | |
 | 3 | `jlens-schema` and `jlens-lsp` changes as ADR 0015 says | As #2 | |
 | 4 | The contracts outside Rust, as ADR 0015 says: the Wasm API, the Python package, the Java package, the JSON of audits and `jlens.json`; a test pins each, so that a change shows in review | Tests that fail on an unintended change of each contract | |
