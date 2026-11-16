@@ -228,7 +228,7 @@ pub fn run(args: &[String]) -> Result<()> {
          {ordered} (order of integer keys), \
          {split} (jsonata-js split a character), {mangled} (regex left of ?? or ?:), \
          {raced} (concurrent errors), {shared} (name shared by concurrent items), \
-         {mutated} (jsonata-js changed its input), {flagged} (wildcard over a sequence), \
+         {mutated} (jsonata-js changed its input), {flagged} (sequence as context), \
          {dropped} (dropped quirk), {fixed} (fixed after 2.2.2), \
          {overflowed} (number out of range), \
          {exact} (exact digits of a large number), {timezone} (timezone not a number)"
@@ -427,11 +427,13 @@ fn bound_names<'a>(node: &'a Node, names: &mut Vec<&'a str>) {
 /// Without a context, the flag need not reach the result: a path whose first step is an array
 /// constructor evaluates it on the sequence `[undefined]`, so a wildcard in it gives
 /// `[undefined, true]`, and the path goes on where jlens's stops at `[]` (`[*].price` is
-/// `undefined` in jsonata-js, `[]` in jlens). The context is undefined without an input, and
-/// with one in a predicate on nothing, which both engines evaluate once on `undefined`
+/// `undefined` in jsonata-js, `[]` in jlens). `$not()` in it takes that sequence for its
+/// argument, which is not `undefined`, and gives `true` (`[$not()].a` is `undefined` in
+/// jsonata-js, `[]` in jlens). The context is undefined without an input, and with one in a
+/// predicate on nothing, which both engines evaluate once on `undefined`
 /// (`nothing[1 * [*].price]`). Such a case counts too, whatever the outcomes.
 fn sequence_flag(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
-    if wildcard_first(expr) {
+    if sequence_first(expr) {
         return true;
     }
     let (Some(actual), Some(expected)) = (actual["value"].as_array(), expected["value"].as_array())
@@ -455,8 +457,9 @@ fn sequence_flag(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
     found
 }
 
-/// Whether `expr` has a path whose first step is an array constructor with a wildcard in it.
-fn wildcard_first(expr: &str) -> bool {
+/// Whether `expr` has a path whose first step is an array constructor with a wildcard, or a
+/// `$not` given no argument, in it.
+fn sequence_first(expr: &str) -> bool {
     let Ok(compiled) = Expression::compile(expr) else {
         return false;
     };
@@ -465,7 +468,16 @@ fn wildcard_first(expr: &str) -> bool {
         if let NodeKind::Path { steps, .. } = &node.kind
             && steps.first().is_some_and(|s| s.attrs.cons_array)
         {
-            steps[0].walk(&mut |n: &Node| found |= matches!(n.kind, NodeKind::Wildcard));
+            steps[0].walk(&mut |n: &Node| {
+                found |= match &n.kind {
+                    NodeKind::Wildcard => true,
+                    NodeKind::Function { procedure, args } => {
+                        args.is_empty()
+                            && matches!(&procedure.kind, NodeKind::Variable { name } if name == "not")
+                    }
+                    _ => false,
+                }
+            });
         }
     });
     found

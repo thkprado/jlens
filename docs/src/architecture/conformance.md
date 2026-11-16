@@ -197,13 +197,14 @@ counts them apart:
   the evaluation (a group-by on an empty array adds an item to it), or saw a group-by add that
   item to an empty array it did not create, a variable's or an item of a value the expression
   built (`([1, []])^(({}; 1))` is `[1, [null]]`), and the outcomes differ.
-- **Wildcard over a sequence**: the expression has a wildcard, and the jsonata-js result is
+- **Sequence as context**: the expression has a wildcard, and the jsonata-js result is
   jlens's with `true` items added. An array that jsonata-js builds from a path carries an own
   property `sequence: true`, which its wildcard enumerates with the items. Without a context, the
   flag can change a result without appearing in it: a path whose first step is an array
   constructor evaluates it on the sequence `[undefined]`, so `[*].price` is `undefined` in
-  jsonata-js, which went on with `[undefined, true]`, and `[]` in jlens. The context is undefined
-  without an input, and with one in a predicate on nothing, which both engines evaluate once
+  jsonata-js, which went on with `[undefined, true]`, and `[]` in jlens. A `$not()` there takes
+  the sequence for its argument and gives `true`, so `[$not()].a` is `undefined` in jsonata-js
+  and `[]` in jlens. The context is undefined without an input, and with one in a predicate on nothing, which both engines evaluate once
   (`nothing[1 * [*].price]`). A case whose expression has such a path counts here whatever the
   outcomes.
 - **Dropped quirk**: the expression may meet a jsonata-js quirk that jlens does not reproduce:
