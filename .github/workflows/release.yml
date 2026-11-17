@@ -329,7 +329,7 @@ jobs:
       - name: Open VSX
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx --yes ovsx@1.2.0 publish --skip-duplicate --packagePath target/vscode/*.vsix
+        run: npx --yes ovsx@1.4.0 publish --skip-duplicate --packagePath target/vscode/*.vsix
 
   # The Python package (ADR 0014) on PyPI: the wheels and the source distribution that wheels.yml
   # built and tested, through trusted publishing (this run's OIDC token, from the environment

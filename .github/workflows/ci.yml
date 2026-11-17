@@ -226,7 +226,7 @@ jobs:
         run: cargo xtask wasm-test --require-browser --example
       - name: TypeScript declarations
         run: >-
-          npx -y -p typescript@5.9.2 tsc --noEmit --strict --target es2022 --module es2022
+          npx -y -p typescript@7.0.2 tsc --noEmit --strict --target es2022 --module es2022
           --moduleResolution bundler --lib es2022,dom,esnext.disposable
           crates/jlens-wasm/tests/types.ts
       - name: Report package size
