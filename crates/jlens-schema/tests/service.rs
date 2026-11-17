@@ -1202,13 +1202,16 @@ fn diagnostics_report_operands_that_may_be_several_values() {
     let several = |side: &str, op: &str, cause: &str, hint: &str| {
         format!("The {side} of {op} may be several values, because of {cause}; {hint}")
     };
+    let array = |side: &str, op: &str, reason: &str, hint: &str| {
+        format!("The {side} of {op} is an array, {reason}; {hint}")
+    };
     let compare = |value: &str| {
         format!("compare one of them, such as `$max({value})`, or test each one in a filter")
     };
     let compute = |value: &str| {
         format!("compute one of them, such as `$sum({value})`, or each one inside a step")
     };
-    let look = "to look for a value among them, write `in`";
+    let look = |found: &str| format!("to look for the value among them, write `{found}`");
     let cases: Vec<(&str, Vec<String>)> = vec![
         // A step over an array gives a sequence: an error for two items (`T2010`, `T2001`,
         // `D1002`), and never equal to one value.
@@ -1226,11 +1229,45 @@ fn diagnostics_report_operands_that_may_be_several_values() {
         ),
         (
             "items.qty = 2",
-            vec![several("left side", "=", "items", look)],
+            vec![several("left side", "=", "items", &look("2 in items.qty"))],
         ),
+        // `!=` is false where a side is undefined: the rewrite keeps it with `$exists`.
         (
             "2 != items.qty",
-            vec![several("right side", "!=", "items", look)],
+            vec![several(
+                "right side",
+                "!=",
+                "items",
+                "to check that the value is not among them, write `$exists(items.qty) and $not(2 in items.qty)`",
+            )],
+        ),
+        (
+            "items.qty != order.qty",
+            vec![several(
+                "left side",
+                "!=",
+                "items",
+                "to check that the value is not among them, write `$exists(items.qty) and $not(order.qty in items.qty)`",
+            )],
+        ),
+        (
+            "items.qty != meta.a",
+            vec![several(
+                "left side",
+                "!=",
+                "items",
+                "to check that the value is not among them, write `$exists(items.qty) and $exists(meta.a) and $not(meta.a in items.qty)`",
+            )],
+        ),
+        // A side longer than 40 characters is elided.
+        (
+            "items[type = 'a' and price > 100 and qty > 1].qty = 1",
+            vec![several(
+                "left side",
+                "=",
+                "items[type = 'a' and price > 100 and qty > 1]",
+                &look("1 in …"),
+            )],
         ),
         (
             "items.qty in [1, 2]",
@@ -1251,18 +1288,72 @@ fn diagnostics_report_operands_that_may_be_several_values() {
                 &compare("items[type = 'a'].price"),
             )],
         ),
-        ("meta.* = 1", vec![several("left side", "=", "*", look)]),
-        ("**.qty = 1", vec![several("left side", "=", "**", look)]),
+        (
+            "meta.* = 1",
+            vec![several("left side", "=", "*", &look("1 in meta.*"))],
+        ),
+        (
+            "**.qty = 1",
+            vec![several("left side", "=", "**", &look("1 in **.qty"))],
+        ),
         (
             "$keys(meta) = 'a'",
-            vec![several("left side", "=", "$keys(meta)", look)],
+            vec![several(
+                "left side",
+                "=",
+                "$keys(meta)",
+                &look("'a' in $keys(meta)"),
+            )],
         ),
-        // An array is an array even of one item: `["a"] > "a"` fails, `["a"] = "a"` is false.
+        // An array is an array even of one item: `["a"] > "a"` fails, `["a"] = "a"` is false,
+        // whatever the document; the text says so.
         (
             "tags > 'a'",
-            vec![several("left side", ">", "tags", &compare("tags"))],
+            vec![array(
+                "left side",
+                ">",
+                "which has no order",
+                &compare("tags"),
+            )],
         ),
-        ("tags = 'a'", vec![several("left side", "=", "tags", look)]),
+        (
+            "tags = 'a'",
+            vec![array(
+                "left side",
+                "=",
+                "which never equals one value",
+                "to look for the value among its items, write `'a' in tags`",
+            )],
+        ),
+        // `tags` is required, so the rewrite has no `$exists`: `[] != 'a'` is true, as
+        // `$not('a' in [])` is.
+        (
+            "'a' != tags",
+            vec![array(
+                "right side",
+                "!=",
+                "which never equals one value",
+                "to check that the value is not among its items, write `$not('a' in tags)`",
+            )],
+        ),
+        (
+            "tags in ['a']",
+            vec![array(
+                "left side",
+                "in",
+                "which is looked for whole among the items on the right",
+                "test each one in a filter",
+            )],
+        ),
+        (
+            "[1, 2] + 1",
+            vec![array(
+                "left side",
+                "+",
+                "not a number",
+                "compute one of them, such as `$sum([1, 2])`, or each one inside a step",
+            )],
+        ),
         // One value: a number filter, a filter of one object, an aggregate, a step's body, a
         // predicate, `in` with the sequence on the right.
         ("items[0].qty > 1 and items[-1].qty + 1 = 2", vec![]),
@@ -1386,6 +1477,81 @@ fn several_values_are_warned_about_exactly_where_an_operand_is_an_array() {
         }
     }
     assert!(warned > 100, "{warned}");
+}
+
+/// The rewrite that `W0215` gives for `=` and `!=` gives what the comparison gives on every
+/// document where the operand is one value or undefined, so that it only changes the answer
+/// where the operand is several values, which the comparison got wrong.
+#[test]
+fn several_values_rewrites_keep_the_answer_for_one_value() {
+    let schema = Schema::from_json_schema(&json!({
+        "type": "object",
+        "properties": {
+            "items": {"type": "array", "items": {
+                "type": "object",
+                "properties": {"qty": {"type": "number"}}
+            }},
+            "order": {"type": "object", "properties": {"qty": {"type": "number"}}},
+            "tags": {"type": "array", "items": {"type": "number"}},
+            "n": {"type": "number"}
+        }
+    }))
+    .unwrap();
+    let mut documents = Vec::new();
+    for items in [
+        None,
+        Some(json!([])),
+        Some(json!([{}])),
+        Some(json!([{"qty": 1}])),
+    ]
+    .into_iter()
+    .chain([Some(json!([{"qty": 2}, {"qty": 1}]))])
+    {
+        for tags in [None, Some(json!([])), Some(json!([1])), Some(json!([2, 1]))] {
+            for n in [None, Some(json!(1)), Some(json!(2))] {
+                let mut doc = serde_json::Map::new();
+                let fields = [("items", &items), ("tags", &tags), ("n", &n)];
+                for (name, value) in fields {
+                    if let Some(value) = value {
+                        doc.insert(name.to_owned(), value.clone());
+                    }
+                }
+                doc.insert("order".to_owned(), json!({"qty": n.clone()}));
+                documents.push(Value::Object(doc));
+            }
+        }
+    }
+    let svc = LanguageService::new(Some(schema));
+    let options = jlens_core::Options::default();
+    let bindings = jlens_core::Bindings::new();
+    let eval = |text: &str, doc: &Value| {
+        let expr = jlens_core::Expression::compile(text).unwrap();
+        expr.evaluate_with(Some(doc), &bindings, &options).ok()
+    };
+    let mut compared = 0;
+    for several in ["items.qty", "tags", "items[qty > 0].qty"] {
+        for one in ["1", "n", "order.qty"] {
+            for text in [
+                format!("{several} = {one}"),
+                format!("{one} = {several}"),
+                format!("{several} != {one}"),
+                format!("{one} != {several}"),
+            ] {
+                let diagnostics = svc.diagnostics(&text);
+                assert_eq!(diagnostics.len(), 1, "{text}");
+                let message = &diagnostics[0].message;
+                let rewrite = message.rsplit('`').nth(1).unwrap();
+                for doc in &documents {
+                    if let Some(Some(Value::Array(_))) = eval(several, doc) {
+                        continue;
+                    }
+                    assert_eq!(eval(&text, doc), eval(rewrite, doc), "{text}, {doc}");
+                    compared += 1;
+                }
+            }
+        }
+    }
+    assert!(compared > 1000, "{compared}");
 }
 
 #[test]

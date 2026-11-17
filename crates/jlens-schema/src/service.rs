@@ -962,28 +962,74 @@ fn one_value(ty: &Ty<'_>) -> bool {
     ty.sequence.is_none() && ty.symbols().is_some_and(|s| !s.values.contains('a'))
 }
 
+/// Whether a value of type `ty` is known to be an array, of one item or many, and never one value
+/// alone: a field that holds an array, not a path that gives a sequence.
+fn always_array(ty: &Ty<'_>) -> bool {
+    ty.sequence.is_none() && ty.symbols().is_some_and(|s| s.values == "a")
+}
+
 /// `W0215` for an `operand` (`left side`, `right side` or `operand`) of `token` that may be several
 /// values, which the operator fails on (an order comparison, arithmetic, a negation) or never
-/// equals a single value with (`=`, `!=`, `in`).
+/// equals a single value with (`=`, `!=`, `in`). The text tells an operand that is always an array
+/// (`tags = "x"` is always false) from one that is an array only for some documents (`items.qty =
+/// 2`, true for an order of one item). `sides` are the left and right sides of `=` and `!=`, which
+/// the hint rewrites with `in`.
 fn several_diagnostic(
     text: &str,
     operand: &str,
     token: &str,
-    node: &Node,
+    (node, ty): (&Node, &Ty<'_>),
     cause: Span,
+    sides: Option<[(&Node, &Ty<'_>); 2]>,
     out: &mut Vec<Diagnostic>,
 ) {
     let source = |span: Span| text.get(span.start..span.end).unwrap_or_default();
-    let mut value = source(node.span).trim();
-    if value.len() > 40 || value.contains('\n') {
-        value = "…";
-    }
-    let hint = match token {
-        "<" | "<=" | ">" | ">=" => {
+    let short = |node: &Node| {
+        let value = source(node.span).trim();
+        if value.len() > 40 || value.contains('\n') {
+            "…"
+        } else {
+            value
+        }
+    };
+    let value = short(node);
+    let array = always_array(ty);
+    let reason = match (array, token) {
+        (false, _) => format!("may be several values, because of {}", source(cause)),
+        (true, "<" | "<=" | ">" | ">=") => "is an array, which has no order".to_owned(),
+        (true, "=" | "!=") => "is an array, which never equals one value".to_owned(),
+        (true, "in") => {
+            "is an array, which is looked for whole among the items on the right".to_owned()
+        }
+        (true, _) => "is an array, not a number".to_owned(),
+    };
+    let among = if array { "its items" } else { "them" };
+    let hint = match (token, sides) {
+        ("<" | "<=" | ">" | ">=", _) => {
             format!("compare one of them, such as `$max({value})`, or test each one in a filter")
         }
-        "=" | "!=" => "to look for a value among them, write `in`".to_owned(),
-        "in" => "test each one in a filter".to_owned(),
+        ("in", _) => "test each one in a filter".to_owned(),
+        ("=" | "!=", Some(sides)) => {
+            // `in` gives what `=` gives where the operand is one value: the other side is one.
+            let other = sides
+                .iter()
+                .find(|(n, _)| !std::ptr::eq(*n, node))
+                .map_or(node, |s| s.0);
+            let found = format!("{} in {value}", short(other));
+            if token == "=" {
+                format!("to look for the value among {among}, write `{found}`")
+            } else {
+                // `!=` is false where a side is undefined, `$not(… in …)` true: `$exists` keeps it.
+                let exists: String = sides
+                    .iter()
+                    .filter(|(_, ty)| ty.undefined.is_some())
+                    .map(|(n, _)| format!("$exists({}) and ", short(n)))
+                    .collect();
+                format!(
+                    "to check that the value is not among {among}, write `{exists}$not({found})`"
+                )
+            }
+        }
         _ => format!("compute one of them, such as `$sum({value})`, or each one inside a step"),
     };
     out.push(Diagnostic::new(
@@ -993,7 +1039,7 @@ fn several_diagnostic(
         &[
             ("side", operand),
             ("token", token),
-            ("cause", source(cause)),
+            ("reason", &reason),
             ("hint", &hint),
         ],
     ));
@@ -1009,16 +1055,33 @@ fn several_compared(
     (rhs, right): (&Node, &Ty<'_>),
     out: &mut Vec<Diagnostic>,
 ) {
+    let sides = Some([(lhs, left), (rhs, right)]);
     if let Some(cause) = several_values(lhs, left)
         && (op == BinaryOp::In || one_value(right))
     {
-        several_diagnostic(text, "left side", op.symbol(), lhs, cause, out);
+        several_diagnostic(
+            text,
+            "left side",
+            op.symbol(),
+            (lhs, left),
+            cause,
+            sides,
+            out,
+        );
     }
     if op != BinaryOp::In
         && let Some(cause) = several_values(rhs, right)
         && one_value(left)
     {
-        several_diagnostic(text, "right side", op.symbol(), rhs, cause, out);
+        several_diagnostic(
+            text,
+            "right side",
+            op.symbol(),
+            (rhs, right),
+            cause,
+            sides,
+            out,
+        );
     }
 }
 
@@ -1755,13 +1818,14 @@ impl LanguageService {
                 operand_diagnostics(node, op, lhs, rhs, &mut out);
                 for (side, (operand, ty)) in [("left side", lhs), ("right side", rhs)] {
                     if let Some(cause) = several_values(operand, ty) {
-                        several_diagnostic(text, side, op.symbol(), operand, cause, &mut out);
+                        let op = op.symbol();
+                        several_diagnostic(text, side, op, (operand, ty), cause, None, &mut out);
                     }
                 }
             }
             Event::Negate { operand, ty } => {
                 if let Some(cause) = several_values(operand, ty) {
-                    several_diagnostic(text, "operand", "-", operand, cause, &mut out);
+                    several_diagnostic(text, "operand", "-", (operand, ty), cause, None, &mut out);
                 }
                 if let Some((symbols, set)) = present_types(ty)
                     && !set.contains('n')

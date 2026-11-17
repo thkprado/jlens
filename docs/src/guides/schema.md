@@ -425,7 +425,16 @@ Completion works on incomplete expressions too, such as `$count(items[` or
   write instead: an aggregate, `$max(items.qty) > 1` or `$sum(items.qty) + 1`; a filter that tests
   each item, `$count(items[qty > 1]) > 0`; `in` to find a value among them, `2 in items.qty`. A
   number filter keeps one item, so `items[0].qty > 1` gets nothing, nor does a filter of an object,
-  `order[qty > 1]`. `=` and `!=` are warned about only where the other side is one value;
+  `order[qty > 1]`. `=` and `!=` are warned about only where the other side is one value.
+  The text tells the two cases apart: an operand that is always an array, such as `tags`, "is an
+  array, which never equals one value", so `tags = 'a'` is false for every document that follows
+  the schema; one that is an array only for some documents, such as `items.qty`, "may be several
+  values", and passes a test with one item. For `=` and `!=` the hint writes the expression again,
+  with the other side looked for in the array: `'a' in tags` for `tags = 'a'`, and `$not('a' in
+  tags)` for `tags != 'a'`. As `!=` is false where a side is undefined and `$not(… in …)` true,
+  that form starts with `$exists` of each side that may be undefined: `items.qty != 2` gives
+  `$exists(items.qty) and $not(2 in items.qty)`. The rewrite gives the same answer wherever the
+  operand is one value or undefined, and changes it only where it is several values;
 - with the type the result must have declared, `W0212`, `W0213` and `W0214` for a result that
   never has it, may have another, or may be undefined ([below](#the-type-of-the-result)).
 

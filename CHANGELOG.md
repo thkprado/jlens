@@ -6,6 +6,18 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `W0215` tells an operand that is always an array from one that may be several values, and
+  writes the fix. `tags = 'a'`, with `tags` an array, gets "The left side of = is an array, which
+  never equals one value", as it is false for every document, where `items.qty = 2`, true for an
+  order of one item, still "may be several values". For `=` and `!=` the hint is the expression
+  written with `in`, the sides swapped where the array is on the left: `'a' in tags`, and for
+  `!=` a form that keeps its answer where a side is undefined,
+  `$exists(items.qty) and $not(2 in items.qty)`. The hint said "write `in`", which taken to the
+  letter gave `tags in 'a'`. The code and severity are the same; the message template has a
+  `reason` detail in place of `cause`.
+
 ## [0.35.0]
 
 The choices of 0.34 reviewed. The expected result type and the path of the context are named

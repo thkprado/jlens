@@ -173,7 +173,12 @@ machinery as `$map(items, function($i){ $i.`.
   number filter anywhere among a step's filters keeps one item. An operand that is never there,
   with no shapes, is not warned about. A service test checks every operand built from a set of
   steps and filters against documents of one and two items: the warning is reported exactly
-  where the operand evaluates to an array on one of them.
+  where the operand evaluates to an array on one of them. The text says "is an array" where the
+  type is known to be an array and no sequence, and "may be several values, because of" the
+  cause otherwise. For `=` and `!=`, the hint is the expression written with `in` from the sides'
+  source (each cut to `…` past 40 characters), and for `!=` with `$exists` of each side whose
+  type may be undefined; another test evaluates each rewrite against documents and checks that
+  it gives the comparison's answer wherever the operand is not an array.
 - **Value requests**: where values are completed, the first shape of the left-hand side (or of
   its arrays' items) with a domain becomes a `ValueRequest` beside the items. Its path is found
   by identity in the schema's tree of shapes, iteratively; a variable's shape has none. Its
