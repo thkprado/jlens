@@ -12,6 +12,11 @@ evaluation's timeout or when it is cancelled. Without an interrupt, the backtrac
 the upstream code. The design is in jlens's
 [ADR 0009](https://github.com/thkprado/jlens/blob/main/docs/src/adr/0009-bounded-regex.md).
 
+With the `utf16` feature, `find_from_utf16_interruptible` and `find_from_ucs2_interruptible`
+search `&[u16]` text the same way, as `find_from_utf16(text, start).next()` and
+`find_from_ucs2(text, start).next()` do, with positions in code units. jlens itself searches
+`&str` and does not build them.
+
 `Regex::searcher(text)` gives a `Searcher`, whose `find_from(start, interrupt)` searches as
 `find_from_interruptible` does and keeps the backtracker's storage for the next search of the
 same text, where each `find_from_interruptible` allocates its own. jlens runs every match of a
@@ -144,8 +149,8 @@ jlens reviews upstream's new commits when `regress` publishes a release, and oth
 jlens minor version. Each commit is ported or skipped with its reason in the table below. A port
 is a jlens commit named `jlens-regress: <upstream subject>`, which names the upstream commit and
 brings the tests upstream added for it; the corpus, the tests with the `utf16` feature
-(`cargo test -p jlens-regress --features utf16 --test tests`) and the benchmark run on it, as
-ADR 0020 says. A port that changes the code raises the version, as above; a review that only
+(`cargo test -p jlens-regress --features utf16 --test tests --test interrupt`) and the benchmark
+run on it, as ADR 0020 says. A port that changes the code raises the version, as above; a review that only
 skips commits changes this README, which ships with the next version.
 
 | Upstream commit | Subject | Ported? |
@@ -181,7 +186,7 @@ skips commits changes this README, which ships with the next version.
 | `f04f3a8` | Add anchored UTF-16 and UCS-2 matching APIs | Skipped: `match_at_utf16` and `match_at_ucs2`, a feature jlens does not need |
 | `c81c327` | Fix clippy::manual_map in BacktrackExecutor::match_at | Skipped: on `f04f3a8` |
 | `adcfb90` | Start UTF-16 matches at the start of a surrogate pair | Ported, for `find_from_utf16`: without the hunks on `f04f3a8` and `542243a`, and its tests as searches. jlens does not build this code; `cargo test -p jlens-regress --features utf16 --test tests` runs it |
-| `49bd5bf` | Add budgeted UTF-16 and UCS-2 searches | Skipped: budget code |
+| `49bd5bf` | Add budgeted UTF-16 and UCS-2 searches | Skipped: budget code. `find_from_utf16_interruptible` and `find_from_ucs2_interruptible` give these searches jlens's interrupt instead |
 | `da5fa13` | Match budgeted searches' start handling to their iterators | Skipped: budget code |
 | `1dd717d` | Check UCS-2 budgeted searches against their iterator | Skipped: budget code |
 | `6517285` | Use Unicode mode for the v flag | Tests ported, and they pass: `Regex::from_unicode` here already set `unicode` with `unicode_sets` (see above), and it is the only caller of `try_parse` |

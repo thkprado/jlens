@@ -508,25 +508,16 @@ impl Regex {
         start: usize,
         interrupt: I,
     ) -> Result<Option<Match>, crate::Interrupted> {
-        use exec::MatchProducer;
         assert!(
             start >= text.len() || text.is_char_boundary(start),
             "start index is not on a char boundary"
         );
-        let mut executor = classicalbacktrack::BacktrackExecutor::with_interrupt(
+        let executor = classicalbacktrack::BacktrackExecutor::with_interrupt(
             &self.cr,
             text,
             crate::interrupt::Callback(interrupt),
         );
-        let Some(pos) = executor.initial_position(start) else {
-            return Ok(None);
-        };
-        let found = executor.next_match(pos, &mut None);
-        if executor.interrupted() {
-            Err(crate::Interrupted)
-        } else {
-            Ok(found)
-        }
+        first_match(executor, start)
     }
 
     /// Returns a [`Searcher`] of `text`, which searches it as
@@ -609,6 +600,23 @@ impl Searcher<'_, '_> {
     }
 }
 
+/// jlens-regress: the first match of an interruptible search from offset `start`.
+fn first_match<Input: indexing::InputIndexer, I: crate::Interrupt>(
+    mut executor: classicalbacktrack::BacktrackExecutor<'_, Input, crate::interrupt::Callback<I>>,
+    start: usize,
+) -> Result<Option<Match>, crate::Interrupted> {
+    use exec::MatchProducer;
+    let Some(pos) = executor.initial_position(start) else {
+        return Ok(None);
+    };
+    let found = executor.next_match(pos, &mut None);
+    if executor.interrupted() {
+        Err(crate::Interrupted)
+    } else {
+        Ok(found)
+    }
+}
+
 impl Regex {
     /// Searches `text` to find the first match.
     /// The input text is expected to be ascii-only: only ASCII case-folding is
@@ -674,6 +682,70 @@ impl Regex {
             ),
             start,
         )
+    }
+
+    /// Searches UTF-16 `text` for the first match at or after code unit index `start`, like
+    /// `find_from_utf16(text, start).next()`, and calls `interrupt` while it backtracks, as
+    /// [`find_from_interruptible`](Regex::find_from_interruptible) does. When `interrupt`
+    /// returns `true`, the search stops and returns [`Interrupted`](crate::Interrupted).
+    ///
+    /// If `start` is the low surrogate of a surrogate pair, the search begins at the pair's
+    /// high surrogate, as in `find_from_utf16`. An out-of-range `start` finds no match.
+    ///
+    /// jlens-regress only; not in regress 0.12.0.
+    ///
+    ///  ```rust
+    ///   use regress::Regex;
+    ///   let re = Regex::new(r"^(a+)+$").unwrap();
+    ///   let text: Vec<u16> = format!("{}!", "a".repeat(40)).encode_utf16().collect();
+    ///   assert!(re.find_from_utf16_interruptible(&text, 0, || true).is_err());
+    ///   let text: Vec<u16> = "aaa".encode_utf16().collect();
+    ///   let m = re.find_from_utf16_interruptible(&text, 0, || false).unwrap().unwrap();
+    ///   assert_eq!(m.range(), 0..3);
+    ///   ```
+    #[cfg(feature = "utf16")]
+    pub fn find_from_utf16_interruptible<I: crate::Interrupt>(
+        &self,
+        text: &[u16],
+        start: usize,
+        interrupt: I,
+    ) -> Result<Option<Match>, crate::Interrupted> {
+        let input = Utf16Input::new(text, self.cr.flags.unicode);
+        let executor = classicalbacktrack::BacktrackExecutor::new(
+            input,
+            MatchAttempter::with_interrupt(
+                &self.cr,
+                input.left_end(),
+                crate::interrupt::Callback(interrupt),
+            ),
+        );
+        first_match(executor, input.match_start(start))
+    }
+
+    /// Searches UCS-2 `text` for the first match at or after code unit index `start`, like
+    /// `find_from_ucs2(text, start).next()`, and calls `interrupt` while it backtracks, as
+    /// [`find_from_interruptible`](Regex::find_from_interruptible) does. When `interrupt`
+    /// returns `true`, the search stops and returns [`Interrupted`](crate::Interrupted). An
+    /// out-of-range `start` finds no match.
+    ///
+    /// jlens-regress only; not in regress 0.12.0.
+    #[cfg(feature = "utf16")]
+    pub fn find_from_ucs2_interruptible<I: crate::Interrupt>(
+        &self,
+        text: &[u16],
+        start: usize,
+        interrupt: I,
+    ) -> Result<Option<Match>, crate::Interrupted> {
+        let input = Ucs2Input::new(text, self.cr.flags.unicode);
+        let executor = classicalbacktrack::BacktrackExecutor::new(
+            input,
+            MatchAttempter::with_interrupt(
+                &self.cr,
+                input.left_end(),
+                crate::interrupt::Callback(interrupt),
+            ),
+        );
+        first_match(executor, start)
     }
 
     /// Replaces the first match of the regex in `text` with the replacement string.

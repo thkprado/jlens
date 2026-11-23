@@ -162,3 +162,90 @@ fn a_searcher_matches_after_an_interrupt() {
     assert_eq!(found.range(), 31..32);
     assert_eq!(found.captures, [None, Some(31..32)]);
 }
+
+/// The interruptible searches of UTF-16 and UCS-2 text.
+#[cfg(feature = "utf16")]
+mod utf16 {
+    use super::catastrophic_text;
+    use regress::{Interrupted, Regex};
+    use std::cell::Cell;
+
+    fn units(text: &str) -> Vec<u16> {
+        text.encode_utf16().collect()
+    }
+
+    #[test]
+    fn catastrophic_patterns_stop() {
+        for pattern in [r"^(a+)+$", r"(a|aa)+$", r"^(?!(a+)+$)", r"(?<=b(a+)+)!"] {
+            let re = Regex::new(pattern).unwrap();
+            let text = units(&catastrophic_text(64));
+            let calls = Cell::new(0);
+            let interrupt = || {
+                calls.set(calls.get() + 1);
+                calls.get() >= 3
+            };
+            let result = re.find_from_utf16_interruptible(&text, 0, interrupt);
+            assert_eq!(result.unwrap_err(), Interrupted, "{pattern}");
+            assert_eq!(calls.get(), 3, "{pattern}");
+            let result = re.find_from_ucs2_interruptible(&text, 0, || true);
+            assert_eq!(result.unwrap_err(), Interrupted, "{pattern}");
+        }
+    }
+
+    #[test]
+    fn short_matches_never_call_the_interrupt() {
+        let re = Regex::new(r"(\d+)-(\d+)").unwrap();
+        let text = units("tel 555-0100");
+        let m = re
+            .find_from_utf16_interruptible(&text, 0, || panic!("called"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(m.range(), 4..12);
+        assert_eq!(m.group(2), Some(8..12));
+    }
+
+    #[test]
+    fn matches_like_find_from_utf16_and_ucs2() {
+        // Texts with surrogate pairs, searched from every code unit and one past the end, so
+        // that some starts are low surrogates.
+        let cases: &[(&str, &str, &str)] = &[
+            (r"(\w)\1", "", "Frankly, Miss Piggy"),
+            (r"(?<=x)y", "", "xyxy"),
+            (r"^abc", "m", "x\nabc"),
+            (r"a*", "", "baaa"),
+            (r"", "", ""),
+            (r"", "u", "a😀b"),
+            (r".", "", "😀x😀"),
+            (r".", "u", "😀x😀"),
+            (r"\u{1F600}+", "u", "x😀😀y"),
+            (r"[^x]", "", "😀x"),
+            (r"é+", "i", "xÉé"),
+            (
+                r"(?<year>\d{4})-(?<month>\d\d)",
+                "",
+                "on 2026-10 😀 1999-01",
+            ),
+            (r"\p{Lu}\p{Ll}*", "u", "Ωμέγα 😀 Ünd"),
+        ];
+        for &(pattern, flags, text) in cases {
+            let re = Regex::with_flags(pattern, flags).unwrap();
+            let text = units(text);
+            for start in 0..=text.len() + 1 {
+                let expected = re.find_from_utf16(&text, start).next();
+                let found = re.find_from_utf16_interruptible(&text, start, || false);
+                assert_eq!(
+                    found.unwrap().map(|m| (m.range(), m.captures)),
+                    expected.map(|m| (m.range(), m.captures)),
+                    "utf16 /{pattern}/{flags} from {start}"
+                );
+                let expected = re.find_from_ucs2(&text, start).next();
+                let found = re.find_from_ucs2_interruptible(&text, start, regress::NoInterrupt);
+                assert_eq!(
+                    found.unwrap().map(|m| (m.range(), m.captures)),
+                    expected.map(|m| (m.range(), m.captures)),
+                    "ucs2 /{pattern}/{flags} from {start}"
+                );
+            }
+        }
+    }
+}

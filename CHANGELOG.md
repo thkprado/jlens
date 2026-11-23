@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `jlens-regress` 0.35.1: searches of UTF-16 and UCS-2 text that stop when their interrupt says
+  so, `find_from_utf16_interruptible` and `find_from_ucs2_interruptible`, with the `utf16`
+  feature. They search as `find_from_utf16(text, start).next()` and
+  `find_from_ucs2(text, start).next()` do, as `find_from_interruptible` does for `&str`, so a
+  crate that searches UTF-16 text can bound a pattern that backtracks catastrophically. jlens
+  does not use them.
+
 ### Changed
 
 - `W0215` tells an operand that is always an array from one that may be several values, and
@@ -24,7 +33,7 @@ All notable changes are recorded here. The format follows
   for one cut to the fields an expression reads.
 - `jlens-regress` has a version of its own, raised only when the crate changes (ADR 0020's
   amendment): a jlens release that changes nothing in it publishes no version of it, where each
-  release published one with jlens's number. It stays at 0.35.0 until it changes. `cargo xtask
+  release published one with jlens's number. Its first such version is 0.35.1. `cargo xtask
   regress-version`, in CI and in the release workflow, fails when crates.io has its version with
   other contents.
 

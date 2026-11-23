@@ -1137,11 +1137,6 @@ impl<'r, 't, I: Interrupt> BacktrackExecutor<'r, Utf8Input<'t>, I> {
         }
     }
 
-    /// Whether the interrupt stopped the last match.
-    pub(crate) fn interrupted(&self) -> bool {
-        self.matcher.poll.interrupted
-    }
-
     /// jlens-regress: an executor that searches with the storage a completed search of the same
     /// text left, instead of allocating its own.
     pub(crate) fn with_storage(
@@ -1183,14 +1178,20 @@ pub(crate) struct Storage<'t> {
     lookarounds: Option<Box<Lookarounds<Utf8Input<'t>>>>,
 }
 
+// jlens-regress: over any interrupt, for the interruptible searches of UTF-16 text.
 #[cfg(feature = "utf16")]
-impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
-    pub(crate) fn new(input: Input, matcher: MatchAttempter<'r, Input>) -> Self {
+impl<'r, Input: InputIndexer, I: Interrupt> BacktrackExecutor<'r, Input, I> {
+    pub(crate) fn new(input: Input, matcher: MatchAttempter<'r, Input, I>) -> Self {
         Self { input, matcher }
     }
 }
 
 impl<Input: InputIndexer, I: Interrupt> BacktrackExecutor<'_, Input, I> {
+    /// jlens-regress: whether the interrupt stopped the last match.
+    pub(crate) fn interrupted(&self) -> bool {
+        self.matcher.poll.interrupted
+    }
+
     fn successful_match(&mut self, start: Input::Position, end: Input::Position) -> Match {
         // We want to simultaneously map our groups to offsets, and clear the groups.
         // A for loop is the easiest way to do this while satisfying the borrow checker.

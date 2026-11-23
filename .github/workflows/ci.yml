@@ -36,7 +36,7 @@ jobs:
           cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --all-features
       - run: cargo test --workspace
       - name: UTF-16 searches of jlens-regress, which jlens does not build
-        run: cargo test -p jlens-regress --features utf16 --test tests
+        run: cargo test -p jlens-regress --features utf16 --test tests --test interrupt
       - name: Generated docs are up to date
         run: cargo xtask gen-docs --check
       - name: Conformance report
