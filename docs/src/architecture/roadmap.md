@@ -47,6 +47,7 @@ reviewed, so that they are reviewed with the item and not a release later.
 | 9 | Three bugs of jsonata-js 2.2.2 reported after its main's `6d9d829`, found by #1 | `$formatInteger` of a number from 1e21 writes its digits, as `$formatNumber` already does in jlens: `$formatInteger(1e21, '#,##0')` is "1,000,000,000,000,000,000,000", where both engines write "1e,+21" (jsonata-js#863, pull request #864); the row of `compatibility.md` covers both functions, with a narrow rule in the differential test. With an exponent picture, the mantissa stays below 10^N, as XPath F&O 3.1 §4.7.5 says: `$formatNumber(10, '0.0e0')` is "1.0e1", not "10.0e0" (#865, pull request #866, which also turns `$formatNumber(10, '#.0e0')` into "0.1e2"): taken if #866 is approved when the item starts, otherwise the maintainer decides. A two-digit year that `$toMillis` reads (`"23"` with `[Y01]` is 1923, #862) stays as 2.2.2 gives it until jsonata-js chooses a rule | done, on 2026-11-23. #864 merged on 2026-11-20 (main `4118e73`) with the digits of JavaScript's `String` followed by zeros, and `$formatInteger` writes the same: "1,000,000,000,000,000,000,000", "123456789012345690000000" for `123456789012345678901234`, Arabic-Indic digits and ordinals too; its cases are in `jlens-core`'s tests, as #864 keeps them out of the suite. Its `$formatNumber` from 1e21 writes the same digits, where jlens keeps the exact value (`…685803008`): the row of `compatibility.md` says so, and `$formatInteger` has a row of its own among the fixes after 2.2.2. The differential test's rule for exact digits takes `$formatInteger` too (20,000 cases, 0 differ). #866 has no review: the maintainer chose to wait, and it is listed in the next section; #862 unchanged. To review: the digits of `String` rather than the exact value, which would differ from jsonata-js, and from what `$formatInteger` writes below 1e21 |
 | 10 | The plan's code checked whole, and the release's measure | The robustness properties with `PROPTEST_CASES=100000` and the fuzz workflow on the final code; the performance page's tables from the M1 | planned |
 | 11 | Release 0.36.0 | The release checklist; the channels checked | planned |
+| 12 | `$formatNumber` from the shortest decimal digits, as jsonata-js's main since pull request #868, before #10 | The suite vendored from main's `db4f747` and the baseline grown by its two new groups (`decimal-rounding`, `issue865`). `$formatNumber` converts the number to the decimal with the fewest digits that converts back to the same double, as XPath F&O 3.1 §4.7.5 says, and rounds those digits half to even: `$formatNumber(1.1, '0.00000000000000000000')` is "1.10000000000000000000", not "1.10000000000000008882". With an exponent picture, the mantissa stays below 10^N: `$formatNumber(10, '0.0e0')` is "1.0e1", `$formatNumber(1, '#.0e0')` "0.1e1" (#865, which #868 fixes in place of #866). `$formatInteger` in digits writes the same digits. #868's cases from jsonata-js's own tests in `jlens-core`'s, where jlens can be given their input; the rows of `compatibility.md` on exact digits rewritten, and the differential test's rule for them removed, so that 20,000 cases against a checkout of main agree; the book's examples and their `differs:` marks; `cargo xtask ab` if the benchmark formats numbers. This replaces the exact digits jlens has written since 0.10 (decided by the maintainer on 2026-11-23: the shortest digits are what §4.7.5 asks, and lose nothing of the double) | planned |
 
 ## 0.37: what the Java adoption shows
 
@@ -65,11 +66,11 @@ jlens follows jsonata-js 2.2.2, the version on npm. Its main branch has since me
 0.35 took the two that change results, pull requests #841 and #861, ahead of the release that
 will ship them: from a fixed commit of main, with rules in the differential test for the answers
 2.2.2 does not give. It also took pull request #838 (a step after a grouping), approved and not
-yet merged. 0.36 took #864, merged at main's `4118e73` (`$formatInteger` from 1e21), and left
-#866 (the mantissa of an exponent picture, `$formatNumber(10, '0.0e0')` "10.0e0" for "1.0e1"),
-open with no review, until it is approved. When that release is on npm, jlens follows it whole:
-if #838 is not in it, or changed before it merged, the difference stays recorded or jlens follows
-the change; if #866 is in it, jlens takes it.
+yet merged. 0.36 took #864, merged at main's `4118e73` (`$formatInteger` from 1e21), and takes
+#868, merged at `db4f747` (`$formatNumber` from the shortest decimal digits, and the mantissa of
+an exponent picture below 10^N, in place of #866). When that release is on npm, jlens follows it
+whole: if #838 is not in it, or changed before it merged, the difference stays recorded or jlens
+follows the change.
 
 | # | Item | Done when | Status |
 |---|---|---|---|
