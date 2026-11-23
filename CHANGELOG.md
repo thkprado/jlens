@@ -36,6 +36,11 @@ All notable changes are recorded here. The format follows
   release published one with jlens's number. Its first such version is 0.35.1. `cargo xtask
   regress-version`, in CI and in the release workflow, fails when crates.io has its version with
   other contents.
+- Releases have a cadence and their channels two tiers (`CONTRIBUTING.md`): a minor every two
+  or three weeks, and patches in between only for fixes. The libraries on crates.io, npm
+  (`jlens-wasm`), PyPI and Maven Central come first: a release is done when the four serve it.
+  The tools follow it, and one that fails does not hold it: the binaries, `jlens-cli` on npm,
+  the image on ghcr.io, Homebrew, Scoop, the VS Code extension and the site.
 
 ### Fixed
 

@@ -86,6 +86,52 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
 
 ## Releasing
 
+### Cadence
+
+A minor release every two or three weeks, the plan of the [roadmap](docs/src/architecture/roadmap.md)
+whose items are done: a plan not done in three weeks releases what is, and its other items move
+to the next plan. Between minors, a patch release only for a fix: a wrong result, a panic, a
+package that fails to install, an advisory of a dependency; never a feature, nor a change of
+behaviour that fixes nothing. An adopter can then plan for each minor and take a patch at once.
+
+A patch release follows the [steps](#steps) below, with three differences. Step 1 moves only
+the dependency of an advisory. Step 3 measures nothing unless the fix touches the evaluation,
+and then compares the patch with the release before it (`cargo xtask ab`, into
+`docs/notes/perf-X.Y.md`); the tables keep the version of the minor. And when `main` has
+changes since the last release other than the fix, the patch is made on a branch of the last
+tag, `git switch -c release-X.Y vX.Y.Z`, with the fix alone (committed to `main` too, with its
+changelog entry). On that branch, before the tag, add `release-X.Y` to the `push` branches of
+`.github/workflows/ci.yml`, and give the `ci` job of `.github/workflows/release.yml`
+`--branch release-X.Y` instead of `--branch main`, so that the release waits for the CI run of
+that branch.
+
+### Channels
+
+The channels come in two tiers, which say what a failed one means.
+
+**Tier 1, the libraries**, which applications pin: crates.io (the five crates, published in
+order), npm's `jlens-wasm`, PyPI's `jlens` and Maven Central's `io.github.thkprado:jlens`. A
+release is done when all four serve the version and step 7 has checked each: it installs, its
+provenance or signature is the workflow's, and it evaluates an expression. When one fails,
+finish it before anything else: re-run its job, or publish it by hand as its section says. A
+failure that needs a change of code is fixed by a patch release, as the versions already
+published cannot be taken back. The one exception is Maven Central without room for the release
+([its limits](#publishing-the-java-package)), where the Java package skips that version and the
+changelog says so.
+
+**Tier 2, the tools**, which follow the release: the GitHub release with the binaries and
+`SHA256SUMS` (which `cargo binstall` reads), npm's `jlens-cli` and its five platform packages,
+the image on ghcr.io, Homebrew, Scoop, the VS Code extension on the Marketplace and Open VSX,
+and the site. One that fails does not hold the release: it is fixed when it can be, and at the
+latest by the next release; until then, the GitHub release's notes say which channel lacks the
+version. Step 7 checks that each serves the version, that its attestation verifies where it has
+one, and that its `jlens` answers. The `github` job of the `Release` workflow, which drafts the
+GitHub release, waits for every job that publishes, so a failed `container` or `vscode` job holds
+the draft and, with it, Homebrew and Scoop: re-run the failed job, and if it keeps failing, draft
+the release with `gh workflow run release.yml --ref vX.Y.Z` (step 5) and fix the channel apart.
+
+### Steps
+
 1. Update the version in `[workspace.package]` and in the `jlens-core`, `jlens-schema` and
    `jlens-lsp` entries of `[workspace.dependencies]` (`Cargo.toml`; not `jlens-regress`'s, which
    [has its own](#checks)), and the project's `<version>` in `crates/jlens-java/java/pom.xml`
@@ -177,7 +223,10 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    `gh release create vX.Y.Z --draft --verify-tag --title "jlens X.Y.Z" --notes-file notes.md`.
 
    If a binary fails, nothing has been published: fix the cause on `main`, then move the tag to
-   the fixed commit (`git tag -f vX.Y.Z`, `git push -f origin vX.Y.Z`); re-run the failed jobs
+   the fixed commit (`git tag -f vX.Y.Z`, `git push -f origin vX.Y.Z`), which the repository's
+   ruleset `version tags` (no update, no deletion of `refs/tags/v*`) refuses until the
+   maintainer disables it in the repository's **Settings**, **Rules** (and enables it again
+   after); re-run the failed jobs
    instead when only a runner failed. If the draft release fails after the packages are
    published, run the workflow by hand on the tag: `gh workflow run release.yml --ref vX.Y.Z`.
    That run publishes nothing; it builds the binaries of the tag, attests them and drafts the
@@ -206,16 +255,15 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    **Drop** the deployment instead, fix the cause and upload again (re-run the job, or publish
    by hand as [Publishing the Java package](#publishing-the-java-package) says). It reaches
    `repo1.maven.org` within about half an hour, and the search of central.sonatype.com later.
-7. Check that the packages prove where they were built:
+7. Check the [channels](#channels), and that the packages prove where they were built. Tier 1
+   first; the release is done when it passes:
 
    ```sh
-   gh release download vX.Y.Z --dir dist
-   cd dist
-   for f in jlens-*; do gh attestation verify "$f" --repo thkprado/jlens; done
+   mkdir dist && cd dist
+   cargo search jlens-core --limit 1             # and jlens-schema, jlens-lsp, jlens-cli (jlens-regress when published) at X.Y.Z
    npm view jlens-wasm@X.Y.Z dist.attestations   # lists the provenance (slsa.dev) statement
-   npm view jlens-cli@X.Y.Z dist.attestations    # and of jlens-cli-<os>-<cpu> likewise
-   npx -y jlens-cli@X.Y.Z --version              # the binary of this platform, from npm
-   uv run --no-project --with jlens==X.Y.Z python -c "import jlens; print(jlens.__version__)"   # the wheel of this platform, from PyPI
+   npm init -y && npm i jlens-wasm@X.Y.Z && node --input-type=module -e "await import('jlens-wasm/global'); await jlens.init(); console.log(new jlens.Expression('\$sum([1, 2, 3])').evaluate())"   # 6
+   uv run --no-project --with jlens==X.Y.Z python -c "import jlens; print(jlens.__version__, jlens.Expression('\$sum([1, 2, 3])').evaluate())"   # X.Y.Z 6, the wheel of this platform, from PyPI
    curl -s https://pypi.org/integrity/jlens/X.Y.Z/jlens-X.Y.Z.tar.gz/provenance | jq '.attestation_bundles[].publisher'
    (cd ../crates/jlens-java/java && ./mvnw -q dependency:get -Dartifact=io.github.thkprado:jlens:X.Y.Z)   # resolved from Maven Central
    m=https://repo1.maven.org/maven2/io/github/thkprado/jlens/X.Y.Z
@@ -223,12 +271,22 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    gpg --keyserver keyserver.ubuntu.com --recv-keys D007C3464271F80C1C1DF11BF1B365D7F599090B   # the release key
    for f in jlens-X.Y.Z*.jar jlens-X.Y.Z.pom; do gpg --verify "$f.asc" "$f"; done   # Good signature, from that fingerprint
    echo 'System.out.println(io.github.thkprado.jlens.Expression.compile("$sum([1, 2, 3])").evaluateJson("null"))' | jshell --class-path jlens-X.Y.Z.jar -R--enable-native-access=ALL-UNNAMED -q -   # 6, the library of this platform
+   ```
+
+   Then tier 2, after the draft is published:
+
+   ```sh
+   mkdir ../tools && cd ../tools
+   gh release download vX.Y.Z --pattern 'jlens-*'
+   for f in jlens-*; do gh attestation verify "$f" --repo thkprado/jlens; done
+   npm view jlens-cli@X.Y.Z dist.attestations    # and of jlens-cli-<os>-<cpu> likewise
+   npx -y jlens-cli@X.Y.Z --version              # the binary of this platform, from npm
    brew upgrade thkprado/jlens/jlens && jlens --version   # macOS and Linux, after the Homebrew run
    scoop update jlens; jlens --version                    # Windows, after the Scoop run
    docker run --rm ghcr.io/thkprado/jlens:X.Y.Z --version
    gh attestation verify oci://ghcr.io/thkprado/jlens:X.Y.Z --repo thkprado/jlens
    code --install-extension thkprado.jlens --force   # from the Marketplace, then open a .jsonata file
-   node editors/vscode/node_modules/@vscode/vsce/vsce show thkprado.jlens   # the Marketplace's version
+   node ../editors/vscode/node_modules/@vscode/vsce/vsce show thkprado.jlens   # the Marketplace's version
    curl -s "https://open-vsx.org/api/-/query?extensionId=thkprado.jlens&extensionVersion=X.Y.Z" | jq '[.extensions[].targetPlatform]'
    ```
 
@@ -243,8 +301,8 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
 
    The package page on npmjs.com also shows a Provenance section linking to the workflow run,
    and each file on pypi.org/project/jlens a Verified details section naming the workflow.
-8. Check the site. The tag also runs the `Pages` workflow, which builds the book and the web
-   editor of the tag (`cargo xtask site`) and deploys them to <https://thkprado.github.io/jlens/>
+8. Check the site, a channel of tier 2. The tag also runs the `Pages` workflow, which builds
+   the book and the web editor of the tag (`cargo xtask site`) and deploys them to <https://thkprado.github.io/jlens/>
    (the `github-pages` environment accepts `v*` tags). Check that the run passed
    (`gh run list --workflow pages.yml --limit 1`), that the book's introduction names the new
    version, and that the editor evaluates an example. If only the deployment failed, re-run it
