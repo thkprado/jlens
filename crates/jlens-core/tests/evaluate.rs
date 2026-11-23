@@ -819,6 +819,27 @@ fn jsonata_js_quirks_that_expose_javascript_are_dropped() {
     }
     assert_eq!(formatted(1234, "#,##,##0.00"), Some(json!("1,234.00")));
     assert_eq!(formatted(1, "0,000"), Some(json!("0,001")));
+    // The options that are strings are taken whole, an empty one too, as in jsonata-js; those
+    // that are characters take the first of the string and keep the default for an empty one.
+    for (expr, expected) in [
+        ("$formatNumber(-5, '0', {'minus-sign': ''})", json!("5")),
+        ("$formatNumber(-5, '0', {'minus-sign': '--'})", json!("--5")),
+        (
+            "$formatNumber(-0.012, '0.0e0', {'minus-sign': ''})",
+            json!("1.2e2"),
+        ),
+        ("$formatNumber(1e308, '0%', {'infinity': ''})", json!("%")),
+        (
+            "$formatNumber(1234.5, '#,##0.00', {'decimal-separator': ''})",
+            json!("1,234.50"),
+        ),
+        (
+            "$formatNumber(1234.5, '#,##0x00', {'decimal-separator': 'xy'})",
+            json!("1,234x50"),
+        ),
+    ] {
+        assert_eq!(eval(expr, json!(null)), Some(expected), "{expr}");
+    }
     // `$substringBefore` and `$substringAfter` without `chars` give the string unchanged.
     let text = json!("a-undefined-b");
     assert_eq!(

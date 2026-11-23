@@ -524,9 +524,13 @@ pub(super) fn format_number<'a>(
     if let Value::Object(options) = arg(&a, 2) {
         for (key, v) in options.borrow().iter() {
             let Some(s) = v.as_str() else { continue };
+            // The strings are taken whole, an empty one too (no sign), as in jsonata-js. The
+            // characters take the first of the string and keep the default for an empty one,
+            // where jsonata-js takes the string (compatibility.md).
             match key.as_ref() {
                 "infinity" => p.infinity = Cow::Owned(s.to_owned()),
                 "NaN" => p.nan = Cow::Owned(s.to_owned()),
+                "minus-sign" => p.minus = Cow::Owned(s.to_owned()),
                 _ => {}
             }
             let Some(c) = s.chars().next() else { continue };
@@ -534,7 +538,6 @@ pub(super) fn format_number<'a>(
                 "decimal-separator" => p.decimal = c,
                 "grouping-separator" => p.grouping = c,
                 "exponent-separator" => p.exponent = c,
-                "minus-sign" => p.minus = Cow::Owned(s.to_owned()),
                 "percent" => p.percent = c,
                 "per-mille" => p.per_mille = c,
                 "zero-digit" => p.zero = c,
