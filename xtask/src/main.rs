@@ -21,6 +21,7 @@ mod mdbook;
 mod npm;
 mod regex_corpus;
 mod regex_differential;
+mod regress_version;
 mod release;
 mod scoop;
 mod site;
@@ -48,6 +49,8 @@ commands:
   regex-differential [--cases N] [--seed S]
                                     run N generated regular expressions (1000) in jlens-regress
                                     and V8 and report where they differ (needs Node.js 24+)
+  regress-version                   check that jlens-regress's version is not on crates.io, or is
+                                    there with the same contents (needs curl)
   fuzz-seed                         seed the corpora of the fuzz targets with the JSONata suite
   fuzz-replay <target> <path>...    run saved inputs (files, or directories of them) through a
                                     fuzz target, without libFuzzer, on any platform
@@ -108,6 +111,7 @@ fn main() -> Result<()> {
         Some("differential") => differential::run(&args[1..]),
         Some("regex-corpus") => regex_corpus::run(&args[1..]),
         Some("regex-differential") => regex_differential::run(&args[1..]),
+        Some("regress-version") => regress_version::run(),
         Some("fuzz-seed") => fuzz::seed(),
         Some("fuzz-replay") => fuzz::replay(&args[1..]),
         Some("homebrew") => match args.get(1) {

@@ -37,6 +37,17 @@ it is not rebased onto new regress versions. jlens ports upstream's fixes one co
 and keeps its own changes to the interrupt, to bugs it finds and to the engine's speed. Report every problem with this
 crate at jlens, not at regress.
 
+## Versions
+
+Up to 0.35.0, every jlens release published this crate with its own version number, changed or
+not. From then on the crate has a version of its own, raised only when its code or its manifest
+changes, and published by the jlens release that follows: a jlens version with nothing new here
+publishes no version of it, and jlens depends on the newest. Before 1.0, versions are read as
+Cargo reads them: the patch for a fix or an addition, the minor for a break, which
+`cargo semver-checks` checks against the last version on crates.io. Each version's changes are
+in [jlens's changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md), named
+`jlens-regress`.
+
 ## Tested against V8
 
 Besides upstream's tests, a corpus of V8's own answers checks the engine
@@ -127,8 +138,15 @@ Found by jlens's examples of the flag `v`:
 
 ## Ported from upstream
 
-Last upstream commit reviewed: `95c0404` (2026-11-02, unreleased after 0.12.0). Each port is
-a jlens commit named `jlens-regress: <upstream subject>`, which names the upstream commit.
+Last upstream commit reviewed: `95c0404` (2026-11-02, unreleased after 0.12.0).
+
+jlens reviews upstream's new commits when `regress` publishes a release, and otherwise once per
+jlens minor version. Each commit is ported or skipped with its reason in the table below. A port
+is a jlens commit named `jlens-regress: <upstream subject>`, which names the upstream commit and
+brings the tests upstream added for it; the corpus, the tests with the `utf16` feature
+(`cargo test -p jlens-regress --features utf16 --test tests`) and the benchmark run on it, as
+ADR 0020 says. A port that changes the code raises the version, as above; a review that only
+skips commits changes this README, which ships with the next version.
 
 | Upstream commit | Subject | Ported? |
 |---|---|---|

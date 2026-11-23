@@ -179,8 +179,19 @@ pub fn write_executable(path: &Path, bytes: &[u8]) -> Result<()> {
 /// The content of the regular file `<dir>/<file>` of a gzipped tar archive (ustar or GNU, as
 /// `tar czf` writes them; names are short, so no long-name records).
 pub fn tar_gz_entry(bytes: &[u8], file: &str) -> Result<Vec<u8>> {
+    tar_gz_files(bytes)?
+        .into_iter()
+        .find(|(name, _)| is_entry(name, file))
+        .map(|(_, data)| data)
+        .with_context(|| format!("no {file} in the archive"))
+}
+
+/// The regular files of a gzipped tar archive, by name, as `tar_gz_entry` reads them; other
+/// records (directories, the pax records of macOS's `tar`) are skipped.
+pub fn tar_gz_files(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
     let mut tar = Vec::new();
     flate2::read::GzDecoder::new(bytes).read_to_end(&mut tar)?;
+    let mut files = Vec::new();
     let mut at = 0;
     while at + 512 <= tar.len() {
         let header = &tar[at..at + 512];
@@ -196,15 +207,18 @@ pub fn tar_gz_entry(bytes: &[u8], file: &str) -> Result<Vec<u8>> {
             .context("invalid size in a tar header")?;
         let name = field(0..100);
         let data = at + 512;
-        if matches!(header[156], b'0' | 0) && is_entry(&name, file) {
-            return tar
-                .get(data..data + size)
-                .map(<[u8]>::to_vec)
-                .context("truncated tar archive");
+        match header[156] {
+            b'0' | 0 => files.push((
+                name,
+                tar.get(data..data + size)
+                    .context("truncated tar archive")?
+                    .to_vec(),
+            )),
+            _ => {}
         }
         at = data + size.div_ceil(512) * 512;
     }
-    bail!("no {file} in the archive")
+    Ok(files)
 }
 
 /// The content of `<dir>/<file>` in a zip archive, stored or deflated, found through its

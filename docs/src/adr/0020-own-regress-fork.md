@@ -89,5 +89,35 @@ told in an issue, written by a person. The fix in the fork does not wait for ups
   reported at jlens.
 - The first port reviews the 22 upstream commits after `aae35de`.
 - Nothing changes for users: the crate, its name, its API and its version scheme stay as they
-  are.
+  are. The version scheme changed in 0.36: see the amendment below.
 - Replacing the fork by an engine of jlens's own stays possible. It would take its own ADR.
+
+## Amendment: a version of its own (0.36)
+
+### Context
+
+Every jlens release published `jlens-regress` with the workspace's version: 34 versions up to
+0.35.0, most of them with no change to the crate. A crate outside jlens uses it alone, pinned to
+one version, and reviews each new pin; every jlens release gave it a version to review that
+changed nothing.
+
+### Decision
+
+- The crate has a version of its own, in its manifest, raised only when what it packages
+  changes, apart from its README. The `regress` entry of the workspace's dependencies asks for
+  that version, so jlens builds and publishes against the newest.
+- Before 1.0 the version is read as Cargo reads it: the patch for a fix or an addition, the minor
+  for a break. `cargo semver-checks` checks it against the last version on crates.io, as it does
+  the other library crates.
+- `cargo xtask regress-version` compares the crate packaged from the tree with the one crates.io
+  has at that version. It fails when they differ: the crate changed and its version was not
+  raised. CI runs it on each push. The release workflow runs it before it publishes, and
+  publishes the crate only when crates.io does not have its version.
+- The README is not compared, so that a review of upstream commits that ports none publishes no
+  version; it ships with the next one.
+
+### Consequences
+
+- A jlens release that changes nothing in the fork publishes no version of it, and the changelog
+  names the fork's changes, `jlens-regress`, under the jlens release that publishes them.
+- The fork's version no longer says which jlens it came with: 0.35.0 was the last to match.

@@ -95,7 +95,10 @@ jobs:
       # new minor version in Cargo.toml (see CONTRIBUTING.md). jlens-cli has no library.
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
-          package: jlens-core, jlens-schema, jlens-lsp
+          package: jlens-core, jlens-schema, jlens-lsp, jlens-regress
+      # jlens-regress has a version of its own (ADR 0020): a change to the crate needs a version
+      # that crates.io does not have yet.
+      - run: cargo xtask regress-version
 
   msrv:
     name: Minimum Rust version

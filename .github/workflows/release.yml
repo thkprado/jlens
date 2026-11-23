@@ -118,8 +118,14 @@ jobs:
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           test "v$version" = "$TAG"
       - run: cargo test --workspace
+      # jlens-regress has a version of its own (ADR 0020), published only when crates.io does not
+      # have it yet; the check fails if crates.io has it with other contents.
+      - name: Whether jlens-regress is published
+        id: regress
+        run: cargo xtask regress-version
       # In dependency order; cargo waits for each crate to appear in the index.
-      - run: cargo publish -p jlens-regress
+      - if: steps.regress.outputs.publish == 'true'
+        run: cargo publish -p jlens-regress
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - run: cargo publish -p jlens-core

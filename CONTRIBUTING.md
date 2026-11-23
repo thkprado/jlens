@@ -25,7 +25,8 @@ cargo test --workspace                         # includes the conformance baseli
 cargo xtask gen-docs --check                   # generated pages are up to date
 cargo xtask doc-check                          # the book's examples run, its links resolve
 cargo xtask wasm-test                          # the browser package, in Node.js and a browser
-cargo semver-checks -p jlens-core -p jlens-schema -p jlens-lsp  # the API against the last release on crates.io
+cargo semver-checks -p jlens-core -p jlens-schema -p jlens-lsp -p jlens-regress  # the API against the last release on crates.io
+cargo xtask regress-version                    # jlens-regress's version: new, or on crates.io unchanged
 cargo +1.88 check --workspace --all-targets    # the minimum Rust version
 cargo deny check                               # advisories, licenses and sources of dependencies
 actionlint                                     # the workflows, with shellcheck on their scripts
@@ -35,6 +36,16 @@ The last check fails on a breaking change while `Cargo.toml` still carries the v
 last release. A breaking change is fine before 1.0, but it is deliberate: the change that
 introduces the first one after a release also raises the minor version in `Cargo.toml` (step 1
 of [Releasing](#releasing)), and records the break in the `Changed` section of `CHANGELOG.md`.
+
+`jlens-regress` has a version of its own
+([ADR 0020](docs/src/adr/0020-own-regress-fork.md#amendment-a-version-of-its-own-036)), in
+`crates/jlens-regress/Cargo.toml`, raised only when the crate changes: the commit that first
+changes what it packages after its last publication, apart from its README, raises the version
+there and in the `regress` entry of `[workspace.dependencies]`. Before 1.0, as Cargo reads
+versions, the patch for a fix or an addition (0.35.0 to 0.35.1), the minor for a break.
+`cargo xtask regress-version` fails while crates.io has the version with other contents; it
+ignores the README, which ships with the next version, so that recording an upstream review
+does not publish one.
 
 Other useful tasks:
 
@@ -75,9 +86,9 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
 
 ## Releasing
 
-1. Update the version in `[workspace.package]` and in the `jlens-core`, `jlens-schema`,
-   `jlens-lsp` and `regress` (`jlens-regress`) entries of `[workspace.dependencies]`
-   (`Cargo.toml`), and the project's `<version>` in `crates/jlens-java/java/pom.xml`
+1. Update the version in `[workspace.package]` and in the `jlens-core`, `jlens-schema` and
+   `jlens-lsp` entries of `[workspace.dependencies]` (`Cargo.toml`; not `jlens-regress`'s, which
+   [has its own](#checks)), and the project's `<version>` in `crates/jlens-java/java/pom.xml`
    (`cargo xtask java` fails while they differ). Also the version of the Maven and Gradle snippets of `docs/src/getting-started/installation.md` and
    `docs/src/guides/java.md`, and of the `Cargo.toml` snippets of the installation page and of
    `docs/src/guides/crate.md`. Before measuring, merge what Dependabot proposes
@@ -128,8 +139,9 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    the CI run of the tagged commit on `main`: nothing is published unless it passed, and a tag
    on a commit not pushed to `main` publishes nothing. When that CI run failed for a reason
    outside the code and passes when run again, "Re-run failed jobs" on the `Release` run
-   resumes it. Then the workflow publishes `jlens-regress`, `jlens-core`, `jlens-schema`,
-   `jlens-lsp` and `jlens-cli` to crates.io, in that order, and to npm with provenance
+   resumes it. Then the workflow publishes `jlens-regress` (when crates.io does not have its
+   version yet), `jlens-core`, `jlens-schema`, `jlens-lsp` and `jlens-cli` to crates.io, in that
+   order, and to npm with provenance
    `jlens-wasm` and the packages of the CLI (ADR 0012: the five `jlens-cli-<os>-<cpu>` packages
    built by `cargo xtask npm-cli` from the archives, then `jlens-cli`; only when the repository
    variable `PUBLISH_NPM_CLI` is `true`), and to PyPI the Python package `jlens` (ADR 0014:
@@ -155,7 +167,8 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
    published. The Maven Central job uploads a new deployment each time it runs: drop the
    Portal's extra ones before publishing one.
 
-   To publish by hand instead: `cargo publish -p jlens-regress`, then `-p jlens-core`, then
+   To publish by hand instead: `cargo publish -p jlens-regress` (if `cargo xtask
+   regress-version` says so), then `-p jlens-core`, then
    `-p jlens-schema`, then `-p jlens-lsp`, then `-p jlens-cli`; then
    `npm publish --access public` in `crates/jlens-wasm/pkg` after `cargo xtask wasm` (without
    provenance and attestations, which only a workflow run can sign); then the Python package

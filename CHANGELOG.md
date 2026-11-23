@@ -22,6 +22,11 @@ All notable changes are recorded here. The format follows
   (`jlens_document_take`), where `jlens_document_new` copied it again. With a document of 16 MB,
   the native peak of making and evaluating one falls from 150 to 133 MB, and from 56 to 49 MB
   for one cut to the fields an expression reads.
+- `jlens-regress` has a version of its own, raised only when the crate changes (ADR 0020's
+  amendment): a jlens release that changes nothing in it publishes no version of it, where each
+  release published one with jlens's number. It stays at 0.35.0 until it changes. `cargo xtask
+  regress-version`, in CI and in the release workflow, fails when crates.io has its version with
+  other contents.
 
 ### Documentation
 
