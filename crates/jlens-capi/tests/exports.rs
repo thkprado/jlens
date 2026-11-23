@@ -655,6 +655,32 @@ fn a_document_that_is_not_json_or_not_utf8_fails_with_u2001() {
 }
 
 #[test]
+fn a_document_taken_from_a_buffer_frees_it_whatever_it_replies() {
+    let text = buffer(r#"{"a": {"b": 1, "x": 2}}"#);
+    let read = buffer(r#"{"a": {"b": true}}"#);
+    let document = handle(reply(jlens_document_take(text, read)));
+    assert_eq!(jlens_buffer_free(text), 0, "the document took the buffer");
+    assert_eq!(jlens_buffer_free(read), 1, "the read stays the caller's");
+    assert_eq!(
+        on_document(compile("a"), document, 0),
+        Reply::Json(r#"{"b":1}"#.into())
+    );
+    assert_eq!(jlens_document_free(document), 1);
+
+    let not_json = buffer("{\"a\": ");
+    assert_eq!(code(&reply(jlens_document_take(not_json, 0))), "U2001");
+    assert_eq!(jlens_buffer_free(not_json), 0);
+    let not_utf8 = buffers::insert(b"\"\xff\"".to_vec());
+    assert_eq!(code(&reply(jlens_document_take(not_utf8, 0))), "U2001");
+    assert_eq!(jlens_buffer_free(not_utf8), 0);
+    let (text, freed) = (buffer("{}"), buffer("true"));
+    jlens_buffer_free(freed);
+    assert_eq!(code(&reply(jlens_document_take(text, freed))), "U2002");
+    assert_eq!(jlens_buffer_free(text), 0);
+    assert_eq!(code(&reply(jlens_document_take(freed, 0))), "U2002");
+}
+
+#[test]
 fn reads_are_json_and_their_union_prunes_a_document() {
     let (a, c) = (compile("a.b"), compile("$sum(c)"));
     let reads_a = json(reply(jlens_reads(a, 0)));

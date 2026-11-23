@@ -67,7 +67,7 @@ final class Native {
     private static final MethodHandle UNION_READS = function("jlens_union_reads", U64, U64);
     private static final MethodHandle OPTIONS_NEW = function("jlens_options_new", U64, U64);
     private static final MethodHandle OPTIONS_FREE = function("jlens_options_free", U32, U64);
-    private static final MethodHandle DOCUMENT_NEW = function("jlens_document_new", U64, U64, U64);
+    private static final MethodHandle DOCUMENT_TAKE = function("jlens_document_take", U64, U64, U64);
     private static final MethodHandle DOCUMENT_FREE = function("jlens_document_free", U32, U64);
     private static final MethodHandle BINDINGS_NEW =
             function("jlens_bindings_new", U64, U64, U64, ValueLayout.ADDRESS, U64);
@@ -196,9 +196,10 @@ final class Native {
         }
     }
 
-    static long documentNew(long text, long read) {
+    /** Makes a document from buffer {@code text}, which the call frees, whatever it replies. */
+    static long documentTake(long text, long read) {
         try {
-            return (long) DOCUMENT_NEW.invokeExact(text, read);
+            return (long) DOCUMENT_TAKE.invokeExact(text, read);
         } catch (Throwable e) {
             throw failed(e);
         }

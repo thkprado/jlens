@@ -96,12 +96,11 @@ public final class Document implements AutoCloseable {
      * @throws JlensException when the text is not JSON or not UTF-8 ({@code U2001})
      */
     public static Document fromJson(byte[] text, Read read) {
-        long buffer = Native.buffer(text);
         long readBuffer = read == null ? 0 : Native.buffer(read.toJson());
         try {
-            return new Document(Native.handle(Native.documentNew(buffer, readBuffer)));
+            // The document takes the buffer's bytes for its text, rather than a copy.
+            return new Document(Native.handle(Native.documentTake(Native.buffer(text), readBuffer)));
         } finally {
-            Native.free(buffer);
             if (readBuffer != 0) Native.free(readBuffer);
         }
     }

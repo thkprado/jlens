@@ -27,7 +27,7 @@ order and an array of 10,000 items:
 The numbers are meant for comparing alternatives on one machine. They are not guarantees, and
 your hardware will give different absolute values. How each change was measured (methods, traps,
 intermediate numbers) is kept outside the book, in
-[`docs/notes/`](https://github.com/thkprado/jlens/tree/main/docs/notes): `perf-0.35.md`, `perf-0.34.md`, `perf-0.33.md`,
+[`docs/notes/`](https://github.com/thkprado/jlens/tree/main/docs/notes): `perf-0.36.md`, `perf-0.35.md`, `perf-0.34.md`, `perf-0.33.md`,
 `perf-0.32.md`, `perf-0.31.md`, `perf-0.30.md`, `perf-0.29.md`, `perf-0.28.md`, `perf-0.27.md`, `perf-0.26.md` and
 `perf-earlier.md`.
 

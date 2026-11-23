@@ -168,6 +168,35 @@ Java objects, so it is the fastest input: `items[0].name` takes under a microsec
 document ([Performance](../architecture/performance.md#java-against-the-other-implementations)).
 Evaluations never modify a document.
 
+### What a document costs
+
+A document keeps its conversion and its JSON text, both in **native memory**: it counts against
+a container's memory limit and the process's resident size, not against the Java heap (`-Xmx`),
+and a heap dump does not show it. The text is kept so that each operating system thread that
+evaluates the document can convert it ([Threads](#threads)). Measured through the C API the
+package calls, on 16 MB of JSON text, an array of 80,000 items of eight fields each (Windows,
+x86-64):
+
+| | Native memory, in times the text |
+|---|---|
+| A whole document | 6.8: the conversion 5.8, the text 1 |
+| A document [cut](#the-fields-an-expression-reads) to `items.price` | 2: the conversion 1, the text 1 |
+| Each further thread that evaluates it | one conversion more |
+| An evaluation against it | its working memory, while it runs: 1.1 for `$count(items[price > 50])` on the whole document |
+
+So a pool of threads multiplies it, in two ways:
+
+- **Threads that each make their own documents**, as consumers of a queue do, hold one document
+  each: 16 threads, each with a whole document of 16 MB, hold 1.8 GB; cut, 0.57 GB.
+- **One document evaluated by many threads** is converted on each, and keeps its text once: 16
+  threads hold 1.5 GB of the whole document, and 0.3 GB of the cut one.
+
+A document that keeps only the fields its expressions read costs a fraction of the whole one, and
+its conversion is that much faster. While it is made, the native memory is what it keeps, plus a
+little: the text the package copies into native memory becomes the document's, with no second
+copy. `fromJson(String)` encodes the text into a UTF-8 `byte[]` on the heap first; text already
+in UTF-8 bytes goes to `fromJson(byte[])` with no encoding.
+
 ### Documents as variables
 
 An expression that reads more than one document, such as two versions of a record, or a record

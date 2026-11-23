@@ -1,0 +1,59 @@
+# Performance notes: 0.36
+
+How the measurements of roadmap 0.36 were made: methods, traps and intermediate numbers that the
+[performance page](../src/architecture/performance.md) and the guides leave out. The item numbers
+are those of the plan, in [the roadmap](../src/architecture/roadmap.md#036-what-adoption-asks).
+
+## #3: what a document costs a pool of threads
+
+**Method.** A probe crate outside the workspace (path dependency on `jlens-capi`'s `rlib`, so
+mimalloc is its allocator, as in the JAR) calls the C API's functions as the Java package does:
+a buffer made and filled with the text, `document_new` (or `document_take`), the buffer freed,
+one evaluation of `$count(items[price > 50])` with a JSON reply. Memory is mimalloc's
+`mi_process_info`: the process's committed memory, after `mi_collect(true)` on every thread for
+"live", and its peak, both less the commit before the first document. The text, 16.2 MB, is read
+from a file, so that making it sets no peak of its own: 80,000 items of eight fields (`id`,
+`sku`, `name`, `price`, `qty`, `tags` of three strings, `attrs` of three fields, `note`). "Own":
+T threads each make, evaluate and hold a document at once; "shared": the first thread makes it,
+all T evaluate it. "Cut" keeps the read of the expression, `items.price`. One process per row;
+Windows 11, Ryzen 7 3700X (memory, not time: the machine's load does not change it).
+
+Native memory in MB, and in times the text per thread (one run each; the cut rows with several
+threads move by about 0.3 times from run to run, as threads finish their conversion at
+different moments):
+
+| Case | T | Live | Peak, `document_new` | Peak, `document_take` |
+|---|---|---|---|---|
+| own, whole | 1 | 110 (6.8) | 150 (9.3) | 133 (8.2) |
+| own, whole | 4 | 440 (6.8) | 555 (8.6) | 505 (7.8) |
+| own, whole | 16 | 1,763 (6.8) | 2,149 (8.3) | 2,010 (7.7) |
+| own, cut | 1 | 32 (2.0) | 56 (3.5) | 49 (3.0) |
+| own, cut | 4 | 127-145 (2.0-2.2) | 300 (4.6) | 195 (3.0) |
+| own, cut | 16 | 566-589 (2.2-2.3) | 910 (3.5) | 779 (3.0) |
+| shared, whole | 4 | 388 (6.0) | 437 (6.7) | 436 (6.7) |
+| shared, whole | 16 | 1,503-1,509 (5.8) | 1,735 (6.7) | 1,736 (6.7) |
+| shared, cut | 4 | 75 (1.2) | 126 (1.9) | 123 (1.9) |
+| shared, cut | 16 | 260-302 (1.0-1.2) | 464 (1.8) | 495 (1.9) |
+
+One thread, step by step (MB over the commit before, `document_take`): the buffer 17.3; the
+document made 115.9 whole, 38.7 cut; evaluated 133.5 and 49.5; after `mi_collect`, 110.3 and
+32.1. So the conversion is 5.8 times the text whole, 1.0 cut; the text kept is 1; the evaluation's
+working memory, 18 MB whole and 11 MB cut, is the rest of the peak, freed when it returns.
+`document_new` adds the copy of the buffer, 17 MB, to the peak of every document made, and
+nothing to a shared document's threads, which do not make it.
+
+**What it decided.** `document_take`: the C API takes the bytes of the host's buffer for the
+text, which the Java package no longer frees after. The other candidates are left for the
+maintainer, with these numbers:
+
+- **A document for one thread, which drops its text once converted**, would save the text, 1 in
+  6.8 of a whole document and 1 in 2 of a cut one, for threads that each make their own. But
+  the C API converts per operating system thread, and a virtual thread may run on another
+  carrier at its next evaluation: such a document would fail there, where a Java thread is not
+  one carrier.
+- **A core `Document` shared between threads** (`Send + Sync`, an ADR): one conversion for all
+  threads, and no text kept: the shared rows fall to about one conversion, 94 MB whole for 16
+  threads instead of 1.5 GB, and the own rows lose their text. Its cost is in the evaluator's
+  hot path, reference counts made atomic, to measure with `cargo xtask ab`.
+- **A smaller conversion**: at 5.8 times the text, about 1,200 bytes per item of 210 bytes of
+  text, it is the largest share of every row.

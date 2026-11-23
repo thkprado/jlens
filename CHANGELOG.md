@@ -17,6 +17,17 @@ All notable changes are recorded here. The format follows
   `$exists(items.qty) and $not(2 in items.qty)`. The hint said "write `in`", which taken to the
   letter gave `tags in 'a'`. The code and severity are the same; the message template has a
   `reason` detail in place of `cause`.
+- A Java `Document` needs its text's memory once instead of twice while it is made: the C API
+  takes the native buffer the package copied the text into for the document's text
+  (`jlens_document_take`), where `jlens_document_new` copied it again. With a document of 16 MB,
+  the native peak of making and evaluating one falls from 150 to 133 MB, and from 56 to 49 MB
+  for one cut to the fields an expression reads.
+
+### Documentation
+
+- The Java guide says what a document costs: its conversion and its text, in native memory, which
+  counts against a container's limit and not against the Java heap, once per thread that makes
+  documents and once more per thread that evaluates a shared one.
 
 ## [0.35.0]
 

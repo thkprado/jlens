@@ -44,6 +44,9 @@ export! {
     /// Parses the JSON text in buffer `text` into a document, keeping the fields of the read in
     /// buffer `read` (0 for all): a reply with the document's handle or the error.
     jlens_document_new(text: u64, read: u64) -> u64 = crate::api::document_new, crate::api::panicked;
+    /// Parses as `jlens_document_new` does, taking the bytes of buffer `text` instead of a
+    /// copy: the call frees that buffer, whatever it replies.
+    jlens_document_take(text: u64, read: u64) -> u64 = crate::api::document_take, crate::api::panicked;
     /// Frees a document: 1 when it was live, 0 for an unknown or freed handle.
     jlens_document_free(document: u64) -> u32 = crate::api::document_free, crate::zero;
     /// Makes bindings of the host functions in buffer `functions` (JSON text, 0 for none), run

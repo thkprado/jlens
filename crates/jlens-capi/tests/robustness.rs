@@ -58,8 +58,9 @@ enum Call {
     Compile(usize),
     /// Makes options from one of the buffers.
     Options(usize),
-    /// Makes a document from one of the buffers, pruned by another or not.
-    Document(usize, Option<usize>),
+    /// Makes a document from one of the buffers, pruned by another or not, taking the text's
+    /// buffer (`jlens_document_take`) or copying it.
+    Document(usize, Option<usize>, bool),
     /// Evaluates one of the expressions against one of the buffers, or no input, with one of
     /// the options made, or none.
     Evaluate(usize, Option<usize>, Option<usize>),
@@ -106,7 +107,8 @@ fn call() -> impl Strategy<Value = Call> {
         1 => any::<u8>().prop_map(Call::Zeroed),
         3 => any::<usize>().prop_map(Call::Compile),
         2 => any::<usize>().prop_map(Call::Options),
-        2 => (any::<usize>(), any::<Option<usize>>()).prop_map(|(t, r)| Call::Document(t, r)),
+        2 => (any::<usize>(), any::<Option<usize>>(), any::<bool>())
+            .prop_map(|(t, r, take)| Call::Document(t, r, take)),
         4 => (any::<usize>(), any::<Option<usize>>(), any::<Option<usize>>())
             .prop_map(|(e, i, o)| Call::Evaluate(e, i, o)),
         3 => (any::<usize>(), any::<usize>(), any::<Option<usize>>())
@@ -250,10 +252,19 @@ proptest! {
                         }
                     }
                 }
-                Call::Document(text, read) => {
-                    let Some(text) = pick(&buffers_made, text) else { continue };
+                Call::Document(index, read, take) => {
+                    let Some(&Made { handle: text, live }) = pick(&buffers_made, index) else { continue };
                     let (read, read_live) = optional(&buffers_made, read);
-                    match (reply(jlens_document_new(text.handle, read))?, text.live && read_live) {
+                    let made = if take { jlens_document_take(text, read) } else { jlens_document_new(text, read) };
+                    // Taken, the text's buffer is freed whatever the call replies, before the
+                    // read is found: the same buffer as both is unknown as the read.
+                    let found = live && read_live && !(take && read == text);
+                    if take && live {
+                        let len = buffers_made.len();
+                        buffers_made[index % len].live = false;
+                        prop_assert_eq!(jlens_buffer_len(text), 0);
+                    }
+                    match (reply(made)?, found) {
                         (replied, false) => prop_assert_eq!(replied, unknown()),
                         (Replied::Handle(handle), true) => documents.push(Made { handle, live: true }),
                         (Replied::Error(code), true) => {

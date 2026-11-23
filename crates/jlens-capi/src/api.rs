@@ -150,13 +150,24 @@ pub fn options_free(options: u64) -> u32 {
 /// replies with its handle or the error. Both buffers stay the caller's. This thread keeps
 /// its conversion; each other thread converts the text the first time it evaluates against it.
 pub fn document_new(text: u64, read: u64) -> u64 {
-    reply(document_text(text, read))
+    reply(document_text(text, read, false))
 }
 
-fn document_text(text: u64, read: u64) -> Result<Vec<u8>, Vec<u8>> {
+/// Parses as [`document_new`] does, taking the bytes of buffer `text` for the document's text
+/// instead of a copy: the call frees that buffer, whatever it replies. A document made from a
+/// host's buffer needs the text's memory once instead of twice at its peak (roadmap 0.36 #3).
+pub fn document_take(text: u64, read: u64) -> u64 {
+    reply(document_text(text, read, true))
+}
+
+fn document_text(text: u64, read: u64, take: bool) -> Result<Vec<u8>, Vec<u8>> {
     // The handles are checked before what they hold, so that an unknown one is always `U2002`.
-    let text = buffers::with(text, |bytes| String::from_utf8(bytes.clone()))
-        .ok_or_else(|| unknown("buffer", text))?;
+    let text = if take {
+        buffers::take(text).map(String::from_utf8)
+    } else {
+        buffers::with(text, |bytes| String::from_utf8(bytes.clone()))
+    }
+    .ok_or_else(|| unknown("buffer", text))?;
     let read = match read {
         0 => None,
         read => Some(
