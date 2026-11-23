@@ -1966,6 +1966,15 @@ fn a_negative_limit_is_checked_before_a_missing_pattern() {
     }
     assert_eq!(eval("$split('abc', nothing, 1)", json!(null)), None);
     assert_eq!(eval("$replace('abc', nothing, 'x', 1)", json!(null)), None);
+    // A limit of 0 gives its result whatever the pattern, a missing one too.
+    assert_eq!(
+        eval("$split('abc', nothing, 0)", json!(null)),
+        Some(json!([]))
+    );
+    assert_eq!(
+        eval("$replace('abc', nothing, nothing, 0)", json!(null)),
+        Some(json!("abc"))
+    );
 }
 
 #[test]

@@ -481,6 +481,11 @@ pub(super) fn replace<'a>(
     }
     // jsonata-js checks the limit before it uses the pattern.
     let limit = check_limit(&a, 3, "D3011", 4)?;
+    // A limit of 0 replaces nothing, so jsonata-js gives the string whatever the pattern, even a
+    // missing one.
+    if limit.is_some_and(|l| l <= 0.0) {
+        return Ok(Value::String(s));
+    }
     if pattern.is_undefined() {
         return Ok(Value::Undefined);
     }
@@ -491,9 +496,6 @@ pub(super) fn replace<'a>(
         Value::Undefined => Value::string(""),
         r => r,
     };
-    if limit.is_some_and(|l| l <= 0.0) {
-        return Ok(Value::String(s));
-    }
     let mut result = String::new();
     let mut count = 0.0;
 
@@ -579,10 +581,12 @@ pub(super) fn split<'a>(
     };
     // jsonata-js checks the limit before it uses the separator.
     let limit = check_limit(&a, 2, "D3020", 3)?;
-    if separator.is_undefined() {
+    let mut out: Vec<Value<'a>> = Vec::new();
+    // A limit of 0 gives no parts, so jsonata-js gives `[]` whatever the separator, even a
+    // missing one.
+    if separator.is_undefined() && limit.is_none_or(|l| l > 0.0) {
         return Ok(Value::Undefined);
     }
-    let mut out: Vec<Value<'a>> = Vec::new();
     if limit.is_none_or(|l| l > 0.0) {
         if let Value::String(sep) = &separator {
             let parts: Vec<Value<'a>> = if sep.is_empty() {
