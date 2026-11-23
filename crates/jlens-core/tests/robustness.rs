@@ -1507,17 +1507,17 @@ fn infinite_input_ends() {
         // Letters and words for infinity looped forever.
         (f64::INFINITY, "$formatInteger($, 'w')", Ok(json!(""))),
         (f64::INFINITY, "$formatInteger($, 'a')", Ok(json!(""))),
-        // An exponent picture scaled an infinite mantissa forever. The text is what the other
-        // pictures give for infinity.
+        // An exponent picture scaled an infinite mantissa forever. Infinity is written as the
+        // `infinity` property between the prefix and the suffix (XPath F&O 3.1 §4.7.5).
         (
             f64::INFINITY,
             "$formatNumber($, '0e0')",
-            Ok(json!("Infinitye0")),
+            Ok(json!("Infinity")),
         ),
         (
             f64::NEG_INFINITY,
             "$formatNumber($, '0.0e0')",
-            Ok(json!("-NaN.0e0")),
+            Ok(json!("-Infinity")),
         ),
         (f64::INFINITY, "$ + 1", Err("D1001")),
     ];
@@ -1570,11 +1570,7 @@ fn fuzz_crashes_stay_fixed() {
         // Rounding a huge number to many decimals overflowed.
         (
             "$formatNumber(1e300, '##4.11111111111111111101')",
-            Ok(json!(format!(
-                "{}.{}",
-                format!("{:.0}", 1e300),
-                "0".repeat(20)
-            ))),
+            Ok(json!(format!("1{}.{}", "0".repeat(300), "0".repeat(20)))),
         ),
         ("$round(1e300, 20)", Ok(json!(1e300))),
         // Width modifiers beyond the string limit.

@@ -10,7 +10,7 @@ mod collections;
 mod numeric;
 mod strings;
 
-pub(crate) use numeric::Picture;
+pub(crate) use numeric::{Decimal, Picture};
 
 use std::sync::OnceLock;
 

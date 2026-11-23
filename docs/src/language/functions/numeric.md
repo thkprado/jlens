@@ -155,6 +155,17 @@ $formatNumber(1234567.891, "#.##0,00", {"decimal-separator": ",", "grouping-sepa
 => "1.234.567,89"
 ```
 
+The number is formatted from the decimal with the fewest digits that converts back to it, as
+`fn:format-number` says, and those digits are rounded half to even: a long fraction shows no
+digits of the binary value, and the mantissa of an exponent picture stays below 10 to the
+number of its integer digits.
+
+```jsonata-example
+differs: jsonata-js 2.2.2 writes "1.10000000000000008882" and "10.0e0" (jsonata-js#865)
+[$formatNumber(1.1, "0.00000000000000000000"), $formatNumber(9.99, "0.0e0"), $formatNumber(0.125, "0.00")]
+=> ["1.10000000000000000000", "1.0e1", "0.12"]
+```
+
 ## `$formatBase`
 
 `$formatBase(n, radix?)` writes the integer part of `n` in base `radix`, from 2 to 36 (10 by

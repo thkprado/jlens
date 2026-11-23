@@ -5,6 +5,7 @@
 //! with its `UTC` methods, so no time-zone database is needed.
 
 use crate::error::{Error, Result};
+use crate::functions::Decimal;
 use crate::value::js_number;
 
 const FEW: [&str; 20] = [
@@ -476,7 +477,7 @@ fn format_integer_with(value: f64, format: &IntegerFormat) -> Result<String> {
             }
         }
         Primary::Decimal => {
-            let mut digits: Vec<char> = integer_digits(value).chars().collect();
+            let mut digits = integer_digits(value);
             if digits.len() < format.mandatory_digits {
                 let pad = format.mandatory_digits - digits.len();
                 digits.splice(0..0, std::iter::repeat_n('0', pad));
@@ -511,29 +512,21 @@ fn format_integer_with(value: f64, format: &IntegerFormat) -> Result<String> {
     Ok(out)
 }
 
-/// The decimal digits of a whole, non-negative `value`: JavaScript's `String(value)`, with its
-/// exponent notation from 1e21 written out, its digits followed by zeros (`1e+21` is a 1 and 21
-/// zeros), as jsonata-js does since its pull request #864.
-fn integer_digits(value: f64) -> String {
-    let s = js_number(value);
-    let Some((mantissa, exponent)) = s.split_once("e+") else {
-        return s;
-    };
-    let Ok(exponent) = exponent.parse::<usize>() else {
-        return s;
-    };
-    let (int, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
-    let mut out = String::with_capacity(int.len() + exponent);
-    out.push_str(int);
-    out.push_str(fraction);
-    // `ryu_js` writes the fraction's digits only up to the last that is not zero, and never more
-    // of them than the exponent: from 1e21, the shortest digits that read back are at most 17.
-    out.extend(std::iter::repeat_n(
-        '0',
-        exponent.saturating_sub(fraction.len()),
-    ));
+/// The decimal digits of a whole, non-negative `value`: the shortest decimal that converts back
+/// to it, written in full (`1e21` is a 1 and 21 zeros), as jsonata-js does since its pull
+/// requests #864 and #868.
+fn integer_digits(value: f64) -> Vec<char> {
+    if !value.is_finite() {
+        return js_number(value).chars().collect();
+    }
+    let mut decimal = Decimal::of(value);
+    decimal.round(0);
+    let mut out = Vec::new();
+    decimal.write(0, &ASCII_DIGITS, &mut out);
     out
 }
+
+const ASCII_DIGITS: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
 /// `$formatInteger`.
 /// Fails with `U1001` when the result would exceed `max_len` bytes.

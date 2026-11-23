@@ -57,3 +57,17 @@ maintainer, with these numbers:
   hot path, reference counts made atomic, to measure with `cargo xtask ab`.
 - **A smaller conversion**: at 5.8 times the text, about 1,200 bytes per item of 210 bytes of
   text, it is the largest share of every row.
+
+## #12: `$formatNumber` from the shortest decimal digits
+
+`cargo xtask ab HEAD .` on the M1, evaluate mode, case `number formatting`
+(`items[[0..19]].$formatNumber(unitPrice * quantity, '#,##0.00')`), 10 rounds, the working tree
+with #12 against `dac6349`, the code before it:
+
+| case | before (median) | after (median) | B/A | before (fastest) | after (fastest) | B/A |
+|---|---:|---:|---:|---:|---:|---:|
+| number formatting | 16.7 µs | 12.5 µs | -25.4% | 16.6 µs | 12.4 µs | -25.2% |
+
+The number is converted once to its shortest digits (`ryu_js`), then scaled and rounded on
+those digits. Before, `round` converted it to a string and back twice to shift the decimal point,
+and `write_fixed` formatted the exact binary value with `format!`.

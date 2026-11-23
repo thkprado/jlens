@@ -218,18 +218,18 @@ counts them apart:
 - **Fixed after 2.2.2**: the expression may meet one of the fixes that jsonata-js made after
   2.2.2, which jlens has: a predicate after one that is not a number literal, which may be a
   computed index (`$arr[$i][$j]`); an array constructor as a step of a path that binds `@`, `#`
-  or a parent, in that step or before it; a step after a group-by. A run against a checkout
+  or a parent, in that step or before it; a step after a group-by; the digits of `$formatNumber`
+  and `$formatInteger`, where 2.2.2 writes JavaScript's exponent notation through the picture
+  (`1e,+21.00`) or lets the mantissa of an exponent picture reach 10^N (`10.0e0`): a call on a
+  literal from 1e18 (which `‰` scales to 1e21) or with a literal exponent picture counts whatever
+  the outcomes, since a result computed from the string need not show it. A run against a checkout
   (`--jsonata-js`) does not count them apart, so a checkout whose main branch has the fixes must
   agree on them.
 - **Overflow to infinity**: jlens failed with `D1001`, which it raises only where a number
   overflows to infinity (`1 / 0`). jsonata-js passes the infinity on, to its result or to an
   operator that fails later.
-- **Exact digits of a large number**: `$formatNumber` from 1e21, where jsonata-js writes
-  JavaScript's exponent notation through the picture (`1e,+21.00`): a case that calls it on a
-  literal from 1e18 (which `‰` scales to 1e21) counts whatever the outcomes, since a result
-  computed from the string need not show the notation; and `$formatBase` from 2^53
-  in a radix that is not a power of two, where jsonata-js writes zeros for the digits below the
-  number's precision.
+- **Exact digits of `$formatBase`**: from 2^53, in a radix that is not a power of two, where
+  jsonata-js writes zeros for the digits below the number's precision.
 
 The `Differential` workflow runs 20,000 cases from a new seed every week, and on demand with a
 chosen number of cases and seed. When it fails, the cases and outcomes are attached to the run.

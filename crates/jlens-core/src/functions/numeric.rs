@@ -1,7 +1,6 @@
 //! Numeric functions, including `$formatNumber` (XPath F&O 3.1 `fn:format-number`).
 
 use std::borrow::Cow;
-use std::fmt;
 use std::rc::Rc;
 
 use super::{Call, arg, num, text};
@@ -271,33 +270,139 @@ fn to_radix(value: f64, radix: u32) -> String {
     digits.iter().rev().collect()
 }
 
-/// `Number.prototype.toFixed` of `|x|`: rounds half away from zero on the exact binary value.
-/// From 1e21, where JavaScript switches to exponent notation (`1e+21`), it keeps writing digits.
-fn write_fixed(out: &mut impl fmt::Write, x: f64, dp: usize) {
-    let x = x.abs();
-    let _ = if !x.is_finite() {
-        out.write_str(&js_number(x))
-    } else if is_tie(x, dp) {
-        // Ties go to the larger magnitude, like JavaScript.
-        write!(out, "{:.*}", dp, x + 0.5 * 10f64.powi(-(dp as i32)))
-    } else {
-        write!(out, "{:.*}", dp, x)
-    };
+/// A non-negative decimal number: its digits, with no leading zero (`0` alone for zero), and the
+/// power of ten of the last one.
+///
+/// `$formatNumber` and `$formatInteger` work on these digits, not on the double: XPath F&O 3.1
+/// §4.7.5 converts the number to the decimal with the fewest digits that converts back to it,
+/// then scales and rounds that decimal, both of which are exact on digits. jsonata-js does the
+/// same since its pull request #868.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Decimal {
+    /// ASCII digits.
+    digits: Vec<u8>,
+    exponent: i64,
 }
 
-/// Whether the exact value of `x` lies halfway between two multiples of 10^-dp, that is, whether
-/// 2·|x|·10^dp is an odd integer. With |x| = m·2^e, that is m·5^dp·2^(e+dp+1), odd when the
-/// factors of two cancel exactly.
-fn is_tie(x: f64, dp: usize) -> bool {
-    let bits = x.abs().to_bits();
-    let exponent = ((bits >> 52) & 0x7ff) as i64;
-    let fraction = bits & ((1 << 52) - 1);
-    let (mantissa, shift) = if exponent == 0 {
-        (fraction, -1074)
-    } else {
-        (fraction | 1 << 52, exponent - 1075)
-    };
-    mantissa != 0 && i64::from(mantissa.trailing_zeros()) + shift + dp as i64 + 1 == 0
+impl Decimal {
+    /// The shortest decimal that converts back to `|value|`, a finite number: the digits of
+    /// JavaScript's `String(value)`.
+    pub(crate) fn of(value: f64) -> Decimal {
+        let mut buffer = ryu_js::Buffer::new();
+        let s = if value == 0.0 {
+            "0"
+        } else {
+            buffer.format(value.abs())
+        };
+        let (mantissa, exponent) = match s.split_once('e') {
+            Some((m, e)) => (m, e.parse::<i64>().unwrap_or(0)),
+            None => (s, 0),
+        };
+        let (int, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+        let digits: Vec<u8> = int
+            .bytes()
+            .chain(fraction.bytes())
+            .skip_while(|&b| b == b'0')
+            .collect();
+        if digits.is_empty() {
+            return Decimal::zero();
+        }
+        Decimal {
+            digits,
+            exponent: exponent - fraction.len() as i64,
+        }
+    }
+
+    fn zero() -> Decimal {
+        Decimal {
+            digits: vec![b'0'],
+            exponent: 0,
+        }
+    }
+
+    fn is_zero(&self) -> bool {
+        self.digits == b"0"
+    }
+
+    /// How many digits the integer part has, or a negative count of the zeros after the decimal
+    /// point before the first digit.
+    fn magnitude(&self) -> i64 {
+        self.digits.len() as i64 + self.exponent
+    }
+
+    /// Rounds to `dp` decimal places, half to even.
+    pub(crate) fn round(&mut self, dp: i64) {
+        let Ok(dropped) = usize::try_from(-self.exponent - dp) else {
+            return;
+        };
+        if dropped == 0 {
+            return;
+        }
+        // The digits are padded with zeros on the left to more than `dropped`.
+        let len = self.digits.len();
+        let kept = len.saturating_sub(dropped);
+        let first = if dropped > len {
+            b'0'
+        } else {
+            self.digits[kept]
+        };
+        let last_kept_odd = kept > 0 && self.digits[kept - 1] % 2 == 1;
+        let up = first > b'5'
+            || (first == b'5'
+                && (self.digits[kept + 1..].iter().any(|&d| d != b'0') || last_kept_odd));
+        self.digits.truncate(kept);
+        if up {
+            match self.digits.iter().rposition(|&d| d != b'9') {
+                Some(i) => {
+                    self.digits[i] += 1;
+                    self.digits[i + 1..].fill(b'0');
+                }
+                None => {
+                    self.digits.fill(b'0');
+                    self.digits.insert(0, b'1');
+                }
+            }
+        }
+        if self.digits.is_empty() {
+            self.digits.push(b'0');
+        }
+        self.exponent = -dp;
+    }
+
+    /// Writes the number in full, never in exponent notation, with `dp` decimal places, in the
+    /// digits of `family`. It must already be rounded to at most `dp` places.
+    pub(crate) fn write(&self, dp: usize, family: &[char], out: &mut Vec<char>) {
+        let digit = |d: u8| family[usize::from(d - b'0')];
+        let start = out.len();
+        let mut fraction = 0;
+        if self.exponent >= 0 {
+            if !self.is_zero() {
+                out.extend(self.digits.iter().map(|&d| digit(d)));
+                out.extend(std::iter::repeat_n(family[0], self.exponent as usize));
+            }
+        } else {
+            fraction = (-self.exponent) as usize;
+            let int_len = self.digits.len().saturating_sub(fraction);
+            out.extend(self.digits[..int_len].iter().map(|&d| digit(d)));
+            if dp > 0 {
+                out.push('.');
+            }
+            out.extend(std::iter::repeat_n(
+                family[0],
+                fraction.saturating_sub(self.digits.len()),
+            ));
+            out.extend(self.digits[int_len..].iter().map(|&d| digit(d)));
+        }
+        if out.len() == start || out[start] == '.' {
+            out.insert(start, family[0]);
+        }
+        if dp > 0 {
+            if fraction == 0 {
+                out.push('.');
+            }
+            out.extend(std::iter::repeat_n(family[0], dp.saturating_sub(fraction)));
+        }
+    }
 }
 
 /// Settings of a picture string (`$formatNumber`'s third argument overrides them).
@@ -307,6 +412,8 @@ struct Props {
     grouping: char,
     exponent: char,
     minus: Cow<'static, str>,
+    infinity: Cow<'static, str>,
+    nan: Cow<'static, str>,
     percent: char,
     per_mille: char,
     zero: char,
@@ -321,6 +428,8 @@ impl Default for Props {
             grouping: ',',
             exponent: 'e',
             minus: Cow::Borrowed("-"),
+            infinity: Cow::Borrowed("Infinity"),
+            nan: Cow::Borrowed("NaN"),
             percent: '%',
             per_mille: '\u{2030}',
             zero: '0',
@@ -415,6 +524,11 @@ pub(super) fn format_number<'a>(
     if let Value::Object(options) = arg(&a, 2) {
         for (key, v) in options.borrow().iter() {
             let Some(s) = v.as_str() else { continue };
+            match key.as_ref() {
+                "infinity" => p.infinity = Cow::Owned(s.to_owned()),
+                "NaN" => p.nan = Cow::Owned(s.to_owned()),
+                _ => {}
+            }
             let Some(c) = s.chars().next() else { continue };
             match key.as_ref() {
                 "decimal-separator" => p.decimal = c,
@@ -671,6 +785,10 @@ fn format_picture(picture: &Picture, value: f64) -> String {
     let p = &picture.props;
     let family = &picture.family;
     let variables = &picture.variables;
+    // JSON has no NaN, but a host can bind one.
+    if value.is_nan() {
+        return p.nan.to_string();
+    }
     let pic = if value >= 0.0 {
         &variables[0]
     } else {
@@ -683,34 +801,37 @@ fn format_picture(picture: &Picture, value: f64) -> String {
     } else {
         value
     };
+    // A number that `%` or `‰` scales past the largest double.
+    if !adjusted.is_finite() {
+        return format!("{}{}{}", pic.prefix, p.infinity, pic.suffix);
+    }
 
-    let (mantissa, exponent) = if pic.min_exponent == 0 {
-        (adjusted, None)
-    } else {
-        let max_mantissa = 10f64.powi(pic.scaling as i32);
-        let min_mantissa = 10f64.powi(pic.scaling as i32 - 1);
-        let mut m = adjusted;
-        let mut e = 0i32;
-        // Infinity never scales into range; jsonata-js loops forever.
-        if m != 0.0 && m.is_finite() {
-            while m.abs() < min_mantissa {
-                m *= 10.0;
-                e -= 1;
-            }
-            while m.abs() > max_mantissa {
-                m /= 10.0;
-                e += 1;
-            }
-        }
-        (m, Some(e))
-    };
-
-    let rounded = round(mantissa, pic.max_fraction as f64);
-    let make_string = |v: f64, dp: usize, s: &mut Vec<char>| {
-        write_fixed(&mut Digits { out: s, family }, v, dp);
-    };
+    // The mantissa and the exponent are scaled and rounded on the number's decimal digits.
+    let mut mantissa = Decimal::of(adjusted);
+    let scaling = pic.scaling as i64;
+    let mut exponent = (pic.min_exponent != 0).then(|| {
+        // `scaling` digits before the decimal point; zero has a zero exponent.
+        let e = if mantissa.is_zero() {
+            0
+        } else {
+            mantissa.magnitude() - scaling
+        };
+        mantissa.exponent -= e;
+        e
+    });
+    let dp = pic.max_fraction as i64;
+    mantissa.round(dp);
+    if let Some(e) = &mut exponent
+        && !mantissa.is_zero()
+        && mantissa.magnitude() > scaling
+    {
+        // Rounding carried the mantissa up to 10^scaling.
+        mantissa.exponent -= 1;
+        mantissa.round(dp);
+        *e += 1;
+    }
     let mut s = Vec::with_capacity(32);
-    make_string(rounded, pic.max_fraction, &mut s);
+    mantissa.write(pic.max_fraction, family, &mut s);
     match s.iter().position(|&c| c == '.') {
         None => s.push(p.decimal),
         Some(i) => s[i] = p.decimal,
@@ -763,7 +884,11 @@ fn format_picture(picture: &Picture, value: f64) -> String {
     out.extend(s);
     if let Some(e) = exponent {
         let mut digits = Vec::new();
-        make_string(f64::from(e), 0, &mut digits);
+        Decimal {
+            digits: e.unsigned_abs().to_string().into_bytes(),
+            exponent: 0,
+        }
+        .write(0, family, &mut digits);
         out.push(p.exponent);
         if e < 0 {
             out.push_str(&p.minus);
@@ -776,25 +901,6 @@ fn format_picture(picture: &Picture, value: f64) -> String {
     }
     out.push_str(&pic.suffix);
     out
-}
-
-/// Writes text into characters, with the ASCII digits replaced by those of a digit family.
-struct Digits<'d> {
-    out: &'d mut Vec<char>,
-    family: &'d [char],
-}
-
-impl fmt::Write for Digits<'_> {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.out.extend(s.chars().map(|c| {
-            if c.is_ascii_digit() {
-                self.family[(c as u8 - b'0') as usize]
-            } else {
-                c
-            }
-        }));
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -828,32 +934,67 @@ mod tests {
     }
 
     #[test]
-    fn ties_agree_with_the_exact_expansion() {
-        let expanded = |x: f64, dp: usize| {
-            let exact = format!("{:.*}", dp + 60, x.abs());
-            let tail = &exact[exact.len() - 60..];
-            tail.starts_with('5') && tail[1..].bytes().all(|b| b == b'0')
-        };
-        let mut values = vec![
-            0.0, 0.5, 2.5, 0.125, -0.375, 1.005, 1e21, 5e-324, 0.1, 1234.5,
-        ];
-        values.extend((0..2000).map(|k| f64::from(k) / 64.0));
-        values.extend((0..2000).map(|k| f64::from(k) * 0.01));
-        for x in values {
-            for dp in 0..8 {
-                assert_eq!(is_tie(x, dp), expanded(x, dp), "{x} to {dp} places");
-            }
-        }
-    }
-
-    #[test]
     fn format_number_from_1e21_writes_digits() {
         assert_eq!(fmt(1e21, "#,##0.00"), "1,000,000,000,000,000,000,000.00");
         assert_eq!(fmt(1e20, "0%"), "10000000000000000000000%");
         assert_eq!(fmt(-1.5e22, "0"), "-15000000000000000000000");
-        // The exact binary value, as below 1e21 (123456789012345680000 writes ...683,968).
-        assert_eq!(fmt(1e23, "0"), "99999999999999991611392");
+        // The shortest digits that convert back, then zeros, not the exact binary value
+        // (99999999999999991611392).
+        assert_eq!(fmt(1e23, "0"), "100000000000000000000000");
         assert_eq!(fmt(1e300, "#,##0").len(), 301 + 100);
+    }
+
+    /// The cases of jsonata-js's pull request #868 in its own tests, which keeps them out of the
+    /// suite.
+    #[test]
+    fn format_number_rounds_the_shortest_decimal_digits() {
+        assert_eq!(fmt(1.1, "0.00000000000000000000"), "1.10000000000000000000");
+        assert_eq!(
+            fmt(0.1 + 0.2, "0.##################"),
+            "0.30000000000000004"
+        );
+        assert_eq!(fmt(531135999999999.94, "0.00"), "531135999999999.94");
+        assert_eq!(fmt(9007199254740994.0, "0.00"), "9007199254740994.00");
+        assert_eq!(fmt(12345678901234567000.0, "0"), "12345678901234567000");
+        assert_eq!(
+            fmt(123456789012345678901234.0, "0.000"),
+            "123456789012345690000000.000"
+        );
+        assert_eq!(
+            fmt(1.5, &format!("0.{}", "0".repeat(101))),
+            format!("1.5{}", "0".repeat(100))
+        );
+        assert_eq!(
+            fmt(1.0, &format!("{}e0", "0".repeat(309))),
+            format!("1{}e-308", "0".repeat(308))
+        );
+        // Half to even on the decimal digits, which the double 1.005 (1.00499…) is not below.
+        assert_eq!(fmt(1.005, "0.00"), "1.00");
+        assert_eq!(fmt(1.015, "0.00"), "1.02");
+        assert_eq!(fmt(0.5, "0"), "0");
+        assert_eq!(fmt(-2.5, "0"), "-2");
+        assert_eq!(fmt(0.004, "0.00"), "0.00");
+        assert_eq!(fmt(5e-324, "0.0"), "0.0");
+        assert_eq!(fmt(5e-324, "0.0e0"), "5.0e-324");
+        assert_eq!(fmt(0.0012, ".0e0"), ".1e-2");
+    }
+
+    #[test]
+    fn format_number_writes_nan_and_infinity() {
+        assert_eq!(fmt(f64::NAN, "£#,##0.00"), "NaN");
+        assert_eq!(fmt(f64::INFINITY, "£#,##0.00"), "£Infinity");
+        assert_eq!(fmt(f64::NEG_INFINITY, "£#,##0.00"), "-£Infinity");
+        assert_eq!(fmt(f64::NEG_INFINITY, "#,##0.00;(#,##0.00)"), "(Infinity)");
+        assert_eq!(fmt(f64::INFINITY, "0.0e0"), "Infinity");
+        assert_eq!(fmt(1e308, "0%"), "Infinity%");
+        let p = Props {
+            nan: Cow::Borrowed("not a number"),
+            infinity: Cow::Borrowed("∞"),
+            ..Props::default()
+        };
+        let picture = Picture::parse("0.00".into(), p).unwrap();
+        assert_eq!(format_picture(&picture, f64::NAN), "not a number");
+        assert_eq!(format_picture(&picture, f64::INFINITY), "∞");
     }
 
     #[test]
@@ -884,14 +1025,6 @@ mod tests {
         assert_eq!(round(1.005, 2.0), 1.0);
         assert_eq!(round(12345.0, -2.0), 12300.0);
         assert_eq!(round(-1e300, 20.0), -1e300);
-        let to_fixed = |x, dp| {
-            let mut out = String::new();
-            write_fixed(&mut out, x, dp);
-            out
-        };
-        assert_eq!(to_fixed(0.5, 0), "1");
-        assert_eq!(to_fixed(2.5, 0), "3");
-        assert_eq!(to_fixed(1.25, 1), "1.3");
         assert_eq!(to_radix(255.0, 16), "ff");
         assert_eq!(to_radix(-5.0, 2), "-101");
     }

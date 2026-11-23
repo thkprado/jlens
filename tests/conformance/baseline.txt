@@ -589,6 +589,8 @@ function-formatNumber/case033
 function-formatNumber/case034
 function-formatNumber/case035
 function-formatNumber/case036
+function-formatNumber/decimal-rounding#0
+function-formatNumber/decimal-rounding#1
 function-formatNumber/issue785#0
 function-formatNumber/issue785#1
 function-formatNumber/issue785#2
@@ -605,6 +607,12 @@ function-formatNumber/issue851#4
 function-formatNumber/issue851#5
 function-formatNumber/issue851#6
 function-formatNumber/issue851#7
+function-formatNumber/issue865#0
+function-formatNumber/issue865#1
+function-formatNumber/issue865#2
+function-formatNumber/issue865#3
+function-formatNumber/issue865#4
+function-formatNumber/issue865#5
 function-fromMillis/case000
 function-fromMillis/case001
 function-fromMillis/case002

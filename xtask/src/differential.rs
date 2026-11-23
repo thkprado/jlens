@@ -185,10 +185,12 @@ pub fn run(args: &[String]) -> Result<()> {
             flagged += 1;
         } else if dropped_quirk(expr) {
             dropped += 1;
-        } else if checkout.is_none() && fixed_after_2_2_2(expr) {
+        } else if checkout.is_none()
+            && (fixed_after_2_2_2(expr) || digits_fixed_after_2_2_2(expr, expected))
+        {
             // A checkout is compared without this rule, so it tells which of the fixes it has.
             fixed += 1;
-        } else if exact_digits(expr, &actual, expected) {
+        } else if exact_base_digits(expr, &actual, expected) {
             exact += 1;
         } else if actual["error"] == "D1001" || rounded_past_infinity(expr, &actual, expected) {
             // jlens raises D1001 where a number overflows to infinity (`1 / 0`), which
@@ -231,7 +233,7 @@ pub fn run(args: &[String]) -> Result<()> {
          {mutated} (jsonata-js changed its input), {flagged} (sequence as context), \
          {dropped} (dropped quirk), {fixed} (fixed after 2.2.2), \
          {overflowed} (number out of range), \
-         {exact} (exact digits of a large number), {timezone} (timezone not a number)"
+         {exact} (exact digits of $formatBase), {timezone} (timezone not a number)"
     );
     if !divergences.is_empty() {
         let path = dir.join("divergences.json");
@@ -653,31 +655,35 @@ fn tail_group(body: &Node) -> bool {
     }
 }
 
-/// Whether jlens wrote the digits of a large number where jsonata-js did not. `$formatNumber`
-/// and `$formatInteger` from 1e21 write JavaScript's exponent notation through the picture, so
-/// jsonata-js's result has an `e` and a `+` with at most a separator between them (`1e,+21.00`),
-/// percent-encoded when the result went through `$encodeUrlComponent` (`1e%2C%2B21.00`). A result
-/// computed from that string (`$contains($formatNumber(1e21, '#'), /e/)`) need not show it, so a
-/// call on a literal from 1e21, or one that `%` or `‰` can scale to it, counts too, whatever the
-/// outcomes. Its main writes digits since pull request #864, not yet released: those of
-/// `$formatInteger` agree, `$formatNumber` from 1e21 writes the shortest digits that read back
-/// and zeros where jlens writes the exact value (`…690000000`, `…685803008`). `$formatBase` from
-/// 2^53 writes zeros below the number's precision in a radix that is not a power of two,
-/// so the results differ only where jsonata-js has a zero.
-fn exact_digits(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
-    let (jlens, js) = (actual.to_string(), expected.to_string());
+/// Whether jsonata-js 2.2.2 may have written the digits of `$formatNumber` or `$formatInteger`
+/// where jlens writes those of its main since pull requests #864 and #868: from 1e21, 2.2.2
+/// writes JavaScript's exponent notation through the picture, so its result has an `e` and a `+`
+/// with at most a separator between them (`1e,+21.00`), percent-encoded when the result went
+/// through `$encodeUrlComponent` (`1e%2C%2B21.00`). A result computed from that string
+/// (`$contains($formatNumber(1e21, '#'), /e/)`) need not show it, so a call on a literal from
+/// 1e21, or one that `%` or `‰` can scale to it, counts too, whatever the outcomes; and so does
+/// `$formatNumber` with an exponent picture, whose mantissa 2.2.2 lets reach 10^N
+/// (`$formatNumber(10, '0.0e0')` is "10.0e0", "1.0e1" in jlens).
+fn digits_fixed_after_2_2_2(expr: &str, expected: &JsonValue) -> bool {
     let calls = |name: &str| expr.contains(&format!("${name}("));
-    let exponent = percent_decoded(&js)
+    let exponent = percent_decoded(&expected.to_string())
         .windows(3)
-        .any(|w| w[0] == b'e' && (w[1] == b'+' || w[2] == b'+'))
-        || large_format_number(expr);
-    let zeros = jlens.len() == js.len()
+        .any(|w| w[0] == b'e' && (w[1] == b'+' || w[2] == b'+'));
+    (calls("formatNumber") || calls("formatInteger"))
+        && (exponent || format_call_fixed_after_2_2_2(expr))
+}
+
+/// Whether jlens wrote the exact digits of `$formatBase` where jsonata-js did not: from 2^53, in a
+/// radix that is not a power of two, jsonata-js writes zeros below the number's precision, so
+/// the results differ only where jsonata-js has a zero.
+fn exact_base_digits(expr: &str, actual: &JsonValue, expected: &JsonValue) -> bool {
+    let (jlens, js) = (actual.to_string(), expected.to_string());
+    expr.contains("$formatBase(")
+        && jlens.len() == js.len()
         && jlens
             .bytes()
             .zip(js.bytes())
-            .all(|(a, b)| a == b || b == b'0');
-    ((calls("formatNumber") || calls("formatInteger")) && exponent)
-        || (calls("formatBase") && zeros)
+            .all(|(a, b)| a == b || b == b'0')
 }
 
 /// Whether jsonata-js gave `null` where jlens gave a number, from an expression that calls
@@ -689,8 +695,9 @@ fn rounded_past_infinity(expr: &str, actual: &JsonValue, expected: &JsonValue) -
 }
 
 /// Whether `expr` calls `$formatNumber` on a number literal from 1e18, which `‰` scales to 1e21,
-/// or `$formatInteger` on one from 1e21.
-fn large_format_number(expr: &str) -> bool {
+/// or with a literal picture that has an exponent separator, or `$formatInteger` on a number
+/// literal from 1e21.
+fn format_call_fixed_after_2_2_2(expr: &str) -> bool {
     let Ok(compiled) = Expression::compile(expr) else {
         return false;
     };
@@ -706,7 +713,10 @@ fn large_format_number(expr: &str) -> bool {
             };
             found |= args.first().is_some_and(
                 |a| matches!(a.kind, NodeKind::Number { value } if value.abs() >= from),
-            );
+            ) || name == "formatNumber"
+                && args.get(1).is_some_and(
+                    |a| matches!(&a.kind, NodeKind::String { value } if value.contains('e')),
+                );
         }
     });
     found
@@ -1193,7 +1203,6 @@ mod tests {
 
     #[test]
     fn digits_of_large_numbers_differ_only_in_format_calls() {
-        let digits = json!({"value": "1,000,000,000,000,000,000,000"});
         for (expr, js) in [
             ("$formatInteger(1e21, '#,##0')", json!({"value": "1e,+21"})),
             ("$formatNumber(1e21, '#,##0')", json!({"value": "1e,+21"})),
@@ -1205,15 +1214,26 @@ mod tests {
                 "$contains($formatNumber(1e19, '0%'), /e/)",
                 json!({"value": true}),
             ),
+            ("$formatNumber(10, '0.0e0')", json!({"value": "10.0e0"})),
         ] {
-            assert!(exact_digits(expr, &digits, &js), "{expr}");
+            assert!(digits_fixed_after_2_2_2(expr, &js), "{expr}");
         }
-        for expr in ["$string(1e21)", "$contains($formatInteger(1e20, '0'), /e/)"] {
+        for expr in [
+            "$string(1e21)",
+            "$contains($formatInteger(1e20, '0'), /e/)",
+            "$formatNumber(10, '0.0')",
+        ] {
             assert!(
-                !exact_digits(expr, &digits, &json!({"value": true})),
+                !digits_fixed_after_2_2_2(expr, &json!({"value": true})),
                 "{expr}"
             );
         }
+        let digits =
+            json!({"value": "212120220222112010021212002200000020022221100201112201012210221"});
+        let zeros =
+            json!({"value": "212120220222112010021212002200000000000000000000000000000000000"});
+        assert!(exact_base_digits("$formatBase(1e30, 3)", &digits, &zeros));
+        assert!(!exact_base_digits("$string(1e30)", &digits, &zeros));
     }
 
     #[test]
