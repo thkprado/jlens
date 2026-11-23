@@ -37,6 +37,14 @@ All notable changes are recorded here. The format follows
   regress-version`, in CI and in the release workflow, fails when crates.io has its version with
   other contents.
 
+### Fixed
+
+- `$formatInteger` in decimal digits writes a number from 1e21 in digits, as jsonata-js's main
+  does since pull request #864, ahead of its release: `$formatInteger(1e21, '#,##0')` is
+  "1,000,000,000,000,000,000,000", where it was "1e,+21", JavaScript's exponent notation through
+  the picture. The digits are those of JavaScript's `String`, followed by zeros, as below 1e21.
+  `$formatNumber` already wrote such a number in digits, the exact value of the binary number.
+
 ### Documentation
 
 - The Java guide says what a document costs: its conversion and its text, in native memory, which

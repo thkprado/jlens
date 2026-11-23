@@ -476,7 +476,7 @@ fn format_integer_with(value: f64, format: &IntegerFormat) -> Result<String> {
             }
         }
         Primary::Decimal => {
-            let mut digits: Vec<char> = js_number(value).chars().collect();
+            let mut digits: Vec<char> = integer_digits(value).chars().collect();
             if digits.len() < format.mandatory_digits {
                 let pad = format.mandatory_digits - digits.len();
                 digits.splice(0..0, std::iter::repeat_n('0', pad));
@@ -509,6 +509,30 @@ fn format_integer_with(value: f64, format: &IntegerFormat) -> Result<String> {
         out.insert(0, '-');
     }
     Ok(out)
+}
+
+/// The decimal digits of a whole, non-negative `value`: JavaScript's `String(value)`, with its
+/// exponent notation from 1e21 written out, its digits followed by zeros (`1e+21` is a 1 and 21
+/// zeros), as jsonata-js does since its pull request #864.
+fn integer_digits(value: f64) -> String {
+    let s = js_number(value);
+    let Some((mantissa, exponent)) = s.split_once("e+") else {
+        return s;
+    };
+    let Ok(exponent) = exponent.parse::<usize>() else {
+        return s;
+    };
+    let (int, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let mut out = String::with_capacity(int.len() + exponent);
+    out.push_str(int);
+    out.push_str(fraction);
+    // `ryu_js` writes the fraction's digits only up to the last that is not zero, and never more
+    // of them than the exponent: from 1e21, the shortest digits that read back are at most 17.
+    out.extend(std::iter::repeat_n(
+        '0',
+        exponent.saturating_sub(fraction.len()),
+    ));
+    out
 }
 
 /// `$formatInteger`.
@@ -1634,6 +1658,32 @@ mod tests {
             "1,234,567"
         );
         assert_eq!(format_integer(3.0, "1;o", usize::MAX).unwrap(), "3rd");
+        // From 1e21, JavaScript's exponent notation written out, as jsonata-js#864 does.
+        for (value, picture, digits) in [
+            (1e21, "#,##0", "1,000,000,000,000,000,000,000"),
+            (-1e21, "0", "-1000000000000000000000"),
+            (123456789012345678901234.0, "0", "123456789012345690000000"),
+            (12345678901234567000.0, "0", "12345678901234567000"),
+            (2e22, "1;o", "20000000000000000000000th"),
+        ] {
+            assert_eq!(
+                format_integer(value, picture, usize::MAX).unwrap(),
+                digits,
+                "{value}"
+            );
+        }
+        assert_eq!(
+            format_integer(1.5e21, "\u{660}", usize::MAX).unwrap(),
+            format!("\u{661}\u{665}{}", "\u{660}".repeat(20))
+        );
+        assert_eq!(
+            format_integer(1e300, "0", usize::MAX).unwrap(),
+            format!("1{}", "0".repeat(300))
+        );
+        assert_eq!(
+            format_integer(f64::INFINITY, "0", usize::MAX).unwrap(),
+            "Infinity"
+        );
         assert_eq!(
             parse_integer("one hundred and twenty-three", "w").unwrap(),
             123.0
