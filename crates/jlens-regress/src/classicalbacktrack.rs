@@ -8,7 +8,7 @@ use crate::exec;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
 #[cfg(not(feature = "utf16"))]
 use crate::insn::StartPredicate;
-use crate::insn::{CompiledRegex, Insn, LoopFields};
+use crate::insn::{CompiledRegex, Insn, LoopFields, unpack_char_set};
 use crate::interrupt::{Interrupt, NoInterrupt, Poll};
 use crate::matchers;
 use crate::matchers::CharProperties;
@@ -437,7 +437,8 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                 dir,
                 scm::MatchAnyExceptLineTerminator::new(),
             ),
-            Insn::CharSet(chars) => {
+            &Insn::CharSet { lo, hi } => {
+                let chars = unpack_char_set(lo, hi);
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::CharSet { chars })
             }
             &Insn::ByteSet2(bytes) => {
@@ -859,7 +860,8 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                         next_or_bt!(m);
                     }
 
-                    Insn::CharSet(chars) => {
+                    &Insn::CharSet { lo, hi } => {
+                        let chars = unpack_char_set(lo, hi);
                         let m = scm::CharSet { chars }.matches(input, dir, &mut pos);
                         next_or_bt!(m);
                     }
