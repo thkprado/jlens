@@ -5,7 +5,7 @@ use crate::bytesearch;
 use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
-use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
+use crate::indexing::{AsciiInput, InputIndexer, Utf8Input};
 #[cfg(not(feature = "utf16"))]
 use crate::insn::StartPredicate;
 use crate::insn::{CompiledRegex, Insn, LoopBounds, LoopFields, unpack_char_set};
@@ -411,14 +411,6 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
         ip: IP,
     ) -> Option<(Input::Position, Input::Position)> {
         match re.insns.iat(ip + 1) {
-            &Insn::Char(c) => {
-                // jlens-regress: a character the input cannot hold (a lone surrogate in a
-                // `&str`) matches nowhere, so the loop matches it zero times, if it may.
-                let Some(c) = <<Input as InputIndexer>::Element as ElementType>::try_from(c) else {
-                    return (min == 0).then_some((pos, pos));
-                };
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::Char { c })
-            }
             &Insn::Bracket(idx) => {
                 let bc = re.brackets.iat(idx as usize);
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::Bracket { bc })
@@ -867,15 +859,6 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                 }
 
                 match re.insns.iat(ip) {
-                    &Insn::Char(c) => {
-                        let m = match <<Input as InputIndexer>::Element as ElementType>::try_from(c)
-                        {
-                            Some(c) => scm::Char { c }.matches(input, dir, &mut pos),
-                            None => false,
-                        };
-                        next_or_bt!(m);
-                    }
-
                     &Insn::CharSet { lo, hi } => {
                         let chars = unpack_char_set(lo, hi);
                         let m = scm::CharSet { chars }.matches(input, dir, &mut pos);
