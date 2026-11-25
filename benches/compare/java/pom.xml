@@ -16,7 +16,7 @@
     <!-- The JAR that `cargo xtask java-compare` builds, with the version it passes. It is never
          installed, so that a local build cannot hide the package published on Maven Central. -->
     <jlens.jar>${project.basedir}/../../../crates/jlens-java/java/target/jlens-${jlens.version}.jar</jlens.jar>
-    <jsonata-java.version>0.9.10</jsonata-java.version>
+    <jsonata-java.version>0.9.11</jsonata-java.version>
     <jsonata-jvm-compiler.version>1.0.7</jsonata-jvm-compiler.version>
   </properties>
 

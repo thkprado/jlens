@@ -114,7 +114,7 @@
     "esbuild": "0.28.2",
     "jsonata": "2.2.2",
     "typescript": "7.0.2",
-    "vscode-languageclient": "11.0.0",
+    "vscode-languageclient": "11.0.1",
     "vscode-oniguruma": "2.0.1",
     "vscode-textmate": "9.3.2"
   },

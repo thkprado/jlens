@@ -669,7 +669,9 @@ impl<'s> Walker<'s, '_> {
                     }
                     let res = self.step(step, &cur, scope);
                     let cons = i == 0 && step.attrs.cons_array;
-                    let arrays = !cons && res.has_arrays();
+                    // An array the step may give: a shape of one, or a value built as one, such
+                    // as a variable bound to an array constructor (`$p.($)`).
+                    let arrays = !cons && (res.has_arrays() || res.form != Form::Value);
                     undefined = undefined.or(res.undefined);
                     if !cons && res.may_be_empty() && (i < last || several.is_some()) {
                         undefined = undefined.or(Some(step.span));

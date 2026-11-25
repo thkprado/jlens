@@ -70,6 +70,10 @@ All notable changes are recorded here. The format follows
   jsonata-js's main does since pull request #856, so a component can follow them:
   `$toMillis('2020-01-02 11:00 -03:3012', '[Y0001]-[M01]-[D01] [H01]:[m01] [Z01][s01]')` reads
   -03:30 and 12 seconds, and `-3:3` matches no offset.
+- The result type of a path that starts with an array the expression builds, such as a variable
+  bound to an array constructor, includes an array: `($p := ['a', 'b']; $p.($length($)))` is
+  typed as a number or an array, where it was typed as a number, which its result `[1, 1]`
+  contradicts. Found by a case of the new suite.
 
 ### Documentation
 

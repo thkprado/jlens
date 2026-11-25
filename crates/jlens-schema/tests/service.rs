@@ -1779,6 +1779,22 @@ fn result_type_tells_what_the_typing_knows() {
 }
 
 #[test]
+fn a_path_from_an_array_built_by_the_expression_may_give_several_values() {
+    use jlens_schema::JsonType::{Array, Number, String};
+    // A step over a variable bound to an array constructor, or over `$sort`, runs over each of
+    // its items, as over the constructor itself.
+    let none = LanguageService::new(None);
+    for (text, types) in [
+        ("['a', 'b'].($length($))", vec![Number, Array]),
+        ("($p := ['a', 'b']; $p.($length($)))", vec![Number, Array]),
+        ("($p := ['a', 'b']; $p.($))", vec![String, Array]),
+        ("$sort(['b', 'a']).($length($))", vec![Number, Array]),
+    ] {
+        assert_eq!(none.result_type(text).types, Some(types), "{text}");
+    }
+}
+
+#[test]
 fn an_expression_is_typed_as_the_body_of_a_step() {
     use jlens_schema::JsonType::Boolean;
     use jlens_schema::ResultCheck::Always;

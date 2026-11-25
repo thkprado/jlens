@@ -92,6 +92,11 @@ fn suite_expressions_get_no_function_or_variable_warnings() {
                     (_, Some(Value::String(f))) => fs::read_to_string(group.join(f)).unwrap(),
                     _ => continue,
                 };
+                // jsonata-js's template strings (`«...»`, pull request #860 of its main branch),
+                // which jlens does not have yet.
+                if group.ends_with("template-strings") || expr.contains('«') {
+                    continue;
+                }
                 let schema = match (case.get("data"), case.get("dataset")) {
                     (Some(data), _) => Some(Schema::infer(std::slice::from_ref(data))),
                     (_, Some(Value::String(name))) => schemas[name].clone(),
