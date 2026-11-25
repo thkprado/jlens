@@ -103,6 +103,8 @@ impl<Position: PositionType> GroupData<Position> {
     }
 
     /// Reset the group to "not entered."
+    // jlens-regress: only the PikeVM resets a group since 1ff2853, and jlens builds without it.
+    #[cfg(feature = "backend-pikevm")]
     pub fn reset(&mut self) {
         self.start = None;
         self.end = None;
