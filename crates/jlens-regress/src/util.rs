@@ -25,6 +25,14 @@ macro_rules! rs_unreachable {
     };
 }
 
+/// Marks the path that calls it as unlikely, as `core::hint::cold_path` does.
+///
+/// jlens-regress: `core::hint::cold_path` became stable after jlens's
+/// `rust-version`; a call to an empty `#[cold]` function gives the optimizer the same hint.
+#[cold]
+#[inline]
+pub(crate) fn cold_path() {}
+
 /// A trait which performs bounds checking only in debug mode.
 pub trait DebugCheckIndex<Idx>: Index<Idx> + IndexMut<Idx> {
     fn iat(&self, index: Idx) -> &Self::Output;
