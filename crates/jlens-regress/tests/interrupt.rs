@@ -32,6 +32,8 @@ fn nested_quantifiers_stop() {
         r"^(a|a)*$",
         r"^(\w+\s?)*$",
         r"(a*)*b",
+        r"^(a+?)+?$",
+        r"(?:a*?)*?b",
     ] {
         let (result, calls) = run(pattern, &catastrophic_text(64), 3);
         assert_eq!(result.unwrap_err(), Interrupted, "{pattern}");
@@ -72,6 +74,21 @@ fn loops_without_failures_are_counted() {
     let (result, calls) = run(r"^(?:(a)b)*$", &text, u32::MAX);
     assert_eq!(result.unwrap().unwrap().range(), 0..text.len());
     assert!(calls >= 19, "{calls} calls");
+}
+
+#[test]
+fn lazy_one_character_loops_are_counted() {
+    // Each further iteration of a lazy loop of one character is a backtrack.
+    let iterations = 20 * INTERRUPT_INTERVAL as usize;
+    let text = "a".repeat(iterations);
+    for pattern in [r"^a*?$", r"^.{2,}?$", r"^[ab]+?$"] {
+        let (result, calls) = run(pattern, &text, u32::MAX);
+        assert_eq!(result.unwrap().unwrap().range(), 0..text.len(), "{pattern}");
+        assert!(calls >= 19, "{pattern}: {calls} calls");
+    }
+    let (result, calls) = run(r"^a*?$", &text, 2);
+    assert_eq!(result.unwrap_err(), Interrupted);
+    assert_eq!(calls, 2);
 }
 
 #[test]
