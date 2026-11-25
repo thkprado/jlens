@@ -8,7 +8,7 @@ use crate::exec;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
 #[cfg(not(feature = "utf16"))]
 use crate::insn::StartPredicate;
-use crate::insn::{CompiledRegex, Insn, LoopFields, unpack_char_set};
+use crate::insn::{CompiledRegex, Insn, LoopBounds, LoopFields, unpack_char_set};
 use crate::interrupt::{Interrupt, NoInterrupt, Poll};
 use crate::matchers;
 use crate::matchers::CharProperties;
@@ -292,7 +292,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
     #[inline(always)]
     fn run_loop(
         &mut self,
-        loop_fields: &'a LoopFields,
+        loop_fields: &LoopFields,
         pos: Input::Position,
         ip: IP,
         entering: bool,
@@ -300,8 +300,8 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
         let loop_data = self.s.loops.mat(loop_fields.loop_id as usize);
         let iteration = if entering { 0 } else { loop_data.iters };
 
-        let do_taken = iteration < loop_fields.max_iters;
-        let do_not_taken = iteration >= loop_fields.min_iters;
+        let do_taken = iteration < loop_fields.bounds.max;
+        let do_not_taken = iteration >= loop_fields.bounds.min;
 
         let loop_taken_ip = ip + 1;
         let loop_not_taken_ip = loop_fields.exit as IP;
@@ -310,7 +310,7 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
         // matches. ES6 21.2.2.5.1 Note 4: "once the minimum number of
         // repetitions has been satisfied, any more expansions of Atom that match the
         // empty character sequence are not considered for further repetitions."
-        if loop_data.entry == pos && iteration > loop_fields.min_iters {
+        if loop_data.entry == pos && iteration > loop_fields.bounds.min {
             return None;
         }
 
@@ -726,22 +726,17 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                     let loop_ip = loop_ip as IP;
                     *ip = loop_ip + 1;
                     *pos = entry;
-                    let loop_fields = match &self.re.insns.iat(loop_ip) {
-                        Insn::EnterLoop(loop_fields) => loop_fields,
+                    let loop_id = match self.re.insns.iat(loop_ip) {
+                        &Insn::EnterLoop { loop_id, .. }
+                        | &Insn::EnterLoopLarge { loop_id, .. } => loop_id,
                         _ => rs_unreachable!("EnterNonGreedyLoop must point at a loop instruction"),
                     };
-                    let loop_data = self.s.loops.mat(loop_fields.loop_id as usize);
+                    let loop_data = self.s.loops.mat(loop_id as usize);
                     debug_assert!(
                         entering || loop_data.iters >= 1,
                         "Continuing a run of a loop that has not been entered"
                     );
-                    Self::prepare_to_enter_loop(
-                        &mut self.bts,
-                        *pos,
-                        loop_fields.loop_id,
-                        loop_data,
-                        entering,
-                    );
+                    Self::prepare_to_enter_loop(&mut self.bts, *pos, loop_id, loop_data, entering);
                     return true;
                 }
 
@@ -1135,9 +1130,9 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                         next_or_bt!(true);
                     }
 
-                    Insn::EnterLoop(fields) => {
+                    Insn::EnterLoop { .. } | Insn::EnterLoopLarge { .. } => {
                         // Entering a loop, not re-entering it.
-                        match self.run_loop(fields, pos, ip, true) {
+                        match self.run_loop(&re.loop_fields(ip), pos, ip, true) {
                             Some(next_ip) => {
                                 ip = next_ip;
                                 continue 'nextinsn;
@@ -1153,13 +1148,8 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                             self.bts.truncate(1);
                             return None;
                         }
-                        let act = match re.insns.iat(begin as IP) {
-                            Insn::EnterLoop(fields) => {
-                                self.run_loop(fields, pos, begin as IP, false)
-                            }
-                            _ => rs_unreachable!("EnterLoop should always refer to loop field"),
-                        };
-                        match act {
+                        let begin = begin as IP;
+                        match self.run_loop(&re.loop_fields(begin), pos, begin, false) {
                             Some(next_ip) => {
                                 ip = next_ip;
                                 continue 'nextinsn;
@@ -1168,12 +1158,11 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                         }
                     }
 
-                    &Insn::Loop1CharBody {
-                        id,
-                        min_iters,
-                        max_iters,
-                        greedy,
-                    } => {
+                    &Insn::Loop1CharBody { id, bounds, greedy } => {
+                        let LoopBounds {
+                            min: min_iters,
+                            max: max_iters,
+                        } = bounds.into();
                         let stop = if greedy {
                             self.run_greedy_loop1char(input, dir, pos, id, min_iters, max_iters, ip)
                         } else {
