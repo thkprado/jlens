@@ -20,6 +20,8 @@ pub trait ElementType:
     + core::convert::TryFrom<u32>
 {
     /// Return another ElementType as self.
+    // jlens-regress: unused since 371ab39, which Rust 1.88, jlens's `rust-version`, reports.
+    #[allow(dead_code)]
     #[inline(always)]
     fn try_from<Elem: ElementType>(v: Elem) -> Option<Self> {
         // Annoying there is no char->u8 conversion.
