@@ -14,6 +14,18 @@ All notable changes are recorded here. The format follows
   `find_from_ucs2(text, start).next()` do, as `find_from_interruptible` does for `&str`, so a
   crate that searches UTF-16 text can bound a pattern that backtracks catastrophically. jlens
   does not use them.
+- `jlens-regress` 0.35.1 also takes the 20 commits `regress` made after `95c0404`, up to
+  `371ab39` (2026-11-22), each in a commit of its own, as its README lists them. A lazy loop of
+  one character, such as `.*?`, tries one more character at each retry, where it first read as
+  far as it could: `<.*?>` no longer reads to the end of the line at each attempt. A quantifier
+  whose maximum overflows is unbounded, and a pattern too large for the bytecode fails to
+  compile instead of panicking. Instructions and backtracking entries take 16 bytes. Each retry
+  of a lazy loop counts toward the interrupt. On the M1, the engine's benchmark is unchanged
+  overall: compiling a pattern is up to 6 % faster, a lookbehind 4 %, and `(\w+)\s+\1`, a
+  backreference that never matches, 10 % slower (13 % with an interrupt), from the commits
+  that let entries shrink; through jlens, the two regular expressions of its benchmark are 3 to
+  5 % slower, outside the engine's search. Under the `pattern` feature, which needs a nightly compiler,
+  `str::rfind`, `str::rsplit` and the other searches from the end no longer take a `&Regex`.
 
 ### Changed
 

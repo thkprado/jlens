@@ -71,3 +71,69 @@ with #12 against `dac6349`, the code before it:
 The number is converted once to its shortest digits (`ryu_js`), then scaled and rounded on
 those digits. Before, `round` converted it to a string and back twice to shift the decimal point,
 and `write_fixed` formatted the exact binary value with `format!`.
+
+## #15: `regress`'s commits after `95c0404`
+
+The engine's benchmark on the M1, built aligned as the performance page says, `ac02f66` (before
+the ports) against `9819d5b` (the last one), three rounds alternated, the median of the rounds;
+each round's times stayed within 0.5 % of the others:
+
+| case | before | after | change | with an interrupt, before | after | change |
+|---|---:|---:|---:|---:|---:|---:|
+| literal | 5.1 µs | 5.0 µs | -2.0% | 5.2 µs | 5.1 µs | -1.9% |
+| literal, no match | 508 ns | 506 ns | -0.4% | 509 ns | 508 ns | -0.2% |
+| case-insensitive literal | 6.4 µs | 6.2 µs | -3.1% | 6.5 µs | 6.4 µs | -1.5% |
+| classes | 27.7 µs | 28.2 µs | +1.8% | 28.7 µs | 28.4 µs | -1.0% |
+| classes, no match | 3.5 µs | 3.5 µs | 0.0% | 3.5 µs | 3.5 µs | 0.0% |
+| alternation of words | 129.9 µs | 136.0 µs | +4.7% | 133.9 µs | 138.2 µs | +3.2% |
+| words | 178.9 µs | 177.3 µs | -0.9% | 183.9 µs | 180.5 µs | -1.8% |
+| captures | 27.7 µs | 27.3 µs | -1.4% | 27.9 µs | 27.9 µs | 0.0% |
+| lazy | 35.5 µs | 36.3 µs | +2.3% | 35.3 µs | 36.7 µs | +4.0% |
+| lines | 29.6 µs | 29.0 µs | -2.0% | 28.8 µs | 29.7 µs | +3.1% |
+| backreference, no match | 441.8 µs | 484.6 µs | +9.7% | 443.1 µs | 501.0 µs | +13.1% |
+| lookahead | 416.8 µs | 410.5 µs | -1.5% | 415.1 µs | 424.1 µs | +2.2% |
+| lookbehind | 153.8 µs | 148.3 µs | -3.6% | 164.4 µs | 161.8 µs | -1.6% |
+| Unicode text | 155.5 µs | 153.4 µs | -1.4% | 159.7 µs | 155.2 µs | -2.8% |
+| Unicode text, case-insensitive | 21.1 µs | 22.1 µs | +4.7% | 21.5 µs | 22.4 µs | +4.2% |
+| Unicode property | 215.9 µs | 211.0 µs | -2.3% | 218.6 µs | 215.4 µs | -1.5% |
+| anchored, short text | 44 ns | 43 ns | -2.3% | 47 ns | 45 ns | -4.3% |
+| compile: date-time | 6.9 µs | 6.5 µs | -5.8% | 6.8 µs | 6.6 µs | -2.9% |
+| compile: e-mail, case-insensitive | 7.5 µs | 7.4 µs | -1.3% | 7.6 µs | 7.4 µs | -2.6% |
+| compile: Unicode property | 3.2 µs | 3.2 µs | 0.0% | 3.2 µs | 3.2 µs | 0.0% |
+
+The geometric mean of the 20 rows is -0.3 % without an interrupt and +0.3 % with one.
+
+The same benchmark at each of the 21 commits, aligned, once each, tells which port moves a case:
+
+- `backreference, no match` (`(\w+)\s+\1` over prose, which never matches) goes from 443 to
+  475 µs with `1ff2853` (a capture group's undo saves its start or its end alone, pushing an entry
+  only when the bound changes) and to 495 µs with `9209939` (a loop's undo split by how it was
+  entered), then stays at 480 to 500 µs. These are the commits that let a backtracking entry
+  shrink to 16 bytes, which the later ones build on.
+- `Unicode text, case-insensitive` (`γράμματα` with `i`) goes from 21.1 to 22.2 µs with
+  `f0972db`, which packs a `CharSet` instruction's four characters into 16 bytes, to unpack at
+  each match.
+- `lazy` (`path=(.*?) `) rises to 40 µs with the same two commits as the backreference and comes
+  back to 37 µs with `e84e9d8`, which makes the lazy loop of one character lazy.
+- `alternation of words` (`\b(?:fox|dog|cat)s?\b`) moves between 130 and 250 µs from one commit
+  to the next with no pattern, by 90 % at commits that do not touch its path (`7ac9163` 248,
+  `5a76444` 167), and `ac02f66` itself took 130 µs in the build of the table and 162 µs in the
+  bisection's: its speed follows the layout of the build, even aligned. The +4.7 % above is
+  not a cost of the ports.
+
+Through jlens, `cargo xtask ab ac02f66 9819d5b` on the M1, evaluate mode, 10 rounds:
+
+| case | before (median) | after (median) | B/A | before (fastest) | after (fastest) | B/A |
+|---|---:|---:|---:|---:|---:|---:|
+| regex, unaligned | 66.7 µs | 69.4 µs | +4.0% | 66.0 µs | 68.2 µs | +3.3% |
+| regex over a long text, unaligned | 86.2 µs | 88.9 µs | +3.2% | 85.7 µs | 88.8 µs | +3.5% |
+| regex, aligned | 66.2 µs | 68.1 µs | +2.9% | 66.0 µs | 67.5 µs | +2.2% |
+| regex over a long text, aligned | 86.3 µs | 90.8 µs | +5.3% | 86.0 µs | 90.6 µs | +5.3% |
+
+The other 15 cases stayed within 1.5 % unaligned; aligned, `path` read +2.1 %, a case with no
+regular expression. `regex over a long text` is `$replace(text, /\w+/, 'x')`, but the engine
+alone does not slow on `\w+`: the same bisection with a case `\w+` over the prose (added to
+`engine.json` for the run only) gives 161.7 µs before and 159.7 µs after, with no step at any
+commit. What `ab` shows is outside the engine's search: in `Searcher`, through which jlens
+searches and the benchmark does not, or in the layout of the jlens binary. #10 measures the
+release against 0.35.0 and shows whether it stays.

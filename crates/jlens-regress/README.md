@@ -143,7 +143,7 @@ Found by jlens's examples of the flag `v`:
 
 ## Ported from upstream
 
-Last upstream commit reviewed: `95c0404` (2026-11-02, unreleased after 0.12.0).
+Last upstream commit reviewed: `371ab39` (2026-11-22, unreleased after 0.12.0).
 
 jlens reviews upstream's new commits when `regress` publishes a release, and otherwise once per
 jlens minor version. Each commit is ported or skipped with its reason in the table below. A port
@@ -191,6 +191,26 @@ skips commits changes this README, which ships with the next version.
 | `1dd717d` | Check UCS-2 budgeted searches against their iterator | Skipped: budget code |
 | `6517285` | Use Unicode mode for the v flag | Tests ported, and they pass: `Regex::from_unicode` here already set `unicode` with `unicode_sets` (see above), and it is the only caller of `try_parse` |
 | `95c0404` | Keep the u and v flags separate in the compiled regex | Skipped: it moves `6517285`'s flag into a check, matching unchanged; jlens reads no flag back from a compiled regex |
+| `1395834` | Mark the Pattern impl as unsafe | Ported. The `pattern` feature needs a nightly compiler; jlens does not build it |
+| `5cf8554` | pattern: fix RegexSearcher's steps and remove ReverseSearcher | Ported: under the `pattern` feature, `str::rfind`, `str::rsplit` and the other searches from the end no longer take a `&Regex` |
+| `1ff2853` | Backtracking: Make SetCaptureGroup only set begin or end | Ported, without its hunk in the budget code. `GroupData::reset`, which only the PikeVM calls since, is built only with it |
+| `9209939` | Backtracking: split loop undo by how the loop was entered | Ported. `core::hint::cold_path` is not stable in Rust 1.88, jlens's `rust-version`: here, and in the later ports that use it, it is the fork's own `util::cold_path`, an empty `#[cold]` function |
+| `2f61cc7` | Backtracking: store an entering flag in EnterNonGreedyLoop | Ported |
+| `21f12f3` | Parse an overflowing quantifier max as unbounded | Ported, with the fork's `unicode` flag where upstream reads `95c0404`'s |
+| `e84e9d8` | Backtracking: make non-greedy 1-char loops lazy | Ported: `<.*?>` no longer walks to the end of the line at each attempt. Each further iteration is a backtrack, which counts toward the interrupt; `tests/interrupt.rs` checks it |
+| `7ac9163` | Backtracking: shrink 1-char loop entries | Ported; the `Searcher`'s backtracker holds the new table of loops too |
+| `d7f6948` | Store long literal byte sequences out-of-line | Ported |
+| `263bd42` | Remove in_lookbehind from emit.rs | Ported |
+| `08b569d` | emit: fix the no_std build | Ported |
+| `ff74244` | emit: return an Error if the regex is too large | Ported, without its hunks in tests of `f04f3a8` and `542243a`, which the fork skipped. `backends::emit`, hidden from the documentation, returns a `Result` |
+| `c362d5a` | Insn: narrow byte sequence and bracket operands | Ported |
+| `f0972db` | Insn: pack CharSet into 16 bytes | Ported |
+| `b57a4dd` | Insn: store the ASCII bracket bitmap in 15 bytes | Ported |
+| `82626d2` | Backtracking: inline run_loop | Ported |
+| `1eaf2f2` | Insn: store loop bounds as u32 inline, large ones out-of-line | Ported; `LoopAgain` keeps counting toward the interrupt before it runs the loop |
+| `78d3d0a` | Insn: assert that instructions are 16 bytes | Ported; they are on `wasm32` too |
+| `a103e90` | Insn: store small brackets as inline ranges | Ported |
+| `371ab39` | Insn: replace Char with CodePointRange | Ported. It replaces the fork's fix for a lone surrogate in a loop (above): a range of code points never matches a surrogate in a `&str`, so such a loop that allows zero iterations matches it zero times, as the fix made it, and upstream now behaves the same |
 
 The upstream README follows.
 
