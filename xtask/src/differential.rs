@@ -498,9 +498,7 @@ fn sequence_first(expr: &str) -> bool {
 /// (`#$j`), which jsonata-js leaves unbound. And a
 /// call with a group-by in tail position of a lambda, whose group-by jsonata-js drops. And
 /// `$fromMillis` with a computed picture, where a marker with an unknown component and a
-/// presentation gives jsonata-js the text "undefined" and jlens `D3132`; with fractional seconds
-/// other than `[f001]`, or a negative time zone with minutes, two date bugs of jsonata-js 2.2.2
-/// that jlens fixes as its pull requests #855 and #856 do. And a left side of `??`
+/// presentation gives jsonata-js the text "undefined" and jlens `D3132`. And a left side of `??`
 /// or `?:` that binds, in the frame it is evaluated in, a name it reads: jsonata-js evaluates
 /// that side twice, so the second sees the first's binding
 /// (`$count($x := [$x, 1]) ?: 0` is 5 there, 4 in jlens).
@@ -549,15 +547,9 @@ fn dropped_quirk(expr: &str) -> bool {
                     .is_some_and(|a| {
                         !matches!(a.kind, NodeKind::String { .. } | NodeKind::Lambda(_))
                     }),
-                NodeKind::Variable { name } if name == "fromMillis" => {
-                    let literal = |i: usize| match args.get(i).map(|a| &a.kind) {
-                        Some(NodeKind::String { value }) => Some(value.as_str()),
-                        _ => None,
-                    };
-                    args.get(1).is_some_and(|_| literal(1).is_none())
-                        || literal(1).is_some_and(short_fraction)
-                        || literal(2).is_some_and(negative_with_minutes)
-                }
+                NodeKind::Variable { name } if name == "fromMillis" => args
+                    .get(1)
+                    .is_some_and(|a| !matches!(a.kind, NodeKind::String { .. })),
                 _ => false,
             },
             NodeKind::Lambda(def) => tail_group(&def.body),
@@ -572,13 +564,14 @@ fn dropped_quirk(expr: &str) -> bool {
     found
 }
 
-/// Whether `expr` may meet one of the three fixes that jsonata-js made after 2.2.2 and jlens
-/// has (see "Fixed in jsonata-js after 2.2.2" in `docs/src/language/compatibility.md`): a
-/// predicate after a predicate that is not a number literal, which may be a computed index
-/// (`$arr[$i][$j]`, jsonata-js#861); an array constructor as a step of a path that binds `@`,
-/// `#` or an ancestor in that step or before it, with no predicate of its own
-/// (`orders#$i.[items.sku]`, jsonata-js#841); and a step after a group-by
-/// (`items{k: $sum(v)}.x`, jsonata-js#838).
+/// Whether `expr` may meet one of the fixes that jsonata-js made after 2.2.2 and jlens has, but
+/// those of the digits of `$formatNumber` and `$formatInteger` (see "Fixed in jsonata-js after
+/// 2.2.2" in `docs/src/language/compatibility.md`): a predicate after a predicate that is not a
+/// number literal, which may be a computed index (`$arr[$i][$j]`, jsonata-js#861); an array
+/// constructor as a step of a path that binds `@`, `#` or an ancestor in that step or before
+/// it, with no predicate of its own (`orders#$i.[items.sku]`, jsonata-js#841); a step after a
+/// group-by (`items{k: $sum(v)}.x`, jsonata-js#838); and `$fromMillis` with fractional seconds
+/// other than `[f001]` (jsonata-js#855) or a negative time zone with minutes (jsonata-js#856).
 fn fixed_after_2_2_2(expr: &str) -> bool {
     let Ok(compiled) = Expression::compile(expr) else {
         return false;
@@ -601,6 +594,16 @@ fn fixed_after_2_2_2(expr: &str) -> bool {
             found |= steps.first().is_some_and(|first| {
                 matches!(first.kind, NodeKind::Path { .. }) && first.attrs.group.is_some()
             });
+        }
+        if let NodeKind::Function { procedure, args } = &node.kind
+            && matches!(&procedure.kind, NodeKind::Variable { name } if name == "fromMillis")
+        {
+            let literal = |i: usize| match args.get(i).map(|a| &a.kind) {
+                Some(NodeKind::String { value }) => Some(value.as_str()),
+                _ => None,
+            };
+            found |= literal(1).is_some_and(short_fraction)
+                || literal(2).is_some_and(negative_with_minutes);
         }
     });
     found

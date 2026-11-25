@@ -2,9 +2,10 @@
 
 jlens vendors the language-neutral test suite of the reference implementation
 ([jsonata-js](https://github.com/jsonata-js/jsonata), MIT) in `tests/jsonata-suite/`, from
-commit `6d9d829` of its main branch: the suite of 2.2.2 and the cases of the fixes made after it,
-which jlens gives ([Fixed in jsonata-js after 2.2.2](../language/compatibility.md#fixed-in-jsonata-js-after-222)).
-That covers 102 groups and about 1,740 cases. The harness lives in
+commit `4bfc27e` of its main branch: the suite of 2.2.2 and the cases of the fixes made after it,
+which jlens gives ([Fixed in jsonata-js after 2.2.2](../language/compatibility.md#fixed-in-jsonata-js-after-222)),
+and of main's template strings (`«...»`), which jlens does not have yet: their 71 cases fail and
+are not in the baseline. That covers 103 groups and about 1,890 cases. The harness lives in
 `crates/jlens-core/tests/conformance.rs` and mirrors `test/run-test-suite.js`:
 
 - Each case is one test, named `<group>/<file>`, or `<group>/<file>#<index>` for files that hold
@@ -46,6 +47,7 @@ cargo xtask conformance --update-baseline  # also rewrites baseline.txt
 |---|---|
 | `function-encodeUrl/case002`, `function-encodeUrlComponent/case002` | The data contains a lone UTF-16 surrogate (U+D800), which Rust's UTF-8 strings cannot represent. |
 | `boolean-expresssions/issue765#10` to `#13` | `1e308 * 10` overflows to infinity: jlens fails with `D1001` at the `*`, jsonata-js at the `and` or `or` that converts the infinity to a boolean. The code is the same, the token and position are not. |
+| `function-fromMillis/issue853#30` and `#31` | A date beyond JavaScript's range: jlens fails with `D1001`, where jsonata-js writes each component as NaN. |
 
 ## Property tests
 
@@ -218,7 +220,8 @@ counts them apart:
 - **Fixed after 2.2.2**: the expression may meet one of the fixes that jsonata-js made after
   2.2.2, which jlens has: a predicate after one that is not a number literal, which may be a
   computed index (`$arr[$i][$j]`); an array constructor as a step of a path that binds `@`, `#`
-  or a parent, in that step or before it; a step after a group-by; the digits of `$formatNumber`
+  or a parent, in that step or before it; a step after a group-by; `$fromMillis` with fractional
+  seconds other than `[f001]` or a negative time zone with minutes; the digits of `$formatNumber`
   and `$formatInteger`, where 2.2.2 writes JavaScript's exponent notation through the picture
   (`1e,+21.00`) or lets the mantissa of an exponent picture reach 10^N (`10.0e0`): a call on a
   literal from 1e18 (which `‰` scales to 1e21) or with a literal exponent picture counts whatever

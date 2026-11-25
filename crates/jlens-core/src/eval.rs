@@ -1240,13 +1240,6 @@ impl<'a> Evaluator<'_, 'a> {
             }
             if ii == 0 && step.attrs.cons_array {
                 result_seq = self.eval(step, &input_seq, env)?;
-            } else if ii == 0
-                && step.attrs.group.is_some()
-                && matches!(step.kind, NodeKind::Path { .. })
-            {
-                // A group-by ends its path: the path is evaluated once, on the whole input,
-                // and the steps after it read its result (jsonata-js#838, after 2.2.2).
-                result_seq = Value::sequence(vec![self.eval(step, &input_seq, env)?]);
             } else if is_tuple {
                 tuple_bindings =
                     Some(self.tuple_step(step, &input_seq, tuple_bindings.as_ref(), env)?);

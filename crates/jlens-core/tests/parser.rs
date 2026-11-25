@@ -446,7 +446,11 @@ fn node_ids_are_unique_and_preordered() {
 }
 
 /// Every expression of the official suite must parse, except those whose expected error is a
-/// static (`S0xxx`) one, which must fail with exactly that code.
+/// static (`S0xxx`) one, which must fail with exactly that code. The cases of jsonata-js's
+/// template strings (`«...»`, pull request #860 of its main branch), which jlens does not have
+/// yet, are left out: the group `template-strings`, the expressions that hold one in other groups,
+/// and the two of a regular expression that starts a block or an array constructor, which #860's
+/// parser reads.
 #[test]
 fn official_suite_expressions_parse() {
     let groups =
@@ -477,6 +481,14 @@ fn official_suite_expressions_parse() {
                     }
                     _ => continue,
                 };
+                let name = file.file_stem().unwrap().to_string_lossy();
+                let group_name = group.file_name().unwrap().to_string_lossy();
+                if group_name == "template-strings"
+                    || expr.contains('«')
+                    || group_name == "regex" && ["case041", "case042"].contains(&&*name)
+                {
+                    continue;
+                }
                 let code = case
                     .get("code")
                     .or_else(|| case.get("error").and_then(|e| e.get("code")))

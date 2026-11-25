@@ -481,10 +481,18 @@ impl<'a> Processor<'a> {
             _ => None,
         };
         // A group-by ends its path, so a path that has one is the first step of a new path,
-        // which reads its result (jsonata-js#838, after 2.2.2): its steps are not carried on,
-        // which would group after them. The parents it still seeks are sought by the new path.
+        // as if it were in parentheses (jsonata-js#838, after 2.2.2): its steps are not carried
+        // on, which would group after them, and it is evaluated for each item of the input, as
+        // a block is. A `[]` among its steps keeps its own singleton arrays, not the new
+        // path's. The parents it still seeks are sought by the new path.
         let grouped = matches!(lstep.kind, NodeKind::Path { .. }) && lstep.attrs.group.is_some();
         let mut result = if grouped {
+            let mut lstep = lstep;
+            lstep.attrs.keep_array = false;
+            // As a block's, which takes it from an array constructor that starts its path.
+            lstep.attrs.cons_array = lstep
+                .steps_mut()
+                .is_some_and(|s| s.first().is_some_and(|f| f.attrs.cons_array));
             let seeking = ancestry(&lstep);
             let mut path = Node::path(vec![lstep]);
             path.attrs.seeking_parent = seeking;

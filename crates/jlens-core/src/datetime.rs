@@ -1371,8 +1371,9 @@ fn parse_datetime(
                     r.push_str(&escape_regex(&sep.to_string()));
                     r.push_str("[0-9]+");
                 } else if format.mandatory_digits <= 2 {
-                    // `[Z01]` and `[Z0]` write minutes after a colon, when there are any.
-                    r.push_str("(?::[0-9]+)?");
+                    // `[Z01]` and `[Z0]` write minutes after a colon, when there are any: two
+                    // digits, so that a component after them can follow without a separator.
+                    r.push_str("(?::[0-9]{2})?");
                 }
                 regex.push_str(&format!("({r})"));
                 let is_z = m.component == 'z';

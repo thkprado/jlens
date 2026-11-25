@@ -48,10 +48,34 @@ All notable changes are recorded here. The format follows
   does since pull request #864, ahead of its release: `$formatInteger(1e21, '#,##0')` is
   "1,000,000,000,000,000,000,000", where it was "1e,+21", JavaScript's exponent notation through
   the picture. The digits are those of JavaScript's `String`, followed by zeros, as below 1e21.
-  `$formatNumber` already wrote such a number in digits, the exact value of the binary number.
+- `$formatNumber` writes the decimal with the fewest digits that converts back to the number, as
+  XPath F&O 3.1 §4.7.5 says and jsonata-js's main does since pull request #868, rounded half to
+  even on those digits: `$formatNumber(1.1, '0.00000000000000000000')` is
+  "1.10000000000000000000", where jlens wrote the exact binary value, "1.10000000000000008882",
+  as jsonata-js 2.2.2 does. With an exponent picture, the mantissa stays below 10^N:
+  `$formatNumber(10, '0.0e0')` is "1.0e1", not "10.0e0". `$formatInteger` writes the same
+  digits. A number that `%` or `‰` scales past the largest double is the `infinity` option, and
+  the options `infinity` and `NaN` are read. The number formatting case of the benchmark is 25%
+  faster.
+- An empty `minus-sign` option of `$formatNumber` writes no sign, as in jsonata-js:
+  `$formatNumber(-5, '0', {'minus-sign': ''})` is "5", where jlens wrote "-5".
+- `$split` with a limit of 0 gives `[]`, and `$replace` with a limit of 0 the string, also when
+  the separator or the pattern is missing, as in jsonata-js; jlens gave nothing.
+- A step after a group-by follows jsonata-js's pull request #838 as its main branch merged it:
+  the grouped path is read as if it were in parentheses, so a `[]` in it no longer keeps the
+  result of the step after it in an array (`items[]{k: v}.x` is `1`, not `[1]`), and in an array
+  context it groups each item, as a block does (`orders{c: lines{p: $sum(q)}.w}` groups the lines
+  of each order, where 0.35 grouped those of all the orders once).
+- `$toMillis` reads two digits of minutes after the colon of a `[Z0]` or `[Z01]` offset, as
+  jsonata-js's main does since pull request #856, so a component can follow them:
+  `$toMillis('2020-01-02 11:00 -03:3012', '[Y0001]-[M01]-[D01] [H01]:[m01] [Z01][s01]')` reads
+  -03:30 and 12 seconds, and `-3:3` matches no offset.
 
 ### Documentation
 
+- The official suite is vendored from jsonata-js's main at `4bfc27e`, with the cases of pull
+  requests #838, #855 and #856, which jlens passes, and of #860, template strings (`«...»`), a
+  feature jlens does not have yet, whose cases fail and are not in the baseline.
 - The Java guide says what a document costs: its conversion and its text, in native memory, which
   counts against a container's limit and not against the Java heap, once per thread that makes
   documents and once more per thread that evaluates a shared one.

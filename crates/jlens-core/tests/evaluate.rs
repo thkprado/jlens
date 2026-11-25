@@ -856,50 +856,31 @@ fn jsonata_js_quirks_that_expose_javascript_are_dropped() {
     );
 }
 
-/// Two date bugs of jsonata-js 2.2.2 that jlens fixes as jsonata-js's pull requests do:
-/// fractional seconds written as the digits of the fraction (jsonata-js#853, pull request #855
-/// at 8c86a80) and negative offsets with minutes (jsonata-js#852, pull request #856 at
-/// 03a595b). `dates_fixed_upstream.json` holds the cases those pull requests add to the suite,
-/// each with its pull request's number.
+/// A group-by ends its path (jsonata-js#838, merged in main after 2.2.2), as if the path were in
+/// parentheses: it is evaluated for each item of its input, as a block is, so a group-by that
+/// reads an array of several objects groups each one. The suite has #838's other cases.
 #[test]
-fn date_bugs_fixed_by_jsonata_js_pull_requests_are_fixed() {
-    let cases: Vec<Value> =
-        serde_json::from_str(include_str!("dates_fixed_upstream.json")).unwrap();
-    assert_eq!(cases.len(), 53);
-    for case in &cases {
-        let expr = case["expr"].as_str().unwrap();
-        assert_eq!(
-            eval(expr, case.get("data").cloned().unwrap_or(Value::Null)).as_ref(),
-            Some(&case["result"]),
-            "{}: {expr}",
-            case["description"]
-        );
-    }
-}
-
-/// A group-by ends its path, so a step after it reads its result, where jsonata-js 2.2.2 and
-/// its main branch take the step before grouping (`items{k: $sum(v)}.x` is `{}` there). jlens
-/// follows jsonata-js's pull request #838 at 662db05, approved and not merged when 0.35 took
-/// it. `grouping_fixed_upstream.json` holds the cases the pull request adds to the suite.
-#[test]
-fn a_step_after_a_group_by_reads_its_result_as_a_jsonata_js_pull_request_does() {
-    let cases: Vec<Value> =
-        serde_json::from_str(include_str!("grouping_fixed_upstream.json")).unwrap();
-    assert_eq!(cases.len(), 5);
-    for case in &cases {
-        let expr = case["expr"].as_str().unwrap();
-        match case.get("code").and_then(Value::as_str) {
-            Some(code) => {
-                let error = Expression::compile(expr).unwrap_err();
-                assert_eq!(error.code(), code, "{}: {expr}", case["description"]);
-            }
-            None => assert_eq!(
-                eval(expr, case["data"].clone()).as_ref(),
-                Some(&case["result"]),
-                "{}: {expr}",
-                case["description"]
-            ),
-        }
+fn a_group_by_followed_by_a_step_is_evaluated_for_each_item_as_jsonata_js_main_does() {
+    let orders = json!({"orders": [
+        {"c": "A", "lines": [{"p": "w", "q": 1}]},
+        {"c": "A", "lines": [{"p": "w", "q": 2}]}
+    ]});
+    assert_eq!(
+        eval("orders{c: lines{p: $sum(q)}.w}", orders),
+        Some(json!({"A": [1, 2]}))
+    );
+    let lookup = json!({"lk": [{"k": "x", "v": 5}], "orders": [{"c": "A"}, {"c": "A"}]});
+    assert_eq!(
+        eval("orders{c: $$.lk{k: $sum(v)}.x}", lookup),
+        Some(json!({"A": [5, 5]}))
+    );
+    // A grouped path that starts with an array constructor is evaluated once, and the step
+    // after it reads nothing from the object it builds, as the same path in parentheses gives.
+    for expr in [
+        "[{'a': {'k': 'x', 'v': 1}}, {'a': {'k': 'x', 'v': 2}}].a{k: $sum(v)}.x",
+        "([{'a': {'k': 'x', 'v': 1}}, {'a': {'k': 'x', 'v': 2}}].a{k: $sum(v)}).x",
+    ] {
+        assert_eq!(eval(expr, json!({})), None, "{expr}");
     }
 }
 

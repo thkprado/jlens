@@ -27,5 +27,13 @@
   "boolean-expresssions/issue765#13": {
     "reason": "`1e308 * 10` overflows to infinity: jlens raises D1001 at the `*`, where jsonata-js passes Infinity on and raises D1001 at the `or` that converts it to a boolean (see \"A number that overflows to infinity\" in docs/src/language/compatibility.md). The code is the same; the token and the position are those of the operator that overflowed.",
     "alternateCode": "D1001"
+  },
+  "function-fromMillis/issue853#30": {
+    "reason": "The date is beyond JavaScript's range of ±8.64e15 ms: jlens raises D1001, where jsonata-js writes every component as NaN, here \"0NaN\" (see \"A date beyond JavaScript's range\" in docs/src/language/compatibility.md).",
+    "alternateCode": "D1001"
+  },
+  "function-fromMillis/issue853#31": {
+    "reason": "The date is beyond JavaScript's range of ±8.64e15 ms once the time zone is applied: jlens raises D1001, where jsonata-js writes every component as NaN (see \"A date beyond JavaScript's range\" in docs/src/language/compatibility.md).",
+    "alternateCode": "D1001"
   }
 }
