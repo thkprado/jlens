@@ -922,6 +922,10 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
                     Insn::ByteSeq16(v) => {
                         next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
+                    Insn::ByteSeqN((start, end)) => {
+                        let v = self.re.byte_literal_buffer.iat(*start..*end);
+                        next_or_bt!(input.match_byte_slice(dir, &mut pos, v))
+                    }
 
                     Insn::AsciiBracket(bitmap) => next_or_bt!(
                         scm::MatchByteSet { bytes: bitmap }.matches(input, dir, &mut pos)
