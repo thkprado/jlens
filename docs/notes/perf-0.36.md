@@ -282,3 +282,19 @@ So the 10 µs was not the field's work, which only a transform reads: each build
 mode of one case or another with the process's environment, as `regex` did across the plan's
 commits in #10. Without the field, `object constructor` has no slow mode in any environment
 tried, which #21 asked for; `regex`'s modes, which 0.35.0 shows too, stay.
+
+## #23: the gaps an outside review found
+
+`$formatNumber` builds the positions of a picture's separators from one count of its digits,
+checks a regular grouping over a sorted copy, and inserts more than 16 separators in one pass;
+up to 16, as nearly every picture has, still go in one at a time, which allocates nothing.
+JSON text is read with a depth in the parsing seeds, which grow the stack every 16 levels.
+
+- **A long picture** (the release CLI on the Ryzen, the whole process): `'0,'` repeated to
+  16,000 and 32,000 characters took 205 and 761 ms; 128,000 now take 16 ms. The results of 16
+  grouped pictures over 10 numbers equal jsonata-js 2.3.0's, before and after.
+- **The workload** (M1, `cargo xtask ab` from `16032be` to `df1410b`, 10 rounds, a detached
+  script, logs in `~/workspaces/logs/036-23`): every case within ±1.4% of the median in
+  `evaluate` mode and within ±1.0% in `document` mode but `filter + aggregate` (+2.1%, a path
+  the change does not touch); `number formatting` +0.5% and +0.7%, within the M1's floor.
+  Parsing JSON text is not in the workload; the depth costs a comparison per array or object.
