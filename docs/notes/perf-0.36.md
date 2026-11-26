@@ -177,3 +177,81 @@ rounds each:
 Before filters took the fast path, the scratch case paid the walk: 198 → 210 µs, +5.7%. A
 location that may reach outside the copy (`$$`, a variable, a function call, a constructor) still
 pays it, in time linear in the copy.
+
+## #10: the plan's code checked whole
+
+- **Properties.** With `PROPTEST_CASES=100000`, in release mode on the Ryzen: `jlens-schema`'s
+  robustness (173 s), keywords (11 s) and references (33 s), `jlens-core`'s 48 robustness
+  properties (152 s), `jlens-lsp`'s (60 s) and `jlens-capi`'s (29 s). All pass.
+- **Fuzzing.** The six targets of the workflow, 10 minutes each under WSL, three at a time, from
+  the seeds of `fuzz-seed`, at `14018ff`: nothing found, from 0.30 million inputs (`evaluate`) to
+  2.06 million (`parse`).
+- **Limits.** Two engines of the limits tables have new versions. `python.py limits` with
+  `jsonatapy` 2.2.15 and `java-compare limits` with jsonata-java 0.9.11, under Linux on the Ryzen:
+  each gives the answers of the tables. In WSL, `mvnw` failed with "Failed to validate Maven
+  distribution SHA-256": without `unzip`, the wrapper fetches the `.tar.gz` and checks it
+  against the `.zip`'s sum; with `unzip` installed it passes.
+
+## #10: the release measured
+
+Measured on 2026-11-26 on the M1 at `14018ff` against v0.35.0. Thermal pressure nominal at each
+step; Rust 1.100.0, Node.js 24.22.3, OpenJDK 25.0.5.1, Python 3.14.10. New versions since 0.35:
+jsonata-js 2.3.0 (#20, the control of the WebAssembly table), `jsonatapy` 2.2.15 (built from its
+source distribution) and jsonata-java 0.9.11; jsonata2js 0.1.2, `jsonata2py` 0.1.3,
+jsonata-python 0.7.2 and jsonata-jvm-compiler 1.0.7 have not changed.
+
+- **Natively**, `cargo xtask ab v0.35.0 HEAD`, 10 rounds, twice in each mode: `number
+  formatting` −19 to −25% (#12), the shipping rule −10.7% from a `Source` only (121 → 108 µs,
+  level in the other modes); every other case within 2.5% but `recursion`, +1.4 to +3.0% in every mode, fastest
+  rounds as much, and `regex over a long text`, +0.7 to +4.0%. Built aligned, once in
+  `evaluate` and `document` mode: `recursion` +0.5% and +1.5% (fastest +0.6% and +0.4%),
+  `regex over a long text` +2.4% and +4.1%, every other case within 2.5% but `index in a
+  variable` against a `Document`, +3.3% (+2.6% fastest; 0.43 against 0.44 µs).
+- **Dates.** Five cases over the order's 200 items, added to `benches/cases.json` for the run
+  only, `ab` 10 rounds:
+
+  | case | mode | 0.35.0 | 0.36 | B/A | aligned |
+  |---|---|---:|---:|---:|---:|
+  | `$sum(items.$toMillis('2018-12-1' & … , '[Y]-[M]-[D] [H]:[m]:[s]'))` | `evaluate` | 2.48 ms | 947 µs | −61.8% | −62.5% |
+  | `$count(items.$toMillis('Monday, 10th December 2018', '[FNn], [D1o] [MNn] [Y]'))` | `evaluate` | 2.73 ms | 898 µs | −67.1% | −67.3% |
+  | `$sum(items.$toMillis('2018-12-10T14:' & … & ':00Z'))` | `evaluate` | 1.98 ms | 1.90 ms | −3.9% | −1.8% |
+  | `$count(items.$fromMillis(…, '[FNn], [D1o] [MNn] [Y] [h]:[m01] [P]'))` | `evaluate` | 501 µs | 516 µs | +2.9% | +3.5% |
+  | `$count(items.$fromMillis(1544450400000 + unitPrice * 60000))` | `evaluate` | 663 µs | 685 µs | +3.4% | +4.0% |
+
+  `document` mode reads the same within a point (`$fromMillis` +2.4% and +3.1%; aligned +5.1%
+  and +6.2%). The two `$fromMillis` cases, aligned, each candidate commit against its parent:
+  `b990c08` (#9) +1.6% and +1.8%, `f190e56` (#12) −1.3% and +0.6%, `e144e55` (#14) +0.6% and
+  −1.6%, `d3f9a65` (#17) +0.5% and +1.0%, `dbf15a8` (#20) +1.0% and +0.8%: no commit holds it;
+  about 0.1 µs a call, left.
+- **Python**, `python.py ab`, two comparisons of five rounds: `number formatting` −23 and −29%;
+  marked in both, with Python values, `regex` +5.4% and +5.6%; `object constructor` +10.7% and
+  +11.4%, unmarked, as one run of 0.36 was fast; `regex over a long text` +2.2 to +2.3%. With
+  wheels built aligned, once: `regex` +4.3%, `object constructor` +12.9%, both marked, and
+  `regex over a long text` against a `Document` +4.0%. The three cases, each commit of the plan
+  that touches the evaluator against the one before, five rounds: `object constructor` comes
+  with `629af7f` (#18), +11.2% and again +12.0%, and with no other; `regex` moves −2.9 to +3.6%
+  from one commit to the next, with none that holds it. Two builds of `629af7f` tell which part of
+  #18: with `#[inline(never)]` on `transform`, `reads_copy_alone` and `outside_copy`, +12.4%
+  against `d3f9a65`; without the field `copier: Option<Value>` of `Evaluator` (the clone looked
+  up at each transform, as before), +0.0% against `d3f9a65` and −10.0% against `629af7f`. The
+  field costs about 10 µs on 200 items read from Python values, where native `source` mode and a
+  Python `Document` read level: a cost to remove before the release, roadmap #21. The table's
+  three runs, which load the installed package rather than a new copy of it, gave 87 µs, as
+  0.35.0.
+- **WebAssembly**, `compare.mjs --pkg --engines jsonata-js`, four processes of each build
+  alternated: `number formatting` −15% with `evaluate` (49 → 42 µs) and −32% against a
+  `Document` (24 → 16.6 µs); every other case within 2.2%. jsonata-js 2.3.0, the control, within
+  3% of 2.2.2's column but the transform, +8.6% (767 → 833 µs).
+- **Java**, `cargo xtask java-compare ab`, every part, five rounds, once: the cases mark only
+  `number formatting`, faster (−3.6 to −27.5%), every other within 2.7% but `regex` from JSON
+  text into Java objects, +3.6%; the documents mark nothing (−5.3 to +3.5%, `$` converted
+  spreading 22%); the threads within 1.1%.
+- **The tables.** Natively, `bench-table`, three copies within 2.1%; against the table of 0.35,
+  each case more than 2% away (`transform` and `tuples` with `evaluate`, `group-by` and `regex over
+  a long text` against a `Document`) is within 2% in the aligned `ab` but the last. Python:
+  three runs of jlens and `jsonatapy`, one of jsonata-python, which is 1.6 to 3.5% faster than
+  its numbers for 0.35 on every case; jlens's `sort + map` 183 → 170 µs: the machine on the day.
+  Java: two JVMs, the faster of each time; jsonata-java's `recursion` 797 or 912 µs.
+- **The regular expression engine**, aligned, each variant twice: the two runs within 3% of each
+  other but `literal` (5.4 and 5.0 µs), the medians within 2% of
+  #15's "after" column; the interrupt 2.4% over the 17 cases, `lookbehind` +9.9% in both pairs.
