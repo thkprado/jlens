@@ -82,6 +82,12 @@ All notable changes are recorded here. The format follows
   jsonata-js's main does since pull request #856, so a component can follow them:
   `$toMillis('2020-01-02 11:00 -03:3012', '[Y0001]-[M01]-[D01] [H01]:[m01] [Z01][s01]')` reads
   -03:30 and 12 seconds, and `-3:3` matches no offset.
+- A regular expression can start a block, an array constructor, an object constructor or a
+  transform, or follow a prefix `-`, as in jsonata-js's main since pull request #860:
+  `$match('xaby', (/ab/))` and `$count([/a/, /b/])` parse, where they failed with `S0211`, the
+  `/` read as a division. A division after a value is still one (`(4/2)`). The suite's
+  `regex/case041` and `case042` pass. Main's template strings, in the same pull request, are not
+  taken.
 - The result type of a path that starts with an array the expression builds, such as a variable
   bound to an array constructor, includes an array: `($p := ['a', 'b']; $p.($length($)))` is
   typed as a number or an array, where it was typed as a number, which its result `[1, 1]`

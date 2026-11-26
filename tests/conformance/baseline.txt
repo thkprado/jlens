@@ -1602,6 +1602,8 @@ regex/case037
 regex/case038
 regex/case039
 regex/case040
+regex/case041
+regex/case042
 simple-array-selectors/case000
 simple-array-selectors/case001
 simple-array-selectors/case002

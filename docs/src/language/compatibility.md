@@ -137,8 +137,9 @@ took before it was merged and follows as merged. The fourth is pull request #864
 `jlens-core`'s. The next two are pull request #868, in main since `db4f747`: the suite has some of
 its cases, and jlens has the others, from jsonata-js's own tests, in `jlens-core`'s. The last two
 are pull requests #855 and #856, in main since `bec2aa4` and `bc935d5`, which jlens took before
-they were merged. Main's template strings (`«...»`, pull request #860) are a feature jlens does
-not have yet. The differential test counts these cases apart when it runs against 2.2.2 ("fixed
+they were merged. Pull request #860, in main since `4bfc27e`, adds template strings (`«...»`), a
+feature jlens does not have yet, and fixes how a regular expression that starts a block or an
+array is read, which jlens takes alone, the last row. The differential test counts these cases apart when it runs against 2.2.2 ("fixed
 after 2.2.2"), and runs against main with `--jsonata-js <checkout>`.
 
 | Topic | jsonata-js 2.2.2 | jlens, and jsonata-js since |
@@ -151,6 +152,7 @@ after 2.2.2"), and runs against main with `--jsonata-js <checkout>`.
 | The mantissa of an exponent picture (`$formatNumber(10, '0.0e0')`) | Can reach 10^N, for a power of ten or a mantissa that rounds up: "10.0e0", and the same for `9.99` | Below 10^N, as XPath F&O 3.1 §4.7.5 says: "1.0e1" for both, and "0.1e1" for `$formatNumber(1, '#.0e0')`. Main since pull request #868 ([jsonata-js#865](https://github.com/jsonata-js/jsonata/issues/865)) |
 | `$fromMillis` with fractional seconds in decimal digits other than three (`'[f01]'`, `'[f]'`) | The milliseconds as an integer: `$fromMillis(1033, '[s].[f01]')` is "01.33", which reads as 330 ms | "01.03": the digits of the fraction, padded and cut on the right, as the picture rules give; a single digit (`'[f]'`) allows the full precision, without the zeros at its end ("01.033", and "01.5" for 1,500 ms). A wrong time that looks valid. Main since pull request #855 ([jsonata-js#853](https://github.com/jsonata-js/jsonata/issues/853)) |
 | A negative time zone with minutes, in `$fromMillis` (`'-0330'`) and in what `$toMillis` reads with `[Z]` or `[z]` (`'-03:30'`) | An hour off: `$fromMillis(0, '[H]:[m] [Z]', '-0330')` is "19:30 -04:30", and `$toMillis` reads `-03:30` as -02:30, `-00:30` as +00:30, and `-330` with `[Z001]` as -33:00 | "20:30 -03:30", and each read back as written: the sign applies to the hours and the minutes. With `[Z0]` or `[Z01]`, the minutes after the colon are two digits, so a component can follow them: `-03:3012` with `[Z01][s01]` is -03:30 and 12 seconds, and `-3:3` is no offset. Main since pull request #856 ([jsonata-js#852](https://github.com/jsonata-js/jsonata/issues/852)) |
+| A regular expression right after an opening `(`, `[` or `{`, a `|` that opens a transform, or a prefix `-` (`$match(s, (/ab/))`, `[/a/, /b/]`) | The `/` is read as a division, which has no left side: `S0211`. After a comma (`[1, /b/]`) or an operator it was already a regular expression | A regular expression: `$count([/a/, /b/])` is 2, and `(/a/)('xa')` matches. A division after a value is still one: `(4/2)` is 2. An expression that had this error may now fail with another (`(/ 2)` is `S0302`, a regular expression with no end). Main since pull request #860 |
 
 ## Extensions
 

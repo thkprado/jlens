@@ -186,7 +186,9 @@ pub fn run(args: &[String]) -> Result<()> {
         } else if dropped_quirk(expr) {
             dropped += 1;
         } else if checkout.is_none()
-            && (fixed_after_2_2_2(expr) || digits_fixed_after_2_2_2(expr, expected))
+            && (fixed_after_2_2_2(expr)
+                || digits_fixed_after_2_2_2(expr, expected)
+                || regex_after_prefix(expr, expected))
         {
             // A checkout is compared without this rule, so it tells which of the fixes it has.
             fixed += 1;
@@ -486,8 +488,8 @@ fn sequence_first(expr: &str) -> bool {
 }
 
 /// Whether `expr` may meet a jsonata-js quirk that jlens dropped (see "Differences" in
-/// `docs/src/language/compatibility.md`): a regex literal applied with `~>` to anything but a
-/// string literal, which jsonata-js matches as JavaScript's `String(value)`; `$formatNumber` with
+/// `docs/src/language/compatibility.md`): a regex literal, alone or in a block or an array
+/// constructor, applied with `~>` to anything but a string literal, which jsonata-js matches as JavaScript's `String(value)`; `$formatNumber` with
 /// a literal picture whose integer part has irregular grouping (`'#,##,##0'`), where jsonata-js
 /// places separators with no digit on their left; and `$substringBefore` or `$substringAfter`
 /// whose `chars` is not a string literal, which jsonata-js searches as "undefined" when missing;
@@ -524,8 +526,7 @@ fn dropped_quirk(expr: &str) -> bool {
                         || ii + 1 == steps.len() && node.attrs.group.is_some())
             }),
             NodeKind::Apply { lhs, rhs } => {
-                matches!(rhs.kind, NodeKind::Regex { .. })
-                    && !matches!(lhs.kind, NodeKind::String { .. })
+                gives_regex(rhs) && !matches!(lhs.kind, NodeKind::String { .. })
             }
             NodeKind::Function { procedure, args } => match &procedure.kind {
                 NodeKind::Variable { name } if name == "formatNumber" => args.get(1).is_some_and(
@@ -570,8 +571,10 @@ fn dropped_quirk(expr: &str) -> bool {
 /// number literal, which may be a computed index (`$arr[$i][$j]`, jsonata-js#861); an array
 /// constructor as a step of a path that binds `@`, `#` or an ancestor in that step or before
 /// it, with no predicate of its own (`orders#$i.[items.sku]`, jsonata-js#841); a step after a
-/// group-by (`items{k: $sum(v)}.x`, jsonata-js#838); and `$fromMillis` with fractional seconds
-/// other than `[f001]` (jsonata-js#855) or a negative time zone with minutes (jsonata-js#856).
+/// group-by (`items{k: $sum(v)}.x`, jsonata-js#838); `$fromMillis` with fractional seconds
+/// other than `[f001]` (jsonata-js#855) or a negative time zone with minutes (jsonata-js#856); and
+/// a regular expression right after a prefix `(`, `[`, `{`, `|` or `-`, which 2.2.2 reads as a
+/// division (`$match(s, (/ab/))`, jsonata-js#860; see also [`regex_after_prefix`]).
 fn fixed_after_2_2_2(expr: &str) -> bool {
     let Ok(compiled) = Expression::compile(expr) else {
         return false;
@@ -605,8 +608,24 @@ fn fixed_after_2_2_2(expr: &str) -> bool {
             found |= literal(1).is_some_and(short_fraction)
                 || literal(2).is_some_and(negative_with_minutes);
         }
+        if let NodeKind::Regex { .. } = node.kind {
+            found |= expr[..node.span.start]
+                .trim_end()
+                .ends_with(['(', '[', '{', '|', '-']);
+        }
     });
     found
+}
+
+/// Whether jsonata-js 2.2.2 failed with `S0211` where `expr` has a `/` right after `(`, `[`, `{`,
+/// `|` or `-`: it reads that `/` as a division, which jsonata-js#860 made a regular expression,
+/// and stops there, where jlens may report a syntax error later in the expression
+/// (`[(/a/), 1 ..]`), which then does not compile for [`fixed_after_2_2_2`] to see.
+fn regex_after_prefix(expr: &str, expected: &JsonValue) -> bool {
+    expected["error"] == "S0211"
+        && expr
+            .match_indices('/')
+            .any(|(i, _)| expr[..i].trim_end().ends_with(['(', '[', '{', '|', '-']))
 }
 
 /// Whether a date/time picture has a marker of fractional seconds other than `[f001]`, which
@@ -640,6 +659,17 @@ fn reads_any(node: &Node, names: &[&str]) -> bool {
             node.for_each_child(|c| found |= reads_any(c, names));
             found
         }
+    }
+}
+
+/// Whether `node` is a regex literal, or a block that ends with one or an array constructor of
+/// one (`(/a/)`, `[/a/][0]`), which jsonata-js reads since its pull request #860.
+fn gives_regex(node: &Node) -> bool {
+    match &node.kind {
+        NodeKind::Regex { .. } => true,
+        NodeKind::Block { exprs, .. } => exprs.last().is_some_and(gives_regex),
+        NodeKind::Array { items } => matches!(&items[..], [item] if gives_regex(item)),
+        _ => false,
     }
 }
 
@@ -1078,6 +1108,12 @@ fn either(rng: &mut Rng, items: &[&'static str], depth: u32) -> String {
 fn regex_call(rng: &mut Rng, depth: u32) -> String {
     let text = either(rng, TEXTS, depth);
     let regex = rng.pick(REGEXES);
+    // A block or an array constructor that starts with the regex (jsonata-js#860).
+    let regex = match rng.below(8) {
+        0 => format!("({regex})"),
+        1 => format!("[{regex}][0]"),
+        _ => regex.to_string(),
+    };
     let limit = |rng: &mut Rng| match rng.below(3) {
         0 => String::new(),
         _ => format!(", {}", either(rng, &["0", "1", "2", "-1"], depth)),
@@ -1237,6 +1273,23 @@ mod tests {
             json!({"value": "212120220222112010021212002200000000000000000000000000000000000"});
         assert!(exact_base_digits("$formatBase(1e30, 3)", &digits, &zeros));
         assert!(!exact_base_digits("$string(1e30)", &digits, &zeros));
+    }
+
+    #[test]
+    fn a_regex_after_a_prefix_operator_is_fixed_after_2_2_2() {
+        for expr in ["$match('ab', (/a/))", "[ /a/, /b/][0]", "-/a/", "{/a/: 1}"] {
+            assert!(fixed_after_2_2_2(expr), "{expr}");
+        }
+        for expr in ["$match('ab', /a/)", "[1, /b/]", "('a' ~> /a/)"] {
+            assert!(!fixed_after_2_2_2(expr), "{expr}");
+        }
+        let s0211 = json!({"error": "S0211"});
+        assert!(regex_after_prefix("[(/a/), 1 ..]", &s0211));
+        assert!(!regex_after_prefix(
+            "[(/a/), 1 ..]",
+            &json!({"error": "S0202"})
+        ));
+        assert!(!regex_after_prefix("(a) / /", &s0211));
     }
 
     #[test]

@@ -409,7 +409,13 @@ impl<'a> Parser<'a> {
     fn expression_inner(&mut self, rbp: u8) -> PResult<Raw> {
         let docs = std::mem::take(&mut self.node.docs);
         let t = self.node.clone();
-        self.advance(None, true)?;
+        // After a prefix operator that parses an operand, the next token is in prefix position,
+        // so `/` starts a regular expression: `(/ab/)`, `[/a/, /b/]` (jsonata-js main, #860).
+        let infix = !matches!(
+            t.kind,
+            SymKind::Tok(TokKind::Op("-" | "(" | "[" | "{" | "|"))
+        );
+        self.advance(None, infix)?;
         let mut left = self.nud(t)?;
         let annotation = self.annotation(&docs);
         let inner = if annotation.is_some() {
