@@ -233,6 +233,9 @@ impl<'a, Input: InputIndexer, I: Interrupt> MatchAttempter<'a, Input, I> {
     /// that whole state is saved. Otherwise (LoopAgain) the count simply goes
     /// up by one, so undoing it is a decrement and only the entry position is
     /// saved.
+    // jlens-regress: on 32-bit targets (wasm32) `u32::MAX as usize` is
+    // `usize::MAX`, so in release builds clippy sees the limit check as always true.
+    #[allow(clippy::absurd_extreme_comparisons)]
     fn prepare_to_enter_loop(
         bts: &mut Vec<BacktrackInsn<Input>>,
         pos: Input::Position,
