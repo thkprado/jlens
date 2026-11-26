@@ -265,14 +265,16 @@ pub(super) fn pad<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_,
 }
 
 /// Applies a matcher (a regex or a user function) to a string, checking the structure it
-/// returns (jsonata-js `evaluateMatcher`).
+/// returns (jsonata-js `evaluateMatcher`). `unwrapped` says whether jsonata-js passed the
+/// matcher as it is ([`Call::unwrapped`]): a `next` function a matcher returned always is.
 fn evaluate_matcher<'a>(
     ev: &mut Evaluator<'_, 'a>,
     matcher: &Value<'a>,
     s: Value<'a>,
     call: &Call<'_, 'a>,
+    unwrapped: bool,
 ) -> R<'a> {
-    let result = ev.callback(matcher, vec![s], call.env)?;
+    let result = ev.callback(matcher, vec![s], call.env, unwrapped)?;
     if let Value::Undefined = result {
         return Ok(result);
     }
@@ -316,9 +318,10 @@ pub(super) fn contains<'a>(
     Ok(match token {
         Value::Undefined => Value::Undefined,
         Value::String(t) => Value::Bool(s.contains(t.as_ref())),
-        matcher => {
-            Value::Bool(!evaluate_matcher(ev, &matcher, Value::String(s), call)?.is_undefined())
-        }
+        matcher => Value::Bool(
+            !evaluate_matcher(ev, &matcher, Value::String(s), call, call.unwrapped(1))?
+                .is_undefined(),
+        ),
     })
 }
 
@@ -371,7 +374,8 @@ pub(super) fn match_<'a>(
             count += 1.0;
         }
     } else if limit.is_none_or(|l| l > 0.0) {
-        let mut matches = evaluate_matcher(ev, &matcher, Value::String(s), call)?;
+        let mut matches =
+            evaluate_matcher(ev, &matcher, Value::String(s), call, call.unwrapped(1))?;
         let mut count = 0.0;
         while !matches.is_undefined() && limit.is_none_or(|l| count < l) {
             let mut m = Map::default();
@@ -379,7 +383,7 @@ pub(super) fn match_<'a>(
             m.insert("index".into(), field(&matches, "start"));
             m.insert("groups".into(), field(&matches, "groups"));
             out.push(Value::object(m));
-            matches = evaluate_matcher(ev, &field(&matches, "next"), Value::Undefined, call)?;
+            matches = evaluate_matcher(ev, &field(&matches, "next"), Value::Undefined, call, true)?;
             count += 1.0;
         }
     }
@@ -540,7 +544,13 @@ pub(super) fn replace<'a>(
         return Ok(Value::string(result));
     }
 
-    let mut matches = evaluate_matcher(ev, &pattern, Value::String(s.clone()), call)?;
+    let mut matches = evaluate_matcher(
+        ev,
+        &pattern,
+        Value::String(s.clone()),
+        call,
+        call.unwrapped(1),
+    )?;
     if matches.is_undefined() {
         return Ok(Value::String(s));
     }
@@ -551,7 +561,7 @@ pub(super) fn replace<'a>(
         result.push_str(&slicer.slice(position, Some(start)));
         match &replacement {
             Value::String(r) => substitute_object(&mut result, r, &matches),
-            func => match ev.callback(func, vec![matches.clone()], call.env)? {
+            func => match ev.callback(func, vec![matches.clone()], call.env, call.unwrapped(2))? {
                 Value::String(r) => result.push_str(&r),
                 other => {
                     let mut err = Error::new("D3012");
@@ -565,7 +575,7 @@ pub(super) fn replace<'a>(
         let matched_len = field(&matches, "match").as_str().map_or(0, utf16_len);
         position = start + matched_len;
         count += 1.0;
-        matches = evaluate_matcher(ev, &field(&matches, "next"), Value::Undefined, call)?;
+        matches = evaluate_matcher(ev, &field(&matches, "next"), Value::Undefined, call, true)?;
     }
     result.push_str(&slicer.slice(position, None));
     Ok(Value::string(result))
@@ -619,7 +629,13 @@ pub(super) fn split<'a>(
             }
         } else {
             let mut count = 0.0;
-            let mut matches = evaluate_matcher(ev, &separator, Value::String(s.clone()), call)?;
+            let mut matches = evaluate_matcher(
+                ev,
+                &separator,
+                Value::String(s.clone()),
+                call,
+                call.unwrapped(1),
+            )?;
             if matches.is_undefined() {
                 out.push(Value::String(s));
             } else {
@@ -629,8 +645,13 @@ pub(super) fn split<'a>(
                     let m_start = field_usize(&matches, "start");
                     out.push(Value::string(slicer.slice(start, Some(m_start))));
                     start = field_usize(&matches, "end");
-                    matches =
-                        evaluate_matcher(ev, &field(&matches, "next"), Value::Undefined, call)?;
+                    matches = evaluate_matcher(
+                        ev,
+                        &field(&matches, "next"),
+                        Value::Undefined,
+                        call,
+                        true,
+                    )?;
                     count += 1.0;
                 }
                 if limit.is_none_or(|l| count < l) {

@@ -605,6 +605,77 @@ fn a_group_by_on_a_tail_call_is_applied() {
 }
 
 #[test]
+fn a_tail_call_takes_the_context_jsonata_js_gives_it() {
+    // A call that takes the context, in tail position of a lambda applied by a built-in function
+    // or `~>`, takes null, unless the lambda was passed as it is: by a tail call, or bound by a
+    // partial application. It then takes the input it was made in (`compatibility.md`, 0.36
+    // #19). Each result is jsonata-js 2.2.2's on the input 1.
+    for (expr, expected) in [
+        ("$map([5], function($e){ $string() })", json!("null")),
+        (
+            "$map([5], function($e){ $map([7], function($f){ $string() }) })",
+            json!(["1"]),
+        ),
+        (
+            "$map([5], function($e){ $map([7], function($f){ $map([9], function($g){ $string() }) }) })",
+            json!([["1"]]),
+        ),
+        (
+            "$map([5], function($e){ [$map([7], function($f){ $string() })] })",
+            json!(["null"]),
+        ),
+        (
+            "$map([5], function($e){ $map([7], function($f){ $not() }) })",
+            json!([false]),
+        ),
+        (
+            "$map([5], function($e){ $eval('$map([7], function($f){ $string() })') })",
+            json!("null"),
+        ),
+        (
+            "$map([5], function($e){ $reduce([7, 8], function($a, $b){ $string() }) })",
+            json!("1"),
+        ),
+        (
+            "$map([5], function($e){ $each({'a': 7}, function($v){ $string() }) })",
+            json!(["1"]),
+        ),
+        (
+            "$map([5], function($e){ $replace('ab', /a/, function($m){ $string() }) })",
+            json!("1b"),
+        ),
+        (
+            "$replace('ab', /a/, function($m){ $string() })",
+            json!("nullb"),
+        ),
+        (
+            "($p := $map(?, function($f){ $string() }); $p([7]))",
+            json!("1"),
+        ),
+        (
+            "($p := $map([7], ?); $p(function($f){ $string() }))",
+            json!("null"),
+        ),
+        (
+            "($p := $map([7], ?); $map([5], function($e){ $p(function($f){ $string() }) }))",
+            json!("1"),
+        ),
+        ("5 ~> function($x){ $string() }", json!("null")),
+        ("5 ~> function($x){ $not() }", json!(true)),
+        (
+            "($f := function($x){ $string() }; $g := function($x){ $x }; 5 ~> $g ~> $f)",
+            json!("null"),
+        ),
+        (
+            "[1, 2].$map([5], function($e){ $map([7], function($f){ $string() }) })",
+            json!(["1", "2"]),
+        ),
+    ] {
+        assert_eq!(eval(expr, json!(1)), Some(expected), "{expr}");
+    }
+}
+
+#[test]
 fn errors_carry_code_position_and_token() {
     let err = Expression::compile("1 + 'a'")
         .unwrap()

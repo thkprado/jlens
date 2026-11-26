@@ -109,6 +109,22 @@ All notable changes are recorded here. The format follows
   family gave NaN, and `[Z0101][s01]` misread `+053012`. Names, `am`, `pm` and roman numerals
   are read in any case, as jsonata-js's open pull request #875 reads names. The suite is
   vendored from main's `1ab3eec`.
+- Transforms and `**` as jsonata-js's main reads them since pull requests #870, #871 and #873. A
+  transform whose location reaches outside its copy, or matches a function, fails with the new
+  `D1014` before it updates anything: `$ ~> | $$.foo | {'x': 1} |` changed the copy, where 2.2.2
+  changes the input. A location that is a path of names, `$`, `*` or `**`, filters allowed, reads
+  only the copy and is not checked. A transform copies with the built-in `$clone` or a host's,
+  never one the expression binds, so no transform changes its input, and `Document`'s exception
+  to that is gone; main still takes a `$clone` bound at the top level outside any block
+  (`compatibility.md`). `**` gives no functions, as `*` does: `$count({'a': {'f': $sum, 'b':
+  2}}.**)` is 3, not 4.
+- A call that takes the context (`$string()`, `$not()`), in tail position of a lambda that a
+  built-in function calls back, takes the context jsonata-js gives it: null, unless the lambda
+  was an argument of a tail call or bound by a partial application, which pass it as it is, and
+  it then takes the input it was made in. On the input 1,
+  `$map([5], function($e){ $map([7], function($f){ $string() }) })` is `["1"]`, where jlens
+  gave `["null"]`. `~>` applies a function with null, where it passed nothing:
+  `5 ~> function($x){ $not() }` is `true`.
 
 ### Documentation
 

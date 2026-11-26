@@ -27,6 +27,19 @@ pub(crate) struct Call<'c, 'a> {
     pub input: &'c Value<'a>,
     /// The environment of the call.
     pub env: &'c Env<'a>,
+    /// The arguments jsonata-js passes as they are, one bit each from the lowest: all of them in
+    /// a tail call, which the trampoline makes, and those a partial application bound. It wraps
+    /// a function among the others in a closure that applies it with no input, so a call that
+    /// takes the context, in tail position of a lambda's body, takes null there; a lambda passed
+    /// as it is takes the input it was made in (0.36 #19).
+    pub unwrapped: u64,
+}
+
+impl Call<'_, '_> {
+    /// Whether the argument at `index` is passed as it is ([`Self::unwrapped`]).
+    pub fn unwrapped(&self, index: usize) -> bool {
+        index < 64 && self.unwrapped & (1 << index) != 0
+    }
 }
 
 pub(crate) type NativeImpl =

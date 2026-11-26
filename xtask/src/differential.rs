@@ -742,8 +742,9 @@ fn functions_fixed_after_2_2_2(expr: &str, actual: &JsonValue) -> bool {
 /// Whether jsonata-js 2.2.2 may have written more than ten thousand `M`s for a call of
 /// `$formatInteger`: a number above ten million in roman numerals, which its main writes in
 /// decimal digits since pull request #869, as jlens does (`$formatInteger(12345678, 'i')`). A
-/// result with such a run counts, and so does a call on such a literal with a roman picture,
-/// whose result may not show it (`$parseInteger($formatInteger(12345678, 'i'), 'i')`).
+/// result with such a run counts, and so does a call with a roman picture on a number that holds
+/// such a literal, whose result may not show it (`$parseInteger($formatInteger(12345678, 'i'),
+/// 'i')`, `$formatInteger($parseInteger($formatInteger(12345678, 'w'), 'w'), 'I')`).
 fn long_roman(expr: &str, expected: &JsonValue) -> bool {
     if !expr.contains("$formatInteger(") {
         return false;
@@ -763,9 +764,12 @@ fn long_roman(expr: &str, expected: &JsonValue) -> bool {
         if let NodeKind::Function { procedure, args } = &node.kind
             && matches!(&procedure.kind, NodeKind::Variable { name } if name == "formatInteger")
         {
-            let above = args
-                .first()
-                .is_some_and(|a| matches!(a.kind, NodeKind::Number { value } if value.abs() > 1e7));
+            let mut above = false;
+            if let Some(number) = args.first() {
+                number.walk(&mut |n: &Node| {
+                    above |= matches!(n.kind, NodeKind::Number { value } if value.abs() > 1e7);
+                });
+            }
             let roman = args.get(1).is_some_and(|a| {
                 matches!(&a.kind, NodeKind::String { value }
                     if matches!(value.split(';').next(), Some("i" | "I")))
@@ -1339,6 +1343,8 @@ mod tests {
         assert!(!long_roman("$string($pad('', 20000, 'M'))", &ms));
         let round_trip = "$parseInteger($formatInteger(12345678, 'i'), 'i')";
         assert!(long_roman(round_trip, &json!({"value": 12345678})));
+        let through_words = "$parseInteger($formatInteger($parseInteger($formatInteger(12345678, 'w'), 'w'), 'I'), 'I')";
+        assert!(long_roman(through_words, &json!({"value": 12345678})));
         assert!(!long_roman(
             "$formatInteger(12345678, '0')",
             &json!({"value": "12345678"})

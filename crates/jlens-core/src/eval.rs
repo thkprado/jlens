@@ -540,7 +540,8 @@ impl crate::host::Caller for HostCaller<'_, '_, '_> {
             .iter()
             .map(|a| a.as_ref().map_or(Value::Undefined, Value::from_json))
             .collect();
-        let result = ev.callback(&func, args, self.env)?;
+        // A host function calls back as jsonata-js's closure would: with no input.
+        let result = ev.callback(&func, args, self.env, false)?;
         let limit = ev.limits.max_result_size;
         let json = result.to_json_within(limit).map_err(|e| {
             e.error(|| {
@@ -2515,12 +2516,25 @@ impl<'a> Evaluator<'_, 'a> {
     /// recursion through such calls evaluates no expression between two levels when the
     /// lambda's body is a tail call (`function($n){ $map(..., function($v){ $f($v) }) }`), so
     /// each call counts as a level of depth and checks the stack itself.
+    ///
+    /// The function is applied with no input (null), as jsonata-js's closure around a function
+    /// passed to a call, unless it was passed as it is ([`Call::unwrapped`]): a lambda then
+    /// takes the input it was made in, which a call in tail position of its body takes as its
+    /// context (0.36 #19).
     pub(crate) fn callback(
         &mut self,
         func: &Value<'a>,
         args: Vec<Value<'a>>,
         env: &Env<'a>,
+        unwrapped: bool,
     ) -> Result<Value<'a>> {
+        let input = match func {
+            Value::Function(f) if unwrapped => match &**f {
+                Function::Lambda(lambda) => lambda.input.clone(),
+                _ => Value::Null,
+            },
+            _ => Value::Null,
+        };
         let deep = !crate::stack::above(self.stack_floor);
         if deep && crate::stack::exhausted() {
             return Err(Error::new("D1011").with("value", self.depth));
@@ -2529,11 +2543,11 @@ impl<'a> Evaluator<'_, 'a> {
         let result = if deep {
             self.grown(|ev| {
                 ev.guardrails()?;
-                ev.apply(func, args, &Value::Null, env)
+                ev.apply(func, args, &input, env)
             })
         } else {
             self.guardrails()
-                .and_then(|()| self.apply(func, args, &Value::Null, env))
+                .and_then(|()| self.apply(func, args, &input, env))
         };
         self.depth -= 1;
         result
@@ -2552,7 +2566,8 @@ impl<'a> Evaluator<'_, 'a> {
         result
     }
 
-    /// Applies a function, running tail-call thunks in a loop (the trampoline).
+    /// Applies a function, running tail-call thunks in a loop (the trampoline). The trampoline
+    /// passes its arguments as they are ([`Call::unwrapped`]); the first call does not.
     pub(crate) fn apply(
         &mut self,
         proc: &Value<'a>,
@@ -2560,7 +2575,7 @@ impl<'a> Evaluator<'_, 'a> {
         input: &Value<'a>,
         env: &Env<'a>,
     ) -> Result<Value<'a>> {
-        let mut result = self.apply_inner(proc, args, input, env)?;
+        let mut result = self.apply_inner(proc, args, input, env, 0)?;
         loop {
             let thunk = match &result {
                 Value::Function(f) if f.is_thunk() => f.clone(),
@@ -2579,7 +2594,7 @@ impl<'a> Evaluator<'_, 'a> {
             }
             let name = procedure_name(procedure);
             result = self
-                .apply_inner(&next, evaluated, input, env)
+                .apply_inner(&next, evaluated, input, env, u64::MAX)
                 .map_err(|e| {
                     let e = e.at_if_missing(procedure.span, procedure.position);
                     match name {
@@ -2590,12 +2605,14 @@ impl<'a> Evaluator<'_, 'a> {
         }
     }
 
+    /// Applies a function once; `unwrapped` is [`Call::unwrapped`] for a built-in one.
     fn apply_inner(
         &mut self,
         proc: &Value<'a>,
         args: Vec<Value<'a>>,
         input: &Value<'a>,
         env: &Env<'a>,
+        unwrapped: u64,
     ) -> Result<Value<'a>> {
         let Value::Function(f) = proc else {
             return Err(Error::new("T1006"));
@@ -2613,7 +2630,15 @@ impl<'a> Evaluator<'_, 'a> {
                     Some(sig) => sig.validate(args, input)?,
                     None => args,
                 };
-                let result = (native.imp)(self, args, &Call { input, env })?;
+                let result = (native.imp)(
+                    self,
+                    args,
+                    &Call {
+                        input,
+                        env,
+                        unwrapped,
+                    },
+                )?;
                 self.check_size(result)
             }
             Function::Host(host) => {
@@ -2628,12 +2653,25 @@ impl<'a> Evaluator<'_, 'a> {
                 target,
                 args: bound,
             } => {
-                let mut supplied = args.into_iter();
+                let mut supplied = args.into_iter().enumerate();
+                // jsonata-js passes the arguments it bound as they are, and the others as the
+                // call to the partial application received them.
+                let mut as_is = 0u64;
                 let full: Vec<Value<'a>> = bound
                     .iter()
-                    .map(|b| match b {
-                        Some(v) => v.clone(),
-                        None => supplied.next().unwrap_or_default(),
+                    .enumerate()
+                    .map(|(i, b)| {
+                        let (value, kept) = match b {
+                            Some(v) => (v.clone(), true),
+                            None => match supplied.next() {
+                                Some((j, v)) => (v, j < 64 && unwrapped & (1 << j) != 0),
+                                None => (Value::Undefined, false),
+                            },
+                        };
+                        if kept && i < 64 {
+                            as_is |= 1 << i;
+                        }
+                        value
                     })
                     .collect();
                 // Like jsonata-js, which wraps the function in a lambda: no signature check and
@@ -2645,6 +2683,7 @@ impl<'a> Evaluator<'_, 'a> {
                         &Call {
                             input: &Value::Undefined,
                             env,
+                            unwrapped: as_is,
                         },
                     ),
                     Function::Host(host) => self.call_host(host, &full, &Value::Undefined, env),
@@ -2828,10 +2867,12 @@ impl<'a> Evaluator<'_, 'a> {
         }
         if value.is_function() {
             // Function composition: λ($f, $g) { λ($x){ $g($f($x)) } }
-            let chain = self.eval(&chain_ast().root, &Value::Undefined, env)?;
-            self.apply(&chain, vec![value, func], &Value::Undefined, env)
+            // With no input, null in jsonata-js: a call in tail position of the function's body
+            // that takes the context takes null.
+            let chain = self.eval(&chain_ast().root, &Value::Null, env)?;
+            self.apply(&chain, vec![value, func], &Value::Null, env)
         } else {
-            self.apply(&func, vec![value], &Value::Undefined, env)
+            self.apply(&func, vec![value], &Value::Null, env)
         }
     }
 

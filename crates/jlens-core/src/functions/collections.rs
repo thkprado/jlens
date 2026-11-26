@@ -17,7 +17,8 @@ fn call<'a>(
     args: Vec<Value<'a>>,
     c: &Call<'_, 'a>,
 ) -> R<'a> {
-    ev.callback(func, args, c.env)
+    // Every higher-order function here takes its function second.
+    ev.callback(func, args, c.env, c.unwrapped(1))
 }
 
 pub(super) fn map<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, c: &Call<'_, 'a>) -> R<'a> {
