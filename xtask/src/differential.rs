@@ -1,4 +1,4 @@
-//! `cargo xtask differential`: generated expressions run in jlens and in jsonata-js 2.2.2,
+//! `cargo xtask differential`: generated expressions run in jlens and in jsonata-js 2.3.0,
 //! which must agree on the result or on the error code.
 //!
 //! The generator is seeded, so a run is reproduced by its seed. The cases go to
@@ -19,7 +19,6 @@
 //! of a value the expression holds; a
 //! wildcard that gives jsonata-js's internal flag `sequence` as a `true` item; an expression
 //! that may meet one of the jsonata-js quirks that jlens dropped; a number that overflows to
-//! that may meet one of the fixes jsonata-js made after 2.2.2, which jlens has; a number that overflows to
 //! infinity, where jlens fails and jsonata-js goes on, or that `$round` shifts to infinity and
 //! back to NaN, where jlens keeps it; and a large number whose digits jlens writes exactly.
 
@@ -132,7 +131,6 @@ pub fn run(args: &[String]) -> Result<()> {
     let (mut agreed, mut limits, mut crashed, mut hung, mut split) = (0, 0, 0, 0, 0);
     let (mut mangled, mut raced, mut mutated, mut flagged, mut dropped) = (0, 0, 0, 0, 0);
     let (mut overflowed, mut exact, mut timezone, mut shared, mut ordered) = (0, 0, 0, 0, 0);
-    let mut fixed = 0;
     let mut divergences = Vec::new();
     for ((expr, input), expected) in cases.iter().zip(&mut reference) {
         let changed_input = expected
@@ -185,15 +183,6 @@ pub fn run(args: &[String]) -> Result<()> {
             flagged += 1;
         } else if dropped_quirk(expr) {
             dropped += 1;
-        } else if checkout.is_none()
-            && (fixed_after_2_2_2(expr)
-                || digits_fixed_after_2_2_2(expr, expected)
-                || regex_after_prefix(expr, expected)
-                || long_roman(expr, expected)
-                || functions_fixed_after_2_2_2(expr, &actual))
-        {
-            // A checkout is compared without this rule, so it tells which of the fixes it has.
-            fixed += 1;
         } else if exact_base_digits(expr, &actual, expected) {
             exact += 1;
         } else if actual["error"] == "D1001" || rounded_past_infinity(expr, &actual, expected) {
@@ -235,7 +224,7 @@ pub fn run(args: &[String]) -> Result<()> {
          {split} (jsonata-js split a character), {mangled} (regex left of ?? or ?:), \
          {raced} (concurrent errors), {shared} (name shared by concurrent items), \
          {mutated} (jsonata-js changed its input), {flagged} (sequence as context), \
-         {dropped} (dropped quirk), {fixed} (fixed after 2.2.2), \
+         {dropped} (dropped quirk), \
          {overflowed} (number out of range), \
          {exact} (exact digits of $formatBase), {timezone} (timezone not a number)"
     );
@@ -491,9 +480,8 @@ fn sequence_first(expr: &str) -> bool {
 
 /// Whether `expr` may meet a jsonata-js quirk that jlens dropped (see "Differences" in
 /// `docs/src/language/compatibility.md`): a regex literal, alone or in a block or an array
-/// constructor, applied with `~>` to anything but a string literal, which jsonata-js matches as JavaScript's `String(value)`; `$formatNumber` with
-/// a literal picture whose integer part has irregular grouping (`'#,##,##0'`), where jsonata-js
-/// places separators with no digit on their left; and `$substringBefore` or `$substringAfter`
+/// constructor, applied with `~>` to anything but a string literal, which jsonata-js matches as
+/// JavaScript's `String(value)`; `$substringBefore` or `$substringAfter`
 /// whose `chars` is not a string literal, which jsonata-js searches as "undefined" when missing;
 /// `$replace` whose replacement is neither a string literal nor a lambda, which jsonata-js
 /// writes as "undefined" when missing; and an order-by after a step that binds `@`, `#` or an
@@ -531,9 +519,6 @@ fn dropped_quirk(expr: &str) -> bool {
                 gives_regex(rhs) && !matches!(lhs.kind, NodeKind::String { .. })
             }
             NodeKind::Function { procedure, args } => match &procedure.kind {
-                NodeKind::Variable { name } if name == "formatNumber" => args.get(1).is_some_and(
-                    |a| matches!(&a.kind, NodeKind::String { value } if irregular_grouping(value)),
-                ),
                 NodeKind::Variable { name }
                     if name == "substringBefore" || name == "substringAfter" =>
                 {
@@ -565,90 +550,6 @@ fn dropped_quirk(expr: &str) -> bool {
         };
     });
     found
-}
-
-/// Whether `expr` may meet one of the fixes that jsonata-js made after 2.2.2 and jlens has, but
-/// those of the digits of `$formatNumber` and `$formatInteger` (see "Fixed in jsonata-js after
-/// 2.2.2" in `docs/src/language/compatibility.md`): a predicate after a predicate that is not a
-/// number literal, which may be a computed index (`$arr[$i][$j]`, jsonata-js#861); an array
-/// constructor as a step of a path that binds `@`, `#` or an ancestor in that step or before
-/// it, with no predicate of its own (`orders#$i.[items.sku]`, jsonata-js#841); a step after a
-/// group-by (`items{k: $sum(v)}.x`, jsonata-js#838); `$fromMillis` with fractional seconds
-/// other than `[f001]` (jsonata-js#855) or a negative time zone with minutes (jsonata-js#856); and
-/// a regular expression right after a prefix `(`, `[`, `{`, `|` or `-`, which 2.2.2 reads as a
-/// division (`$match(s, (/ab/))`, jsonata-js#860; see also [`regex_after_prefix`]).
-fn fixed_after_2_2_2(expr: &str) -> bool {
-    let Ok(compiled) = Expression::compile(expr) else {
-        return false;
-    };
-    let chained = |stages: &[Stage]| {
-        stages.windows(2).any(|pair| {
-            matches!(&pair[0], Stage::Filter { expr, .. } if !matches!(expr.kind, NodeKind::Number { .. }))
-                && matches!(pair[1], Stage::Filter { .. })
-        })
-    };
-    let mut found = false;
-    compiled.ast().root.walk(&mut |node: &Node| {
-        found |= chained(&node.attrs.predicate) || chained(&node.attrs.stages);
-        if let NodeKind::Path { steps, .. } = &node.kind {
-            let mut tuple = false;
-            for (ii, step) in steps.iter().enumerate() {
-                tuple |= step.attrs.tuple;
-                found |= tuple && ii > 0 && step.attrs.cons_array && step.attrs.stages.is_empty();
-            }
-            found |= steps.first().is_some_and(|first| {
-                matches!(first.kind, NodeKind::Path { .. }) && first.attrs.group.is_some()
-            });
-        }
-        if let NodeKind::Function { procedure, args } = &node.kind
-            && matches!(&procedure.kind, NodeKind::Variable { name } if name == "fromMillis")
-        {
-            let literal = |i: usize| match args.get(i).map(|a| &a.kind) {
-                Some(NodeKind::String { value }) => Some(value.as_str()),
-                _ => None,
-            };
-            found |= literal(1).is_some_and(short_fraction)
-                || literal(2).is_some_and(negative_with_minutes);
-        }
-        if let NodeKind::Regex { .. } = node.kind {
-            found |= expr[..node.span.start]
-                .trim_end()
-                .ends_with(['(', '[', '{', '|', '-']);
-        }
-    });
-    found
-}
-
-/// Whether jsonata-js 2.2.2 failed with `S0211` where `expr` has a `/` right after `(`, `[`, `{`,
-/// `|` or `-`: it reads that `/` as a division, which jsonata-js#860 made a regular expression,
-/// and stops there, where jlens may report a syntax error later in the expression
-/// (`[(/a/), 1 ..]`), which then does not compile for [`fixed_after_2_2_2`] to see.
-fn regex_after_prefix(expr: &str, expected: &JsonValue) -> bool {
-    expected["error"] == "S0211"
-        && expr
-            .match_indices('/')
-            .any(|(i, _)| expr[..i].trim_end().ends_with(['(', '[', '{', '|', '-']))
-}
-
-/// Whether a date/time picture has a marker of fractional seconds other than `[f001]`, which
-/// jsonata-js 2.2.2 writes as an integer of milliseconds and jlens as the digits of the fraction
-/// (jsonata-js#853).
-fn short_fraction(picture: &str) -> bool {
-    picture
-        .match_indices("[f")
-        .any(|(i, _)| !picture[i..].starts_with("[f001]"))
-}
-
-/// Whether a time zone is negative with minutes (`-0330`), which jsonata-js 2.2.2 reads an hour
-/// off (jsonata-js#852).
-fn negative_with_minutes(timezone: &str) -> bool {
-    let digits: String = timezone
-        .strip_prefix('-')
-        .unwrap_or_default()
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect();
-    digits.parse::<u64>().is_ok_and(|n| n % 100 != 0)
 }
 
 /// Whether `node` reads one of `names`, other than as the target of a binding.
@@ -690,96 +591,6 @@ fn tail_group(body: &Node) -> bool {
     }
 }
 
-/// Whether jsonata-js 2.2.2 may have written the digits of `$formatNumber` or `$formatInteger`
-/// where jlens writes those of its main since pull requests #864 and #868: from 1e21, 2.2.2
-/// writes JavaScript's exponent notation through the picture, so its result has an `e` and a `+`
-/// with at most a separator between them (`1e,+21.00`), percent-encoded when the result went
-/// through `$encodeUrlComponent` (`1e%2C%2B21.00`). A result computed from that string
-/// (`$contains($formatNumber(1e21, '#'), /e/)`) need not show it, so a call on a literal from
-/// 1e21, or one that `%` or `‰` can scale to it, counts too, whatever the outcomes; and so does
-/// `$formatNumber` with an exponent picture, whose mantissa 2.2.2 lets reach 10^N
-/// (`$formatNumber(10, '0.0e0')` is "10.0e0", "1.0e1" in jlens).
-fn digits_fixed_after_2_2_2(expr: &str, expected: &JsonValue) -> bool {
-    let calls = |name: &str| expr.contains(&format!("${name}("));
-    let exponent = percent_decoded(&expected.to_string())
-        .windows(3)
-        .any(|w| w[0] == b'e' && (w[1] == b'+' || w[2] == b'+'));
-    (calls("formatNumber") || calls("formatInteger"))
-        && (exponent || format_call_fixed_after_2_2_2(expr))
-}
-
-/// Whether jsonata-js 2.2.2 may have read a function where its main, since pull requests #870
-/// and #873, does not: jlens failed with `D1014`, for a transform whose location matched a
-/// function, which 2.2.2 changed; or `**` walks a value that may be a function (a lambda, a
-/// regular expression, a transform, a partial application or a built-in function named without
-/// a call), which 2.2.2 gave among the descendants (`[$sum, 1].**`).
-fn functions_fixed_after_2_2_2(expr: &str, actual: &JsonValue) -> bool {
-    if actual["error"] == "D1014" {
-        return true;
-    }
-    let Ok(compiled) = Expression::compile(expr) else {
-        return false;
-    };
-    let (mut descendant, mut function) = (false, false);
-    compiled
-        .ast()
-        .root
-        .walk(&mut |node: &Node| match &node.kind {
-            NodeKind::Descendant => descendant = true,
-            NodeKind::Lambda(_)
-            | NodeKind::Regex { .. }
-            | NodeKind::Transform(_)
-            | NodeKind::Partial { .. } => function = true,
-            NodeKind::Variable { name } => {
-                function |= FUNCTIONS.contains(&format!("${name}").as_str())
-                    && !expr[node.span.end..].trim_start().starts_with('(');
-            }
-            _ => {}
-        });
-    descendant && function
-}
-
-/// Whether jsonata-js 2.2.2 may have written more than ten thousand `M`s for a call of
-/// `$formatInteger`: a number above ten million in roman numerals, which its main writes in
-/// decimal digits since pull request #869, as jlens does (`$formatInteger(12345678, 'i')`). A
-/// result with such a run counts, and so does a call with a roman picture on a number that holds
-/// such a literal, whose result may not show it (`$parseInteger($formatInteger(12345678, 'i'),
-/// 'i')`, `$formatInteger($parseInteger($formatInteger(12345678, 'w'), 'w'), 'I')`).
-fn long_roman(expr: &str, expected: &JsonValue) -> bool {
-    if !expr.contains("$formatInteger(") {
-        return false;
-    }
-    if expected
-        .to_string()
-        .to_ascii_uppercase()
-        .contains(&"M".repeat(10_001))
-    {
-        return true;
-    }
-    let Ok(compiled) = Expression::compile(expr) else {
-        return false;
-    };
-    let mut found = false;
-    compiled.ast().root.walk(&mut |node: &Node| {
-        if let NodeKind::Function { procedure, args } = &node.kind
-            && matches!(&procedure.kind, NodeKind::Variable { name } if name == "formatInteger")
-        {
-            let mut above = false;
-            if let Some(number) = args.first() {
-                number.walk(&mut |n: &Node| {
-                    above |= matches!(n.kind, NodeKind::Number { value } if value.abs() > 1e7);
-                });
-            }
-            let roman = args.get(1).is_some_and(|a| {
-                matches!(&a.kind, NodeKind::String { value }
-                    if matches!(value.split(';').next(), Some("i" | "I")))
-            });
-            found |= above && roman;
-        }
-    });
-    found
-}
-
 /// Whether jlens wrote the exact digits of `$formatBase` where jsonata-js did not: from 2^53, in a
 /// radix that is not a power of two, jsonata-js writes zeros below the number's precision, so
 /// the results differ only where jsonata-js has a zero.
@@ -799,65 +610,6 @@ fn rounded_past_infinity(expr: &str, actual: &JsonValue, expected: &JsonValue) -
     expr.contains("$round(")
         && expected.get("value").is_some_and(JsonValue::is_null)
         && actual["value"].is_number()
-}
-
-/// Whether `expr` calls `$formatNumber` on a number literal from 1e18, which `‰` scales to 1e21,
-/// or with a literal picture that has an exponent separator, or `$formatInteger` on a number
-/// literal from 1e21.
-fn format_call_fixed_after_2_2_2(expr: &str) -> bool {
-    let Ok(compiled) = Expression::compile(expr) else {
-        return false;
-    };
-    let mut found = false;
-    compiled.ast().root.walk(&mut |node: &Node| {
-        if let NodeKind::Function { procedure, args } = &node.kind
-            && let NodeKind::Variable { name } = &procedure.kind
-        {
-            let from = match name.as_str() {
-                "formatNumber" => 1e18,
-                "formatInteger" => 1e21,
-                _ => return,
-            };
-            found |= args.first().is_some_and(
-                |a| matches!(a.kind, NodeKind::Number { value } if value.abs() >= from),
-            ) || name == "formatNumber"
-                && args.get(1).is_some_and(
-                    |a| matches!(&a.kind, NodeKind::String { value } if value.contains('e')),
-                );
-        }
-    });
-    found
-}
-
-/// The bytes of `text` with each `%XX` escape replaced by the byte it encodes.
-fn percent_decoded(text: &str) -> Vec<u8> {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let escape = bytes.get(i + 1..i + 3).filter(|_| bytes[i] == b'%');
-        match escape.and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()) {
-            Some(byte) => {
-                out.push(byte);
-                i += 3;
-            }
-            None => {
-                out.push(bytes[i]);
-                i += 1;
-            }
-        }
-    }
-    out
-}
-
-/// Whether the integer part of a sub-picture of `picture` has groups of different sizes after
-/// its first separator, as `#,##,##0` has.
-fn irregular_grouping(picture: &str) -> bool {
-    picture.split(';').any(|sub| {
-        let integer = sub.split('.').next().unwrap_or_default();
-        let sizes: Vec<usize> = integer.split(',').skip(1).map(str::len).collect();
-        sizes.windows(2).any(|w| w[0] != w[1])
-    })
 }
 
 /// JSON equality, where numbers are compared as floating-point values (jsonata-js writes `1`
@@ -1315,92 +1067,13 @@ mod tests {
     }
 
     #[test]
-    fn functions_among_descendants_are_fixed_after_2_2_2() {
-        let value = json!({"value": 1});
-        for expr in [
-            "[$sum, 1].**",
-            "{'a': function(){1}}.**",
-            "[/a/].**",
-            "$count({'f': $string}.**)",
-        ] {
-            assert!(functions_fixed_after_2_2_2(expr, &value), "{expr}");
-        }
-        for expr in ["$sum(**)", "[1, $string(2)].**", "{'a': $sum([1])}.*"] {
-            assert!(!functions_fixed_after_2_2_2(expr, &value), "{expr}");
-        }
-        assert!(functions_fixed_after_2_2_2(
-            "$sum ~> |$|{}|",
-            &json!({"error": "D1014"})
-        ));
-    }
-
-    #[test]
-    fn long_roman_numerals_are_fixed_after_2_2_2() {
-        let ms = json!({"value": "m".repeat(12_345) + "dclxxviii"});
-        assert!(long_roman("$formatInteger(12345678, 'i')", &ms));
-        let short = json!({"value": "M".repeat(10_000)});
-        assert!(!long_roman("$formatInteger(1e7, 'I')", &short));
-        assert!(!long_roman("$string($pad('', 20000, 'M'))", &ms));
-        let round_trip = "$parseInteger($formatInteger(12345678, 'i'), 'i')";
-        assert!(long_roman(round_trip, &json!({"value": 12345678})));
-        let through_words = "$parseInteger($formatInteger($parseInteger($formatInteger(12345678, 'w'), 'w'), 'I'), 'I')";
-        assert!(long_roman(through_words, &json!({"value": 12345678})));
-        assert!(!long_roman(
-            "$formatInteger(12345678, '0')",
-            &json!({"value": "12345678"})
-        ));
-    }
-
-    #[test]
-    fn digits_of_large_numbers_differ_only_in_format_calls() {
-        for (expr, js) in [
-            ("$formatInteger(1e21, '#,##0')", json!({"value": "1e,+21"})),
-            ("$formatNumber(1e21, '#,##0')", json!({"value": "1e,+21"})),
-            (
-                "$contains($formatInteger(1e21, '0'), /e/)",
-                json!({"value": true}),
-            ),
-            (
-                "$contains($formatNumber(1e19, '0%'), /e/)",
-                json!({"value": true}),
-            ),
-            ("$formatNumber(10, '0.0e0')", json!({"value": "10.0e0"})),
-        ] {
-            assert!(digits_fixed_after_2_2_2(expr, &js), "{expr}");
-        }
-        for expr in [
-            "$string(1e21)",
-            "$contains($formatInteger(1e20, '0'), /e/)",
-            "$formatNumber(10, '0.0')",
-        ] {
-            assert!(
-                !digits_fixed_after_2_2_2(expr, &json!({"value": true})),
-                "{expr}"
-            );
-        }
+    fn digits_of_large_numbers_differ_only_where_jsonata_js_has_zeros() {
         let digits =
             json!({"value": "212120220222112010021212002200000020022221100201112201012210221"});
         let zeros =
             json!({"value": "212120220222112010021212002200000000000000000000000000000000000"});
         assert!(exact_base_digits("$formatBase(1e30, 3)", &digits, &zeros));
         assert!(!exact_base_digits("$string(1e30)", &digits, &zeros));
-    }
-
-    #[test]
-    fn a_regex_after_a_prefix_operator_is_fixed_after_2_2_2() {
-        for expr in ["$match('ab', (/a/))", "[ /a/, /b/][0]", "-/a/", "{/a/: 1}"] {
-            assert!(fixed_after_2_2_2(expr), "{expr}");
-        }
-        for expr in ["$match('ab', /a/)", "[1, /b/]", "('a' ~> /a/)"] {
-            assert!(!fixed_after_2_2_2(expr), "{expr}");
-        }
-        let s0211 = json!({"error": "S0211"});
-        assert!(regex_after_prefix("[(/a/), 1 ..]", &s0211));
-        assert!(!regex_after_prefix(
-            "[(/a/), 1 ..]",
-            &json!({"error": "S0202"})
-        ));
-        assert!(!regex_after_prefix("(a) / /", &s0211));
     }
 
     #[test]

@@ -87,7 +87,7 @@ today can read [Coming from jsonata-js](docs/src/getting-started/from-jsonata-js
 | `crates/jlens-python` | Python package (maturin) |
 | `crates/jlens-capi` | C API under the Java package |
 | `crates/jlens-java` | Java package (Maven, over the C API) |
-| `tests/jsonata-suite` | Vendored official test suite (jsonata-js 2.2.2, MIT) |
+| `tests/jsonata-suite` | Vendored official test suite (jsonata-js 2.3.0, MIT) |
 | `tests/conformance` | Baseline, overrides and conformance report |
 | `fixtures` | Sample documents and expressions used in tests and guides |
 | `examples/web-editor` | Browser demo: JSONata editor with autocomplete, explanations and audit trees |

@@ -927,11 +927,11 @@ fn jsonata_js_quirks_that_expose_javascript_are_dropped() {
     );
 }
 
-/// A group-by ends its path (jsonata-js#838, merged in main after 2.2.2), as if the path were in
+/// A group-by ends its path (jsonata-js#838, in 2.3.0), as if the path were in
 /// parentheses: it is evaluated for each item of its input, as a block is, so a group-by that
 /// reads an array of several objects groups each one. The suite has #838's other cases.
 #[test]
-fn a_group_by_followed_by_a_step_is_evaluated_for_each_item_as_jsonata_js_main_does() {
+fn a_group_by_followed_by_a_step_is_evaluated_for_each_item_as_jsonata_js_2_3_does() {
     let orders = json!({"orders": [
         {"c": "A", "lines": [{"p": "w", "q": 1}]},
         {"c": "A", "lines": [{"p": "w", "q": 2}]}
@@ -956,7 +956,7 @@ fn a_group_by_followed_by_a_step_is_evaluated_for_each_item_as_jsonata_js_main_d
 }
 
 /// `$toMillis` reads month and day names, and `am` and `pm`, in any case, as jsonata-js's open
-/// pull request #875 does (its cases; 2.2.2 and main fail with `D3136`), and roman numerals too.
+/// pull request #875 does (its cases; 2.3.0 fails with `D3136`), and roman numerals too.
 /// A name it does not know is missing, so the picture lacks a part, where jlens before 0.36 read
 /// January or ignored the word.
 #[test]
@@ -1364,7 +1364,7 @@ fn equality_with_a_string_literal_keeps_the_rules_of_equality() {
 }
 
 /// The detail of `D2016` is the padding's length as an integer, as jsonata-js prints it
-/// (jsonata-js #832, unreleased after 2.2.2); before 0.28 it was `19999999.0`.
+/// (jsonata-js #832, in 2.3.0); before 0.28 it was `19999999.0`.
 #[test]
 fn a_pad_too_long_reports_its_length_as_an_integer() {
     let err = Expression::compile(r#"$pad("x", 20000000)"#)
@@ -1379,8 +1379,8 @@ fn a_pad_too_long_reports_its_length_as_an_integer() {
     );
 }
 
-/// A regex bound to a variable gives each call the same matches (jsonata-js #845, unreleased
-/// after 2.2.2: its calls shared one `lastIndex`).
+/// A regex bound to a variable gives each call the same matches (jsonata-js #845, in 2.3.0;
+/// in 2.2.2 its calls shared one `lastIndex`).
 #[test]
 fn a_regex_in_a_variable_serves_each_call_alike() {
     let expr = r#"( $input := "a,b,c"; $pattern := /[,-]/;
@@ -2128,6 +2128,41 @@ fn transforms_match_only_their_copy() {
         .evaluate(Some(&input), &Bindings::new().var("clone", 5))
         .unwrap_err();
     assert_eq!(err.code(), "T2013");
+}
+
+/// The cases of jsonata-js's advisory GHSA-3x2j-862j-x779, fixed in 2.3.0: a function as a
+/// transform's update value is `T2011`, with no value, and `__proto__` is a key like any other.
+#[test]
+fn a_transform_updates_with_an_object_alone() {
+    for (source, position) in [
+        (
+            r#"($f := function(){1}; {} ~> | $ | $f, "_jsonata_lambda" |)"#,
+            36,
+        ),
+        (r#"{} ~> | $ | $lookup, "_jsonata_function" |"#, 19),
+    ] {
+        let err = Expression::compile(source)
+            .unwrap()
+            .evaluate(Some(&json!({})), &Bindings::new())
+            .unwrap_err();
+        assert_eq!(err.code(), "T2011", "{source}");
+        assert_eq!(err.position(), Some(position), "{source}");
+        assert_eq!(err.detail("value"), None, "{source}");
+    }
+    assert_eq!(
+        eval(
+            r#"{} ~> | $ | {"__proto__": {"injected": true}} |"#,
+            json!({})
+        ),
+        Some(json!({"__proto__": {"injected": true}}))
+    );
+    assert_eq!(
+        eval(
+            r#"[{} ~> | $ | {"__proto__": {"injected": true}} |, {}].injected"#,
+            json!({})
+        ),
+        None
+    );
 }
 
 #[test]

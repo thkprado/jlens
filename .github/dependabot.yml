@@ -30,7 +30,7 @@ updates:
       # Near the Node.js of that floor, so that the types offer no API it lacks.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
-      # jlens behaves like jsonata-js 2.2.2.
+      # jlens behaves like jsonata-js 2.3.0.
       - dependency-name: jsonata
 
   - package-ecosystem: npm
@@ -43,7 +43,7 @@ updates:
       compare:
         patterns: ["*"]
     ignore:
-      # jlens behaves like jsonata-js 2.2.2.
+      # jlens behaves like jsonata-js 2.3.0.
       - dependency-name: jsonata
 
   - package-ecosystem: maven

@@ -1,6 +1,6 @@
 name: Differential
 
-# Generated expressions run in jlens and in jsonata-js 2.2.2, which must agree on the result or
+# Generated expressions run in jlens and in jsonata-js 2.3.0, which must agree on the result or
 # the error code (`cargo xtask differential`; see "Differential testing" in
 # docs/src/architecture/conformance.md). Each run draws a new seed, which it prints: a failure is
 # reproduced locally with `cargo xtask differential --cases <N> --seed <S>`. Generated regular

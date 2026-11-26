@@ -5,7 +5,7 @@
 ## Checklist
 
 - [ ] The checks in [CONTRIBUTING.md](https://github.com/thkprado/jlens/blob/main/CONTRIBUTING.md#checks) that the change touches pass.
-- [ ] A deliberate difference from jsonata-js 2.2.2 is recorded in
+- [ ] A deliberate difference from jsonata-js 2.3.0 is recorded in
       `docs/src/language/compatibility.md` (and in `tests/conformance/overrides.json` if it
       affects the suite).
 - [ ] The documentation is updated, and generated pages are regenerated (`cargo xtask gen-docs`).

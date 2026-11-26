@@ -64,7 +64,7 @@ cargo xtask fuzz-replay evaluate <file or directory>  # replay saved fuzz inputs
 
 ## Guidelines
 
-- **Conformance first.** jlens follows jsonata-js 2.2.2. A difference must be deliberate,
+- **Conformance first.** jlens follows jsonata-js 2.3.0. A difference must be deliberate,
   explained in `docs/src/language/compatibility.md`, and, if it affects the suite, recorded in
   `tests/conformance/overrides.json` with a reason. The baseline in
   `tests/conformance/baseline.txt` may only grow.

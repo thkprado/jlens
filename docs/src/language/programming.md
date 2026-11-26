@@ -295,7 +295,6 @@ variable bound outside the transform, or that matches a function, is an error (`
 nothing is changed:
 
 ```jsonata-example
-differs: jsonata-js 2.2.2 gives {} and sets the limit of the input to 0 (fixed in its main, #870)
 input: {"settings": {"limit": 10}}
 {} ~> |$$.settings|{"limit": 0}|
 => error D1014

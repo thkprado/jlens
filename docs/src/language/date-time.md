@@ -94,7 +94,6 @@ $fromMillis(1544450400000, "[Y]-[M01]-[D01]T[H01]:[m01]:[s01][Z]", "+0530")
 A negative timezone applies its sign to the hours and the minutes:
 
 ```jsonata-example
-differs: jsonata-js 2.2.2 is an hour off, "19:30-04:30" (jsonata-js#852)
 $fromMillis(0, "[H01]:[m01][Z]", "-0330")
 => "20:30-03:30"
 ```
@@ -103,7 +102,6 @@ Fractional seconds are the digits of the fraction, cut on the right without roun
 writes two, and `[f]` as many as there are, without the zeros at the end.
 
 ```jsonata-example
-differs: jsonata-js 2.2.2 writes the milliseconds as an integer, "01.33 33" (jsonata-js#853)
 $fromMillis(1033, "[s].[f01] [f]")
 => "01.03 033"
 ```

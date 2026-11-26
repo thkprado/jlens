@@ -1868,7 +1868,7 @@ fn datetime_matcher(spec: &[Part]) -> Result<Vec<(MatchPart, ComponentParser)>> 
                 }
                 None => {
                     // A name, read in any case, as `[MN]` and `[Mn]` ask (jsonata-js's pull
-                    // request #875, not merged yet; 2.2.2 and its main read only "April").
+                    // request #875, not merged yet; 2.3.0 reads only "April").
                     let max = m.width.as_ref().and_then(|w| w.max).filter(|&w| w != 0);
                     let key = move |name: &str| -> Vec<char> {
                         let name = match max {

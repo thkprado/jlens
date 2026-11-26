@@ -1522,7 +1522,7 @@ impl<'a> Evaluator<'_, 'a> {
             }
             // A value that is not an array is its one item, without a list of its own, and
             // so is an array the step constructs, unless the step filters its items
-            // (`orders#$i.[items.sku]`, jsonata-js#841, after 2.2.2).
+            // (`orders#$i.[items.sku]`, jsonata-js#841, in 2.3.0).
             let (items, res_is_tuple): (&[Value<'a>], bool) = match &res {
                 Value::Array(a) if !(a.has(CONS) && step.attrs.stages.is_empty()) => {
                     (a.items(), a.is_tuple_stream())
@@ -1570,7 +1570,7 @@ impl<'a> Evaluator<'_, 'a> {
     /// `chained` says that another predicate follows. A predicate that gives the same number
     /// for every item then selects an array as a literal index does: the array itself, whose
     /// items the next predicate reads, where a sequence that holds it would give the next one
-    /// the array as its one item (`$arr[$i][$j]`, jsonata-js#861, after 2.2.2).
+    /// the array as its one item (`$arr[$i][$j]`, jsonata-js#861, in 2.3.0).
     #[inline(never)]
     fn filter(
         &mut self,

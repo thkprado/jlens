@@ -15,7 +15,7 @@ expr = Expression("$sum(items[type = $kind].(price * qty))")
 expr.evaluate({"items": [{"type": "a", "price": 2.5, "qty": 4}]}, {"kind": "a"})  # 10
 ```
 
-jlens passes the official JSONata 2.2.2 test suite, and its package is typed. Wheels cover
+jlens follows jsonata-js 2.3.0 and its official test suite, and its package is typed. Wheels cover
 CPython 3.10 and later, and free-threaded Python 3.15 and later, on Linux, macOS and Windows.
 The package is in beta until jlens 1.0.
 

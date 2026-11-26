@@ -2,10 +2,9 @@
 
 jlens vendors the language-neutral test suite of the reference implementation
 ([jsonata-js](https://github.com/jsonata-js/jsonata), MIT) in `tests/jsonata-suite/`, from
-commit `4bfc27e` of its main branch: the suite of 2.2.2 and the cases of the fixes made after it,
-which jlens gives ([Fixed in jsonata-js after 2.2.2](../language/compatibility.md#fixed-in-jsonata-js-after-222)),
-and of main's template strings (`«...»`), which jlens does not have yet: their 71 cases fail and
-are not in the baseline. That covers 103 groups and about 1,890 cases. The harness lives in
+its tag v2.3.0. jlens does not have 2.3.0's template strings (`«...»`) yet
+([compatibility](../language/compatibility.md#parsing)): their cases fail and are not in the
+baseline. The suite has 103 groups and 1,972 cases. The harness lives in
 `crates/jlens-core/tests/conformance.rs` and mirrors `test/run-test-suite.js`:
 
 - Each case is one test, named `<group>/<file>`, or `<group>/<file>#<index>` for files that hold
@@ -136,7 +135,7 @@ whose tail calls were marked without growing the stack. They are not tracked fur
 ## Differential testing
 
 The suite covers the cases its authors thought of. Differential testing covers others: it
-generates expressions and runs them in jlens and in jsonata-js 2.2.2, which must agree on the
+generates expressions and runs them in jlens and in jsonata-js 2.3.0, which must agree on the
 result or, when the expression fails, on the error code.
 
 ```sh
@@ -163,7 +162,7 @@ that reaches either limit is skipped. The divergences are printed and written to
 `target/differential/divergences.json`. The command fails when there are any. A seed
 reproduces a run.
 
-Thirteen kinds of disagreement are known differences of jsonata-js, listed in the
+Twelve kinds of disagreement are known differences of jsonata-js, listed in the
 [compatibility notes](../language/compatibility.md). They are not divergences; the command
 counts them apart:
 
@@ -211,23 +210,11 @@ counts them apart:
   outcomes.
 - **Dropped quirk**: the expression may meet a jsonata-js quirk that jlens does not reproduce:
   a regular expression literal applied with `~>` to anything but a string literal,
-  `$formatNumber` with a literal picture whose integer part has irregular grouping
-  (`'#,##,##0'`), `$substringBefore` / `$substringAfter` whose `chars` is not a string literal,
+  `$substringBefore` / `$substringAfter` whose `chars` is not a string literal,
   `$replace` whose replacement is neither a string literal nor a lambda, `$fromMillis` with a
   computed picture, which may hold a marker with an unknown component and a presentation, or a
   left side of `??` or `?:` that binds a name it reads, which jsonata-js evaluates twice
   (`$count($x := [$x, 1]) ?: 0`).
-- **Fixed after 2.2.2**: the expression may meet one of the fixes that jsonata-js made after
-  2.2.2, which jlens has: a predicate after one that is not a number literal, which may be a
-  computed index (`$arr[$i][$j]`); an array constructor as a step of a path that binds `@`, `#`
-  or a parent, in that step or before it; a step after a group-by; `$fromMillis` with fractional
-  seconds other than `[f001]` or a negative time zone with minutes; the digits of `$formatNumber`
-  and `$formatInteger`, where 2.2.2 writes JavaScript's exponent notation through the picture
-  (`1e,+21.00`) or lets the mantissa of an exponent picture reach 10^N (`10.0e0`): a call on a
-  literal from 1e18 (which `‰` scales to 1e21) or with a literal exponent picture counts whatever
-  the outcomes, since a result computed from the string need not show it. A run against a checkout
-  (`--jsonata-js`) does not count them apart, so a checkout whose main branch has the fixes must
-  agree on them.
 - **Overflow to infinity**: jlens failed with `D1001`, which it raises only where a number
   overflows to infinity (`1 / 0`). jsonata-js passes the infinity on, to its result or to an
   operator that fails later.

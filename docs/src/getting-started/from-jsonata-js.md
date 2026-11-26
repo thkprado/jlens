@@ -1,6 +1,6 @@
 # Coming from jsonata-js
 
-jlens targets the behaviour of jsonata-js 2.2.2. An expression that works there gives the same
+jlens targets the behaviour of jsonata-js 2.3.0. An expression that works there gives the same
 result here: jlens is checked against the official test suite on every change, and against
 jsonata-js itself with generated expressions every week
 ([Conformance testing](../architecture/conformance.md)). What changes is the API around the

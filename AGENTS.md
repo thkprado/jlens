@@ -2,7 +2,7 @@
 
 Guidance for coding agents working in this repository. Humans: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-jlens is a JSONata 2.2 engine in Rust, ported from jsonata-js 2.2.2.
+jlens is a JSONata 2.2 engine in Rust, ported from jsonata-js 2.2.2 and following 2.3.0.
 
 ## Map
 
@@ -42,7 +42,7 @@ cargo xtask java                                  # after touching jlens-java, j
 
 ## Rules
 
-- **Behave like jsonata-js 2.2.2.** When unsure, run the expression in jsonata-js
+- **Behave like jsonata-js 2.3.0.** When unsure, run the expression in jsonata-js
   (`benches/compare` has it installed after `npm install`) and match it.
   - Deliberate differences must be documented in `docs/src/language/compatibility.md`.
   - If a difference affects the suite, it must also be recorded in

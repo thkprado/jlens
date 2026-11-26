@@ -149,7 +149,7 @@ fn an_index_after_an_index_reads_the_item() {
 }
 
 /// A predicate after a computed index reads the item the index selects where the index is a
-/// number, the same for every item, as after a literal one (jsonata-js#861, after 2.2.2), and
+/// number, the same for every item, as after a literal one (jsonata-js#861, in 2.3.0), and
 /// the sequence it keeps otherwise: an index the typing cannot tell is either.
 #[test]
 fn an_index_after_a_computed_index_reads_the_item_it_selects() {

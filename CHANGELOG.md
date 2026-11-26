@@ -31,6 +31,16 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- jlens follows jsonata-js 2.3.0, released on 2026-11-26, in place of 2.2.2. 2.3.0 ships the
+  fixes that 0.35 and this release took from its main branch, so the compatibility notes no
+  longer list them apart. Two differences stay: template strings (`«...»`), which jlens does not
+  have yet, and a `$clone` bound at the top level of an expression, outside any block, which a
+  transform in 2.3.0 still copies with. Two other rows are gone, as 2.3.0 gives jlens's result:
+  `$formatNumber` with irregular grouping (`'#,##,##0'`), and the `next` of a match called more
+  than once. The differential test runs against 2.3.0, without its rules for the fixes after
+  2.2.2, and 20,000 cases agree; `benches/compare` and the VS Code extension's grammar test use
+  2.3.0. Its fix of the advisory GHSA-3x2j-862j-x779, a function as a transform's update value,
+  was already jlens's behaviour (`T2011`), now with a test.
 - `W0215` tells an operand that is always an array from one that may be several values, and
   writes the fix. `tags = 'a'`, with `tags` an array, gets "The left side of = is an array, which
   never equals one value", as it is false for every document, where `items.qty = 2`, true for an
@@ -130,9 +140,9 @@ All notable changes are recorded here. The format follows
 
 ### Documentation
 
-- The official suite is vendored from jsonata-js's main at `4bfc27e`, with the cases of pull
-  requests #838, #855 and #856, which jlens passes, and of #860, template strings (`«...»`), a
-  feature jlens does not have yet, whose cases fail and are not in the baseline.
+- The official suite is vendored from jsonata-js 2.3.0, with the cases of the fixes made after
+  2.2.2, which jlens passes, and of #860, template strings (`«...»`), a feature jlens does not
+  have yet, whose cases fail and are not in the baseline.
 - The Java guide says what a document costs: its conversion and its text, in native memory, which
   counts against a container's limit and not against the Java heap, once per thread that makes
   documents and once more per thread that evaluates a shared one.

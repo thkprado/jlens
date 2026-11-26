@@ -15,7 +15,7 @@ body:
       label: The proposal
       description: >-
         What you would like jlens to do. If it changes the JSONata language, say how it differs
-        from jsonata-js 2.2.2.
+        from jsonata-js 2.3.0.
     validations:
       required: true
   - type: textarea

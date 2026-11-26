@@ -28,7 +28,7 @@ What sets jlens apart from other JSONata implementations:
 - **Schema-driven assistance.** jlens infers structural metadata from sample documents. It then
   uses that metadata to offer completion, diagnostics and hover information for expressions
   being written, in the browser and in editors ([language server](guides/editors.md)).
-- **Conformance first.** The engine is checked against the official JSONata test suite (2.2.2)
+- **Conformance first.** The engine is checked against the official JSONata test suite (2.3.0)
   on every change, and against jsonata-js itself with generated expressions every week; see
   [Conformance testing](architecture/conformance.md).
 

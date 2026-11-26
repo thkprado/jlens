@@ -197,7 +197,6 @@ input: address.json
 `**` gives no functions, where `*` gives those an object holds:
 
 ```jsonata-example
-differs: jsonata-js 2.2.2 counts the function, 4 (fixed in its main, #873)
 $count({"a": {"f": $sum, "b": 2}}.**)
 => 3
 ```

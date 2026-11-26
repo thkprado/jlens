@@ -55,7 +55,7 @@ body:
     attributes:
       label: What you expected
       description: >-
-        jlens follows jsonata-js 2.2.2. If you know what jsonata-js returns (for example on
+        jlens follows jsonata-js 2.3.0. If you know what jsonata-js returns (for example on
         try.jsonata.org), say so.
     validations:
       required: true

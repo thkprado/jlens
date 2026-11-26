@@ -1622,7 +1622,7 @@ fn fuzz_crashes_stay_fixed() {
         ("$fromMillis(0, '[,,]')", Err("D3132")),
         ("$toMillis('1', '[,]')", Err("D3133")),
         // Characters outside the picture's digit family are left as they are, for `parseInt` to
-        // read or stop at, as jsonata-js's main does since its pull request #869 (2.2.2 throws a
+        // read or stop at, as jsonata-js does since 2.3.0, pull request #869 (2.2.2 throws a
         // `RangeError`): a full-width minus is no sign, and ASCII digits are read.
         ("$parseInteger('１２ [1]３４０', 'map###０')", Ok(json!(12))),
         ("$parseInteger('－１２x', '０')", Ok(json!(null))),

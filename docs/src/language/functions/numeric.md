@@ -161,7 +161,6 @@ digits of the binary value, and the mantissa of an exponent picture stays below 
 number of its integer digits.
 
 ```jsonata-example
-differs: jsonata-js 2.2.2 writes "1.10000000000000008882" and "10.0e0" (jsonata-js#865)
 [$formatNumber(1.1, "0.00000000000000000000"), $formatNumber(9.99, "0.0e0"), $formatNumber(0.125, "0.00")]
 => ["1.10000000000000000000", "1.0e1", "0.12"]
 ```
