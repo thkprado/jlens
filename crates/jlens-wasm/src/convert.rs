@@ -348,6 +348,11 @@ pub fn js_error(err: &jlens_core::Error, offsets: &Offsets) -> JsValue {
     error.into()
 }
 
+// Named in release builds too, where `install_hooks` does not call it, so that cargo's
+// `unused_dependencies` lint does not flag the dependency.
+#[cfg(not(debug_assertions))]
+use console_error_panic_hook as _;
+
 /// Reports Rust panics on the browser console (debug builds only).
 pub fn install_hooks() {
     #[cfg(debug_assertions)]
