@@ -25,7 +25,9 @@ All notable changes are recorded here. The format follows
   backreference that never matches, 10 % slower (13 % with an interrupt), from the commits
   that let entries shrink; through jlens, the two regular expressions of its benchmark are 3 to
   5 % slower, outside the engine's search. Under the `pattern` feature, which needs a nightly compiler,
-  `str::rfind`, `str::rsplit` and the other searches from the end no longer take a `&Regex`.
+  `str::rfind`, `str::rsplit` and the other searches from the end no longer take a `&Regex`; the
+  README now says that this feature, which follows the nightly standard library, is outside the
+  crate's semantic versioning, so the change is a patch.
 
 ### Changed
 

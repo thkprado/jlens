@@ -49,7 +49,9 @@ not. From then on the crate has a version of its own, raised only when its code 
 changes, and published by the jlens release that follows: a jlens version with nothing new here
 publishes no version of it, and jlens depends on the newest. Before 1.0, versions are read as
 Cargo reads them: the patch for a fix or an addition, the minor for a break, which
-`cargo semver-checks` checks against the last version on crates.io. Each version's changes are
+`cargo semver-checks` checks against the last version on crates.io. The `pattern` feature is
+outside that promise: it implements the standard library's `Pattern` trait, which only a nightly
+compiler has and which changes with it, so it may change in any version. Each version's changes are
 in [jlens's changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md), named
 `jlens-regress`.
 
