@@ -380,8 +380,9 @@ expressions.
 {{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:reads_bindings}}
   ```
 
-  The evaluations that cut their own input (`evaluateJson`, `evaluateFromJson`, and `evaluate`
-  over Java objects) go by `reads()`, as an expression serves any bindings.
+  `evaluate` over Java objects cuts its input by `reads()`, as an expression serves any
+  bindings; `evaluateJson` and `evaluateFromJson` cut the JSON text by `reads(bindings)` when
+  the bindings hold host functions, as [JSON text](#json-text) says, and by `reads()` otherwise.
 - **`everyBinding()`** says the expression may read any binding whole, as `$eval` can: keep them
   all. `toJson()` gives the JSON form, which the other packages and the CLI share.
 

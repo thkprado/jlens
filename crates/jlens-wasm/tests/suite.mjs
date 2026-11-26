@@ -435,6 +435,15 @@ export const cases = [
     throws(() => new j.Expression(`(${build}; $build(100000, 1))`).evaluate(), (e) => equal(e.code, "U1001"));
     equal(new j.Expression(`(${build}; $count([$build(100000, 1)]))`).evaluate(), 1, "dropped");
     equal(new j.Expression(`(${build}; $build(1000, 1) = $build(1000, 1))`).evaluate(), true, "1,000 levels");
+    // JSON text is read up to 1,000 levels deep, past serde_json's 128, and fails beyond them,
+    // on WebAssembly's fixed stack too (0.36 #23); a level of more than 16 values comes as text.
+    const text = (n) => "[".repeat(n) + "1" + "]".repeat(n);
+    equal(new j.Expression("$count($)").evaluateJson(text(1000)), "1", "1,000 levels of text");
+    for (const deeper of [text(1001), "[".repeat(100000)]) {
+      throws(() => new j.Expression("$").evaluateJson(deeper), (e) => ok(e instanceof TypeError, "deeper text"));
+    }
+    const wide = JSON.parse(`[${Array(17).fill(text(999)).join(",")}]`);
+    equal(new j.Expression("$count($[0])").evaluate(wide), 1, "a level read as text");
     equal(new j.Expression("1 + 1").evaluate(), 2, "still usable");
   }],
 

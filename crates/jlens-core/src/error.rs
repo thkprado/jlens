@@ -115,6 +115,19 @@ impl Error {
 
     /// The human-readable message, built from the code's template and the error details.
     pub fn message(&self) -> String {
+        // The lexer's S0302 is an unterminated literal; the regex engine's carries its own
+        // reason, as JavaScript's SyntaxError does (0.36 #23).
+        if let (true, Some(reason)) = (
+            self.0.code == "S0302",
+            self.0.details.get("message").and_then(JsonValue::as_str),
+        ) {
+            let detail = |key| self.0.details.get(key).and_then(JsonValue::as_str);
+            return format!(
+                "Invalid regular expression: /{}/{}: {reason}",
+                detail("value").unwrap_or_default(),
+                detail("flags").unwrap_or_default()
+            );
+        }
         match template(&self.0.code) {
             Some(template) => populate(template, &self.0.details),
             None => self
@@ -468,6 +481,19 @@ mod tests {
         assert_eq!(
             Error::new("S0211").message(),
             "The symbol undefined cannot be used as a unary operator"
+        );
+        // The regex engine's S0302 gives its reason, the lexer's the template.
+        let err = Error::new("S0302")
+            .with("value", "a")
+            .with("flags", "uv")
+            .with("message", "the flags 'u' and 'v' cannot be given together");
+        assert_eq!(
+            err.message(),
+            "Invalid regular expression: /a/uv: the flags 'u' and 'v' cannot be given together"
+        );
+        assert_eq!(
+            Error::new("S0302").message(),
+            "No terminating / in regular expression"
         );
     }
 

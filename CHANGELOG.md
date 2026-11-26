@@ -137,6 +137,19 @@ All notable changes are recorded here. The format follows
   `$map([5], function($e){ $map([7], function($f){ $string() }) })` is `["1"]`, where jlens
   gave `["null"]`. `~>` applies a function with null, where it passed nothing:
   `5 ~> function($x){ $not() }` is `true`.
+- JSON text is read up to 1,000 levels of arrays and objects, the limit of every other value,
+  where `serde_json` stopped at 128: `Document::parse` and `parse_cut`, every package that
+  evaluates JSON text, and the CLI's input, bindings and `--filter`. Deeper text fails as
+  invalid JSON with no stack overflow, 100,000 levels included; `parse_cut` still checks the
+  fields it skips as syntax alone, at any depth.
+- `$formatNumber` with a long grouped picture takes linear time: `'0,'` 64,000 times took 3.3 s,
+  past a 200 ms timeout, and now a few milliseconds.
+- `S0302` from the regex engine, for invalid flags or an invalid pattern, reads
+  `Invalid regular expression: /a/uv: the flags 'u' and 'v' cannot be given together`, where it
+  read the lexer's "No terminating / in regular expression"; the error has the flags in `flags`.
+- A host variable named as the place the transforms keep the host's `$clone`, or an expression
+  that binds that name with a NUL character in it, no longer replaces the `$clone` a transform
+  copies with.
 
 ### Documentation
 

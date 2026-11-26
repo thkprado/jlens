@@ -60,7 +60,7 @@ reviewed, so that they are reviewed with the item and not a release later.
 | 21 | The evaluator without the field that slowed Python's object constructor, found by #10 | `Evaluator::copier`, added by #18, costs `object constructor` with Python values 10 to 13% (about 10 µs on 200 items) on the M1, with new copies of the wheel, where a build of `629af7f` without it is level with `d3f9a65`; the host's `$clone` kept where #18 put it in effect (a variable of the evaluation, else its function or the built-in, never one the expression binds) without that field, or the cause found; `python.py ab` against 0.35.0 on the M1 shows the case level, and native `ab` too; the performance page's section on 0.36 and `perf-0.36.md` say so | done, on 2026-11-26 (`docs/notes/perf-0.36.md`). The root frame keeps the host's variable `clone` under a name no expression can write, and each transform looks it up there, else the host's function or the built-in; a test binds `$clone` at the top level over a host's variable. The field cost no work: from an SSH command every build with it reads 97 µs and every build without it 87 µs, 0.35.0 included; from a detached script, at twelve sizes of the environment, both 87 µs. Without the field, against 0.35.0: −0.9% from the SSH command, within 1% at every size, native `ab` within 2.5% as #10. Its `regex` with Python values reads 3.6 to 7.5% slower at three of the twelve sizes, and against a `Document` 7% slower in one environment, as 0.35.0 at another: the modes #10 found, left. Reviewed on 2026-11-26, as proposed: the change is kept, though the field cost no work, since it was the one build with no slow mode of `object constructor` |
 | 23 | The gaps an outside review of the code found, before #22 | Each with a test: a host variable named `"\0clone"` no longer replaces the transform's `$clone` (#21); `S0302` for invalid flags or an invalid pattern carries the regex engine's message, not "No terminating / in regular expression" (`/a/uv`), the lexer's error and the generated catalog kept; JSON text read up to 1,000 levels deep, as the book says, not `serde_json`'s 128 (`Document::parse`, `parse_cut` with its skipped fields, the CLI), through `stack::grow`, with no stack overflow on 100,000 `[`; `$formatNumber` with a long grouped picture in linear time or under the timeout, as #17 did for dates (`'0,'` 64,000 times runs 3.3 s past a 200 ms timeout), its number-formatting cases measured with `ab` on the M1 if the code changes; `performance.md`'s sentence that a pattern is compiled once per expression, when it is compiled once per evaluation (0.37 #7); the stale text the review lists, checked and fixed: the section "Next: the jsonata-js release after 2.2.2", "JSONata 2.2" and "1,734 of 1,736", `jlens-cli` "not published yet" on npm, "jsonata-js's main since pull request #869" in `overrides.json`, and the Java guide on `reads(bindings)` (lines 147-149 against 383-384) | planned |
 | 22 | The release's x86_64 check, on the Ryzen | The plan changed the evaluator (#12, #15, #18, #19, #21) and measured it on the M1 alone, so the Ryzen compares the final code with 0.35.0: `cargo xtask ab v0.35.0 HEAD` twice in each mode natively under Windows, and `python.py ab` twice under WSL, the second with the environment padded by a variable of a few hundred bytes, as a slow mode can follow the process's environment (#21), about 30 minutes with the machine idle; a case past the floor is built aligned before it is put down to a change; the result in `perf-0.36.md`, not on the page | planned |
-| 11 | Release 0.36.0 | The release checklist; the channels checked; the README's status line with the suite of 2.3.0 (#20) | planned |
+| 11 | Release 0.36.0 | The release checklist; the channels checked; the status lines of the README and of the book's introduction with the suite of 2.3.0 (#20, #23) | planned |
 
 ## 0.37: what the Java adoption shows
 
@@ -89,24 +89,6 @@ and `parse_cut`, the Python package (a `seed` of 2^64 reported as negative, coun
 `Self` from `typing_extensions` in the stub, a Python method called in a critical section under
 free threading), and `jlens-regress`'s `utf16` feature, which also turns off the prefix search of
 `&str` searches for a crate that enables it (upstream `542243a`, skipped).
-
-## Next: the jsonata-js release after 2.2.2
-
-jlens follows jsonata-js 2.2.2, the version on npm. Its main branch has since merged fixes, and
-0.35 took the two that change results, pull requests #841 and #861, ahead of the release that
-will ship them: from a fixed commit of main, with rules in the differential test for the answers
-2.2.2 does not give. It also took pull request #838 (a step after a grouping), approved and not
-yet merged then (merged on 2026-11-23). 0.36 took #864, merged at main's `4118e73` (`$formatInteger` from 1e21), and
-#868, merged at `db4f747` (`$formatNumber` from the shortest decimal digits, and the mantissa of
-an exponent picture below 10^N, in place of #866), and 0.36 #14 takes what main merged up to
-`4bfc27e` but #860's template strings, a feature left for a later plan; #17 and #18 take what it
-merged up to `1ab3eec`. When that release is on npm, jlens follows it
-whole: if #838 is not in it, or changed before it merged, the difference stays recorded or jlens
-follows the change.
-
-| # | Item | Done when | Status |
-|---|---|---|---|
-| 1 | The jsonata-js release after 2.2.2, once published | The official suite of that release vendored (`cargo xtask update-suite`) and the baseline grown; each fix's cases pass, or a difference is recorded with its reason in `compatibility.md`; the differential test and the book's examples run against that release, and the rules, the `differs:` marks and the rows of `compatibility.md` that 0.35 #8 and 0.36 #9, #12, #14, #17 and #18 added are removed where the release gives jlens's answers, and the cases of #838 kept in `jlens-core`'s tests are dropped once the suite has them; the version jlens follows changed wherever it is named | waiting for a jsonata-js release |
 
 ## In exploration: a regular expression engine of jlens's own
 

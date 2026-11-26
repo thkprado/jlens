@@ -503,12 +503,56 @@ fn regular(indexes: &[usize]) -> usize {
     if factor == 0 {
         return 0;
     }
-    for i in 1..=indexes.len() {
-        if !indexes.contains(&(i * factor)) {
-            return 0;
+    // Each of `factor`, `2 * factor` … `len * factor` is one of the `len` indexes, as
+    // jsonata-js checks it, so the indexes are those multiples, each once. Sorted, not searched
+    // for each multiple, which made a long grouped picture quadratic (0.36 #23).
+    let mut sorted = indexes.to_vec();
+    sorted.sort_unstable();
+    let multiples = sorted
+        .iter()
+        .enumerate()
+        .all(|(i, &n)| n == (i + 1) * factor);
+    if multiples { factor } else { 0 }
+}
+
+/// Inserts `separator` at each index of `at`, an index of the text as it is when that separator
+/// goes in, as inserting them one at a time would, but in one pass when the indexes never
+/// decrease, as the groupings of a picture give them: one at a time moved the rest of the text
+/// each time, which made a long grouped picture quadratic (0.36 #23). A few, as most pictures
+/// have, still go in one at a time, which allocates nothing.
+fn insert_all(s: &mut Vec<char>, separator: char, at: impl Iterator<Item = usize> + Clone) {
+    if at.clone().nth(16).is_none() || !at.clone().is_sorted() {
+        for i in at {
+            s.insert(i.min(s.len()), separator);
         }
+        return;
     }
-    factor
+    insert_sorted(s, separator, at);
+}
+
+/// [`insert_all`] in one pass, for indexes that never decrease.
+fn insert_sorted(s: &mut Vec<char>, separator: char, at: impl Iterator<Item = usize>) {
+    // The separators that go before each character of `s`, and after the last one.
+    let mut before = vec![0usize; s.len() + 1];
+    // The character the next index falls at or before, and the index of the first separator
+    // before it, in the text as it is then.
+    let (mut i, mut start) = (0, 0);
+    let mut count = 0;
+    for index in at {
+        count += 1;
+        while i < s.len() && index > start + before[i] {
+            start += before[i] + 1;
+            i += 1;
+        }
+        before[i] += 1;
+    }
+    let mut out = Vec::with_capacity(s.len() + count);
+    for (&c, &n) in s.iter().zip(&before) {
+        out.extend(std::iter::repeat_n(separator, n));
+        out.push(c);
+    }
+    out.extend(std::iter::repeat_n(separator, before[s.len()]));
+    *s = out;
 }
 
 pub(super) fn format_number<'a>(
@@ -702,20 +746,23 @@ fn analyse_picture(picture: &str, p: &Props) -> Result<(Vec<char>, [Analysis; 2]
 
     let analyse = |parts: &Parts| -> Analysis {
         let grouping_positions = |part: &[char], to_left: bool| -> Vec<usize> {
+            // The digits of `part` before each index, counted once rather than for each
+            // separator, which made a long grouped picture quadratic (0.36 #23).
+            let mut counts = Vec::with_capacity(part.len() + 1);
+            counts.push(0);
+            for &c in part {
+                let last = counts[counts.len() - 1];
+                counts.push(last + usize::from(is_digit(c) || c == p.digit));
+            }
             let mut positions = Vec::new();
             let mut gp = index_of(part, p.grouping, 0);
             while let Some(g) = gp {
-                let range: &[char] = if to_left {
-                    &part[..g.min(part.len())]
+                let before = counts[g.min(part.len())];
+                positions.push(if to_left {
+                    before
                 } else {
-                    &part[g.min(part.len())..]
-                };
-                positions.push(
-                    range
-                        .iter()
-                        .filter(|&&c| is_digit(c) || c == p.digit)
-                        .count(),
-                );
+                    counts[part.len()] - before
+                });
                 // jsonata-js continues the search in the integer part, even for the fraction.
                 gp = index_of(&parts.integer, p.grouping, g + 1);
             }
@@ -854,30 +901,37 @@ fn format_picture(picture: &Picture, value: f64) -> String {
         s.extend(std::iter::repeat_n(p.zero, pad_right as usize));
     }
     decimal_pos = index_of(&s, p.decimal, 0).unwrap_or(s.len());
+    // The indexes each separator goes in at, as one inserted at a time sees the text.
     if let Some(group_count) =
         ((decimal_pos as isize - 1).max(0) as usize).checked_div(pic.regular_grouping)
     {
-        for group in 1..=group_count {
-            let at = decimal_pos - group * pic.regular_grouping;
-            s.insert(at, p.grouping);
-        }
+        // From the left, each after the ones already in, where jsonata-js goes from the right.
+        let group = pic.regular_grouping;
+        let at = (1..=group_count)
+            .rev()
+            .enumerate()
+            .map(move |(done, n)| decimal_pos - n * group + done);
+        insert_all(&mut s, p.grouping, at);
     } else {
-        for &pos in &pic.integer_grouping {
-            // A separator needs a digit on its left. jsonata-js inserts one anyway, counting a
-            // negative index from the end (`$formatNumber(1234, '#,##,##0')` is "12,34,");
-            // jlens skips it (compatibility.md).
-            if pos >= decimal_pos {
-                continue;
-            }
-            s.insert(decimal_pos - pos, p.grouping);
-            decimal_pos += 1;
-        }
+        // A separator needs a digit on its left. jsonata-js inserts one anyway, counting a
+        // negative index from the end (`$formatNumber(1234, '#,##,##0')` is "12,34,");
+        // jlens skips it (compatibility.md).
+        let at = pic.integer_grouping.iter().scan(decimal_pos, |dp, &pos| {
+            Some((pos < *dp).then(|| {
+                *dp += 1;
+                *dp - 1 - pos
+            }))
+        });
+        insert_all(&mut s, p.grouping, at.flatten());
     }
     decimal_pos = index_of(&s, p.decimal, 0).unwrap_or(s.len());
-    for &pos in &pic.fractional_grouping {
-        let at = (pos + decimal_pos + 1).min(s.len());
-        s.insert(at, p.grouping);
-    }
+    let len = s.len();
+    let at = pic
+        .fractional_grouping
+        .iter()
+        .enumerate()
+        .map(move |(done, &pos)| (pos + decimal_pos + 1).min(len + done));
+    insert_all(&mut s, p.grouping, at);
     decimal_pos = index_of(&s, p.decimal, 0).unwrap_or(s.len());
     if !pic.picture.contains(&p.decimal) || decimal_pos + 1 == s.len() {
         s.pop();
@@ -980,6 +1034,44 @@ mod tests {
         assert_eq!(fmt(5e-324, "0.0"), "0.0");
         assert_eq!(fmt(5e-324, "0.0e0"), "5.0e-324");
         assert_eq!(fmt(0.0012, ".0e0"), ".1e-2");
+    }
+
+    /// `insert_sorted` gives the text inserting one separator at a time gives, for every sorted
+    /// list of up to four indexes into a text of three characters.
+    #[test]
+    fn separators_go_in_as_one_at_a_time() {
+        let mut lists = vec![vec![]];
+        for _ in 0..4 {
+            let longer: Vec<Vec<usize>> = lists
+                .iter()
+                .filter(|l| l.len() == lists.last().unwrap().len())
+                .flat_map(|l| (0..=3 + l.len()).map(move |i| [l.as_slice(), &[i]].concat()))
+                .collect();
+            lists.extend(longer);
+        }
+        for at in lists.into_iter().filter(|l| l.is_sorted()) {
+            let mut one = vec!['a', 'b', 'c'];
+            for &i in &at {
+                one.insert(i.min(one.len()), ',');
+            }
+            let mut all = vec!['a', 'b', 'c'];
+            insert_sorted(&mut all, ',', at.iter().copied());
+            assert_eq!(all, one, "{at:?}");
+        }
+    }
+
+    /// A long grouped picture formats in linear time: 64,000 separators took seconds.
+    #[test]
+    fn long_grouped_pictures_take_linear_time() {
+        let picture = format!("{}0", "0,".repeat(64_000));
+        let started = std::time::Instant::now();
+        let out = fmt(1234567.0, &picture);
+        assert_eq!(out.len(), picture.len());
+        assert!(out.ends_with("1,2,3,4,5,6,7"));
+        // The fraction's separators, which jsonata-js finds in the integer part.
+        let picture = format!("{}0.{}0", "0,".repeat(32_000), "0,".repeat(32_000));
+        assert!(fmt(1.5, &picture).starts_with("0,0,"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]

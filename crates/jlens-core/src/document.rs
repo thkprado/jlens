@@ -11,7 +11,7 @@ use serde_json::Value as JsonValue;
 mod serialize;
 
 use crate::reads::Read;
-use crate::value::{Keys, Map, Value};
+use crate::value::{Keys, MAX_NESTING, Map, Value, nest};
 
 /// A JSON document in jlens's internal representation.
 ///
@@ -75,7 +75,8 @@ impl Document {
     }
 
     /// Parses JSON text straight into the internal representation. This is faster than parsing
-    /// into a `serde_json::Value` and converting it.
+    /// into a `serde_json::Value` and converting it. Arrays and objects may nest 1,000 levels
+    /// deep, as in a value converted to JSON; `serde_json` alone stops at 128.
     pub fn parse(text: &str) -> serde_json::Result<Self> {
         Ok(Document {
             value: parse_value(text, &mut Keys::default())?,
@@ -87,9 +88,10 @@ impl Document {
     /// read of their input (one expression's [`Reads::input`], or the union of several), and
     /// the document serves each of them as the whole one would.
     ///
-    /// The fields skipped are checked as JSON syntax but not converted, so two values that
-    /// [`parse`](Document::parse) rejects pass when skipped: a number too large for a float,
-    /// and a string with a lone surrogate escape.
+    /// The fields skipped are checked as JSON syntax but not converted, so three values that
+    /// [`parse`](Document::parse) rejects pass when skipped: a number too large for a float, a
+    /// string with a lone surrogate escape, and arrays and objects nested more than 1,000 levels
+    /// deep.
     ///
     /// ```
     /// use jlens_core::{Bindings, Document, Expression, Options};
@@ -110,7 +112,8 @@ impl Document {
     pub fn parse_cut(text: &str, read: &Read) -> serde_json::Result<Self> {
         let mut keys = Keys::default();
         let mut deserializer = serde_json::Deserializer::from_str(text);
-        let value = CutSeed(&mut keys, read, PhantomData).deserialize(&mut deserializer)?;
+        deserializer.disable_recursion_limit();
+        let value = CutSeed(&mut keys, read, 0, PhantomData).deserialize(&mut deserializer)?;
         deserializer.end()?;
         Ok(Document { value })
     }
@@ -213,19 +216,20 @@ fn index(token: &str) -> Option<usize> {
 /// Parses JSON text into a value, sharing the keys of its objects through `keys`.
 pub(crate) fn parse_value<'a>(text: &str, keys: &mut Keys) -> serde_json::Result<Value<'a>> {
     let mut deserializer = serde_json::Deserializer::from_str(text);
-    let value = ValueSeed(keys, PhantomData).deserialize(&mut deserializer)?;
+    deserializer.disable_recursion_limit();
+    let value = ValueSeed(keys, 0, PhantomData).deserialize(&mut deserializer)?;
     deserializer.end()?;
     Ok(value)
 }
 
 /// Deserializes a value, sharing the keys of its objects through one table.
-struct ValueSeed<'k, 'a>(&'k mut Keys, PhantomData<Value<'a>>);
+struct ValueSeed<'k, 'a>(&'k mut Keys, usize, PhantomData<Value<'a>>);
 
 impl<'de, 'a> DeserializeSeed<'de> for ValueSeed<'_, 'a> {
     type Value = Value<'a>;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value<'a>, D::Error> {
-        deserializer.deserialize_any(self)
+        nest(self.1, move || deserializer.deserialize_any(self))
     }
 }
 
@@ -265,18 +269,20 @@ impl<'de, 'a> Visitor<'de> for ValueSeed<'_, 'a> {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value<'a>, A::Error> {
+        let depth = deeper(self.1)?;
         let mut items = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-        while let Some(item) = seq.next_element_seed(ValueSeed(&mut *self.0, PhantomData))? {
+        while let Some(item) = seq.next_element_seed(ValueSeed(&mut *self.0, depth, PhantomData))? {
             items.push(item);
         }
         Ok(Value::array(items, 0))
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Value<'a>, A::Error> {
+        let depth = deeper(self.1)?;
         let mut map = Map::with_capacity(access.size_hint().unwrap_or(0));
         // A repeated key keeps its first position and takes the last value, as in `JSON.parse`.
         while let Some(key) = access.next_key_seed(KeySeed(self.0))? {
-            let value = access.next_value_seed(ValueSeed(&mut *self.0, PhantomData))?;
+            let value = access.next_value_seed(ValueSeed(&mut *self.0, depth, PhantomData))?;
             map.insert(key, value);
         }
         Ok(Value::object(map))
@@ -284,15 +290,15 @@ impl<'de, 'a> Visitor<'de> for ValueSeed<'_, 'a> {
 }
 
 /// Deserializes a value cut by a `Read`, skipping the fields it leaves out.
-struct CutSeed<'k, 'r, 'a>(&'k mut Keys, &'r Read, PhantomData<Value<'a>>);
+struct CutSeed<'k, 'r, 'a>(&'k mut Keys, &'r Read, usize, PhantomData<Value<'a>>);
 
 impl<'de, 'a> DeserializeSeed<'de> for CutSeed<'_, '_, 'a> {
     type Value = Value<'a>;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value<'a>, D::Error> {
         match self.1 {
-            Read::Whole => ValueSeed(self.0, PhantomData).deserialize(deserializer),
-            Read::Fields(_) => deserializer.deserialize_any(self),
+            Read::Whole => ValueSeed(self.0, self.2, PhantomData).deserialize(deserializer),
+            Read::Fields(_) => nest(self.2, move || deserializer.deserialize_any(self)),
         }
     }
 }
@@ -334,8 +340,11 @@ impl<'de, 'a> Visitor<'de> for CutSeed<'_, '_, 'a> {
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value<'a>, A::Error> {
         // The items of an array are cut by the `Read` of the array.
+        let depth = deeper(self.2)?;
         let mut items = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-        while let Some(item) = seq.next_element_seed(CutSeed(&mut *self.0, self.1, PhantomData))? {
+        while let Some(item) =
+            seq.next_element_seed(CutSeed(&mut *self.0, self.1, depth, PhantomData))?
+        {
             items.push(item);
         }
         Ok(Value::array(items, 0))
@@ -343,13 +352,15 @@ impl<'de, 'a> Visitor<'de> for CutSeed<'_, '_, 'a> {
 
     fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Value<'a>, A::Error> {
         let Read::Fields(fields) = self.1 else {
-            return ValueSeed(self.0, PhantomData).visit_map(access);
+            return ValueSeed(self.0, self.2, PhantomData).visit_map(access);
         };
+        let depth = deeper(self.2)?;
         let mut map = Map::with_capacity(fields.len());
         while let Some(field) = access.next_key_seed(FieldSeed(&mut *self.0, fields))? {
             match field {
                 Some((key, read)) => {
-                    let value = access.next_value_seed(CutSeed(&mut *self.0, read, PhantomData))?;
+                    let value =
+                        access.next_value_seed(CutSeed(&mut *self.0, read, depth, PhantomData))?;
                     map.insert(key, value);
                 }
                 None => {
@@ -406,4 +417,22 @@ impl<'de> Visitor<'de> for KeySeed<'_> {
     fn visit_str<E>(self, s: &str) -> Result<Rc<str>, E> {
         Ok(self.0.get(s))
     }
+}
+
+/// The level of the values of an array or object read at `depth`, or the error of one nested
+/// more than [`MAX_NESTING`] levels deep, as a value converted to JSON fails (`serde_json`
+/// alone stops at 128). On WebAssembly, whose stack cannot grow, the error of a stack too
+/// small comes first.
+fn deeper<E: serde::de::Error>(depth: usize) -> Result<usize, E> {
+    if depth >= MAX_NESTING {
+        return Err(E::custom(format!(
+            "a value is nested more than {MAX_NESTING} levels deep"
+        )));
+    }
+    if crate::stack::exhausted() {
+        return Err(E::custom(
+            "the stack is too small for a value nested so deeply",
+        ));
+    }
+    Ok(depth + 1)
 }

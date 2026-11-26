@@ -78,7 +78,7 @@ error. jlens cannot represent that input, so it skips those two cases.
 | A regular expression literal on the left of `??` or `?:` (`$match('abc', /b/) ?? 1`) | The parser copies the left side through JSON, which turns the regex into `{}`; `$match` and `$split` then loop until memory runs out, and the timeout cannot stop them | Evaluated as written |
 | The keys of an order-by (`items^(price)`) | Evaluated for both items at every comparison: about 2·n·log₂ n evaluations for n items | Evaluated once per item, on first use, and kept. The keys are evaluated in the order jsonata-js first evaluates them, so results and the first error are the same; only a key with a side effect differs, such as one using `$random`, which draws once per item |
 | Error `position` and `token` inside function calls | Overwritten with the call site | Filled in only when the inner error has none, so it points at the real cause |
-| Invalid regular expression | JavaScript `SyntaxError` without a code | `S0302` with the engine message in `message` |
+| Invalid regular expression | JavaScript `SyntaxError` without a code | `S0302` with the engine's reason in the detail `message`, and the pattern in `value` and `flags`; the error reads `Invalid regular expression: /a/uv: the flags 'u' and 'v' cannot be given together` |
 | A function as the final result | The function object | `None`, like `JSON.stringify` |
 | Very large integers in results | Printed in full up to 1e21 | `serde_json` numbers. Integers above 2^53 become floats (same value, possibly in exponent notation) |
 | `$toMillis` of a date-time without an offset | Local time (per `Date.parse`) | UTC, so results never depend on the machine's time zone |

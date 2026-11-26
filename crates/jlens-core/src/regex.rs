@@ -41,6 +41,7 @@ impl Regex {
         if let Some(message) = invalid_flags(flags) {
             return Err(Error::new("S0302")
                 .with("value", pattern)
+                .with("flags", flags)
                 .with("message", message));
         }
         let re = regress::Regex::with_flags(pattern, flags).map_err(|e| {
@@ -48,6 +49,7 @@ impl Regex {
             // syntax error.
             Error::new("S0302")
                 .with("value", pattern)
+                .with("flags", flags)
                 .with("message", e.to_string())
         })?;
         Ok(Regex {

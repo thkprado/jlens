@@ -33,11 +33,12 @@ const FEW_VARS: usize = 8;
 const SHORT_NAME: usize = 14;
 
 /// The name under which the root frame keeps a host's variable `clone`, for the transforms to
-/// copy with: no expression can write it, so one that binds `$clone` in that frame leaves the
-/// copier as it was (jsonata-js#871). A field of the evaluator holding it put Python's object
-/// constructor, with no transform, in a mode 10 to 13% slower in some environments of the
-/// process on the M1 (0.36 #21).
-const HOST_CLONE: &str = "\0clone";
+/// copy with. No expression can write it, as the lexer ends a name at a space, so one that binds
+/// `$clone` in that frame leaves the copier as it was (jsonata-js#871); a host's variable of
+/// that name, which no expression could read, is ignored (0.36 #23). A field of the evaluator
+/// holding it put Python's object constructor, with no transform, in a mode 10 to 13% slower in
+/// some environments of the process on the M1 (0.36 #21).
+const HOST_CLONE: &str = " clone";
 
 /// A name in a frame. Each binding of a block or a tuple, each host variable and each built-in
 /// looked up keeps one. Sharing the syntax tree's would count on one cache line for every thread
@@ -608,6 +609,9 @@ pub(crate) fn evaluate<'a, 'v, R>(
     // the frame goes on `cyclic` only when the expression binds a function in it (0.35 #9).
     let mut vars = Vars::Empty;
     for (name, value) in variables {
+        if name == HOST_CLONE {
+            continue;
+        }
         if name == "clone" {
             vars.set(HOST_CLONE, value.clone());
         }

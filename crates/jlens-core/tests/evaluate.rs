@@ -1459,8 +1459,8 @@ fn size_caps_stop_huge_values() {
     // 30 times a string of 10^7 bytes is over the default 256 MiB.
     let huge = r#"($s := $pad("", 10000000, "x"); $join([1..30].$s))"#;
     assert_eq!(code(huge, &Options::new()).as_deref(), Some("U1001"));
-    // An `M` per thousand: above ten million, the number is written in digits, as jsonata-js's
-    // main does since its pull request #869, so 1e21 no longer takes 10^18 bytes.
+    // An `M` per thousand: above ten million, the number is written in digits, as jsonata-js
+    // 2.3.0 does (pull request #869), so 1e21 no longer takes 10^18 bytes.
     assert_eq!(
         eval("$formatInteger(1e21, 'I')", json!(null)),
         Some(json!("1000000000000000000000"))
@@ -2024,7 +2024,7 @@ fn transforms_change_a_copy_alone() {
             json!({"f": "", "g": ["", 1], "n": 0.3, "z": 0}),
         ),
         // A `$clone` the expression binds is not the transform's (jsonata-js#871), not even at
-        // the top level, where jsonata-js's main still takes it and changes the input.
+        // the top level, where jsonata-js 2.3.0 still takes it and changes the input.
         (
             "($clone := function($x){$x}; $ ~> |items|{}, ['b', 'a']|)",
             json!({"items": [{}, {}], "n": 0.3}),
@@ -2045,7 +2045,7 @@ fn transforms_change_a_copy_alone() {
     }
 }
 
-/// As jsonata-js's main since pull requests #870, #871 and #873: a transform's location matches
+/// As jsonata-js 2.3.0, since pull requests #870, #871 and #873: a transform's location matches
 /// only values of its copy, a transform copies with the host's `$clone` or the built-in, and
 /// `**` gives no functions.
 #[test]
@@ -2135,6 +2135,21 @@ fn transforms_match_only_their_copy() {
         .evaluate(Some(&input), &Bindings::new().var("clone", 5))
         .unwrap_err();
     assert_eq!(err.code(), "T2013");
+    // Nor can a name the expression or the host makes replace it: one with a NUL, which the lexer
+    // keeps in a name, or the one the root frame keeps it under (0.36 #23).
+    let input = json!({"foo": {}});
+    for name in ["\0clone", " clone"] {
+        let result = Expression::compile("$ ~> | foo | {'y': 1} |")
+            .unwrap()
+            .evaluate(Some(&input), &Bindings::new().var(name, 5))
+            .unwrap();
+        assert_eq!(result, Some(json!({"foo": {"y": 1}})), "{name:?}");
+    }
+    let result = Expression::compile("[$\0clone := 5, $ ~> | foo | {'y': 1} |][1]")
+        .unwrap()
+        .evaluate(Some(&input), &Bindings::new())
+        .unwrap();
+    assert_eq!(result, Some(json!({"foo": {"y": 1}})));
 }
 
 /// The cases of jsonata-js's advisory GHSA-3x2j-862j-x779, fixed in 2.3.0: a function as a

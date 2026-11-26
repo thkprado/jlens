@@ -287,7 +287,8 @@ public final class Expression implements AutoCloseable {
 
     /**
      * Evaluates the expression against JSON text. Only the fields the expression reads are
-     * parsed ({@link #reads()}).
+     * parsed: {@link #reads(Bindings)} with bindings that hold host functions,
+     * {@link #reads()} otherwise.
      *
      * @param input the input as JSON text, {@code null} for no input
      * @return the result as Java objects, {@code null} when it is undefined or {@code null}
@@ -394,7 +395,8 @@ public final class Expression implements AutoCloseable {
 
     /**
      * Evaluates the expression against JSON text. Only the fields the expression reads are
-     * parsed ({@link #reads()}).
+     * parsed: {@link #reads(Bindings)} with bindings that hold host functions,
+     * {@link #reads()} otherwise.
      *
      * @param input the input as JSON text, {@code null} for no input
      * @return the result as JSON text, {@code null} when it is undefined

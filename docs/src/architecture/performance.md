@@ -541,8 +541,9 @@ Measured for 0.36.0, which ported 20 newer commits of `regress`'s master (the me
   backreferences. `jlens-regress` is a backtracker that interprets its instructions. It is
   faster where it can search for a literal first (`memchr`): 2.2 times on `literal`, 14 times
   on a literal that does not occur; and on `\p{L}+`.
-- jlens compiles a pattern once per expression, when the expression is compiled. V8's
-  `new RegExp` only parses the pattern; the first `exec` compiles it.
+- jlens compiles a pattern once per evaluation, the first time the evaluation reaches it, so an
+  expression evaluated many times compiles its patterns each time. V8's `new RegExp` only parses
+  the pattern; the first `exec` compiles it.
 - **The interrupt** costs about 2.4% over these 17 cases (the geometric mean), from 0.3% faster
   to 9.9% slower per case (`lookbehind`, 9 to 10% in each run, and 7% before the ports), most
   of that spread from how the compiler allocates the backtracker's registers, not from the check

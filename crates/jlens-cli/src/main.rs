@@ -228,7 +228,52 @@ fn run(cli: Cli) -> Result<ExitCode> {
 /// Reads and parses a JSON file.
 pub fn read_json(path: &PathBuf) -> Result<Value> {
     let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+    parse_json(&text).with_context(|| format!("parsing {}", path.display()))
+}
+
+/// Parses JSON text as `serde_json` does, numbers kept exact, but with arrays and objects
+/// nested up to jlens's limit, 1,000 levels, as `Document::parse` reads them, rather than
+/// `serde_json`'s 128 (0.36 #23). Text nested deeper fails with `Document::parse`'s error,
+/// found by a loop, before `serde_json`'s recursion could exhaust the stack.
+pub fn parse_json(text: &str) -> serde_json::Result<Value> {
+    if nests_deeper(text, 1_000)
+        && let Err(e) = jlens_core::Document::parse(text)
+    {
+        return Err(e);
+    }
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    deserializer.disable_recursion_limit();
+    let value = serde::Deserialize::deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    Ok(value)
+}
+
+/// Whether arrays and objects nest more than `limit` levels deep somewhere in JSON text.
+fn nests_deeper(text: &str, limit: usize) -> bool {
+    let (mut depth, mut string, mut escaped) = (0usize, false, false);
+    for b in text.bytes() {
+        if string {
+            match b {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match b {
+            b'"' => string = true,
+            b'[' | b'{' => {
+                depth += 1;
+                if depth > limit {
+                    return true;
+                }
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Prints a value as pretty JSON on stdout.

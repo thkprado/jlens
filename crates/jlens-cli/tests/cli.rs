@@ -197,6 +197,44 @@ fn eval_cut_input() {
     );
 }
 
+/// The input is read up to 1,000 levels deep, not `serde_json`'s 128, the document `--filter`
+/// prints with its integers exact, and deeper input is invalid with no stack overflow
+/// (0.36 #23).
+#[test]
+fn eval_deep_input() {
+    let nested = |n: usize| format!("{}1{}", "[".repeat(n), "]".repeat(n));
+    let run = |args: &[&str], input: &str| {
+        let out = Command::cargo_bin("jlens")
+            .unwrap()
+            .args(args)
+            .write_stdin(input)
+            .output()
+            .unwrap();
+        (out.status.code(), String::from_utf8(out.stdout).unwrap())
+    };
+    let input = format!(r#"{{"a":2,"n":12345678901234567890,"b":{}}}"#, nested(999));
+    // An evaluation's numbers are floats, as in jsonata-js.
+    let evaluated = input.replace("12345678901234567890", "12345678901234567000");
+    for (args, expected) in [
+        (&["eval", "-c", "--filter", "a > 1"][..], &input),
+        (&["eval", "-c", "$"], &evaluated),
+    ] {
+        let (code, out) = run(args, &input);
+        assert_eq!((code, out.trim_end()), (Some(0), &**expected), "{args:?}");
+    }
+    let (code, out) = run(&["eval", "--explain", "a"], &input);
+    assert_eq!((code, out.lines().next()), (Some(0), Some("result: 2")));
+    for input in [nested(1_001), "[".repeat(100_000)] {
+        for args in [
+            &["eval", "a"][..],
+            &["eval", "--explain", "a"],
+            &["eval", "$"],
+        ] {
+            assert_eq!(run(args, &input).0, Some(2), "{args:?}");
+        }
+    }
+}
+
 #[test]
 fn eval_ndjson() {
     let args = ["eval", "--ndjson", "-i", "fixtures/orders.ndjson"];

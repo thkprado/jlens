@@ -1638,7 +1638,7 @@ fn fuzz_crashes_stay_fixed() {
             Ok(json!(format!("1{}.{}", "0".repeat(300), "0".repeat(20)))),
         ),
         ("$round(1e300, 20)", Ok(json!(1e300))),
-        // Width modifiers above 100 (D3142, as jsonata-js's main since its pull request #869).
+        // Width modifiers above 100 (D3142, as in jsonata-js 2.3.0, pull request #869).
         ("$fromMillis(0, '[Y,5555555555555555555553]')", Err("D3142")),
         (
             "$fromMillis(0, '[D0,66666666666666666666666666661]')",
@@ -2131,6 +2131,55 @@ fn deep_values_fail_cleanly() {
         assert!(result.unwrap().is_some());
         let result = expr.evaluate_source(&Nested(1_001), &Bindings::new(), &options);
         assert_eq!(result.unwrap_err().code(), "U1001");
+    };
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(run)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+/// JSON text is read up to the nesting limit, 1,000 levels, not `serde_json`'s 128, and fails
+/// beyond it with no stack overflow, 100,000 levels deep included; `parse_cut` checks the fields
+/// it skips as syntax alone, at any depth (0.36 #23).
+#[test]
+fn deep_json_text_is_read_to_the_nesting_limit() {
+    let run = || {
+        let nested = |n: usize, inner: &str| format!("{}{inner}{}", "[".repeat(n), "]".repeat(n));
+        let objects = |n: usize| format!("{}1{}", r#"{"a":"#.repeat(n), "}".repeat(n));
+        let read = Expression::compile("b")
+            .unwrap()
+            .reads()
+            .input()
+            .unwrap()
+            .clone();
+        let string = Expression::compile("$string($)").unwrap();
+        let options = Options::new();
+        // The object around a field `b` takes one level.
+        let wrap = |name: &str, text: &str| format!(r#"{{"{name}":{text}}}"#);
+        for (text, inner) in [
+            (nested(1_000, "1"), nested(999, "1")),
+            (objects(1_000), objects(999)),
+        ] {
+            let doc = Document::parse(&text).unwrap();
+            let result = string.evaluate_document(&doc, &Bindings::new(), &options);
+            assert_eq!(result.unwrap(), Some(json!(text)));
+            let cut = Document::parse_cut(&wrap("b", &inner), &read).unwrap();
+            let result = string.evaluate_document(&cut, &Bindings::new(), &options);
+            assert_eq!(result.unwrap(), Some(json!(wrap("b", &inner))));
+        }
+        for (text, inner) in [
+            (nested(1_001, "1"), nested(1_000, "1")),
+            (objects(1_001), objects(1_000)),
+            (nested(100_000, ""), nested(100_000, "")),
+        ] {
+            assert!(Document::parse(&text).is_err());
+            assert!(Document::parse_cut(&wrap("b", &inner), &read).is_err());
+            let skipped = Document::parse_cut(&format!(r#"{{"a":{text},"b":2}}"#), &read).unwrap();
+            assert_eq!(skipped.to_json(), json!({"b": 2}));
+        }
+        assert!(Document::parse(&"[".repeat(100_000)).is_err());
     };
     std::thread::Builder::new()
         .stack_size(1 << 20)

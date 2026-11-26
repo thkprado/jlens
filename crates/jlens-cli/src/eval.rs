@@ -198,7 +198,7 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
     let result = if auditing || args.trace_log.is_some() {
         // The audit and the trace log record input values: parse the whole document.
         let doc = match &input {
-            Some((text, name)) => match serde_json::from_str(text) {
+            Some((text, name)) => match crate::parse_json(text) {
                 Ok(doc) => Some(doc),
                 Err(e) => return invalid(e, name),
             },
@@ -224,7 +224,7 @@ pub fn run(args: EvalArgs) -> Result<ExitCode> {
                     && let Some((text, name)) = &input
                 {
                     // The document was parsed without the fields the expression does not read.
-                    let doc: Value = match serde_json::from_str(text) {
+                    let doc: Value = match crate::parse_json(text) {
                         Ok(doc) => doc,
                         Err(e) => return invalid(e, name),
                     };
@@ -302,7 +302,7 @@ fn ndjson(
             Ok(value) if args.filter => {
                 if truthy(value.as_ref()) {
                     // The line was parsed without the fields the expression does not read.
-                    let doc: Value = match serde_json::from_str(text) {
+                    let doc: Value = match crate::parse_json(text) {
                         Ok(doc) => doc,
                         Err(e) => {
                             failures += 1;
