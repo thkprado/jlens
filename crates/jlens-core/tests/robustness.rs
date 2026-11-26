@@ -139,7 +139,12 @@ fn valid() -> impl Strategy<Value = String> {
                 .clone()
                 .prop_map(|v| format!("items#$i[[$i, $x[0]]].{v}")),
             inner.clone().prop_map(|v| format!("items@$o.{v}")),
-            (inner.clone(), inner).prop_map(|(v, u)| format!("{v} ~> |items|{{'p': {u}}}|")),
+            (inner.clone(), inner.clone())
+                .prop_map(|(v, u)| format!("{v} ~> |items|{{'p': {u}}}|")),
+            // Any location, which may reach outside the copy (`D1014`), under a `$clone` the
+            // transform does not use (0.36 #18).
+            (inner.clone(), inner.clone(), inner)
+                .prop_map(|(v, l, u)| format!("($clone := {u}; {v} ~> |{l}|{{'p': {u}}}|)")),
         ]
     })
 }

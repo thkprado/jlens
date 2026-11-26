@@ -156,3 +156,24 @@ CLI, the fastest of five runs of 20,000 calls, less the 41 to 56 ms of starting 
 machine's noise, and #10 checks them on the M1. The pictures that took longest before, in a
 debug build: `[Y` and 600,000 times `0.` and `]` took 414 s and now under 2 s (a set in place of
 a list for the regularity of separators), and `[f,150000000]` 63 s and about 4 GB, now `D3142`.
+
+## #18: a transform's matches checked against its copy
+
+jsonata-js#870 checks, before a transform changes anything, that every match is an object or
+array of the copy, by collecting all of the copy's objects into a set. jlens's first port walked
+the copy until it had found every match, with the standard library's hasher: on the M1, `cargo
+xtask ab d3f9a65 .` gave the benchmark's transform (`$ ~> |items|…|`) +9.9% in `evaluate`
+mode (187 → 206 µs) and +11.0% in `document` mode (170 → 188 µs). A location that is a path of
+names, `$`, `*` or `**`, whose steps may filter, reads only values of the copy, which holds no
+function, so the check is skipped for it; the walk uses foldhash for what remains. Then, 10
+rounds each:
+
+| case | mode | d3f9a65 | #18 | B/A |
+|---|---|---:|---:|---:|
+| transform | `evaluate` | 188 µs | 187 µs | −0.5% |
+| transform | `document` | 170 µs | 169 µs | −0.4% |
+| `$ ~> \|items[quantity > 0]\|…\|`, a scratch case | `evaluate` | 198 µs | 198 µs | −0.1% |
+
+Before filters took the fast path, the scratch case paid the walk: 198 → 210 µs, +5.7%. A
+location that may reach outside the copy (`$$`, a variable, a function call, a constructor) still
+pays it, in time linear in the copy.

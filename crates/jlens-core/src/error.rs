@@ -361,6 +361,7 @@ catalog! {
     "D1011" => "Stack overflow. Check for non-terminating recursive function.  Consider rewriting as tail-recursive",
     "D1012" => "Evaluation timeout after {{value}} milliseconds. Check for infinite loop",
     "D1013" => "Object property names starting with _jsonata_ are reserved for internal use: {{value}}",
+    "D1014" => "The location in a transform expression can only match objects in the copy that is being transformed",
     "T2001" => "The left side of the {{token}} operator must evaluate to a number",
     "T2002" => "The right side of the {{token}} operator must evaluate to a number",
     "T2003" => "The left side of the range operator (..) must evaluate to an integer",

@@ -91,6 +91,7 @@ Raised while evaluating, for other run-time problems.
 | `D1011` | `Stack overflow. Check for non-terminating recursive function.  Consider rewriting as tail-recursive` |
 | `D1012` | `Evaluation timeout after {{value}} milliseconds. Check for infinite loop` |
 | `D1013` | `Object property names starting with _jsonata_ are reserved for internal use: {{value}}` |
+| `D1014` | `The location in a transform expression can only match objects in the copy that is being transformed` |
 | `D2005` | `The left side of := must be a variable name (start with $)` |
 | `D2014` | `The size of the sequence allocated by the range operator (..) must not exceed 1e7.  Attempted to allocate {{value}}.` |
 | `D2015` | `The maximum sequence length of {{value}} was exceeded.` |

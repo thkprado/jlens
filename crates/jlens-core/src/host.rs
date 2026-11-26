@@ -320,18 +320,18 @@ mod tests {
     /// evaluation ends (0.32 #20, #21). The host function's `Arc` counts the values left alive
     /// that hold it.
     #[test]
-    fn a_transform_in_place_leaves_no_cycle() {
+    fn a_transform_leaves_no_cycle() {
         let h = HostFunction::new(0, |_, _| Ok(None));
         let imp = Arc::clone(&h.imp);
         let bindings = Bindings::new().function("h", h);
         let mut leaked = Vec::new();
         for source in [
-            // A call's frame, holding the object and the function.
-            "($clone := function($x){$x}; $f := function($v, $k){ ($g := function(){$v}; \
+            // A call's frame and a tuple's, holding the object and the function. Before 0.36, a
+            // `$clone` the expression bound to `function($x){$x}` made these transforms change
+            // the object itself; they change a copy since (0.36 #18).
+            "($f := function($v, $k){ ($g := function(){$v}; \
              $v ~> | $ | {'g': $g} |; 1) }; $f({'a': 1}, $h))",
-            // A tuple's frame, holding the object, which holds the function.
-            "($clone := function($x){$x}; [{'a': 1, 'k': $h}]@$i.($g := function(){$i}; \
-             $i ~> | $ | {'g': $g} |; 1))",
+            "[{'a': 1, 'k': $h}]@$i.($g := function(){$i}; $i ~> | $ | {'g': $g} |; 1)",
             // The built-in `$clone`: a copy, which no frame made before holds.
             "$map([{'a': 1, 'k': $h}], function($v){ ($g := function(){$v}; \
              $v ~> | $ | {'g': $g} |; 1) })",

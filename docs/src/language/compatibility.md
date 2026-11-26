@@ -141,7 +141,9 @@ are pull requests #855 and #856, in main since `bec2aa4` and `bc935d5`, which jl
 they were merged. Pull request #860, in main since `4bfc27e`, adds template strings (`«...»`), a
 feature jlens does not have yet, and fixes how a regular expression that starts a block or an
 array is read, which jlens takes alone, the row after #856. The rows after it are pull request
-#869, in main since `817a7a3`, which rewrote the date/time pictures. The differential test counts these cases apart when it runs against 2.2.2 ("fixed
+#869, in main since `817a7a3`, which rewrote the date/time pictures, up to the row on `[P]`. The
+last three are pull requests #870, #871 and #873, in main since `01b828c`, `1257a75` and
+`0c72fb8`. The differential test counts these cases apart when it runs against 2.2.2 ("fixed
 after 2.2.2"), and runs against main with `--jsonata-js <checkout>`.
 
 | Topic | jsonata-js 2.2.2 | jlens, and jsonata-js since |
@@ -162,6 +164,9 @@ after 2.2.2"), and runs against main with `--jsonata-js <checkout>`.
 | A picture whose digits are not ASCII, on text with other characters (`$parseInteger('١٬٢٣٤', '#٬##١')`, `$toMillis('2018', '[Y١]')`, `$parseInteger('12', '##０')`) | A `RangeError` without a code (`Invalid code point`). jlens before 0.36 ended the number at a character below the family: NaN for the last, and the date NaN | The digits of the family are read as digits, and any other character is left for `parseInt` to read or stop at: 1234, 2018, 12. `$toMillis` matches ASCII digits there, as in any picture |
 | Two numbers with no literal between them in `$toMillis`, where the second is not in digits (`'2018XI'` with `[Y][MI]`) or the first is fractional seconds (`'12:00:00.5002018'` with `[s01].[f001][Y0001]`) | The first gets the width of its picture whenever a marker follows: `[Y]` takes one digit, so `'2018XI'` gives no date; fractional seconds take any number of digits, so they read `5002018` | The first gets a fixed width only before a number in digits or fractional seconds, and only when it is always written with that many digits: fractional seconds with as many digits as their picture, a time zone `[Z01]` or `[Z0001]`, the minutes after a time zone's separator. `'2018XI'` is November 2018; `'+053012'` with `[Z0101][s01]` is +05:30 and 12 seconds |
 | `[P]` in `$toMillis` on a word that is a property of JavaScript objects (`'constructor'`) | Read as a value, so the date is made | Only `am` and `pm` are read; any other word is missing, so the picture lacks a part: `D3136` |
+| A transform whose location matches a value outside its copy, through `$$` or a variable (`$ ~> \|$$.foo\|{'x': 1}\|`, `($v := {'k': {}}; $ ~> \|$v.k\|{'x': 1}\|)`), or a function (`{} ~> \|$sum\|{'x': 1}\|`) | That value is changed: the input, a variable's object, or the function object, while the copy is returned unchanged. jlens before 0.36 changed the copy of `$$`, an object of the expression's, and nothing for a function | `D1014`, located at the transform, and nothing is changed: every match is checked before the first update. Arrays and objects reached from the copy are matched as before |
+| A transform in an expression that binds `$clone` (`($clone := function($v){ 'x' }; $ ~> \|a\|{'y': 1}\|)`) | The transform copies with the expression's `$clone`: "x" here, `T2013` when it is no function, and the input itself is changed when it returns its argument | The built-in `$clone` or the host's: a function bound as `clone`, or `T2013` for a variable of the host's that is no function. jsonata-js's main still takes a `$clone` bound at the top level outside any block (`[$clone := function($v){$v}, $ ~> \|a\|{'y': 1}\|]`), in the frame of the host's variables, so that it changes the input; jlens does not, so no transform changes its input |
+| `**` over an object or array that holds a function (`$count({'a': {'f': $sum, 'b': 2}}.**)`, `[$sum].**`) | The function is among the descendants: 4 | No function: 3, and nothing for `[$sum].**`. `*` still gives the functions an object holds (`{'f': $sum}.*`), in both engines |
 
 ## Extensions
 

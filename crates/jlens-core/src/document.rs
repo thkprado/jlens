@@ -34,8 +34,8 @@ use crate::value::{Keys, Map, Value};
 /// }
 /// ```
 ///
-/// Evaluations never modify the document. The one exception is a transform (`|...|`) whose
-/// expression rebinds `$clone` to a function that does not copy its argument.
+/// Evaluations never modify the document: a transform (`|...|`) changes only the copy that the
+/// built-in `$clone`, or the host's, makes.
 ///
 /// A `Document` is not `Send`. Convert it on the thread that evaluates against it.
 pub struct Document {

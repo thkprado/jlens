@@ -227,6 +227,24 @@ impl<'a> Frame<'a> {
         }
     }
 
+    /// The root frame, which holds the evaluation's variables and the host functions.
+    fn root(&self) -> &Frame<'a> {
+        let mut frame = self;
+        while let Some(parent) = &frame.parent {
+            frame = parent;
+        }
+        frame
+    }
+
+    /// The host function of a name, or else the built-in, as [`Self::builtin`] finds it but
+    /// without binding it, so that a variable the expression bound in the root frame stays.
+    fn function(&self, name: &str) -> Value<'a> {
+        match self.functions.as_ref().and_then(|f| f.get(name)) {
+            Some(function) => Value::function(Function::Host(function.clone())),
+            None => functions::native_value(name).unwrap_or_default(),
+        }
+    }
+
     /// [`Self::lookup`] of a variable read in a lambda's body, which `param` places: when this
     /// frame is a call of that lambda with all its parameters, the parameter's value, or for a
     /// name that none of them has, the lookup from the frame above, without comparing the name
@@ -259,10 +277,7 @@ impl<'a> Frame<'a> {
     /// never outlive their evaluation, so each evaluation has its own.
     #[inline(never)]
     fn builtin(&self, name: &str) -> Value<'a> {
-        let value = match self.functions.as_ref().and_then(|f| f.get(name)) {
-            Some(function) => Value::function(Function::Host(function.clone())),
-            None => functions::native_value(name).unwrap_or_default(),
-        };
+        let value = self.function(name);
         if !value.is_undefined() {
             self.vars.borrow_mut().set(name, value.clone());
         }
@@ -373,6 +388,10 @@ pub(crate) struct Evaluator<'t, 'a> {
     /// `Expression` is shared between threads, so its tree cannot hold the `Rc<str>` a value
     /// takes.
     literals: Vec<Option<Rc<str>>>,
+    /// The `$clone` a transform copies with: a variable of the host's, set when the evaluation
+    /// starts, or else its function or the built-in, found by the first transform. Never one
+    /// the expression binds (jsonata-js#871), so no transform changes the input.
+    copier: Option<Value<'a>>,
 }
 
 impl Drop for Evaluator<'_, '_> {
@@ -577,6 +596,7 @@ pub(crate) fn evaluate<'a, 'v, R>(
         source,
         literals: Vec::new(),
         stack_floor: crate::stack::floor(),
+        copier: None,
     };
     let mut input = input;
     // The host functions are looked up on a miss: a variable, bound to a document or in
@@ -585,6 +605,9 @@ pub(crate) fn evaluate<'a, 'v, R>(
     // the frame goes on `cyclic` only when the expression binds a function in it (0.35 #9).
     let mut vars = Vars::Empty;
     for (name, value) in variables {
+        if name == "clone" {
+            ev.copier = Some(value.clone());
+        }
         // The input takes the place of a variable named `$`, as it did when it was bound.
         if name != "$" {
             vars.set(name, value);
@@ -2822,7 +2845,14 @@ impl<'a> Evaluator<'_, 'a> {
         if obj.is_undefined() {
             return Ok(Value::Undefined);
         }
-        let clone = env.lookup("clone");
+        let clone = match &self.copier {
+            Some(clone) => clone.clone(),
+            None => {
+                let clone = env.root().function("clone");
+                self.copier = Some(clone.clone());
+                clone
+            }
+        };
         if !clone.is_function() {
             return Err(Error::new("T2013"));
         }
@@ -2831,7 +2861,12 @@ impl<'a> Evaluator<'_, 'a> {
         if matches.is_undefined() {
             return Ok(result);
         }
-        for m in matches.items_or_self() {
+        let matches = matches.items_or_self();
+        // Only the copy can change: every match is checked before any is (jsonata-js#870).
+        if !reads_copy_alone(&def.pattern) && outside_copy(&result, &matches) {
+            return Err(Error::new("D1014"));
+        }
+        for m in matches {
             let update = self.eval(&def.update, &m, env)?;
             if !update.is_undefined() {
                 let Value::Object(update) = &update else {
@@ -3191,6 +3226,8 @@ fn recurse_descendants<'a>(
             push_within(out, input.clone(), max)?;
             o.borrow().values().try_for_each(|v| nested(v, out))
         }
+        // A function is no descendant (jsonata-js#873); `*` still gives those an object holds.
+        Value::Function(_) => Ok(()),
         other => push_within(out, other.clone(), max),
     }
 }
@@ -3248,6 +3285,77 @@ enum Reach {
     Function,
     /// Neither: storing it closes no cycle.
     Nothing,
+}
+
+/// Whether a transform's location is a path of names, `$`, `*` or `**` alone, with no binding
+/// or grouping, whose steps may filter (`items`, `a.b[c > 1]`): such a path gives only values of
+/// the copy it reads, which holds no function, as the built-in `$clone` and the host's give none,
+/// so [`outside_copy`] would walk the copy to find each match for nothing. A filter only selects.
+fn reads_copy_alone(pattern: &Node) -> bool {
+    let filters = |stages: &[Stage]| stages.iter().all(|s| matches!(s, Stage::Filter { .. }));
+    let plain = |node: &Node| {
+        let a = &node.attrs;
+        filters(&a.stages)
+            && filters(&a.predicate)
+            && a.group.is_none()
+            && !a.tuple
+            && !a.cons_array
+            && a.focus.is_none()
+            && a.index.is_none()
+            && a.ancestor_label.is_none()
+    };
+    let simple = |step: &Node| {
+        plain(step)
+            && match &step.kind {
+                NodeKind::Name { .. } | NodeKind::Wildcard | NodeKind::Descendant => true,
+                NodeKind::Variable { name } => name.is_empty(),
+                _ => false,
+            }
+    };
+    match &pattern.kind {
+        NodeKind::Path { steps, .. } => plain(pattern) && steps.iter().all(simple),
+        _ => simple(pattern),
+    }
+}
+
+/// Whether one of a transform's `matches` is a function, or an array or object that is neither
+/// `copy` nor reached from it through arrays and objects (jsonata-js's `objectsWithin`). The walk
+/// stops once every match is found; matching the copy itself needs none.
+fn outside_copy<'a>(copy: &Value<'a>, matches: &[Value<'a>]) -> bool {
+    fn address(value: &Value<'_>) -> Option<*const ()> {
+        match value {
+            Value::Array(a) => Some(Rc::as_ptr(a) as *const ()),
+            Value::Object(o) => Some(Rc::as_ptr(o) as *const ()),
+            _ => None,
+        }
+    }
+    type Set = std::collections::HashSet<*const (), foldhash::fast::RandomState>;
+    let mut pending = Set::default();
+    for m in matches {
+        if m.is_function() {
+            return true;
+        }
+        pending.extend(address(m));
+    }
+    let mut seen = Set::default();
+    let mut stack = vec![copy.clone()];
+    while !pending.is_empty()
+        && let Some(v) = stack.pop()
+    {
+        let Some(at) = address(&v) else { continue };
+        pending.remove(&at);
+        if !seen.insert(at) {
+            continue;
+        }
+        match &v {
+            // An array or object not read yet holds only values of the input, none of which
+            // exists before its parent is read, so none is a match.
+            Value::Object(o) if !o.is_unread() => stack.extend(o.borrow().values().cloned()),
+            Value::Array(a) if !a.is_unread() => stack.extend(a.items().iter().cloned()),
+            _ => {}
+        }
+    }
+    !pending.is_empty()
 }
 
 /// Whether `object` can be reached from `values` (or is one of them) through arrays and

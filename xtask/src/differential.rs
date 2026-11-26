@@ -189,7 +189,8 @@ pub fn run(args: &[String]) -> Result<()> {
             && (fixed_after_2_2_2(expr)
                 || digits_fixed_after_2_2_2(expr, expected)
                 || regex_after_prefix(expr, expected)
-                || long_roman(expr, expected))
+                || long_roman(expr, expected)
+                || functions_fixed_after_2_2_2(expr, &actual))
         {
             // A checkout is compared without this rule, so it tells which of the fixes it has.
             fixed += 1;
@@ -705,6 +706,37 @@ fn digits_fixed_after_2_2_2(expr: &str, expected: &JsonValue) -> bool {
         .any(|w| w[0] == b'e' && (w[1] == b'+' || w[2] == b'+'));
     (calls("formatNumber") || calls("formatInteger"))
         && (exponent || format_call_fixed_after_2_2_2(expr))
+}
+
+/// Whether jsonata-js 2.2.2 may have read a function where its main, since pull requests #870
+/// and #873, does not: jlens failed with `D1014`, for a transform whose location matched a
+/// function, which 2.2.2 changed; or `**` walks a value that may be a function (a lambda, a
+/// regular expression, a transform, a partial application or a built-in function named without
+/// a call), which 2.2.2 gave among the descendants (`[$sum, 1].**`).
+fn functions_fixed_after_2_2_2(expr: &str, actual: &JsonValue) -> bool {
+    if actual["error"] == "D1014" {
+        return true;
+    }
+    let Ok(compiled) = Expression::compile(expr) else {
+        return false;
+    };
+    let (mut descendant, mut function) = (false, false);
+    compiled
+        .ast()
+        .root
+        .walk(&mut |node: &Node| match &node.kind {
+            NodeKind::Descendant => descendant = true,
+            NodeKind::Lambda(_)
+            | NodeKind::Regex { .. }
+            | NodeKind::Transform(_)
+            | NodeKind::Partial { .. } => function = true,
+            NodeKind::Variable { name } => {
+                function |= FUNCTIONS.contains(&format!("${name}").as_str())
+                    && !expr[node.span.end..].trim_start().starts_with('(');
+            }
+            _ => {}
+        });
+    descendant && function
 }
 
 /// Whether jsonata-js 2.2.2 may have written more than ten thousand `M`s for a call of
@@ -1276,6 +1308,26 @@ mod tests {
         ] {
             assert!(!concurrent_binding(apart), "{apart}");
         }
+    }
+
+    #[test]
+    fn functions_among_descendants_are_fixed_after_2_2_2() {
+        let value = json!({"value": 1});
+        for expr in [
+            "[$sum, 1].**",
+            "{'a': function(){1}}.**",
+            "[/a/].**",
+            "$count({'f': $string}.**)",
+        ] {
+            assert!(functions_fixed_after_2_2_2(expr, &value), "{expr}");
+        }
+        for expr in ["$sum(**)", "[1, $string(2)].**", "{'a': $sum([1])}.*"] {
+            assert!(!functions_fixed_after_2_2_2(expr, &value), "{expr}");
+        }
+        assert!(functions_fixed_after_2_2_2(
+            "$sum ~> |$|{}|",
+            &json!({"error": "D1014"})
+        ));
     }
 
     #[test]

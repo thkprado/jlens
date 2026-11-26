@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use jlens_core::{Bindings, Document, Expression, Options};
+use jlens_core::{Bindings, Document, Expression, HostFunction, Options};
 use serde_json::{Value, json};
 
 fn fixture(name: &str) -> String {
@@ -1952,6 +1952,16 @@ fn transforms_change_a_copy_alone() {
             "($f := function(){1}; {'f': $f, 'g': [$f, 1], 'n': 0.1 + 0.2, 'z': -0} ~> |$|{}|)",
             json!({"f": "", "g": ["", 1], "n": 0.3, "z": 0}),
         ),
+        // A `$clone` the expression binds is not the transform's (jsonata-js#871), not even at
+        // the top level, where jsonata-js's main still takes it and changes the input.
+        (
+            "($clone := function($x){$x}; $ ~> |items|{}, ['b', 'a']|)",
+            json!({"items": [{}, {}], "n": 0.3}),
+        ),
+        (
+            "[$clone := function($x){$x}, $ ~> |items|{}, ['b', 'a']|, $][2]",
+            input.clone(),
+        ),
     ] {
         let expr = Expression::compile(source).unwrap();
         let result = expr.evaluate(Some(&input), &Bindings::new()).unwrap();
@@ -1962,6 +1972,91 @@ fn transforms_change_a_copy_alone() {
         assert_eq!(result, Some(expected), "{source} against a document");
         assert_eq!(document.to_json(), input, "{source}: the document changed");
     }
+}
+
+/// As jsonata-js's main since pull requests #870, #871 and #873: a transform's location matches
+/// only values of its copy, a transform copies with the host's `$clone` or the built-in, and
+/// `**` gives no functions.
+#[test]
+fn transforms_match_only_their_copy() {
+    let input = json!({"foo": {"a": 1}, "items": [{"a": 1}]});
+    for (source, position) in [
+        ("$ ~> | $$.foo | {'x': 1} |", 6),
+        ("($v := {'k': {}}; $ ~> | $v.k | {'x': 1} |)", 24),
+        ("{'a': 1} ~> | $sum | {'x': 1} |", 13),
+        ("($f := function(){1}; {'a': 1} ~> | $f | {'x': 1} |)", 35),
+        ("{'a': 1} ~> | [[1]] | {'x': 1} |", 13),
+        ("{'a': {}} ~> | {'q': 1} | {'x': 1} |", 14),
+        // Every match is checked before any changes.
+        (
+            "($t := {'a': {}}; [$t ~> | [a, $$.foo] | {'x': 1} |, $t])",
+            26,
+        ),
+    ] {
+        let err = Expression::compile(source)
+            .unwrap()
+            .evaluate(Some(&input), &Bindings::new())
+            .unwrap_err();
+        assert_eq!(err.code(), "D1014", "{source}");
+        assert_eq!(err.position(), Some(position), "{source}");
+    }
+    for (source, expected) in [
+        (
+            "$ ~> | $ | {'x': 1} |",
+            json!({"foo": {"a": 1}, "items": [{"a": 1}], "x": 1}),
+        ),
+        (
+            "$ ~> | items | {'x': 1} |",
+            json!({"foo": {"a": 1}, "items": [{"a": 1, "x": 1}]}),
+        ),
+        (
+            "{'a': [[1], [2]]} ~> | a | {'x': 1} |",
+            json!({"a": [[1], [2]]}),
+        ),
+        // A filter only selects among the values of the copy.
+        (
+            "{'a': [{'b': 1}, {'b': 2}]} ~> | a[b > 1] | {'x': 1} |",
+            json!({"a": [{"b": 1}, {"b": 2, "x": 1}]}),
+        ),
+        (
+            "{'a': [[{'b': 1}], [{'b': 2}]]} ~> | a[0] | {'x': 1} |",
+            json!({"a": [[{"b": 1, "x": 1}], [{"b": 2}]]}),
+        ),
+        (
+            "($clone := function($v){ 'x' }; $ ~> | foo | {'y': 1} |).foo",
+            json!({"a": 1, "y": 1}),
+        ),
+        (
+            "($clone := 5; $ ~> | foo | {'y': 1} |).foo",
+            json!({"a": 1, "y": 1}),
+        ),
+        ("$count({'a': {'f': $sum, 'b': 2}}.**)", json!(3)),
+        ("[$sum, function(){1}, /a/, 1].**", json!(1)),
+    ] {
+        let result = Expression::compile(source)
+            .unwrap()
+            .evaluate(Some(&input), &Bindings::new())
+            .unwrap();
+        assert_eq!(result, Some(expected), "{source}");
+    }
+    assert_eq!(eval("$sum.**", json!(null)), None);
+    // The host's `$clone`, as a function or as a variable that is none.
+    let marked = Bindings::new().function(
+        "clone",
+        HostFunction::new(1, |args, _| {
+            let mut copy = args[0].clone().unwrap_or_default();
+            copy["copied"] = json!(true);
+            Ok(Some(copy))
+        }),
+    );
+    let expr =
+        Expression::compile("($clone := function($v){ $v }; $ ~> | foo | {'y': 1} |)").unwrap();
+    let result = expr.evaluate(Some(&json!({"foo": {}})), &marked).unwrap();
+    assert_eq!(result, Some(json!({"foo": {"y": 1}, "copied": true})));
+    let err = expr
+        .evaluate(Some(&input), &Bindings::new().var("clone", 5))
+        .unwrap_err();
+    assert_eq!(err.code(), "T2013");
 }
 
 #[test]

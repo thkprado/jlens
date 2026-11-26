@@ -290,6 +290,21 @@ Updates see the original values. Here `Total` uses the price before the 20% incr
 => {"Price": 12, "Quantity": 3, "Total": 30}
 ```
 
+`location` can match only objects of the copy. One that reaches outside it, through `$$` or a
+variable bound outside the transform, or that matches a function, is an error (`D1014`), and
+nothing is changed:
+
+```jsonata-example
+differs: jsonata-js 2.2.2 gives {} and sets the limit of the input to 0 (fixed in its main, #870)
+input: {"settings": {"limit": 10}}
+{} ~> |$$.settings|{"limit": 0}|
+=> error D1014
+```
+
+The copy is made by the built-in [`$clone`](functions/misc.md#clone), or by a host function
+named `clone`; a `$clone` bound in the expression is not used, so a transform never changes its
+input.
+
 A transform is a function, so it can be bound to a variable and reused, or chained with other
 transforms. An update that would make an object contain itself is an error (`U1001`) in jlens;
 see [Compatibility](compatibility.md).
