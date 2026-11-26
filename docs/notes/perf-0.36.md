@@ -255,3 +255,30 @@ jsonata-python 0.7.2 and jsonata-jvm-compiler 1.0.7 have not changed.
 - **The regular expression engine**, aligned, each variant twice: the two runs within 3% of each
   other but `literal` (5.4 and 5.0 µs), the medians within 2% of
   #15's "after" column; the interrupt 2.4% over the 17 cases, `lookbehind` +9.9% in both pairs.
+
+## #21: the evaluator without `copier`
+
+The host's variable `clone` is kept in the root frame under a name no expression can write
+(`"\0clone"`), and each transform looks it up there, else the host's function or the built-in;
+`Evaluator::copier` is gone. On the M1, `python.py ab` (wheels of `4d1f9ca` and of it with the
+change, `p21`, built as in #10, new copies each round), and native `cargo xtask ab`:
+
+- **Natively**, `ab` of `evaluate` mode, ten rounds: against `4d1f9ca` every case within 1.5% but
+  `strings` (−10.4% median, −0.8% fastest: one slow process); against 0.35.0 as in #10 (number
+  formatting −25%, `recursion` +2.2%, `regex over a long text` +2.5%, every other within 2%).
+- **Python, as #10 ran it** (an SSH command, five rounds): `object constructor` with Python
+  values reads 97 µs for every build with the field (`629af7f`, #10's wheel of `dbf15a8` and
+  `4d1f9ca`, the last two the same code, level with each other) and 87 µs for every build without
+  it (0.35.0, `d3f9a65`, #10's `629af7f` without the field, `p21`): `4d1f9ca` → `p21` −10.4%,
+  `p21` against 0.35.0 −0.9%; `d3f9a65` → `629af7f` +12.5% and back −10.7% again.
+- **From a detached script** (`nohup`), the same wheels: `4d1f9ca` reads 87 µs as well. Twelve
+  sizes of the environment (a variable of 1 to 4,501 bytes, three rounds each): `object
+  constructor` 86.3 to 87.6 µs for `4d1f9ca` and `p21` at every size; 0.35.0 92.7 µs at one.
+  `regex` with Python values reads 68 to 71 µs (+3.6 to +7.5%) for `p21` at three sizes and 66
+  µs elsewhere; against a `Document`, 54 µs (+7%) for `p21` in the first script's environment
+  and for 0.35.0 at one size, 50 to 51 µs elsewhere.
+
+So the 10 µs was not the field's work, which only a transform reads: each build lands in a slow
+mode of one case or another with the process's environment, as `regex` did across the plan's
+commits in #10. Without the field, `object constructor` has no slow mode in any environment
+tried, which #21 asked for; `regex`'s modes, which 0.35.0 shows too, stay.

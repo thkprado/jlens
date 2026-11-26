@@ -32,6 +32,13 @@ const FEW_VARS: usize = 8;
 /// The bytes of the longest name kept in place: a [`Name`] takes 16 bytes.
 const SHORT_NAME: usize = 14;
 
+/// The name under which the root frame keeps a host's variable `clone`, for the transforms to
+/// copy with: no expression can write it, so one that binds `$clone` in that frame leaves the
+/// copier as it was (jsonata-js#871). A field of the evaluator holding it put Python's object
+/// constructor, with no transform, in a mode 10 to 13% slower in some environments of the
+/// process on the M1 (0.36 #21).
+const HOST_CLONE: &str = "\0clone";
+
 /// A name in a frame. Each binding of a block or a tuple, each host variable and each built-in
 /// looked up keeps one. Sharing the syntax tree's would count on one cache line for every thread
 /// (0.26 #20), so a name is copied, and a short one, as most are, needs no allocation (0.27 #7).
@@ -388,10 +395,6 @@ pub(crate) struct Evaluator<'t, 'a> {
     /// `Expression` is shared between threads, so its tree cannot hold the `Rc<str>` a value
     /// takes.
     literals: Vec<Option<Rc<str>>>,
-    /// The `$clone` a transform copies with: a variable of the host's, set when the evaluation
-    /// starts, or else its function or the built-in, found by the first transform. Never one
-    /// the expression binds (jsonata-js#871), so no transform changes the input.
-    copier: Option<Value<'a>>,
 }
 
 impl Drop for Evaluator<'_, '_> {
@@ -597,7 +600,6 @@ pub(crate) fn evaluate<'a, 'v, R>(
         source,
         literals: Vec::new(),
         stack_floor: crate::stack::floor(),
-        copier: None,
     };
     let mut input = input;
     // The host functions are looked up on a miss: a variable, bound to a document or in
@@ -607,7 +609,7 @@ pub(crate) fn evaluate<'a, 'v, R>(
     let mut vars = Vars::Empty;
     for (name, value) in variables {
         if name == "clone" {
-            ev.copier = Some(value.clone());
+            vars.set(HOST_CLONE, value.clone());
         }
         // The input takes the place of a variable named `$`, as it did when it was bound.
         if name != "$" {
@@ -2886,14 +2888,12 @@ impl<'a> Evaluator<'_, 'a> {
         if obj.is_undefined() {
             return Ok(Value::Undefined);
         }
-        let clone = match &self.copier {
-            Some(clone) => clone.clone(),
-            None => {
-                let clone = env.root().function("clone");
-                self.copier = Some(clone.clone());
-                clone
-            }
-        };
+        // The `$clone` a transform copies with: a variable of the host's, or else its function
+        // or the built-in. Never one the expression binds (jsonata-js#871), so no transform
+        // changes the input.
+        let root = env.root();
+        let host = root.vars.borrow().get(HOST_CLONE).cloned();
+        let clone = host.unwrap_or_else(|| root.function("clone"));
         if !clone.is_function() {
             return Err(Error::new("T2013"));
         }

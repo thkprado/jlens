@@ -2128,6 +2128,13 @@ fn transforms_match_only_their_copy() {
         .evaluate(Some(&input), &Bindings::new().var("clone", 5))
         .unwrap_err();
     assert_eq!(err.code(), "T2013");
+    // Bound at the top level, in the frame of the host's variables, `$clone` replaces the host's
+    // there, but not as the transform's.
+    let err = Expression::compile("[$clone := function($v){ $v }, $ ~> | foo | {'y': 1} |]")
+        .unwrap()
+        .evaluate(Some(&input), &Bindings::new().var("clone", 5))
+        .unwrap_err();
+    assert_eq!(err.code(), "T2013");
 }
 
 /// The cases of jsonata-js's advisory GHSA-3x2j-862j-x779, fixed in 2.3.0: a function as a

@@ -784,9 +784,10 @@ several commits of the plan. Natively every other case is within 3% in each mode
 a long text`, 2 to 4% slower in every mode, and 2% in Python and Java, from the ported commits;
 built aligned, `recursion`, 1.4 to 3.0% slower in plain builds, is within 1.5%. WebAssembly moves
 no other case more than 2% but times under 2 µs, printed to a tenth, and Java slows none more
-than 3.6%. In Python, `object constructor` with
-Python values takes 11 to 13% more, from a field that #18 added to the evaluator, and `regex` 4
-to 6% more with no commit that holds it.
+than 3.6%. In Python, `object constructor` with Python values took 11 to 13% more in some
+environments of the process with a field that #18 added to the evaluator, and is level without
+it (#21); `regex` takes 4 to 7% more in some environments, as 0.35.0 does in others, with no
+commit that holds it.
 
 On its own benchmark, the engine is within 2% of 0.35.0 on most cases; `backreference, no match`
 takes 10% more and `alternation of words` 5% more, and the interrupt 2.4% where it took 1.5%.
