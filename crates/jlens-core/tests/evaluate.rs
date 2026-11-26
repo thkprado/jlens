@@ -884,6 +884,51 @@ fn a_group_by_followed_by_a_step_is_evaluated_for_each_item_as_jsonata_js_main_d
     }
 }
 
+/// `$toMillis` reads month and day names, and `am` and `pm`, in any case, as jsonata-js's open
+/// pull request #875 does (its cases; 2.2.2 and main fail with `D3136`), and roman numerals too.
+/// A name it does not know is missing, so the picture lacks a part, where jlens before 0.36 read
+/// January or ignored the word.
+#[test]
+fn to_millis_reads_names_in_any_case() {
+    for (expr, millis) in [
+        (
+            "$toMillis('27 APRIL 2008', '[D1] [MN] [Y0001]')",
+            1_209_254_400_000_u64,
+        ),
+        (
+            "$toMillis('27 april 2008', '[D1] [Mn] [Y0001]')",
+            1_209_254_400_000,
+        ),
+        (
+            "$toMillis('2 FEB 2012', '[D1] [MN,3-3] [Y0001]')",
+            1_328_140_800_000,
+        ),
+        (
+            "$toMillis('MONDAY 2 APRIL 2018', '[FN] [D1] [MN] [Y0001]')",
+            1_522_627_200_000,
+        ),
+        (
+            "$toMillis($fromMillis(1522159380000, '[D1] [MN] [Y0001] [h]:[m01] [PN]'), '[D1] [MN] [Y0001] [h]:[m01] [PN]')",
+            1_522_159_380_000,
+        ),
+        ("$toMillis('MMXVIII-12', '[YI]-[M01]')", 1_543_622_400_000),
+        ("$toMillis('mmxviii-12', '[YI]-[M01]')", 1_543_622_400_000),
+    ] {
+        assert_eq!(eval(expr, json!(null)), Some(json!(millis)), "{expr}");
+    }
+    for expr in [
+        "$toMillis('27 Apri 2008', '[D1] [MNn] [Y0001]')",
+        "$toMillis('2020-01-01 10:00 xx', '[Y0001]-[M01]-[D01] [h]:[m01] [P]')",
+        "$toMillis('2020-01-01 10:00 constructor', '[Y0001]-[M01]-[D01] [h]:[m01] [P]')",
+    ] {
+        let error = Expression::compile(expr)
+            .unwrap()
+            .evaluate(None, &Bindings::new())
+            .unwrap_err();
+        assert_eq!(error.code(), "D3136", "{expr}");
+    }
+}
+
 #[test]
 fn quirks_found_by_the_differential_tests_match_jsonata_js() {
     // `$base64decode` reads each UTF-16 code unit as its low byte, as Node's `Buffer` does:
@@ -1343,9 +1388,19 @@ fn size_caps_stop_huge_values() {
     // 30 times a string of 10^7 bytes is over the default 256 MiB.
     let huge = r#"($s := $pad("", 10000000, "x"); $join([1..30].$s))"#;
     assert_eq!(code(huge, &Options::new()).as_deref(), Some("U1001"));
-    // An `M` per thousand: this Roman numeral would take 10^18 bytes.
+    // An `M` per thousand: above ten million, the number is written in digits, as jsonata-js's
+    // main does since its pull request #869, so 1e21 no longer takes 10^18 bytes.
     assert_eq!(
-        code("$formatInteger(1e21, 'I')", &Options::new()).as_deref(),
+        eval("$formatInteger(1e21, 'I')", json!(null)),
+        Some(json!("1000000000000000000000"))
+    );
+    // Ten thousand `M`s are still over a cap of 10 bytes.
+    assert_eq!(
+        code(
+            "$formatInteger(1e7, 'I')",
+            &Options::new().max_string_length(10)
+        )
+        .as_deref(),
         Some("U1001")
     );
 

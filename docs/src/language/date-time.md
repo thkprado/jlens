@@ -67,7 +67,7 @@ A *presentation modifier* after the component letter chooses how it is written:
 | `w`, `W`, `Ww` | the number in words |
 | `I`, `i` | Roman numerals |
 | `o` after the presentation | an ordinal: `1st`, `first` |
-| `,min-max` | the minimum and maximum width (`[MNn,3-3]` gives `Jan`) |
+| `,min-max` | the minimum and maximum width (`[MNn,3-3]` gives `Jan`), at most 100 (`D3142` above) |
 
 Literal square brackets are written `[[` and `]]`.
 
@@ -135,6 +135,19 @@ $toMillis("Monday, 10th December 2018", "[FNn], [D1o] [MNn] [Y]")
 $toMillis("2018-12-10 14:00 +01:00", "[Y]-[M]-[D] [H]:[m] [Z]") ~> $fromMillis()
 => "2018-12-10T13:00:00.000Z"
 ```
+
+The timestamp is matched without regard to case, so names and roman numerals are read in any
+case:
+
+```jsonata-example
+differs: jsonata-js reads only the name in title case, "April", and fails with D3136
+$toMillis("27 APRIL 2008", "[D1] [MN] [Y0001]") ~> $fromMillis("[Y]-[M01]-[D01]")
+=> "2008-04-27"
+```
+
+A timestamp that does not match the picture gives no date. Matching takes time proportional to
+the length of the timestamp times the parts of the picture, however the picture is built, and a
+timestamp whose length times the parts passes a million gives no date either.
 
 ---
 

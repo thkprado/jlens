@@ -188,7 +188,8 @@ pub fn run(args: &[String]) -> Result<()> {
         } else if checkout.is_none()
             && (fixed_after_2_2_2(expr)
                 || digits_fixed_after_2_2_2(expr, expected)
-                || regex_after_prefix(expr, expected))
+                || regex_after_prefix(expr, expected)
+                || long_roman(expr, expected))
         {
             // A checkout is compared without this rule, so it tells which of the fixes it has.
             fixed += 1;
@@ -704,6 +705,43 @@ fn digits_fixed_after_2_2_2(expr: &str, expected: &JsonValue) -> bool {
         .any(|w| w[0] == b'e' && (w[1] == b'+' || w[2] == b'+'));
     (calls("formatNumber") || calls("formatInteger"))
         && (exponent || format_call_fixed_after_2_2_2(expr))
+}
+
+/// Whether jsonata-js 2.2.2 may have written more than ten thousand `M`s for a call of
+/// `$formatInteger`: a number above ten million in roman numerals, which its main writes in
+/// decimal digits since pull request #869, as jlens does (`$formatInteger(12345678, 'i')`). A
+/// result with such a run counts, and so does a call on such a literal with a roman picture,
+/// whose result may not show it (`$parseInteger($formatInteger(12345678, 'i'), 'i')`).
+fn long_roman(expr: &str, expected: &JsonValue) -> bool {
+    if !expr.contains("$formatInteger(") {
+        return false;
+    }
+    if expected
+        .to_string()
+        .to_ascii_uppercase()
+        .contains(&"M".repeat(10_001))
+    {
+        return true;
+    }
+    let Ok(compiled) = Expression::compile(expr) else {
+        return false;
+    };
+    let mut found = false;
+    compiled.ast().root.walk(&mut |node: &Node| {
+        if let NodeKind::Function { procedure, args } = &node.kind
+            && matches!(&procedure.kind, NodeKind::Variable { name } if name == "formatInteger")
+        {
+            let above = args
+                .first()
+                .is_some_and(|a| matches!(a.kind, NodeKind::Number { value } if value.abs() > 1e7));
+            let roman = args.get(1).is_some_and(|a| {
+                matches!(&a.kind, NodeKind::String { value }
+                    if matches!(value.split(';').next(), Some("i" | "I")))
+            });
+            found |= above && roman;
+        }
+    });
+    found
 }
 
 /// Whether jlens wrote the exact digits of `$formatBase` where jsonata-js did not: from 2^53, in a
@@ -1238,6 +1276,21 @@ mod tests {
         ] {
             assert!(!concurrent_binding(apart), "{apart}");
         }
+    }
+
+    #[test]
+    fn long_roman_numerals_are_fixed_after_2_2_2() {
+        let ms = json!({"value": "m".repeat(12_345) + "dclxxviii"});
+        assert!(long_roman("$formatInteger(12345678, 'i')", &ms));
+        let short = json!({"value": "M".repeat(10_000)});
+        assert!(!long_roman("$formatInteger(1e7, 'I')", &short));
+        assert!(!long_roman("$string($pad('', 20000, 'M'))", &ms));
+        let round_trip = "$parseInteger($formatInteger(12345678, 'i'), 'i')";
+        assert!(long_roman(round_trip, &json!({"value": 12345678})));
+        assert!(!long_roman(
+            "$formatInteger(12345678, '0')",
+            &json!({"value": "12345678"})
+        ));
     }
 
     #[test]

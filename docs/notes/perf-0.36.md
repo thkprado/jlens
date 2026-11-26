@@ -137,3 +137,22 @@ alone does not slow on `\w+`: the same bisection with a case `\w+` over the pros
 commit. What `ab` shows is outside the engine's search: in `Searcher`, through which jlens
 searches and the benchmark does not, or in the layout of the jlens binary. #10 measures the
 release against 0.35.0 and shows whether it stays.
+
+## #17: the date/time pictures of jsonata-js#869
+
+`$toMillis` no longer builds a regular expression from its picture for each call: a matcher
+walks the parts, in time linear in the timestamp's length times the parts. The benchmark has no
+date case, so `cargo xtask ab` measures nothing here; a rough run on the Ryzen (Windows, release
+CLI, the fastest of five runs of 20,000 calls, less the 41 to 56 ms of starting the process and
+`$count([1..20000])`) compares 0.35.0 with this change:
+
+| expression, 20,000 calls | 0.35.0 | #17 |
+|---|---:|---:|
+| `$toMillis('2018-12-10 14:00:NN', '[Y]-[M]-[D] [H]:[m]:[s]')` | 271 ms | 103 ms |
+| `$toMillis('Monday, 10th December 2018', '[FNn], [D1o] [MNn] [Y]')` | 324 ms | 99 ms |
+| `$fromMillis(…, '[FNn], [D1o] [MNn] [Y] [h]:[m01] [P]')` | 56 ms | 62 ms |
+
+`$fromMillis` changed only in its width checks and the roman bound; its 6 ms are within this
+machine's noise, and #10 checks them on the M1. The pictures that took longest before, in a
+debug build: `[Y` and 600,000 times `0.` and `]` took 414 s and now under 2 s (a set in place of
+a list for the regularity of separators), and `[f,150000000]` 63 s and about 4 GB, now `D3142`.

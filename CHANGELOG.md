@@ -92,6 +92,23 @@ All notable changes are recorded here. The format follows
   bound to an array constructor, includes an array: `($p := ['a', 'b']; $p.($length($)))` is
   typed as a number or an array, where it was typed as a number, which its result `[1, 1]`
   contradicts. Found by a case of the new suite.
+- The date/time pictures follow jsonata-js's pull request #869, which its main merged after
+  2.2.2. `$toMillis` matches a picture with no regular expression, in time linear in the
+  timestamp's length times the picture's parts, so a picture whose parts match the same
+  characters (`'[f1][f1]…'`, jsonata-js#833) no longer backtracks until the timeout; a timestamp
+  too short for its picture, or one whose length times the parts passes a million, gives no
+  date. Simple pictures parse two to three times faster. A width modifier above 100 is `D3142`
+  (`$fromMillis(0, '[f,150000000]')` took a minute and 4 GB to fail), roman numerals above ten
+  million are written in decimal digits, `$parseInteger` removes any regular grouping separator
+  (`'1.234.567'` with `'#.##0'` is 1234567, not 1), a picture in another digit family reads the
+  digits of that family and leaves other characters (`'2018'` with `[Y١]`), two numbers with no
+  literal between them get a fixed width only where the second is in digits (`'2018XI'` with
+  `[Y][MI]`), and `[P]` reads only am and pm. jlens's own bugs in the same code are fixed too: a
+  month or day name in another case than its title case gave January, an unknown `[P]` word was
+  ignored, a width that is no positive number (`[Y,1--2]`) or a character outside a digit
+  family gave NaN, and `[Z0101][s01]` misread `+053012`. Names, `am`, `pm` and roman numerals
+  are read in any case, as jsonata-js's open pull request #875 reads names. The suite is
+  vendored from main's `1ab3eec`.
 
 ### Documentation
 

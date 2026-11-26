@@ -1550,6 +1550,64 @@ fn nested_fallbacks_stay_linear() {
     }
 }
 
+/// Pieces of date/time and integer pictures: markers of every kind, widths (also negative ones
+/// and ones past the limit of 100), separators and literals.
+const PICTURE_PARTS: &[&str] = &[
+    "[Y]", "[Y0001]", "[Y,2]", "[Y,1--2]", "[YI]", "[Yw]", "[M01]", "[MNn]", "[MN,3-3]", "[MI]",
+    "[D1o]", "[Dw]", "[d001]", "[FNn]", "[F1]", "[H01]", "[h#1]", "[m01]", "[s01]", "[f001]",
+    "[f1]", "[f#]", "[f,2-2]", "[P]", "[PN]", "[Z]", "[Z01]", "[Z0101]", "[Z01x01]", "[z]", "[Zt]",
+    "[X0001]", "[W01]", "[Y,101]", "[Y١]", "-", ":", " ", ".", "x", "T", "[[", "]]", "[", "]", "#",
+    "0", ",", "i", "w", "a", "١",
+];
+
+/// Pieces of timestamps and numbers that those pictures read.
+const TIMESTAMP_PARTS: &[&str] = &[
+    "1", "12", "2018", "0101", "-", "+", "+05:30", "-0330", ":", " ", ".", "x", "T", "GMT", "one",
+    "twenty", " and ", "thousand", "MMX", "xi", "April", "APRIL", "Mon", "pm", "AM", "1st", "th",
+    "١٢", "1.234", "[", "]",
+];
+
+fn pieces(parts: &'static [&'static str], max: usize) -> impl Strategy<Value = String> {
+    prop::collection::vec(prop::sample::select(parts), 0..max).prop_map(|p| p.concat())
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2000))]
+
+    /// A picture of any shape, against any timestamp, gives a value or a coded error, and
+    /// `$toMillis` ends without a timeout, as it matches in time linear in the timestamp's length
+    /// times the picture's parts (jsonata-js#869).
+    #[test]
+    fn date_pictures_end_with_a_value_or_an_error(
+        picture in pieces(PICTURE_PARTS, 12),
+        timestamp in pieces(TIMESTAMP_PARTS, 12),
+        repeat in 1usize..300,
+    ) {
+        let bindings = Bindings::new()
+            .var("p", json!(picture))
+            .var("t", json!(timestamp))
+            .var("long", json!(timestamp.repeat(repeat)))
+            .var("lp", json!(picture.repeat(repeat)));
+        let options = Options::new().timeout(Duration::from_secs(10));
+        for source in [
+            "$toMillis($t, $p)",
+            "$toMillis($long, $p)",
+            "$toMillis($long, $lp)",
+            "$fromMillis(1544450400000, $p)",
+            "$fromMillis(1544450400000, $p, '-0330')",
+            "$parseInteger($t, $p)",
+            "$formatInteger(12345678, $p)",
+        ] {
+            let result = Expression::compile(source)
+                .unwrap()
+                .evaluate_with(None, &bindings, &options);
+            if let Err(e) = result {
+                prop_assert!(e.code() != "U1003" && e.code() != "D1012", "{source}: {e} ({picture:?}, {timestamp:?})");
+            }
+        }
+    }
+}
+
 #[test]
 fn fuzz_crashes_stay_fixed() {
     let cases: &[(&str, Result<serde_json::Value, &str>)] = &[
@@ -1558,10 +1616,12 @@ fn fuzz_crashes_stay_fixed() {
         ("$fromMillis(0, '[,DWwo]')", Err("D3132")),
         ("$fromMillis(0, '[,,]')", Err("D3132")),
         ("$toMillis('1', '[,]')", Err("D3133")),
-        // Characters below the picture's digit family end the number.
+        // Characters outside the picture's digit family are left as they are, for `parseInt` to
+        // read or stop at, as jsonata-js's main does since its pull request #869 (2.2.2 throws a
+        // `RangeError`): a full-width minus is no sign, and ASCII digits are read.
         ("$parseInteger('１２ [1]３４０', 'map###０')", Ok(json!(12))),
-        ("$parseInteger('－１２x', '０')", Ok(json!(-12))),
-        ("$parseInteger('12', '##０')", Ok(json!(null))),
+        ("$parseInteger('－１２x', '０')", Ok(json!(null))),
+        ("$parseInteger('12', '##０')", Ok(json!(12))),
         // A name presentation for fractional seconds.
         (
             "$fromMillis(1533038400000, 'Week: [w]xNo[ f n]')",
@@ -1573,13 +1633,13 @@ fn fuzz_crashes_stay_fixed() {
             Ok(json!(format!("1{}.{}", "0".repeat(300), "0".repeat(20)))),
         ),
         ("$round(1e300, 20)", Ok(json!(1e300))),
-        // Width modifiers beyond the string limit.
-        ("$fromMillis(0, '[Y,5555555555555555555553]')", Err("U1001")),
+        // Width modifiers above 100 (D3142, as jsonata-js's main since its pull request #869).
+        ("$fromMillis(0, '[Y,5555555555555555555553]')", Err("D3142")),
         (
             "$fromMillis(0, '[D0,66666666666666666666666666661]')",
-            Err("U1001"),
+            Err("D3142"),
         ),
-        ("$fromMillis(0, '[Y01,99999999999999999999]')", Err("U1001")),
+        ("$fromMillis(0, '[Y01,99999999999999999999]')", Err("D3142")),
         ("$fromMillis(0, '[Y,3-4]')", Ok(json!("1970"))),
         // A year with dozens of digits overflowed the calendar arithmetic.
         (
@@ -1594,15 +1654,16 @@ fn fuzz_crashes_stay_fixed() {
             "$toMillis('275760-09-14', '[Y0001]-[M01]-[D01]')",
             Ok(json!(null)),
         ),
-        // A long width with a separator took quadratic time.
-        (
-            "$length($fromMillis(0, '[DU0,1020449:]'))",
-            Ok(json!(2040897)),
-        ),
-        // Parsing does not pad: a huge width only fails to match, as in jsonata-js.
+        // A long width with a separator took quadratic time; it is now above the limit.
+        ("$length($fromMillis(0, '[DU0,1020449:]'))", Err("D3142")),
         (
             "$toMillis('197001', '[Y,99999999999999999999][M01]')",
-            Ok(json!(null)),
+            Err("D3142"),
+        ),
+        // A width that is no positive number matches nothing, where NaN leaked.
+        (
+            "$exists($toMillis('201801', '[Y,1--2][M01]'))",
+            Ok(json!(false)),
         ),
         // A date beyond JavaScript's range (±8.64e15 ms after the offset) fails. Its fields used
         // to be NaN in part, and words for them recursed forever.

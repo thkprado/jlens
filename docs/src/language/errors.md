@@ -136,6 +136,7 @@ Raised while evaluating, for other run-time problems.
 | `D3139` | `The $single() function expected exactly 1 matching result.  Instead it matched 0.` |
 | `D3140` | `Malformed URL passed to ${{{functionName}}}(): {{value}}` |
 | `D3141` | `{{{message}}}` |
+| `D3142` | `A width modifier in a date/time picture string cannot be greater than 100: {{value}}` |
 | `D3150` | `The timezone must be a number of hours and minutes, such as +0530: {{value}}` |
 
 ## Guardrail errors (U)

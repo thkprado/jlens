@@ -35,5 +35,13 @@
   "function-fromMillis/issue853#31": {
     "reason": "The date is beyond JavaScript's range of ±8.64e15 ms once the time zone is applied: jlens raises D1001, where jsonata-js writes every component as NaN (see \"A date beyond JavaScript's range\" in docs/src/language/compatibility.md).",
     "alternateCode": "D1001"
+  },
+  "function-fromMillis/outOfRange#0": {
+    "reason": "The date is beyond JavaScript's range of ±8.64e15 ms: jlens raises D1001, where jsonata-js's main since pull request #869 writes its names, words, roman numerals and letters as empty strings (see \"A date beyond JavaScript's range\" in docs/src/language/compatibility.md).",
+    "alternateCode": "D1001"
+  },
+  "function-fromMillis/outOfRange#1": {
+    "reason": "The time zone 'abc' is no number: jlens raises D3150, where jsonata-js's main since pull request #869 writes the words of the NaN date as an empty string (see the row on a timezone that does not start with a number in docs/src/language/compatibility.md).",
+    "alternateCode": "D3150"
   }
 }
