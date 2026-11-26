@@ -280,13 +280,15 @@ pub fn test(require_browser: bool, example: bool) -> Result<()> {
             "jlens.global.js from file://",
         ),
     ] {
-        let dom = dump_dom(&browser, &url)?;
-        let log = dom
+        let dump = dump_dom(&browser, &url)?;
+        let log = dump
+            .dom
             .split_once("<pre id=\"log\">")
             .and_then(|(_, rest)| rest.split_once("</pre>"))
             .map_or("", |(log, _)| log);
         print!("{}", unescape(log));
-        if !dom.contains("data-status=\"pass\"") {
+        if !dump.dom.contains("data-status=\"pass\"") {
+            dump.print_log();
             bail!("the {what} failed in {} ({url})", browser.display());
         }
         println!("{what} passed ({})", browser.display());
@@ -368,20 +370,45 @@ const EDITOR_CHECK: &str = r#"<!doctype html>
 "#;
 
 fn check_editor(browser: &Path, url: &str) -> Result<()> {
-    let dom = dump_dom(browser, url)?;
-    if !dom.contains("data-ready=\"true\"") || !dom.contains("FREE_SHIPPING") {
-        bail!("the web editor did not load or evaluate its sample ({url})");
+    let dump = dump_dom(browser, url)?;
+    let dom = &dump.dom;
+    let failure = if !dom.contains("data-ready=\"true\"") || !dom.contains("FREE_SHIPPING") {
+        "did not load or evaluate its sample"
+    } else if !dom.contains("shared-ok: jlens") {
+        "did not restore a shared address, or call its host function"
+    } else if !dom.contains("overrides-ok") {
+        "did not apply the schema overrides of a shared address"
+    } else if !dom.contains("did you mean name?") {
+        "did not warn about an override path the input lacks"
+    } else {
+        return Ok(());
+    };
+    dump.print_log();
+    bail!("the web editor {failure} ({url})")
+}
+
+/// What a headless browser returned: the DOM it dumped, and the last console messages and errors
+/// it logged, which explain a page that did not finish or failed.
+struct Dump {
+    dom: String,
+    log: Vec<String>,
+}
+
+impl Dump {
+    fn print_log(&self) {
+        print_browser_log(&self.log);
     }
-    if !dom.contains("shared-ok: jlens") {
-        bail!("the web editor did not restore a shared address, or call its host function ({url})");
+}
+
+fn print_browser_log(lines: &[String]) {
+    if lines.is_empty() {
+        println!("the browser logged no console messages or errors");
+        return;
     }
-    if !dom.contains("overrides-ok") {
-        bail!("the web editor did not apply the schema overrides of a shared address ({url})");
+    println!("last browser log lines:");
+    for line in lines {
+        println!("  {line}");
     }
-    if !dom.contains("did you mean name?") {
-        bail!("the web editor did not warn about an override path the input lacks ({url})");
-    }
-    Ok(())
 }
 
 /// Loads `url` in a headless browser and returns the DOM once the page has settled. Headless
@@ -389,17 +416,17 @@ fn check_editor(browser: &Path, url: &str) -> Result<()> {
 /// still says `data-status="running"` was dumped before it finished, which virtual time allows
 /// while the page waits on work it does not track (a WebAssembly compile, a worker): that is
 /// retried once too, and returned as it is the second time, for the caller to report.
-fn dump_dom(browser: &Path, url: &str) -> Result<String> {
+fn dump_dom(browser: &Path, url: &str) -> Result<Dump> {
     const ATTEMPTS: u32 = 2;
     for attempt in 1..=ATTEMPTS {
         match dump_dom_once(browser, url, Duration::from_secs(90))? {
-            Some(dom) if dom.contains("data-status=\"running\"") && attempt < ATTEMPTS => {
+            Some(dump) if dump.dom.contains("data-status=\"running\"") && attempt < ATTEMPTS => {
                 println!(
                     "{} dumped {url} before the page finished (attempt {attempt})",
                     browser.display()
                 );
             }
-            Some(dom) => return Ok(dom),
+            Some(dump) => return Ok(dump),
             None => println!(
                 "{} did not finish loading {url} (attempt {attempt})",
                 browser.display()
@@ -409,7 +436,7 @@ fn dump_dom(browser: &Path, url: &str) -> Result<String> {
     bail!("{} hung loading {url}", browser.display())
 }
 
-fn dump_dom_once(browser: &Path, url: &str, timeout: Duration) -> Result<Option<String>> {
+fn dump_dom_once(browser: &Path, url: &str, timeout: Duration) -> Result<Option<Dump>> {
     let profile = env::temp_dir().join(format!(
         "jlens-browser-test-{}-{}",
         std::process::id(),
@@ -464,20 +491,22 @@ fn dump_dom_once(browser: &Path, url: &str, timeout: Duration) -> Result<Option<
     };
     let out = reader.join().unwrap_or_default();
     let log = log_reader.join().unwrap_or_default();
+    // What the page logged last tells which step hung, or why it failed.
+    let log = String::from_utf8_lossy(&log);
+    let mut lines: Vec<String> = log
+        .lines()
+        .filter(|l| l.contains("CONSOLE") || l.contains("ERROR"))
+        .map(str::to_owned)
+        .collect();
+    lines.drain(..lines.len().saturating_sub(15));
     if !finished {
-        // Show what the page logged last, to tell which step hung.
-        let log = String::from_utf8_lossy(&log);
-        let lines: Vec<&str> = log
-            .lines()
-            .filter(|l| l.contains("CONSOLE") || l.contains("ERROR"))
-            .collect();
-        println!("last browser log lines:");
-        for line in &lines[lines.len().saturating_sub(15)..] {
-            println!("  {line}");
-        }
+        print_browser_log(&lines);
     }
     let _ = fs::remove_dir_all(&profile);
-    Ok(finished.then(|| String::from_utf8_lossy(&out).into_owned()))
+    Ok(finished.then(|| Dump {
+        dom: String::from_utf8_lossy(&out).into_owned(),
+        log: lines,
+    }))
 }
 
 /// The `file://` address of `path`.
