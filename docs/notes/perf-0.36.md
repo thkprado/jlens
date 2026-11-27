@@ -2,7 +2,9 @@
 
 How the measurements of roadmap 0.36 were made: methods, traps and intermediate numbers that the
 [performance page](../src/architecture/performance.md) and the guides leave out. The item numbers
-are those of the plan, in [the roadmap](../src/architecture/roadmap.md#036-what-adoption-asks).
+are those of the plan, whose table the tag keeps in
+[the roadmap](https://github.com/thkprado/jlens/blob/v0.36.0/docs/src/architecture/roadmap.md#036-what-adoption-asks);
+[the roadmap's history](../src/architecture/roadmap-history.md#036) sums it up.
 
 ## #3: what a document costs a pool of threads
 

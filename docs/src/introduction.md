@@ -32,7 +32,8 @@ What sets jlens apart from other JSONata implementations:
   on every change, and against jsonata-js itself with generated expressions every week; see
   [Conformance testing](architecture/conformance.md).
 
-> **Status:** jlens 0.35 implements all of JSONata 2.2 (1,734 of the 1,736 official test cases,
-> with the other two documented), host functions, evaluation audits, schema-driven editor
-> support with a language server, a command line for scripts and agents that checks and tests
-> expressions, and the browser package. See the [roadmap](architecture/roadmap.md).
+> **Status:** jlens 0.36 implements all of JSONata 2.2 (1,901 of the 1,972 test cases of
+> jsonata-js 2.3.0: of the other 71, 69 are that release's template strings, which jlens does
+> not have yet, and two are documented differences), host functions, evaluation audits,
+> schema-driven editor support with a language server, a command line for scripts and agents
+> that checks and tests expressions, and the browser package. See the [roadmap](architecture/roadmap.md).

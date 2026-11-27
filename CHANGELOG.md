@@ -6,6 +6,19 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.36.0]
+
+What adoption asks. jlens follows jsonata-js 2.3.0, released during the plan, and takes the
+fixes of its main branch that went into it: the date/time pictures rewritten, `$formatNumber`
+from the shortest decimal digits, transforms that stay inside their copy, a step after a
+group-by. It passes 1,901 of the 1,972 cases of 2.3.0's suite; the others are 2.3.0's template
+strings, which jlens does not have yet, and two documented differences. No date/time or number
+picture runs past an evaluation's timeout any more, and JSON text is read 1,000 levels deep.
+`W0215` says which case it is and writes the rewrite. A Java `Document` needs its text's memory
+once while it is made, and the Java guide says what a document costs a pool of threads.
+`jlens-regress` has a version of its own, 0.35.1, with searches of UTF-16 text that an interrupt
+stops. Releases now have a cadence and their channels two tiers.
+
 ### Added
 
 - `jlens-regress` 0.35.1: searches of UTF-16 and UCS-2 text that stop when their interrupt says
@@ -83,8 +96,9 @@ All notable changes are recorded here. The format follows
   faster.
 - An empty `minus-sign` option of `$formatNumber` writes no sign, as in jsonata-js:
   `$formatNumber(-5, '0', {'minus-sign': ''})` is "5", where jlens wrote "-5".
-- `$split` with a limit of 0 gives `[]`, and `$replace` with a limit of 0 the string, also when
-  the separator or the pattern is missing, as in jsonata-js; jlens gave nothing.
+- `$split` and `$replace` with a missing separator or pattern give nothing whatever the limit,
+  as jsonata-js 2.3.0 does (its pull request #831): a negative limit failed with `D3020` or
+  `D3011`, as in 2.2.2, which read the limit first.
 - A step after a group-by follows jsonata-js's pull request #838 as its main branch merged it:
   the grouped path is read as if it were in parentheses, so a `[]` in it no longer keeps the
   result of the step after it in an array (`items[]{k: v}.x` is `1`, not `[1]`), and in an array
@@ -1950,7 +1964,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/thkprado/jlens/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/thkprado/jlens/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/thkprado/jlens/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/thkprado/jlens/compare/v0.32.0...v0.33.0

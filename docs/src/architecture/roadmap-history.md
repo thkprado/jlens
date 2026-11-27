@@ -428,3 +428,34 @@ about 15 ns less in every package. Nothing in the tables moved past 2.6% slower;
 6 to 8% faster natively. How it was measured is in
 [`docs/notes/perf-0.35.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.35.md).
 ([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0350))
+
+## 0.36
+
+*What adoption asks.* jlens had its first users outside its own repository, and the plan took
+what they asked for. `W0215` tells an operand that is always an array from one that may be
+several values, and its hint writes the expression with `in`, as the old hint taken to the
+letter gave another wrong one. For an application in Java that evaluates large documents from a
+pool of threads, the native memory of a document was measured at its peak and while it lives,
+the C API took the package's buffer as the document's text, so that a document needs its text's
+memory once while it is made (a 16 MB document's peak from 150 to 133 MB), and the Java guide
+says what a document costs per thread. `jlens-regress` got a version of its own, 0.35.1, raised
+only when the crate changes, with searches of UTF-16 and UCS-2 text that an interrupt stops, for
+a crate that uses it alone; it took the 20 commits of `regress` after `95c0404`. Releases got a
+cadence, a minor every two or three weeks, and their channels two tiers. Most of the plan
+followed jsonata-js: three of 2.2.2's bugs reported after its main's `6d9d829`, then its main
+branch as it moved, `$formatNumber` from the shortest decimal digits (#868), a regular
+expression that starts a block (#860), the date/time pictures rewritten (#869), with `$toMillis`
+matching in linear time and no picture running past an evaluation's timeout, and transforms and
+`**` (#870, #871, #873). jsonata-js 2.3.0 was released during the plan, with those fixes, and
+became the behaviour target in place of 2.2.2; the section "Next: the jsonata-js release after
+2.2.2" left the roadmap, its item done. Its template strings (`«...»`) are the one feature jlens
+lacks: of 2.3.0's 1,972 cases, jlens passes 1,901. An outside review of the code found six gaps,
+fixed with tests (JSON text read 1,000 levels deep, `$formatNumber` with a long grouped picture
+in linear time, the host's `$clone` under a name no expression can bind, among them), and four
+more items for 0.37. Two items moved to 0.37 to wait for the Java adoption: a result kept as a
+`Document`, and ADR 0015. In the tables, number formatting takes 4 to 32% less in every package
+and `$toMillis` with a picture 62 to 67% less; a field #18 added to the evaluator slowed Python's
+object constructor in some environments, and #21 removed it. The release's check on x86_64 found
+nothing to change. How it was measured is in
+[`docs/notes/perf-0.36.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.36.md).
+([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0360))
