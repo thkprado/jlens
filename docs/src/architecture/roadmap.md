@@ -29,7 +29,8 @@ Two items of 0.36 wait for an application in Java that is adopting jlens: what i
 how a result is kept for later rules and which gaps the API's inventory lists. A third, from 0.36 #8's
 review, lets the release workflow follow the channels' tiers. #4 to #7 come from an outside review
 of the code at `7b69a6e`, its claims checked before they were listed (one, a hang of
-`$formatInteger` in words, was false). The rest of the plan is drafted when it starts.
+`$formatInteger` in words, was false). #8 is the one feature of jsonata-js 2.3.0 that 0.36 left
+out. The rest of the plan is drafted when it starts.
 
 | # | Item | Done when | Status |
 |---|---|---|---|
@@ -40,6 +41,7 @@ of the code at `7b69a6e`, its claims checked before they were listed (one, a han
 | 5 | No allocation past the size limits | `$replace` checks `max_string_length` while it builds its result; the review's other cases (`filter_items`, `$split`, `$pad`, `$join` on wasm32, `$fromMillis`) checked, and fixed where they allocate past a limit | planned |
 | 6 | Unknown evaluation options in Wasm | `{ timeot: 100 }` fails as in Rust, Python and Java, or the difference documented; decided with #2, as failing may break a caller | planned |
 | 7 | A regular expression literal compiled once per expression | Kept in `Compiled` by node, with no key cloned each time the node is evaluated; the two fixed patterns of `datetime.rs` (`parse_iso8601`, `words_to_number`) compiled once, not per call; `ab` on the M1 | planned |
+| 8 | Template strings, as jsonata-js 2.3.0 reads them (pull request #860) | `«...{expr}...»` parsed and evaluated as in 2.3.0, with its escapes and nesting, and its errors' codes; `"a" & «x»` is "ax"; the 69 cases that use them (68 of the group `template-strings` and `function-eval/case009`) in the baseline (1,970 of 1,972, the other two the overrides of a lone surrogate); the lexer, the parser's limits and the property tests, the language server and the VS Code grammar (which tokenizes the suite), the book's syntax pages and `compatibility.md`'s row removed; "JSONata 2.2" in the READMEs and the introduction becomes 2.3 | planned, proposed at the 0.36.0 release (2026-11-27) |
 
 Candidates from the same review, not planned: the JSON Schema reader (`allOf`'s `required`,
 `required` without `properties`, closed tuples), the type checker (`~>` with a transform, a host
