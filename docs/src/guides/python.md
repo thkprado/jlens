@@ -88,7 +88,7 @@ document is.
 | `dict` and its subclasses, with `str` keys | object, in the order of the keys |
 | `list`, `tuple` | array |
 | `str` and its subclasses | string |
-| `int`, `float` and their subclasses (an `IntEnum`, say) | number; NaN and the infinities become `null`, as in JSON; an `int` beyond 2<sup>53</sup> the nearest number, as in jsonata-js |
+| `int`, `float` and their subclasses (an `IntEnum`, say) | number; NaN and the infinities become `null`, as in JSON; an `int` beyond 2<sup>53</sup> the nearest number, as in jsonata-js; a subclass is read by its value, without calling its own methods (`__float__`) |
 | `bool` | boolean |
 | `None` | `null` |
 

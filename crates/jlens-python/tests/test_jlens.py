@@ -90,6 +90,39 @@ def test_input_values():
     assert everything.evaluate([Text("x"), Level.HIGH, True]) == ["x", 3, True]
 
 
+def test_no_python_code_while_a_level_is_read():
+    # A level is read with its list or dict locked (a critical section of free-threaded Python),
+    # so no method of the values it holds is called: an int beyond 64 bits becomes the float of
+    # its value, as `int.__float__` gives it, not of what its class's `__float__` returns.
+    calls = []
+
+    class Big(int):
+        def __float__(self):
+            calls.append(self)
+            container.clear()
+            return 1.5
+
+    for container in ([Big(2**70), 1], {"a": Big(2**70), "b": 1}):
+        assert Expression("$").evaluate(container) == (
+            [float(2**70), 1] if isinstance(container, list) else {"a": float(2**70), "b": 1}
+        )
+    assert Expression("$[0]").evaluate([Big(2**70)]) == float(2**70)
+    assert Expression("a").evaluate({"a": Big(2**70)}) == float(2**70)
+
+    # A str with a lone surrogate is encoded by `str.encode`, not by its class's `encode`.
+    class Text(str):
+        def encode(self, *args):
+            calls.append(self)
+            container.clear()
+            return b""
+
+    for container in ([Text("a\ud800"), Text("😀")], {Text("k\udc00"): Text("\ud800")}):
+        assert Expression("$").evaluate(container) == (
+            ["a�", "😀"] if isinstance(container, list) else {"k�": "�"}
+        )
+    assert calls == []
+
+
 def test_result_numbers():
     everything = Expression("$")
     assert type(Expression("2.0").evaluate()) is int

@@ -9,7 +9,8 @@ use jlens_core::{Bindings, Options};
 use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::critical_section::with_critical_section;
-use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
+use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
+use pyo3::{PyTypeInfo, intern};
 use serde_json::Value as Json;
 
 use crate::host::{self, Host};
@@ -64,7 +65,17 @@ pub fn scalar<'v>(value: &'v Bound<'_, PyAny>) -> Result<Option<Scalar<'v>>, Str
     } else if value.is_instance_of::<PyInt>() {
         match value.extract::<i64>() {
             Ok(n) => Scalar::Int(n),
-            Err(_) => float(value.extract::<f64>().map_err(|e| e.to_string())?),
+            Err(_) if value.is_exact_instance_of::<PyInt>() => {
+                float(value.extract::<f64>().map_err(|e| e.to_string())?)
+            }
+            // `int.__float__` itself: `extract::<f64>` (`PyFloat_AsDouble`) would call the
+            // `__float__` of a subclass, Python code while a level is read (`source.rs`).
+            Err(_) => float(
+                PyInt::type_object(value.py())
+                    .call_method1(intern!(value.py(), "__float__"), (value,))
+                    .and_then(|n| n.extract::<f64>())
+                    .map_err(|e| e.to_string())?,
+            ),
         }
     } else if value.is_instance_of::<PyFloat>() {
         float(value.extract::<f64>().map_err(|e| e.to_string())?)
@@ -93,17 +104,31 @@ fn float(n: f64) -> Scalar<'static> {
 
 /// A `str` as UTF-8. A lone surrogate, which UTF-8 cannot hold, becomes U+FFFD, as it does in
 /// the WebAssembly package.
+///
+/// No Python code runs, since a level is read under a lock (`source.rs`): `str.encode` itself,
+/// not a subclass's `encode`, and `"utf-16"`, which CPython encodes without looking the codec
+/// up (`"utf-16-le"` would run the `encodings` search function the first time), in the
+/// machine's order, given by its byte order mark.
 fn text<'v>(s: &'v Bound<'_, PyString>) -> Cow<'v, str> {
     s.to_cow().unwrap_or_else(|_| {
-        let units = s
-            .call_method1("encode", ("utf-16-le", "surrogatepass"))
-            .and_then(|bytes| bytes.extract::<Vec<u8>>())
-            .unwrap_or_default();
+        let py = s.py();
+        let bytes = PyString::type_object(py)
+            .call_method1(intern!(py, "encode"), (s, "utf-16", "surrogatepass"))
+            .and_then(|bytes| Ok(bytes.cast_into::<PyBytes>()?));
+        let bytes = bytes.as_ref().map_or(&[][..], |bytes| bytes.as_bytes());
+        let (little, units) = match bytes {
+            [0xFE, 0xFF, units @ ..] => (false, units),
+            [0xFF, 0xFE, units @ ..] => (true, units),
+            units => (cfg!(target_endian = "little"), units),
+        };
         let units: Vec<u16> = units
             .as_chunks::<2>()
             .0
             .iter()
-            .map(|pair| u16::from_le_bytes(*pair))
+            .map(|&pair| match little {
+                true => u16::from_le_bytes(pair),
+                false => u16::from_be_bytes(pair),
+            })
             .collect();
         Cow::Owned(String::from_utf16_lossy(&units))
     })

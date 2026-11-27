@@ -8,6 +8,11 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- Python package: reading the input calls no method of its values, which a subclass may define
+  and which ran while their list or dictionary was locked. The read of an `int` subclass beyond
+  64 bits called the class's own `__float__`, and that of a `str` subclass with a lone surrogate
+  its own `encode`: code there that changed the container made the read fail with `U1004`, or
+  panic in a dictionary. Such an `int` now becomes the float of its value.
 - The size limits stop a result while it is built, not once it is whole: `$replace` (a long
   replacement, or many `$0`s, for each match), `$split`, `$match`, `$pad` and `$fromMillis` built
   up to hundreds of times the limit before failing with `U1001`, and `$join`'s check could

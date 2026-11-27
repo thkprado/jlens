@@ -2,9 +2,21 @@
 //!
 //! A `dict` (or a subclass) is read as an object, a `list` or a `tuple` as an array; `str`,
 //! `int`, `float`, `bool` and `None` as JSON's values. Anything else, a key that is not a `str`
-//! or a cycle stops the evaluation with `U1004`, with the message `json.dumps` would give. No
-//! Python code runs while a level is read, and a `dict` or `list` is locked while it is read,
-//! so that another thread of free-threaded Python cannot change it halfway.
+//! or a cycle stops the evaluation with `U1004`, with the message `json.dumps` would give. A
+//! `dict` or `list` is locked while it is read, so that another thread of free-threaded Python
+//! cannot change it halfway.
+//!
+//! No Python code runs under that lock: Python code could change the value being read itself,
+//! and on free-threaded Python anything that blocks (a lock, an import) suspends the lock and lets
+//! the other threads in. A level's items are told apart by the flags of their types, and their
+//! values read by the functions of the built-in types, never by the items' own methods, which a
+//! subclass may define (`convert::scalar`): an `int` beyond 64 bits by `int.__float__`, a `str`
+//! with a lone surrogate by `str.encode`. Nor does a collection run its finalizers there: since
+//! Python 3.12 it runs only between bytecodes, never when an object is allocated. Two cases are
+//! left, neither on free-threaded Python, where the lock is nothing more than the GIL: on Python
+//! 3.10, the name of a type in an error message is its `__name__`, which a metaclass can define,
+//! and the read stops at that error; and on 3.10 and 3.11, the rare items that allocate Python
+//! objects (those two, and error messages) can start a collection.
 //!
 //! The arrays and objects of a level are written as members of one [`Level`], so that each
 //! costs the core one allocation, not two.
