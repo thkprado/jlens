@@ -46,8 +46,8 @@ The `wasm-bindgen` CLI must be the exact version in `Cargo.lock`, and the task c
 |---|---|
 | `jlens.js` | The ES module |
 | `jlens.d.ts` | TypeScript declarations |
-| `jlens_bg.wasm` | The WebAssembly module: about 1.4 MiB, 535 KiB gzipped |
-| `jlens.global.js` | The package as one classic script, the module embedded: about 1.8 MiB, 745 KiB gzipped |
+| `jlens_bg.wasm` | The WebAssembly module: about 1.7 MiB, 640 KiB gzipped |
+| `jlens.global.js` | The package as one classic script, the module embedded: about 2.3 MiB, 920 KiB gzipped |
 | `jlens.global.d.ts` | TypeScript declarations of its global, `jlens` |
 | `package.json` | npm metadata: `"type": "module"`, `exports`, `types` |
 
@@ -106,10 +106,11 @@ It also serves what cannot resolve the `.wasm` file: a classic worker loads it w
 import declares it too; a classic script references it with
 `/// <reference types="jlens-wasm/global" />`.
 
-Its cost is size: the `.wasm` in base64 is a third larger, about 1.8 MiB, and 745 KiB gzipped
-against 518 KiB for `jlens_bg.wasm`, as base64 compresses less well. A page that loads it pays
-for the whole module even if it never calls `init`, and the npm package unpacks to 3.4 MB
-where it took 1.5 MB without it. Starting is no slower: in Node.js 22, reading
+Its cost is size: the `.wasm` in base64 is a third larger, about 2.3 MiB, and 920 KiB gzipped
+against 640 KiB for `jlens_bg.wasm`, as base64 compresses less well
+([serving the module](#serving-the-module) compares them). A page that loads it pays for the
+whole module even if it never calls `init`, and the npm package unpacks to 4.2 MB, of which the
+script takes 2.4 MB. Starting is no slower: in Node.js 22, reading
 the script and `init()` take about 19 ms, and the module with its bytes about 26 ms. `jlens.js`
 does not change, nor what importing it loads. Each loads a module of its own, so a page that
 loads both has two instances, with classes that do not mix.
@@ -119,6 +120,59 @@ JavaScript snippets in a function of its own. It changes only what it recognises
 of the `wasm-bindgen` version in `Cargo.lock`, and the build fails on anything else. The Node.js
 and browser tests run the whole suite against it, and open a page from `file://` that loads it
 with one `<script>`.
+
+## Serving the module
+
+### Content-Security-Policy
+
+A Content-Security-Policy decides whether a page may compile WebAssembly, as it decides for
+`eval`. A page whose policy has a `script-src` directive, or only a `default-src`, needs
+`'wasm-unsafe-eval'` in its `script-src`:
+
+```text
+Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'
+```
+
+`'wasm-unsafe-eval'` allows compiling WebAssembly and nothing else: `eval` and `new Function`
+stay forbidden, and jlens uses neither. `'unsafe-eval'` would allow the module too, but those as
+well. Without either, `init()` rejects with a `WebAssembly.CompileError`, from `jlens.js` and
+`jlens.global.js` alike. In Edge, as in the other Chromium browsers, it reads:
+
+```text
+CompileError: WebAssembly.instantiateStreaming(): Compiling or instantiating WebAssembly module violates the following Content Security policy directive because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "default-src 'self'".
+```
+
+and in Firefox `call to WebAssembly.instantiateStreaming() blocked by CSP`, with
+`WebAssembly.instantiate()` in both when it comes from `jlens.global.js`. The message names
+`'unsafe-eval'`, but `'wasm-unsafe-eval'` is the narrower fix.
+
+`jlens.js` also fetches `jlens_bg.wasm`, so the policy's `connect-src`, or its `default-src`,
+must allow the module's origin. Otherwise `init()` rejects with a `TypeError` before compiling
+anything: `Failed to fetch` in Edge, `NetworkError when attempting to fetch
+resource.` in Firefox. `jlens.global.js` fetches nothing.
+
+These were tried with the policies above sent as headers, in Edge 158 and Firefox 160.
+
+### Size
+
+| What the page loads | Size | gzip | brotli |
+|---|---|---|---|
+| `jlens.js` and `jlens_bg.wasm` | 41 KiB + 1.7 MiB | 9 + 640 KiB | 8 + 471 KiB |
+| `jlens.global.js` | 2.3 MiB | 920 KiB | 652 KiB |
+
+The sizes of 0.37, brotli at its highest quality, 11. To serve the module small:
+
+- **Compress `jlens_bg.wasm` with brotli**, sent with `Content-Encoding: br`: a quarter smaller
+  than with gzip. A server that compresses as it sends often uses a lower quality (at 5, the
+  module is 540 KiB); compressing the file once when deploying, at quality 11, and serving that
+  copy keeps the smaller size.
+- **Send it with `Content-Type: application/wasm`.** `init()` then compiles the module with
+  `WebAssembly.instantiateStreaming`, while it downloads. With any other type, it warns on the
+  console and compiles only once the whole module has arrived.
+- **Load `jlens.js` with the `.wasm` beside it, not `jlens.global.js`**, wherever the page can
+  load a module. The module in base64 compresses worse, a third more with brotli, and it is
+  decoded and compiled only once the whole script has arrived. `jlens.global.js` is for what
+  cannot fetch the `.wasm`: a page opened from disk, a classic worker.
 
 ## Evaluating expressions
 
