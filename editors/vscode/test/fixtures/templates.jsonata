@@ -1,0 +1,6 @@
+«Hello, {name}! You have {$count(items)} items»
+«escapes: \{ \} \« \» \< \> \n \u00e9, not one: \q, an unescaped }»
+<<<li>{ {"total": $sum(items.price)} }</li\>>>
+«outer {«inner {x}»} and {<<y>>}»
+"a" < <<b>> and <<a>><<<b>>
+<<n={λ($x)<a<n>>{$x}([1,2])}>>

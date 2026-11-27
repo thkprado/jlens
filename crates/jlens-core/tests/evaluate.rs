@@ -1485,6 +1485,16 @@ fn size_caps_stop_huge_values() {
         code(r#"$uppercase("abcdefghijk")"#, &strings).as_deref(),
         Some("U1001")
     );
+    // A template string checks the limit as it adds each part (0.37 #8).
+    assert_eq!(code(r#"«abc{"de"}{"fgh"}ij»"#, &strings), None);
+    assert_eq!(
+        code(r#"«abc{"de"}{"fgh"}ijk»"#, &strings).as_deref(),
+        Some("U1001")
+    );
+    assert_eq!(
+        code(r#"«{$pad("", 9, "x")}{[1, 2]}»"#, &strings).as_deref(),
+        Some("U1001")
+    );
 
     let arrays = Options::new().max_array_length(3);
     for ok in ["[1, 2, 3]", "[[1, 2], [3, 4]]", "[1..3]"] {

@@ -141,6 +141,42 @@ FirstName & " " & Surname
 => "50true"
 ```
 
+### Template strings
+
+A template string is literal text with expressions in braces, written `«...»`, or `<<...>>`
+where guillemets are hard to type (JSONata 2.3). Each expression's value joins the text as `&`
+joins it: a string as it is, other values as by `$string`, nothing as the empty string.
+
+```jsonata-example
+input: address.json
+«{FirstName} {Surname} has {$count(Phone)} phones»
+=> "Fred Smith has 4 phones"
+```
+
+The text is kept as written, whitespace and quotes included. A backslash escapes what it escapes
+in a string literal, and `{`, `}`, `<`, `>`, `«` and `»` too. A `}` in the text must be
+escaped (`S0108`), and the first `>>` closes a `<<...>>` template, so text that ends with `>`
+escapes it:
+
+```jsonata-example
+input: address.json
+<<<b>{Surname}</b\>>>
+=> "<b>Smith</b>"
+```
+
+Between the braces goes any expression, another template among them; a block of several needs
+its own parentheses, `{($x := 2; $x * 3)}`, and `{}` adds nothing. In a path, a template is a
+string built for each item, never a field name:
+
+```jsonata-example
+input: address.json
+Phone[type = "office"].«{type}: {number}»
+=> ["office: 01962 001234", "office: 01962 001235"]
+```
+
+`<<` opens a template only where an operand starts. After an operand it is the less-than
+operator, so `"a"<<<b>>` compares `"a"` with the template `<<b>>`.
+
 ## Conditionals
 
 `condition ? then : else` evaluates `then` when the condition is true, and `else` otherwise.

@@ -273,10 +273,34 @@ pub enum NodeKind {
         /// The sort keys.
         terms: Vec<SortTerm>,
     },
+    /// A template string (`«text {expr} text»` or `<<text {expr} text>>`).
+    Template {
+        /// The literal text and the embedded expressions, in order.
+        parts: Vec<TemplatePart>,
+    },
     /// A syntax error that the recovering parser replaced with this node.
     Error {
         /// The error.
         error: Box<Error>,
+    },
+}
+
+/// A part of a template string.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum TemplatePart {
+    /// Literal text, its escapes decoded.
+    Text(String),
+    /// An embedded expression (`{expr}`), its value cast to a string as `&` does.
+    Expr {
+        /// The expression.
+        expression: Box<Node>,
+        /// Byte range of the braces and the expression between them.
+        span: Span,
+        /// The UTF-16 offset just after the `{`: the `position` of an error that casting the
+        /// value raises, as in jsonata-js.
+        #[serde(skip)]
+        position: usize,
     },
 }
 
@@ -588,6 +612,7 @@ impl Node {
             NodeKind::Lambda { .. } => "lambda",
             NodeKind::Transform { .. } => "transform",
             NodeKind::Sort { .. } => "sort",
+            NodeKind::Template { .. } => "template",
             NodeKind::Error { .. } => "error",
         }
     }
@@ -652,6 +677,11 @@ impl Node {
                 }
             }
             NodeKind::Sort { terms } => terms.iter().for_each(|t| f(&t.expr)),
+            NodeKind::Template { parts } => parts.iter().for_each(|part| {
+                if let TemplatePart::Expr { expression, .. } = part {
+                    f(expression);
+                }
+            }),
             _ => {}
         }
         for stage in self.attrs.stages.iter().chain(&self.attrs.predicate) {
@@ -721,6 +751,11 @@ impl Node {
                 }
             }
             NodeKind::Sort { terms } => terms.iter_mut().for_each(|t| f(&mut t.expr)),
+            NodeKind::Template { parts } => parts.iter_mut().for_each(|part| {
+                if let TemplatePart::Expr { expression, .. } = part {
+                    f(expression);
+                }
+            }),
             _ => {}
         }
     }

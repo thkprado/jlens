@@ -9,6 +9,7 @@
       "patterns": [
         { "include": "#comment" },
         { "include": "#string" },
+        { "include": "#template" },
         { "include": "#backtick-name" },
         { "include": "#regex" },
         { "include": "#number" },
@@ -74,6 +75,61 @@
           "match": "\\\\."
         }
       ]
+    },
+    "template": {
+      "comment": "Template strings (JSONata 2.3). « always opens one. << opens one where an operand is expected, as a regular expression's slash does, but not after the >> that closes another: <<a>><<<b>> is <<a>> < <<b>>. The first >> closes a <<...>> template.",
+      "patterns": [
+        {
+          "name": "string.template.jsonata",
+          "begin": "«",
+          "end": "»",
+          "beginCaptures": { "0": { "name": "punctuation.definition.string.template.begin.jsonata" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.string.template.end.jsonata" } },
+          "patterns": [{ "include": "#template-content" }]
+        },
+        {
+          "name": "string.template.jsonata",
+          "begin": "(?:(?<=[\\[({,;:?=<>!+\\-*/%&|^~])(?<!>>)|(?<=\\band|\\bor|\\bin)|^)\\s*(<<)",
+          "end": ">>",
+          "beginCaptures": { "1": { "name": "punctuation.definition.string.template.begin.jsonata" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.string.template.end.jsonata" } },
+          "patterns": [{ "include": "#template-content" }]
+        }
+      ]
+    },
+    "template-content": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.jsonata",
+          "match": "\\\\(?:[\"\\\\/bfnrt{}<>«»]|u[0-9A-Fa-f]{4})"
+        },
+        {
+          "name": "invalid.illegal.escape.jsonata",
+          "match": "\\\\."
+        },
+        {
+          "comment": "A } in the text must be escaped.",
+          "name": "invalid.illegal.brace.jsonata",
+          "match": "\\}"
+        },
+        {
+          "name": "meta.template.expression.jsonata",
+          "contentName": "meta.embedded.line.jsonata",
+          "begin": "\\{",
+          "end": "\\}",
+          "beginCaptures": { "0": { "name": "punctuation.definition.template-expression.begin.jsonata" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.template-expression.end.jsonata" } },
+          "patterns": [{ "include": "#template-braces" }, { "include": "#expression" }]
+        }
+      ]
+    },
+    "template-braces": {
+      "comment": "Braces inside an embedded expression (an object constructor, a function's body), so that their } does not close the expression.",
+      "begin": "\\{",
+      "end": "\\}",
+      "beginCaptures": { "0": { "name": "punctuation.section.braces.begin.jsonata" } },
+      "endCaptures": { "0": { "name": "punctuation.section.braces.end.jsonata" } },
+      "patterns": [{ "include": "#template-braces" }, { "include": "#expression" }]
     },
     "backtick-name": {
       "name": "variable.other.member.quoted.jsonata",

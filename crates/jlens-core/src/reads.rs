@@ -57,7 +57,7 @@ use serde::de::{self, DeserializeSeed, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
-use crate::ast::{Ast, FallbackOp, LambdaDef, Node, NodeKind, Stage, TransformDef};
+use crate::ast::{Ast, FallbackOp, LambdaDef, Node, NodeKind, Stage, TemplatePart, TransformDef};
 use crate::functions::{self, Native};
 use crate::signature::Signature;
 use crate::{Bindings, Document};
@@ -729,6 +729,15 @@ impl<'n> Analysis<'n> {
             }
             NodeKind::Negate { expr } => {
                 self.used(expr, context, scope);
+                Vec::new()
+            }
+            // Each value is cast to a string, which reads all of it.
+            NodeKind::Template { parts } => {
+                for part in parts {
+                    if let TemplatePart::Expr { expression, .. } = part {
+                        self.used(expression, context, scope);
+                    }
+                }
                 Vec::new()
             }
             NodeKind::Array { items } => {

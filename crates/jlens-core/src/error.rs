@@ -336,6 +336,8 @@ catalog! {
     "S0104" => "The escape sequence \\u must be followed by 4 hex digits",
     "S0105" => "Quoted property name must be terminated with a backquote (`)",
     "S0106" => "Comment has no closing tag",
+    "S0107" => "Template string must be terminated with {{value}}",
+    "S0108" => "A } in template string text must be escaped as \\}",
     "S0201" => "Syntax error: {{token}}",
     "S0202" => "Expected {{value}}, got {{token}}",
     "S0203" => "Expected {{value}} before end of expression",

@@ -25,7 +25,7 @@ The documentation is at <https://thkprado.github.io/jlens/>, with a
 
 ## Highlights
 
-- Full JSONata 2.2 semantics, including every built-in function, checked against the official
+- Full JSONata 2.3 semantics, including every built-in function, checked against the official
   test suite.
 - Audit trees and explanations of evaluations (`jlens eval --explain`). Business labels go in
   ordinary comments, so expressions stay portable:

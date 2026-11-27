@@ -14,7 +14,9 @@ use std::sync::{Arc, OnceLock};
 use indexmap::IndexMap;
 use web_time::{Duration, Instant};
 
-use crate::ast::{Ast, BinaryOp, FallbackOp, Node, NodeKind, Param, SortTerm, Stage, TransformDef};
+use crate::ast::{
+    Ast, BinaryOp, FallbackOp, Node, NodeKind, Param, SortTerm, Stage, TemplatePart, TransformDef,
+};
 use crate::audit::{Branch, EvalInfo, Outcome, Tracer, ValueRef};
 use crate::error::{Error, Result};
 use crate::functions::{self, Call, Picture, boolean};
@@ -1056,6 +1058,7 @@ impl<'a> Evaluator<'_, 'a> {
             NodeKind::Object { pairs } => self.group(pairs, expr, input.clone(), env)?,
             NodeKind::Name { name } => functions::lookup(input, name),
             NodeKind::String { value } => Value::string(self.literal(expr, value)),
+            NodeKind::Template { parts } => self.template(expr, parts, input, env)?,
             NodeKind::Number { value } => Value::Number(*value),
             NodeKind::Bool { value } => Value::Bool(*value),
             NodeKind::Null => Value::Null,
@@ -1793,6 +1796,66 @@ impl<'a> Evaluator<'_, 'a> {
     }
 
     /// [`Self::guardrails`] of a literal evaluated one level below the current node.
+    /// A template string: its text, and the value of each embedded expression cast to a string
+    /// as `&` casts it (undefined adds nothing, a function the empty string).
+    fn template(
+        &mut self,
+        expr: &Node,
+        parts: &[TemplatePart],
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Value<'a>> {
+        // One part is taken as it is: the literal's shared string, or the value's string.
+        match parts {
+            [] => return Ok(Value::string(self.literal(expr, ""))),
+            [TemplatePart::Text(text)] => return Ok(Value::string(self.literal(expr, text))),
+            [TemplatePart::Expr { .. }] => {
+                return self.template_part(&parts[0], input, env).map(Value::String);
+            }
+            _ => {}
+        }
+        let mut out = String::new();
+        for part in parts {
+            let value;
+            let piece = match part {
+                TemplatePart::Text(text) => text.as_str(),
+                TemplatePart::Expr { .. } => {
+                    value = self.template_part(part, input, env)?;
+                    &*value
+                }
+            };
+            self.check_string(out.len() + piece.len())
+                .map_err(|e| e.at(expr.span, expr.position))?;
+            out.push_str(piece);
+        }
+        Ok(Value::string(out))
+    }
+
+    /// The value of a template's embedded expression, cast to a string.
+    fn template_part(
+        &mut self,
+        part: &TemplatePart,
+        input: &Value<'a>,
+        env: &Env<'a>,
+    ) -> Result<Text> {
+        let TemplatePart::Expr {
+            expression,
+            span,
+            position,
+        } = part
+        else {
+            return Ok(Text::default());
+        };
+        Ok(match self.eval(expression, input, env)? {
+            Value::String(s) => s,
+            v => functions::to_string(&v, false, self.limits.max_string_length)
+                // As in jsonata-js, an error casting the value points at the `{`.
+                .map_err(|e| e.at(*span, *position).with("token", "{"))?
+                .map(Text::from)
+                .unwrap_or_default(),
+        })
+    }
+
     /// The shared string of the string literal `node`, whose text is `text`: made the first time
     /// the evaluation meets it and cloned afterwards. The text is compared on each use, since
     /// node ids are unique only within one tree and `$eval` evaluates others.

@@ -481,13 +481,59 @@ enum Lexical {
     String(usize, Option<usize>),
     /// Inside a backquoted name that starts at this offset.
     Backquote(usize),
+    /// In the literal text of a template string, outside its `{...}` expressions.
+    TemplateText,
 }
 
 fn lexical_state(text: &str, offset: usize) -> Lexical {
     let bytes = text.as_bytes();
+    // The template strings open at `i`, innermost last: the closing delimiter, and the `{` not
+    // yet closed in the current embedded expression (zero in the text), as the lexer counts.
+    let mut templates: Vec<(&[u8], usize)> = Vec::new();
+    // Where the `>>` of the last template closed: an operand ends there.
+    let mut closed = None;
     let mut i = 0;
     while i < offset.min(bytes.len()) {
+        if let Some((close, depth)) = templates.last_mut()
+            && *depth == 0
+        {
+            if bytes[i..].starts_with(close) {
+                i += close.len();
+                templates.pop();
+                closed = Some(i);
+            } else {
+                match bytes[i] {
+                    b'\\' => i += 2,
+                    b'{' => {
+                        *depth = 1;
+                        i += 1;
+                    }
+                    _ => i += 1,
+                }
+            }
+            continue;
+        }
+        if bytes[i..].starts_with("«".as_bytes()) {
+            templates.push(("»".as_bytes(), 0));
+            i += "«".len();
+            continue;
+        }
+        if bytes[i..].starts_with(b"<<") && !operand_before(text, i, closed) {
+            templates.push((b">>", 0));
+            i += 2;
+            continue;
+        }
         match bytes[i] {
+            b'{' => {
+                if let Some((_, depth)) = templates.last_mut() {
+                    *depth += 1;
+                }
+            }
+            b'}' => {
+                if let Some((_, depth)) = templates.last_mut() {
+                    *depth -= 1;
+                }
+            }
             q @ (b'"' | b'\'') => {
                 let start = i;
                 i += 1;
@@ -519,7 +565,26 @@ fn lexical_state(text: &str, offset: usize) -> Lexical {
         }
         i += 1;
     }
-    Lexical::Code
+    match templates.last() {
+        Some((_, 0)) => Lexical::TemplateText,
+        _ => Lexical::Code,
+    }
+}
+
+/// Whether an operand ends just before `at`, where `<<` is then the less-than operator (as the
+/// lexer reads it after an operand): a name or literal, a closing bracket, or the `>>` that closed
+/// a template at `closed`. An approximation of what the parser knows.
+fn operand_before(text: &str, at: usize, closed: Option<usize>) -> bool {
+    let before = text[..at].trim_end();
+    if closed == Some(before.len()) {
+        return true;
+    }
+    let word = &before[before.trim_end_matches(is_word_char).len()..];
+    match before.chars().last() {
+        Some(c) if is_word_char(c) => !matches!(word, "and" | "or" | "in"),
+        Some(c) => ")]}\"'`".contains(c),
+        None => false,
+    }
 }
 
 fn is_word_char(c: char) -> bool {
@@ -1423,7 +1488,8 @@ impl LanguageService {
             value_request: None,
         };
         match lexical_state(text, offset) {
-            Lexical::Comment => return empty(Span::new(offset, offset)),
+            // A template's text is not code: nothing to complete until a `{`.
+            Lexical::Comment | Lexical::TemplateText => return empty(Span::new(offset, offset)),
             Lexical::String(start, closed) => {
                 // Complete a value of the comparison the literal is the right-hand side of; the
                 // whole literal is replaced. The rest of an unclosed literal stays as it is.
@@ -2058,7 +2124,16 @@ impl LanguageService {
         let mut i = offset;
         while i > 0 {
             i -= 1;
-            if lexical_state(text, i) != Lexical::Code {
+            let state = lexical_state(text, i);
+            // The braces of a template's expression count as those of an object.
+            let template_brace = match bytes[i] {
+                b'{' => state == Lexical::TemplateText,
+                b'}' => {
+                    state == Lexical::Code && lexical_state(text, i + 1) == Lexical::TemplateText
+                }
+                _ => false,
+            };
+            if state != Lexical::Code && !template_brace {
                 continue;
             }
             match bytes[i] {

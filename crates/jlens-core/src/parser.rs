@@ -107,6 +107,10 @@ pub(crate) enum RawKind {
     Block {
         exprs: Vec<Raw>,
     },
+    /// A template string: its pieces of literal text and its embedded expressions, in order.
+    Template {
+        parts: Vec<RawPart>,
+    },
     /// `(end)` used as an operand; processing reports S0207.
     End,
     /// An error recorded by the recovering parser, possibly wrapping what was parsed before it.
@@ -114,6 +118,16 @@ pub(crate) enum RawKind {
         error: Option<Box<Error>>,
         lhs: Option<Box<Raw>>,
     },
+}
+
+/// A part of a template string.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub(crate) enum RawPart {
+    /// Literal text.
+    Text(String),
+    /// An embedded expression, with the span of its braces.
+    Expr { expression: Raw, span: Span },
 }
 
 impl Raw {
@@ -169,6 +183,9 @@ impl Sym {
             SymKind::Tok(TokKind::Str(_) | TokKind::Number(_) | TokKind::Value(_)) => "(literal)",
             SymKind::Tok(TokKind::Regex { .. }) => "(regex)",
             SymKind::Tok(TokKind::Op(op)) => op,
+            SymKind::Tok(TokKind::TemplateOpen(_)) => "(template)",
+            SymKind::Tok(TokKind::TemplateText(_)) => "(template-text)",
+            SymKind::Tok(TokKind::TemplateEnd(_)) => "(template-end)",
             SymKind::End => "(end)",
             SymKind::Error => "(error)",
         }
@@ -200,7 +217,10 @@ impl Sym {
             SymKind::Tok(TokKind::Number(n)) => (*n).into(),
             SymKind::Tok(TokKind::Value(lit)) => lit_json(*lit),
             SymKind::Tok(TokKind::Regex { pattern, .. }) => pattern.clone().into(),
-            SymKind::Tok(TokKind::Op(op)) => (*op).into(),
+            SymKind::Tok(
+                TokKind::Op(op) | TokKind::TemplateOpen(op) | TokKind::TemplateEnd(op),
+            ) => (*op).into(),
+            SymKind::Tok(TokKind::TemplateText(text)) => text.clone().into(),
             SymKind::End => "(end)".into(),
             SymKind::Error => return None,
         })
@@ -466,6 +486,13 @@ impl<'a> Parser<'a> {
             SymKind::Tok(TokKind::Value(value)) => RawKind::Value { value },
             SymKind::Tok(TokKind::Regex { pattern, flags }) => RawKind::Regex { pattern, flags },
             SymKind::End => return Ok(Raw::new(RawKind::End, t.span, t.span.end)),
+            SymKind::Tok(TokKind::TemplateOpen(open)) => RawKind::Template {
+                parts: self.template_parts(open)?,
+            },
+            // Only valid inside a template string, which `template_parts` reads.
+            SymKind::Tok(TokKind::TemplateText(_) | TokKind::TemplateEnd(_)) => {
+                return self.prefix_error(&t);
+            }
             SymKind::Tok(TokKind::Op(op)) => match op {
                 // keywords used as field names
                 "and" | "or" | "in" => RawKind::Name {
@@ -548,6 +575,54 @@ impl<'a> Parser<'a> {
             },
         };
         Ok(Raw::new(kind, self.span_from(start), pos))
+    }
+
+    /// The parts of a template string, up to and past its closing delimiter: the lexer gives its
+    /// pieces of text, and the tokens of each `{...}` between them.
+    fn template_parts(&mut self, open: &'static str) -> PResult<Vec<RawPart>> {
+        let errors = self.errors.len();
+        let mut parts = Vec::new();
+        loop {
+            match &self.node.kind {
+                SymKind::Tok(TokKind::TemplateText(text)) => {
+                    parts.push(RawPart::Text(text.clone()));
+                    self.advance(None, false)?;
+                }
+                SymKind::Tok(TokKind::Op("{")) => {
+                    let start = self.node.span.start;
+                    self.advance(None, false)?;
+                    // `{}` adds nothing.
+                    let expression = if self.node.id() == "}" {
+                        None
+                    } else {
+                        Some(self.expression(0)?)
+                    };
+                    self.advance(Some("}"), false)?;
+                    if let Some(expression) = expression {
+                        let span = self.span_from(start);
+                        parts.push(RawPart::Expr { expression, span });
+                    }
+                }
+                SymKind::Tok(TokKind::TemplateEnd(_)) => {
+                    self.advance(None, true)?;
+                    return Ok(parts);
+                }
+                SymKind::End if self.errors.len() == errors => {
+                    // The input ended inside the text.
+                    let close = if open == "«" { "»" } else { ">>" };
+                    let err = Error::new("S0107").with("value", close).located(
+                        self.src,
+                        self.node.span,
+                        self.node.span.end,
+                    );
+                    self.handle_error(err)?;
+                    return Ok(parts);
+                }
+                // Recover mode only: an error inside `{}` has been recorded and the rest of the
+                // input skipped, so the parts read so far are kept.
+                _ => return Ok(parts),
+            }
+        }
     }
 
     /// S0211: a symbol that cannot start an expression.

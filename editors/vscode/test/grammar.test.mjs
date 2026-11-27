@@ -164,9 +164,13 @@ function corpus() {
   return items;
 }
 
-// Errors of the lexer: an expression that expects one may leave a string, a comment or a
-// regular expression open.
-const LEXER_ERRORS = new Set(["S0101", "S0102", "S0103", "S0104", "S0105", "S0106", "S0301", "S0302"]);
+// Errors of the lexer: an expression that expects one may leave a string, a comment, a regular
+// expression or a template string open. So may an embedded expression not closed (S0203).
+const LEXER_ERRORS = new Set([
+  "S0101", "S0102", "S0103", "S0104", "S0105", "S0106", "S0107", "S0108", "S0301", "S0302",
+]);
+const mayStayOpen = (code, expr) =>
+  LEXER_ERRORS.has(code) || (code === "S0203" && /«|<</.test(expr));
 
 /** How many regular expressions jsonata-js's syntax tree holds; undefined if it does not parse. */
 function astRegexes(expr) {
@@ -194,7 +198,7 @@ test("the suite's expressions and the book's examples are tokenized", () => {
   assert.ok(items.length > 1500, `only ${items.length} expressions found`);
   for (const { where, expr, code } of items) {
     const { lines, stack } = tokenize(expr);
-    if (!LEXER_ERRORS.has(code) && stack.depth !== 1) {
+    if (!mayStayOpen(code, expr) && stack.depth !== 1) {
       problems.push(`${where}: a string, comment or regular expression stays open\n  ${expr}`);
       continue;
     }
@@ -209,7 +213,7 @@ test("the suite's expressions and the book's examples are tokenized", () => {
             t.scopes.some((s) => s.includes("string.regexp"))) regexes++;
       }
     }
-    if (LEXER_ERRORS.has(code)) continue;
+    if (mayStayOpen(code, expr)) continue;
     const expected = astRegexes(expr);
     if (expected !== undefined && expected !== regexes) {
       problems.push(`${where}: ${regexes} regular expressions, jsonata-js finds ${expected}\n  ${expr}`);

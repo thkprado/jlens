@@ -6,7 +6,7 @@ functions (`$sum(Product.(Price * Quantity))`), and shapes the output with ordin
 (`{"total": ...}`). It also has variables, functions and conditionals, so rules of any
 complexity can be written in it.
 
-jlens implements JSONata 2.2 and is checked against the official test suite. Where it differs
+jlens implements JSONata 2.3 and is checked against the official test suite. Where it differs
 from the reference implementation, jsonata-js, [Compatibility](compatibility.md) says so.
 
 > This reference is adapted from the [JSONata documentation](https://docs.jsonata.org)
@@ -40,7 +40,7 @@ JSONata values have the JSON types plus one more:
 
 | Type | Examples |
 |---|---|
-| string | `"hello"`, `'hello'` |
+| string | `"hello"`, `'hello'`, a [template](operators.md#template-strings) `«hello {name}»` |
 | number | `42`, `-3.5`, `1e6` (always a 64-bit float) |
 | Boolean | `true`, `false` |
 | null | `null` |

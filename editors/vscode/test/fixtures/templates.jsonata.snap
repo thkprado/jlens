@@ -1,0 +1,123 @@
+>«Hello, {name}! You have {$count(items)} items»
+#^ string.template.jsonata punctuation.definition.string.template.begin.jsonata
+# ^^^^^^^ string.template.jsonata
+#        ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.begin.jsonata
+#         ^^^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata variable.other.member.jsonata
+#             ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.end.jsonata
+#              ^^^^^^^^^^^ string.template.jsonata
+#                         ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.begin.jsonata
+#                          ^^^^^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata support.function.builtin.jsonata
+#                                ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.parens.begin.jsonata
+#                                 ^^^^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata variable.other.member.jsonata
+#                                      ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.parens.end.jsonata
+#                                       ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.end.jsonata
+#                                        ^^^^^^ string.template.jsonata
+#                                              ^ string.template.jsonata punctuation.definition.string.template.end.jsonata
+>«escapes: \{ \} \« \» \< \> \n \u00e9, not one: \q, an unescaped }»
+#^ string.template.jsonata punctuation.definition.string.template.begin.jsonata
+# ^^^^^^^^^ string.template.jsonata
+#          ^^ string.template.jsonata constant.character.escape.jsonata
+#            ^ string.template.jsonata
+#             ^^ string.template.jsonata constant.character.escape.jsonata
+#               ^ string.template.jsonata
+#                ^^ string.template.jsonata constant.character.escape.jsonata
+#                  ^ string.template.jsonata
+#                   ^^ string.template.jsonata constant.character.escape.jsonata
+#                     ^ string.template.jsonata
+#                      ^^ string.template.jsonata constant.character.escape.jsonata
+#                        ^ string.template.jsonata
+#                         ^^ string.template.jsonata constant.character.escape.jsonata
+#                           ^ string.template.jsonata
+#                            ^^ string.template.jsonata constant.character.escape.jsonata
+#                              ^ string.template.jsonata
+#                               ^^^^^^ string.template.jsonata constant.character.escape.jsonata
+#                                     ^^^^^^^^^^^ string.template.jsonata
+#                                                ^^ string.template.jsonata invalid.illegal.escape.jsonata
+#                                                  ^^^^^^^^^^^^^^^ string.template.jsonata
+#                                                                 ^ string.template.jsonata invalid.illegal.brace.jsonata
+#                                                                  ^ string.template.jsonata punctuation.definition.string.template.end.jsonata
+><<<li>{ {"total": $sum(items.price)} }</li\>>>
+#^^ string.template.jsonata punctuation.definition.string.template.begin.jsonata
+#  ^^^^ string.template.jsonata
+#      ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.begin.jsonata
+#       ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata
+#        ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.braces.begin.jsonata
+#         ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+#          ^^^^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.quoted.double.jsonata
+#               ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.quoted.double.jsonata punctuation.definition.string.end.jsonata
+#                ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata keyword.operator.ternary.jsonata
+#                 ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata
+#                  ^^^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata support.function.builtin.jsonata
+#                      ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.parens.begin.jsonata
+#                       ^^^^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata variable.other.member.jsonata
+#                            ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.accessor.jsonata
+#                             ^^^^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata variable.other.member.jsonata
+#                                  ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.parens.end.jsonata
+#                                   ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.braces.end.jsonata
+#                                    ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata
+#                                     ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.end.jsonata
+#                                      ^^^^ string.template.jsonata
+#                                          ^^ string.template.jsonata constant.character.escape.jsonata
+#                                            ^^ string.template.jsonata punctuation.definition.string.template.end.jsonata
+>«outer {«inner {x}»} and {<<y>>}»
+#^ string.template.jsonata punctuation.definition.string.template.begin.jsonata
+# ^^^^^^ string.template.jsonata
+#       ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.begin.jsonata
+#        ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.template.jsonata punctuation.definition.string.template.begin.jsonata
+#         ^^^^^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.template.jsonata
+#               ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.begin.jsonata
+#                ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata variable.other.member.jsonata
+#                 ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.end.jsonata
+#                  ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.template.jsonata punctuation.definition.string.template.end.jsonata
+#                   ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.end.jsonata
+#                    ^^^^^ string.template.jsonata
+#                         ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.begin.jsonata
+#                          ^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.template.jsonata punctuation.definition.string.template.begin.jsonata
+#                            ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.template.jsonata
+#                             ^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata string.template.jsonata punctuation.definition.string.template.end.jsonata
+#                               ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.end.jsonata
+#                                ^ string.template.jsonata punctuation.definition.string.template.end.jsonata
+>"a" < <<b>> and <<a>><<<b>>
+#^ string.quoted.double.jsonata punctuation.definition.string.begin.jsonata
+# ^ string.quoted.double.jsonata
+#  ^ string.quoted.double.jsonata punctuation.definition.string.end.jsonata
+#    ^ keyword.operator.comparison.jsonata
+#     ^ string.template.jsonata
+#      ^^ string.template.jsonata punctuation.definition.string.template.begin.jsonata
+#        ^ string.template.jsonata
+#         ^^ string.template.jsonata punctuation.definition.string.template.end.jsonata
+#            ^^^ keyword.operator.logical.jsonata
+#               ^ string.template.jsonata
+#                ^^ string.template.jsonata punctuation.definition.string.template.begin.jsonata
+#                  ^ string.template.jsonata
+#                   ^^ string.template.jsonata punctuation.definition.string.template.end.jsonata
+#                     ^ keyword.operator.comparison.jsonata
+#                      ^^ string.template.jsonata punctuation.definition.string.template.begin.jsonata
+#                        ^ string.template.jsonata
+#                         ^^ string.template.jsonata punctuation.definition.string.template.end.jsonata
+><<n={λ($x)<a<n>>{$x}([1,2])}>>
+#^^ string.template.jsonata punctuation.definition.string.template.begin.jsonata
+#  ^^ string.template.jsonata
+#    ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.begin.jsonata
+#     ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata storage.type.function.jsonata
+#      ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.parens.begin.jsonata
+#       ^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata variable.other.jsonata
+#         ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.parens.end.jsonata
+#          ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata keyword.operator.comparison.jsonata
+#           ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata variable.other.member.jsonata
+#            ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata keyword.operator.comparison.jsonata
+#             ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata variable.other.member.jsonata
+#              ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata keyword.operator.comparison.jsonata
+#               ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata keyword.operator.comparison.jsonata
+#                ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.braces.begin.jsonata
+#                 ^^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata variable.other.jsonata
+#                   ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.braces.end.jsonata
+#                    ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.parens.begin.jsonata
+#                     ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.brackets.begin.jsonata
+#                      ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata constant.numeric.decimal.jsonata
+#                       ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.separator.comma.jsonata
+#                        ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata constant.numeric.decimal.jsonata
+#                         ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.brackets.end.jsonata
+#                          ^ string.template.jsonata meta.template.expression.jsonata meta.embedded.line.jsonata punctuation.section.parens.end.jsonata
+#                           ^ string.template.jsonata meta.template.expression.jsonata punctuation.definition.template-expression.end.jsonata
+#                            ^^ string.template.jsonata punctuation.definition.string.template.end.jsonata

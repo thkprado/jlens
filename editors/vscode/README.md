@@ -1,7 +1,7 @@
 # jlens — JSONata
 
 [JSONata](https://jsonata.org) in Visual Studio Code, with the language server of
-[jlens](https://thkprado.github.io/jlens/), a JSONata 2.2 engine:
+[jlens](https://thkprado.github.io/jlens/), a JSONata 2.3 engine:
 
 - highlighting of `.jsonata` files;
 - diagnostics: syntax errors, unknown functions, wrong argument counts, and fields that the

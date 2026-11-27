@@ -2,7 +2,7 @@
 
 Guidance for coding agents working in this repository. Humans: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-jlens is a JSONata 2.2 engine in Rust, ported from jsonata-js 2.2.2 and following 2.3.0.
+jlens is a JSONata 2.3 engine in Rust, ported from jsonata-js 2.2.2 and following 2.3.0.
 
 ## Map
 

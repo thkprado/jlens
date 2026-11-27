@@ -13,10 +13,10 @@
 //! In recover mode errors become [`NodeKind::Error`] nodes and diagnostics instead of aborting.
 
 use crate::ast::{BinaryOp, FallbackOp, LambdaDef, Param, Slot, TransformDef};
-use crate::ast::{Group, Node, NodeKind, SlotId, SortTerm, Span, Stage};
+use crate::ast::{Group, Node, NodeKind, SlotId, SortTerm, Span, Stage, TemplatePart};
 use crate::error::{Error, Result};
 use crate::lexer::Lit;
-use crate::parser::{Raw, RawKind};
+use crate::parser::{Raw, RawKind, RawPart};
 use std::sync::Arc;
 
 pub(crate) struct Processor<'a> {
@@ -73,8 +73,16 @@ impl<'a> Processor<'a> {
             node.id = next_id;
             next_id += 1;
             node.position = utf16[node.pos.min(utf16.len() - 1)];
-            if let NodeKind::Parent { slot, label } = &mut node.kind {
-                *label = slots[*slot].label.clone();
+            match &mut node.kind {
+                NodeKind::Parent { slot, label } => *label = slots[*slot].label.clone(),
+                NodeKind::Template { parts } => {
+                    for part in parts {
+                        if let TemplatePart::Expr { span, position, .. } = part {
+                            *position = utf16[(span.start + 1).min(utf16.len() - 1)];
+                        }
+                    }
+                }
+                _ => {}
             }
             node.attrs.ancestor_label = node.attrs.ancestor.map(|s| slots[s].label.clone());
             mark_frame(node, eval);
@@ -389,6 +397,27 @@ impl<'a> Processor<'a> {
                 );
                 node.attrs.seeking_parent = seeking;
                 node.attrs.cons_array = cons_array;
+                node
+            }
+            RawKind::Template { parts } => {
+                let mut seeking = Vec::new();
+                let mut out = Vec::with_capacity(parts.len());
+                for part in parts {
+                    out.push(match part {
+                        RawPart::Text(text) => TemplatePart::Text(text),
+                        RawPart::Expr { expression, span } => {
+                            let expression = self.process_boxed(expression)?;
+                            seeking.extend(ancestry(&expression));
+                            TemplatePart::Expr {
+                                expression,
+                                span,
+                                position: 0,
+                            }
+                        }
+                    });
+                }
+                let mut node = Node::new(NodeKind::Template { parts: out }, span, pos);
+                node.attrs.seeking_parent = seeking;
                 node
             }
             RawKind::Name { value } => {

@@ -8,6 +8,12 @@
 //! * doc-comments (`/** ... */`) are kept and attached to the following token;
 //! * `\uXXXX` escapes forming a UTF-16 surrogate pair are combined into one character, and a
 //!   lone surrogate becomes U+FFFD, since Rust strings cannot hold unpaired surrogates.
+//!
+//! Template strings (`«...»` and `<<...>>`) are tokenized as in jsonata-js 2.3.0: an opening
+//! token, then pieces of literal text and the tokens of each `{...}` expression, then a closing
+//! token. The lexer keeps a stack with one entry per open template, as they nest inside `{}`,
+//! and each entry counts the `{` not yet closed in its current expression: at zero the lexer
+//! reads literal text. The parser needs to know nothing of this state.
 
 use crate::annotation::DocComment;
 use crate::ast::Span;
@@ -29,8 +35,17 @@ pub(crate) enum TokKind {
     Str(String),
     Number(f64),
     Value(Lit),
-    Regex { pattern: String, flags: String },
+    Regex {
+        pattern: String,
+        flags: String,
+    },
     Op(&'static str),
+    /// The opening delimiter of a template string: `«` or `<<`.
+    TemplateOpen(&'static str),
+    /// A piece of a template's literal text, its escapes decoded.
+    TemplateText(String),
+    /// The closing delimiter of a template string: `»` or `>>`.
+    TemplateEnd(&'static str),
 }
 
 /// A token with its location and any doc-comments that precede it.
@@ -50,6 +65,17 @@ const SINGLE_CHAR_OPS: &[&str] = &[
 
 const DOUBLE_CHAR_OPS: &[&str] = &["..", ":=", "!=", ">=", "<=", "**", "~>", "?:", "??"];
 
+/// The characters that a template's text may escape as themselves, besides the JSON escapes.
+const TEMPLATE_ESCAPES: &str = "{}<>«»";
+
+/// A template string being read.
+struct OpenTemplate {
+    /// The closing delimiter.
+    close: &'static str,
+    /// The `{` not yet closed in the current embedded expression; zero in the literal text.
+    depth: usize,
+}
+
 fn is_whitespace(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0b)
 }
@@ -62,6 +88,8 @@ pub(crate) struct Lexer<'a> {
     src: &'a str,
     pos: usize,
     docs: Vec<DocComment>,
+    /// The template strings open at this point, innermost last.
+    templates: Vec<OpenTemplate>,
 }
 
 impl<'a> Lexer<'a> {
@@ -70,6 +98,7 @@ impl<'a> Lexer<'a> {
             src,
             pos: 0,
             docs: Vec::new(),
+            templates: Vec::new(),
         }
     }
 
@@ -77,6 +106,7 @@ impl<'a> Lexer<'a> {
     pub fn finish(&mut self) {
         self.pos = self.src.len();
         self.docs.clear();
+        self.templates.clear();
     }
 
     /// Doc-comments seen after the last token (they have nothing to attach to).
@@ -104,6 +134,14 @@ impl<'a> Lexer<'a> {
     ///
     /// `infix` is true when the parser expects an operator, in which case `/` means division.
     pub fn next(&mut self, infix: bool) -> Result<Option<Token>> {
+        if let Some(template) = self.templates.last()
+            && template.depth == 0
+            && self.byte(self.pos) != Some(b'{')
+        {
+            // A `{` falls through, lexed as an operator: it starts an embedded expression.
+            let close = template.close;
+            return self.template_text(close);
+        }
         let len = self.src.len();
         loop {
             while self.byte(self.pos).is_some_and(is_whitespace) {
@@ -142,12 +180,34 @@ impl<'a> Lexer<'a> {
         }
 
         let rest = &self.src[start..];
+        // `<<` opens a template only in operand position: after an operand, `"a"<<<b>>` is
+        // `"a" < <<b>>`.
+        let template = if rest.starts_with('«') {
+            Some(("«", "»"))
+        } else if !infix && rest.starts_with("<<") {
+            Some(("<<", ">>"))
+        } else {
+            None
+        };
+        if let Some((open, close)) = template {
+            self.pos += open.len();
+            self.templates.push(OpenTemplate { close, depth: 0 });
+            return Ok(self.token(TokKind::TemplateOpen(open), start));
+        }
         if let Some(op) = DOUBLE_CHAR_OPS.iter().find(|op| rest.starts_with(**op)) {
             self.pos += 2;
             return Ok(self.token(TokKind::Op(op), start));
         }
         if let Some(op) = SINGLE_CHAR_OPS.iter().find(|op| op.as_bytes()[0] == c) {
             self.pos += 1;
+            // Inside an embedded expression, the `}` that closes its first `{` resumes the text.
+            if let Some(template) = self.templates.last_mut() {
+                match c {
+                    b'{' => template.depth += 1,
+                    b'}' => template.depth = template.depth.saturating_sub(1),
+                    _ => {}
+                }
+            }
             return Ok(self.token(TokKind::Op(op), start));
         }
 
@@ -258,46 +318,7 @@ impl<'a> Lexer<'a> {
             let c = src[self.pos..].chars().next().expect("in bounds");
             if c == '\\' {
                 self.pos += 1;
-                let Some(esc) = src[self.pos..].chars().next() else {
-                    break;
-                };
-                match esc {
-                    '"' => out.push('"'),
-                    '\\' => out.push('\\'),
-                    '/' => out.push('/'),
-                    'b' => out.push('\u{8}'),
-                    'f' => out.push('\u{c}'),
-                    'n' => out.push('\n'),
-                    'r' => out.push('\r'),
-                    't' => out.push('\t'),
-                    'u' => {
-                        let Some(unit) = hex4(&src[self.pos + 1..]) else {
-                            return Err(self.error("S0104", token_start, self.pos));
-                        };
-                        self.pos += 4;
-                        let ch = if (0xD800..0xDC00).contains(&unit) {
-                            // High surrogate: combine with a following \uDC00-\uDFFF escape.
-                            let next = &src[(self.pos + 1).min(src.len())..];
-                            match next.strip_prefix("\\u").and_then(hex4) {
-                                Some(low) if (0xDC00..0xE000).contains(&low) => {
-                                    self.pos += 6;
-                                    let cp = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
-                                    char::from_u32(cp).unwrap_or('\u{FFFD}')
-                                }
-                                _ => '\u{FFFD}',
-                            }
-                        } else {
-                            char::from_u32(unit).unwrap_or('\u{FFFD}')
-                        };
-                        out.push(ch);
-                    }
-                    other => {
-                        return Err(self
-                            .error("S0103", token_start, self.pos)
-                            .with("token", other.to_string()));
-                    }
-                }
-                self.pos += 1;
+                out.push(self.escape(token_start, "")?);
             } else if c as u32 == quote as u32 {
                 self.pos += 1;
                 return Ok(out);
@@ -309,16 +330,104 @@ impl<'a> Lexer<'a> {
         self.pos = src.len();
         Err(self.error("S0101", token_start, src.len()))
     }
+
+    /// Decodes the escape sequence whose `\` has just been consumed: `self.pos` is on the
+    /// escaped character, and is left after the sequence. `extra` lists the characters that may
+    /// also be escaped as themselves. As in jsonata-js 2.3.0, a `\` at the end of the input is
+    /// `S0103`, and `\u` needs four hex digits even there.
+    fn escape(&mut self, token_start: usize, extra: &str) -> Result<char> {
+        let src = self.src;
+        let Some(esc) = src[self.pos..].chars().next() else {
+            return Err(self.error("S0103", token_start, self.pos).with("token", ""));
+        };
+        let ch = match esc {
+            '"' => '"',
+            '\\' => '\\',
+            '/' => '/',
+            'b' => '\u{8}',
+            'f' => '\u{c}',
+            'n' => '\n',
+            'r' => '\r',
+            't' => '\t',
+            'u' => {
+                let Some(unit) = hex4(&src[self.pos + 1..]) else {
+                    return Err(self.error("S0104", token_start, self.pos));
+                };
+                self.pos += 4;
+                if (0xD800..0xDC00).contains(&unit) {
+                    // High surrogate: combine with a following \uDC00-\uDFFF escape.
+                    let next = &src[(self.pos + 1).min(src.len())..];
+                    match next.strip_prefix("\\u").and_then(hex4) {
+                        Some(low) if (0xDC00..0xE000).contains(&low) => {
+                            self.pos += 6;
+                            let cp = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
+                            char::from_u32(cp).unwrap_or('\u{FFFD}')
+                        }
+                        _ => '\u{FFFD}',
+                    }
+                } else {
+                    char::from_u32(unit).unwrap_or('\u{FFFD}')
+                }
+            }
+            other if extra.contains(other) => other,
+            other => {
+                return Err(self
+                    .error("S0103", token_start, self.pos)
+                    .with("token", other.to_string()));
+            }
+        };
+        self.pos += esc.len_utf8();
+        Ok(ch)
+    }
+
+    /// Reads a template's literal text up to the next `{` or its closing delimiter `close`, or
+    /// that delimiter. The end of the input inside the text gives `None`, as at the end of any
+    /// expression: the parser reports the unterminated template (`S0107`).
+    fn template_text(&mut self, close: &'static str) -> Result<Option<Token>> {
+        let src = self.src;
+        let start = self.pos;
+        if start >= src.len() {
+            return Ok(None);
+        }
+        // The first `>>` closes a `<<...>>` template, so `<<a>>>b` is `<<a>>` and then `>`.
+        if src[start..].starts_with(close) {
+            self.pos += close.len();
+            self.templates.pop();
+            return Ok(self.token(TokKind::TemplateEnd(close), start));
+        }
+        let mut text = String::new();
+        while let Some(c) = src[self.pos..].chars().next() {
+            if c == '{' || src[self.pos..].starts_with(close) {
+                break;
+            }
+            match c {
+                '\\' => {
+                    self.pos += 1;
+                    text.push(self.escape(start, TEMPLATE_ESCAPES)?);
+                }
+                // A `}` in the text must be escaped, so that a stray brace is reported.
+                '}' => {
+                    return Err(self
+                        .error("S0108", self.pos, self.pos + 1)
+                        .with("token", "}"));
+                }
+                c => {
+                    text.push(c);
+                    self.pos += c.len_utf8();
+                }
+            }
+        }
+        Ok(self.token(TokKind::TemplateText(text), start))
+    }
 }
 
-/// Parses the (up to) four hex digits after `\u`. Like jsonata-js, fewer than four digits are
-/// accepted at the very end of the input.
+/// Parses the four hex digits after `\u`.
 fn hex4(s: &str) -> Option<u32> {
-    let digits: String = s.chars().take(4).collect();
-    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+    let digits = s.get(..4)?;
+    if !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
-    u32::from_str_radix(&digits, 16).ok()
+    u32::from_str_radix(digits, 16).ok()
 }
 
 /// Matches `(0|[1-9][0-9]*)(\.[0-9]+)?([Ee][-+]?[0-9]+)?` starting at `start` (which is a digit)
@@ -428,6 +537,36 @@ mod tests {
         assert_eq!(
             kinds(r#""a\"bé𝄞\uD800""#),
             vec![TokKind::Str("a\"bé𝄞\u{FFFD}".into())]
+        );
+    }
+
+    #[test]
+    fn template_strings() {
+        assert_eq!(
+            kinds(r"«a \{ {x}/* t */{ {} }»"),
+            vec![
+                TokKind::TemplateOpen("«"),
+                TokKind::TemplateText("a { ".into()),
+                TokKind::Op("{"),
+                TokKind::Name("x".into()),
+                TokKind::Op("}"),
+                TokKind::TemplateText("/* t */".into()),
+                TokKind::Op("{"),
+                TokKind::Op("{"),
+                TokKind::Op("}"),
+                TokKind::Op("}"),
+                TokKind::TemplateEnd("»"),
+            ]
+        );
+        // The first `>>` closes; a `»` inside `<<...>>` is text.
+        assert_eq!(
+            kinds("<<»>>>"),
+            vec![
+                TokKind::TemplateOpen("<<"),
+                TokKind::TemplateText("»".into()),
+                TokKind::TemplateEnd(">>"),
+                TokKind::Op(">"),
+            ]
         );
     }
 

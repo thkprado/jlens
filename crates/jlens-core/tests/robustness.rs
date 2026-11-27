@@ -21,7 +21,8 @@ const TOKENS: &[&str] = &[
     "^(", ">price", "@$v", "#$j", "|", "function($v){", "λ($w){", "$sum(", "$map(", "$string(",
     "$substring(", "$match(", "$replace(", "$split(", "$formatNumber(", "$fromMillis(", "$keys(",
     "$merge(", "$sort(", "$reduce(", "$each(", "$eval(", "$echo(", "$checked(", "$fail(", "$echo(?, ", "$apply(", "/a+/", "/[/", "`a b`", "/* c */",
-    "/** @label \"x\" */", "<s:s>", "%", "\\", "é", "𝄞", " ",
+    "/** @label \"x\" */", "<s:s>", "%", "\\", "é", "𝄞", " ", "«", "»", "<<", ">>", "«t {",
+    "} u»", r"\{", r"é",
 ];
 
 /// Syntactically valid expressions, built from a small grammar, so that the evaluator is
@@ -139,6 +140,14 @@ fn valid() -> impl Strategy<Value = String> {
                 .clone()
                 .prop_map(|v| format!("items#$i[[$i, $x[0]]].{v}")),
             inner.clone().prop_map(|v| format!("items@$o.{v}")),
+            // Template strings, nested and as a path step (0.37 #8).
+            (inner.clone(), inner.clone())
+                .prop_map(|(v, w)| format!(r"«a {{{v}}} \{{b\}} {{{w}}}»")),
+            (inner.clone(), inner.clone())
+                .prop_map(|(v, w)| format!(r"<<{{{v}}}<{{«{{{w}}}»}}\>>>")),
+            inner
+                .clone()
+                .prop_map(|v| format!("items.«{{%.a}}-{{{v}}}»")),
             (inner.clone(), inner.clone())
                 .prop_map(|(v, u)| format!("{v} ~> |items|{{'p': {u}}}|")),
             // Any location, which may reach outside the copy (`D1014`), under a `$clone` the

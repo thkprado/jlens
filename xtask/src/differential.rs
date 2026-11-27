@@ -806,7 +806,7 @@ fn expression(rng: &mut Rng, depth: u32) -> String {
         0 => rng.pick(STEPS).to_owned(),
         _ => format!("({})", e(rng)),
     };
-    match rng.below(24) {
+    match rng.below(25) {
         0..=2 => {
             let l = e(rng);
             let op = rng.pick(OPERATORS);
@@ -855,6 +855,16 @@ fn expression(rng: &mut Rng, depth: u32) -> String {
             format!("($f := function({params}){{ {body} }}; $f({}))", list(rng))
         }
         22 => distinct_call(rng, depth),
+        // Template strings (0.37 #8): escapes, a path step, and a part that binds a name a later
+        // part reads, as the parts are evaluated in order in both engines.
+        23 => match rng.below(3) {
+            0 => format!(r"«a {{{}}} \{{b\}} {{{}}}»", e(rng), e(rng)),
+            1 => format!("items.<<{{{}}}>>", e(rng)),
+            _ => {
+                let (bound, read) = binding(rng, depth);
+                format!("«{{{bound}}}-{{{read}}}»")
+            }
+        },
         _ => constructed(rng, depth),
     }
 }

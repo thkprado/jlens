@@ -10,7 +10,7 @@
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use jlens_core::ast::{BinaryOp, FallbackOp, LambdaDef, Node, NodeKind, Span, Stage};
+use jlens_core::ast::{BinaryOp, FallbackOp, LambdaDef, Node, NodeKind, Span, Stage, TemplatePart};
 
 use crate::shape::{Definitions, Field, JsonType, NO_DEFINITIONS, Sh, Shape, members, members_of};
 
@@ -984,6 +984,14 @@ impl<'s> Walker<'s, '_> {
                 ctx.clone()
             }
             NodeKind::String { .. } => Ty::literal(JsonType::String),
+            NodeKind::Template { parts } => {
+                for part in parts {
+                    if let TemplatePart::Expr { expression, .. } = part {
+                        self.walk(expression, ctx, scope);
+                    }
+                }
+                Ty::literal(JsonType::String)
+            }
             NodeKind::Number { .. } => Ty::literal(JsonType::Number),
             NodeKind::Bool { .. } => Ty::literal(JsonType::Boolean),
             NodeKind::Null => Ty::literal(JsonType::Null),

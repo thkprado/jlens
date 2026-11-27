@@ -2,9 +2,7 @@
 
 jlens vendors the language-neutral test suite of the reference implementation
 ([jsonata-js](https://github.com/jsonata-js/jsonata), MIT) in `tests/jsonata-suite/`, from
-its tag v2.3.0. jlens does not have 2.3.0's template strings (`«...»`) yet
-([compatibility](../language/compatibility.md#parsing)): their cases fail and are not in the
-baseline. The suite has 103 groups and 1,972 cases. The harness lives in
+its tag v2.3.0. The suite has 103 groups and 1,972 cases. The harness lives in
 `crates/jlens-core/tests/conformance.rs` and mirrors `test/run-test-suite.js`:
 
 - Each case is one test, named `<group>/<file>`, or `<group>/<file>#<index>` for files that hold

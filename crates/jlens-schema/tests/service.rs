@@ -1581,6 +1581,40 @@ fn hover_and_signature_help() {
 }
 
 #[test]
+fn template_strings_hold_text_and_code() {
+    let svc = service();
+    // A template's expressions are code: their fields complete, hover and are checked.
+    let fields = |marked| labels(&svc, marked, Some(CompletionKind::Field));
+    assert!(fields("«{items.ty|}»").contains(&"type".to_owned()));
+    assert!(fields(r"<<a \{ '{items[0].t|}' >>").contains(&"tax".to_owned()));
+    assert!(fields("«{ {'k': items.ty|} }»").contains(&"type".to_owned()));
+    let (text, offset) = cursor("«x {items.t|ax}»");
+    let hover = svc.hover(&text, offset).unwrap();
+    assert!(
+        hover.contents.starts_with("`tax`: number"),
+        "{}",
+        hover.contents
+    );
+    let codes: Vec<String> = svc
+        .diagnostics("«{items.typ}»")
+        .into_iter()
+        .map(|d| d.code)
+        .collect();
+    assert_eq!(codes, ["W0201"]);
+    // Their text is not, quotes and all.
+    assert!(labels(&svc, "«it's {customer.name} ty|»", None).is_empty());
+    assert!(labels(&svc, "<<a>><<<b |>>", None).is_empty());
+    // A template's braces count as an object's for the call around the cursor.
+    let (text, offset) = cursor("$substring(«{$uppercase(customer.name)}», |");
+    let help = svc.signature_help(&text, offset).unwrap();
+    assert_eq!((help.name.as_str(), help.active_param), ("$substring", 1));
+    let (text, offset) = cursor("$join(«{ $string(1) }», «{ $f(2, 3) }», |)");
+    assert_eq!(svc.signature_help(&text, offset).unwrap().active_param, 2);
+    let (text, offset) = cursor("«{$substring(customer.name, |)}»");
+    assert_eq!(svc.signature_help(&text, offset).unwrap().active_param, 1);
+}
+
+#[test]
 fn works_without_a_schema() {
     let svc = LanguageService::new(None);
     assert!(svc.diagnostics("a.b.c").is_empty());

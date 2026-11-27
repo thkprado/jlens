@@ -15,9 +15,10 @@ both kinds of decision:
 
 jsonata-js 2.3.0 changed many results of 2.2.2, which its
 [release notes](https://github.com/jsonata-js/jsonata/releases/tag/v2.3.0) list. jlens took
-those changes from jsonata-js's main branch in 0.35 and 0.36, before the release (see the
+those changes from jsonata-js's main branch in 0.35 and 0.36, before the release, and its
+template strings in 0.37 (see the
 [changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md)), and gives what 2.3.0
-gives, except for template strings and a `$clone` bound at the top level, below.
+gives, except for a `$clone` bound at the top level, below.
 
 ## Differences
 
@@ -46,10 +47,6 @@ error. jlens cannot represent that input, so it skips those two cases.
   an extra `S0211` with an `undefined` token in that situation.
 - **Doc-comments** (`/** ... */`) are parsed as [audit annotations](annotations.md). Like any
   comment, they never change how an expression is parsed or evaluated.
-- **Template strings** (`«...»`), which jsonata-js 2.3.0 added (pull request #860), are not
-  supported yet. jlens reads `«` and `»` as characters of a name, as 2.2.2 did: `"a" & «x»` is
-  "a", as the field `«x»` is missing, where 2.3.0 gives "ax". The suite's cases of template
-  strings fail (see [conformance](../architecture/conformance.md)).
 
 ### Evaluation
 
@@ -90,7 +87,7 @@ error. jlens cannot represent that input, so it skips those two cases.
 | `$fromMillis` with a name presentation for fractional seconds (`'[fn]'`) | A JavaScript `TypeError` without a code | `D3133`, as for the other components that have no names (`'[Yn]'`) |
 | Rounding a very large number to many decimals (`$round(1e300, 20)`), or any number to so many that the shift overflows (`$round(3, 1e3)`) | Shifting the decimal point overflows to `Infinity`, and shifting it back gives `NaN`: `$round` returns `null` | The number unchanged: a number that large has no fractional digits. `$formatNumber` writes such a number in full in both engines |
 | `$formatBase` of a number from 2^53 in a radix that is not a power of two (`$formatBase(1e30, 3)`) | Zeros for the digits below the number's precision | Every digit exact. A radix that is a power of two gives the same digits in both engines |
-| A number that overflows to infinity (`1e308 * 10`, `1 / 0`, `$sum([1e308, 1e308])`, `$round(1.7e308, -308)`, `$parseInteger` of a 400-digit number) | `Infinity`, which goes on: a result writes it as `null` in JSON, a function takes it (`$string` fails with `D3001`, `$formatNumber` writes "Infinity"), and the next operator, `$boolean` or `$sort` fails with `D1001` | `D1001` where the number overflows, as `$power(10, 400)` (`D3061`) and the literal `1e400` (`S0102`) fail in both engines. JSON has no infinity, so a result never becomes `null` without notice. `$average` of numbers whose sum overflows gives their mean (`1e308` for `[1e308, 1e308]`). `0 / 0` is NaN in both engines |
+| A number that overflows to infinity (`1e308 * 10`, `1 / 0`, `$sum([1e308, 1e308])`, `$round(1.7e308, -308)`, `$parseInteger` of a 400-digit number) | `Infinity`, which goes on: a result writes it as `null` in JSON, a function takes it (`$string` and a template string fail with `D3001`, `$formatNumber` writes "Infinity"), and the next operator, `$boolean` or `$sort` fails with `D1001` | `D1001` where the number overflows, as `$power(10, 400)` (`D3061`) and the literal `1e400` (`S0102`) fail in both engines. JSON has no infinity, so a result never becomes `null` without notice. `$average` of numbers whose sum overflows gives their mean (`1e308` for `[1e308, 1e308]`). `0 / 0` is NaN in both engines |
 | A date/time picture marker with an unknown component and a presentation (`$fromMillis(0, '[Qx]')`, `'[,2]'`) | The text "undefined" in the result. With no presentation (`'[Q]'`) it fails with `D3132` | `D3132` in every case. The text exposes JavaScript's `undefined`. `$toMillis` gives `D3133` for both, as jsonata-js does |
 | A date beyond JavaScript's range, ±8.64e15 ms (100,000,000 days) around 1970, after the time zone of `$fromMillis` (`$fromMillis(1e17)`, `$fromMillis(8.64e15, '[Y]', '+0100')`) | Every component is NaN: "0NaN-NaN-NaNTNaN:NaN:NaN.NaNZ", but names, words, roman numerals and letters, which are empty strings ("\|" for `'[Yw]\|[FNn]'`). In 2.2.2 they were NaN too, and words recursed until the stack overflowed | `D1001`, as a number that overflows to infinity. Within the range every component is exact, also where it counts from a date beyond it: `$fromMillis(-8.64e15, '[Y] [d] [W]')` is "-271821 110 16", where jsonata-js writes "-271821 NaN NaN". `$toMillis` gives no date beyond the range in both engines, and jlens checks it after the time zone too, so `$fromMillis` takes every date it gives |
 | `$fromMillis` given NaN, which `$toMillis` returns for a date that does not exist, in both engines (`$fromMillis($toMillis('2024-13-01'))`, `$fromMillis(0 / 0)`) | Every component is NaN: "0NaN-NaN-NaNTNaN:NaN:NaN.NaNZ" | `D1001`, as a date beyond the range. The text exposes JavaScript's NaN; until 0.19 jlens wrote the epoch, "1970-01-01T00:00:00.000Z", a wrong date that looks valid |

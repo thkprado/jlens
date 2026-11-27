@@ -1,7 +1,7 @@
 //! Parser tests: structure of the processed tree, recovery (ported from jsonata-js
 //! `test/parser-recovery.js`), and audit annotations.
 
-use jlens_core::ast::{Node, NodeKind, Stage};
+use jlens_core::ast::{Node, NodeKind, Stage, TemplatePart};
 use jlens_core::{Severity, parse, parse_recover};
 
 /// A compact, span-free rendering of a tree, used to compare structures.
@@ -34,6 +34,17 @@ fn outline(n: &Node) -> String {
         NodeKind::Name { name } => name.clone(),
         NodeKind::Variable { name } => format!("${name}"),
         NodeKind::String { value } => format!("{value:?}"),
+        NodeKind::Template { parts } => format!(
+            "«{}»",
+            parts
+                .iter()
+                .map(|part| match part {
+                    TemplatePart::Text(text) => format!("{text:?}"),
+                    TemplatePart::Expr { expression, .. } => format!("{{{}}}", outline(expression)),
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
         NodeKind::Number { value } => value.to_string(),
         NodeKind::Bool { value } => value.to_string(),
         NodeKind::Null => "null".into(),
@@ -176,6 +187,15 @@ fn paths_predicates_and_constructors() {
         ),
         ("/ab+c/i", "/ab+c/i"),
         ("and.or.in", "path(and, or, in)"),
+        // Template strings (0.37 #8): `{}` adds no part, and `<<` opens one only where an
+        // operand starts.
+        ("«a {x}{} b»", r#"«"a " {path(x)} " b"»"#),
+        ("«{«{x}»}»", "«{«{path(x)}»}»"),
+        ("a.«{%.b}»", "path(a, «{path(%0, b)}»)"),
+        ("<<{x}>>>=1", "(«{path(x)}» >= 1)"),
+        ("\"a\"<<<b>>", r#"("a" < «"b"»)"#),
+        (r"<<a\>>>", r#"«"a>"»"#),
+        ("«{ {\"k\": x} }»", r#"«{{"k": path(x)}}»"#),
         (
             "a = 1 and b != 2 or c in [3]",
             "(((path(a) = 1) and (path(b) != 2)) or (path(c) in [3]))",
@@ -299,6 +319,17 @@ fn syntax_errors() {
         ("`a", "S0105"),
         ("//", "S0301"),
         ("/abc", "S0302"),
+        // As in jsonata-js 2.3.0, a `\` at the end is S0103, and `\u` needs four digits there.
+        ("\"abc\\", "S0103"),
+        ("\"\\u41", "S0104"),
+        ("«a", "S0107"),
+        ("<<a{b}", "S0107"),
+        ("«a}»", "S0108"),
+        ("«\\q»", "S0103"),
+        ("«\\u12»", "S0104"),
+        ("«{a»", "S0203"),
+        ("«a» «b»", "S0201"),
+        ("<<a>>>", "S0207"),
     ];
     for (src, code) in cases {
         assert_eq!(error_code(src), code, "{src:?}");
@@ -581,6 +612,47 @@ fn deep_nesting_is_an_error_not_a_crash() {
     );
     let ast = jlens_core::parse_recover(&format!("{}a", "[".repeat(5000)));
     assert_eq!(ast.diagnostics[0].code, "U1001");
+
+    // Template strings nested in their expressions count too (0.37 #8).
+    let templates = |n: usize| format!("{}1{}", "«{".repeat(n), "}»".repeat(n));
+    let ok = jlens_core::Expression::compile(&templates(400)).unwrap();
+    assert_eq!(
+        ok.evaluate(None, &jlens_core::Bindings::new()).unwrap(),
+        Some("1".into())
+    );
+    let err = jlens_core::Expression::compile(&templates(5000)).unwrap_err();
+    assert_eq!(err.code(), "U1001");
+    let ast = jlens_core::parse_recover(&templates(5000));
+    assert_eq!(ast.diagnostics[0].code, "U1001");
+}
+
+/// The codes, positions and parts of jsonata-js 2.3.0 in recover mode.
+#[test]
+fn recovery_keeps_the_parts_of_a_template() {
+    type Case<'a> = (&'a str, &'a str, &'a [(&'a str, usize)]);
+    let cases: &[Case] = &[
+        ("<<a {b} c", r#"«"a " {path(b)} " c"»"#, &[("S0107", 9)]),
+        (
+            "<<a {b +} c>>",
+            r#"«"a " {(path(b) + !S0211)}»"#,
+            &[("S0211", 9), ("S0202", 11)],
+        ),
+        ("<<a {b", r#"«"a " {path(b)}»"#, &[("S0203", 6)]),
+    ];
+    for (src, expected_tree, expected_errors) in cases {
+        let ast = parse_recover(src);
+        let errors: Vec<(&str, usize)> = ast
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .map(|d| (d.code.as_str(), d.span.end))
+            .collect();
+        assert_eq!(
+            (outline(&ast.root).as_str(), &errors[..]),
+            (*expected_tree, *expected_errors),
+            "{src}"
+        );
+    }
 }
 
 #[test]

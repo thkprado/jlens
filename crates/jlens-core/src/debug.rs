@@ -13,7 +13,8 @@ use crate::lexer::{Lexer, TokKind};
 /// A token as shown by [`tokens`].
 #[derive(Debug, Clone, Serialize)]
 pub struct TokenInfo {
-    /// `name`, `variable`, `string`, `number`, `value`, `regex` or `operator`.
+    /// `name`, `variable`, `string`, `number`, `value`, `regex`, `operator`, or `template`,
+    /// `template-text` and `template-end` for the parts of a template string.
     #[serde(rename = "type")]
     pub kind: &'static str,
     /// The token's value.
@@ -42,6 +43,9 @@ pub fn tokens(source: &str) -> Result<Vec<TokenInfo>> {
                 ("regex", format!("/{pattern}/{flags}").into(), true)
             }
             TokKind::Op(op) => ("operator", op.into(), matches!(op, ")" | "]" | "}")),
+            TokKind::TemplateOpen(open) => ("template", open.into(), false),
+            TokKind::TemplateText(text) => ("template-text", text.into(), false),
+            TokKind::TemplateEnd(close) => ("template-end", close.into(), true),
         };
         infix = operand;
         out.push(TokenInfo {

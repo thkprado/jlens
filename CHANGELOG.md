@@ -6,6 +6,16 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Template strings, as jsonata-js 2.3.0 reads them: `«Hello {name}!»`, or `<<Hello {name}!>>`.
+  Each `{...}` holds an expression, whose value joins the text as `&` joins it; templates nest,
+  their text takes the escapes of a string literal and `\{`, `\}`, `\<`, `\>`, `\«`, `\»`, and the
+  new codes `S0107` (a template not closed) and `S0108` (a `}` not escaped in its text) report
+  their errors. The syntax tree has a new `NodeKind::Template`. The language service completes,
+  hovers and checks inside their expressions, and the VS Code grammar colours them. jlens now
+  passes 1,970 of the suite's 1,972 cases.
+
 ### Changed
 
 - The workflows pin every action by commit SHA, with its version in a comment that Dependabot
@@ -21,6 +31,9 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- A string literal's escapes are read as jsonata-js 2.3.0 reads them: a `\` at the end of the
+  expression is `S0103`, where it was `S0101`, and `\u` with fewer than four hex digits there is
+  `S0104`.
 - Python package: reading the input calls no method of its values, which a subclass may define
   and which ran while their list or dictionary was locked. The read of an `int` subclass beyond
   64 bits called the class's own `__float__`, and that of a `str` subclass with a lone surrogate
