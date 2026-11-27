@@ -30,28 +30,38 @@ how a result is kept for later rules and which gaps the API's inventory lists. A
 review, lets the release workflow follow the channels' tiers. #4 to #7 come from an outside review
 of the code at `7b69a6e`, its claims checked before they were listed (one, a hang of
 `$formatInteger` in words, was false). #8 is the one feature of jsonata-js 2.3.0 that 0.36 left
-out. The rest of the plan is drafted when it starts.
+out. #9 and #10 come from applications built on jlens: their editors list a schema's fields by
+walking it by hand, and corporate pages set a Content-Security-Policy that the guide does not
+mention. #13 follows from #9: when a schema's new version renames or moves fields, the expressions
+stored against the old one are rewritten from a table of paths that the application builds from
+the two lists. #11 and #12 were candidates of the same review, taken on 2026-11-27. The rows run from the
+fixes to the features; #3 comes last before the release that first uses it, and #1, #2 and #6
+wait for the adoption's reports.
 
 | # | Item | Done when | Status |
 |---|---|---|---|
-| 1 | An evaluation's result kept as a `Document` | In the core, the C API and Java: a result used as the input or a variable of later evaluations with no conversion, such as an index of a record's items by key built once for many rules; measured against the index built by each rule | planned |
-| 2 | ADR 0015 proposed: what 1.0 will promise | Item #1 of the deferred plan below, with no change to the API: the inventory of public items and contracts, each stable, hidden or `#[non_exhaustive]`, and the gaps adopters logged (host function context, offset conversion, a diagnostic's details as data, a quick fix as data, such as `W0215`'s rewrite); the ADR left proposed for the maintainer | planned |
-| 3 | The release workflow's tiers | The `github` job of `release.yml` waits only for the tier-1 channels of 0.36 #8 and the binaries it attaches, so that a failed `container` or `vscode` job no longer holds the draft, and with it Homebrew and Scoop; tried on a tag of a fork or a dry run before the release that first uses it | planned |
 | 4 | The C API and the Java package under threads and failures | Each reproduced by a test before it is fixed: a document freed while an idle pool thread still caches its text (`documents.rs`'s `FOUND`), so that no thread sweeps its conversions; `Bindings.close` during an evaluation, whose host function then throws `IllegalStateException`; `critical(false)` on `BUFFER_*` downcalls that lock and free; `BUFFER_FREE` outside a `try/finally`; `Json.java` and `Read.java`, recursive, over a value 1,000 levels deep at `-Xss128k`; `Options.NATIVE`, which never evicts, so that after 64 distinct options (a `now` per call) every other one makes and frees its native object per evaluation | planned |
 | 5 | No allocation past the size limits | `$replace` checks `max_string_length` while it builds its result; the review's other cases (`filter_items`, `$split`, `$pad`, `$join` on wasm32, `$fromMillis`) checked, and fixed where they allocate past a limit | planned |
-| 6 | Unknown evaluation options in Wasm | `{ timeot: 100 }` fails as in Rust, Python and Java, or the difference documented; decided with #2, as failing may break a caller | planned |
-| 7 | A regular expression literal compiled once per expression | Kept in `Compiled` by node, with no key cloned each time the node is evaluated; the two fixed patterns of `datetime.rs` (`parse_iso8601`, `words_to_number`) compiled once, not per call; `ab` on the M1 | planned |
+| 12 | No Python code inside a critical section | Free-threaded Python: `source.rs` writes a list's item while it holds the list's critical section, and writing it may call the item's own methods (a `Mapping`'s, a subclass's), which may suspend that section; reproduced by a test on free-threaded CPython before it is fixed, or shown not to happen and the reason written beside the code | planned |
+| 11 | The workflows hardened | Every action of `.github/workflows` pinned by commit SHA, its version in a comment, kept up to date by Dependabot's `github-actions` updates; `concurrency` on the workflows that a newer push makes stale (not on `release.yml`); an unknown `xtask` subcommand fails with its usage instead of exiting 0; actionlint clean | planned |
+| 10 | A Content-Security-Policy in the WebAssembly guide | The guide says which directive a page needs to compile the module (`'wasm-unsafe-eval'` in `script-src`), what fails without it and how the error reads; tried in a browser with the header set | planned |
 | 8 | Template strings, as jsonata-js 2.3.0 reads them (pull request #860) | `«...{expr}...»` parsed and evaluated as in 2.3.0, with its escapes and nesting, and its errors' codes; `"a" & «x»` is "ax"; the 69 cases that use them (68 of the group `template-strings` and `function-eval/case009`) in the baseline (1,970 of 1,972, the other two the overrides of a lone surrogate); the lexer, the parser's limits and the property tests, the language server and the VS Code grammar (which tokenizes the suite), the book's syntax pages and `compatibility.md`'s row removed; "JSONata 2.2" in the READMEs and the introduction becomes 2.3 | planned; proposed at the 0.36.0 release and accepted by the maintainer as proposed, on 2026-11-27 |
+| 7 | A regular expression literal compiled once per expression | Kept in `Compiled` by node, with no key cloned each time the node is evaluated; the two fixed patterns of `datetime.rs` (`parse_iso8601`, `words_to_number`) compiled once, not per call; `ab` on the M1 | planned |
+| 9 | The fields of a schema, listed | The language service lists a schema's fields: each path with its type, whether it is required, its label and description, its allowed values and its open domain, as completion and hover know them, and the field's own `x-` keywords as written, which jlens does not read (such as an application's stable key for the field), overrides applied and hidden fields left out, so that an application builds its list of attributes, or matches the fields of two versions of a schema, without walking it; in Rust, Wasm and Java, with an example in each guide | planned |
+| 13 | Paths renamed in an expression | Given a table of paths, old to new, the language service rewrites an expression: only the steps that read a renamed path change, found as `uses` finds them (relative paths in a predicate, a parent kept in a variable, the same name under another parent left alone), the rest of the text kept as written, a new name that needs them in backquotes; the answer gives the rewritten text, each edit with its range, and the places it cannot rewrite safely, where a field is named as data (`$lookup` with a string, `*`, `**`, `$keys`, `$sift`); in Rust, Wasm and Java, tests over the cases above and property tests; the schema guide shows a schema's new version migrated: `changes`, the table, the rewrite and the check with `uses` | planned; after #9 |
+| 3 | The release workflow's tiers | The `github` job of `release.yml` waits only for the tier-1 channels of 0.36 #8 and the binaries it attaches, so that a failed `container` or `vscode` job no longer holds the draft, and with it Homebrew and Scoop; tried on a tag of a fork or a dry run before the release that first uses it | planned |
+| 1 | An evaluation's result kept as a `Document` | In the core, the C API and Java: a result used as the input or a variable of later evaluations with no conversion, such as an index of a record's items by key built once for many rules; measured against the index built by each rule | planned; waits for the adoption's reports |
+| 2 | ADR 0015 proposed: what 1.0 will promise | Item #1 of the deferred plan below, with no change to the API: the inventory of public items and contracts, each stable, hidden or `#[non_exhaustive]`, and the gaps adopters logged (host function context, offset conversion, a diagnostic's details as data, a quick fix as data, such as `W0215`'s rewrite, the fields of an AST node that a visual builder reads, typed in `types.d.ts` or said to be hidden); the ADR left proposed for the maintainer | planned; waits for the adoption's reports |
+| 6 | Unknown evaluation options in Wasm | `{ timeot: 100 }` fails as in Rust, Python and Java, or the difference documented; decided with #2, as failing may break a caller | planned; with #2 |
 
 Candidates from the same review, not planned: the JSON Schema reader (`allOf`'s `required`,
 `required` without `properties`, closed tuples), the type checker (`~>` with a transform, a host
 function's declared result), the language server (code actions, its cache dropped on any `.json`
-change), the CLI (`--var`, `-` for stdin, `--ndjson` flushed per line), CI (`concurrency`,
-actions pinned by SHA, an unknown `xtask` subcommand exiting 0), fuzz targets for JSON Schemas
-and `parse_cut`, the Python package (a `seed` of 2^64 reported as negative, counts read as `usize`,
-`Self` from `typing_extensions` in the stub, a Python method called in a critical section under
-free threading), and `jlens-regress`'s `utf16` feature, which also turns off the prefix search of
-`&str` searches for a crate that enables it (upstream `542243a`, skipped).
+change), the CLI (`--var`, `-` for stdin, `--ndjson` flushed per line), fuzz targets for JSON
+Schemas and `parse_cut`, the Python package (a `seed` of 2^64 reported as negative, counts read as
+`usize`, `Self` from `typing_extensions` in the stub), and `jlens-regress`'s `utf16` feature, which
+also turns off the prefix search of `&str` searches for a crate that enables it (upstream
+`542243a`, skipped).
 
 ## In exploration: a regular expression engine of jlens's own
 
