@@ -165,6 +165,11 @@ pub struct Shape {
     /// `fields` is empty, an object whose fields are not known at all: any field may be there.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub other_fields: Option<Box<OtherFields>>,
+    /// The keywords of a JSON Schema whose names begin with `x-` and that jlens does not read
+    /// (all but the `x-jlens-*` of [`Schema::to_json_schema`]), as written: an application's
+    /// own, such as a stable key for a field. Kept and written back; nothing else reads them.
+    #[serde(skip_serializing_if = "IndexMap::is_empty", default)]
+    pub extensions: IndexMap<String, JsonValue>,
 
     // Inference state.
     #[serde(skip)]

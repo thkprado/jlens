@@ -346,6 +346,13 @@ impl LanguageService {
         };
         Ok(ser_to_js(&self.inner.uses(&reads)))
     }
+
+    /// The fields of the schema of the service's input, each with what completion and hover
+    /// tell of it, in the order of their paths; none without a schema.
+    #[wasm_bindgen(skip_typescript)]
+    pub fn fields(&self) -> JsValue {
+        ser_to_js(&self.inner.fields())
+    }
 }
 
 /// What changed between two answers of `LanguageService.uses`, that of the schema an

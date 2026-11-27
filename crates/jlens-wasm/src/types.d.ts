@@ -607,6 +607,41 @@ export interface Use {
 }
 
 /**
+ * A field of the schema of a service's input, or another value it describes, as
+ * `LanguageService.fields()` lists it.
+ */
+export interface ListedField {
+  /**
+   * The path, written as `uses()` writes it: `$` for the value itself, `items[]` for the items of
+   * `items`, a name that is not a plain one between backquotes.
+   */
+  path: string;
+  /** The types as completion and hover give them (`array<object>`, `string | null`); `unknown` when the schema gives none. */
+  typeSummary: string;
+  /** The types the schema gives the value; absent when it gives none. */
+  types?: JsonType[];
+  /** Whether the object that holds the field requires it; absent for the value itself and the items of an array. */
+  required?: boolean;
+  /** Its short display name (`title`). */
+  label?: string;
+  /** What it means. */
+  description?: string;
+  /** The values the schema lists for it. */
+  enum?: unknown[];
+  /** The enumeration is closed, as `Use.closed` tells. */
+  closed?: true;
+  /** Its open domain (`x-jlens-domain`). */
+  domain?: string;
+  /** Its string format. */
+  format?: string;
+  /**
+   * Its own `x-` keywords, as written, which jlens does not read (an application's key for the
+   * field): those of its place first, then those of the definitions it refers to.
+   */
+  extensions?: Record<string, unknown>;
+}
+
+/**
  * What an expression uses of the schema of its input and of each variable, given by
  * `LanguageService.uses()`: kept beside the expression, it tells with `usesChanges()` whether
  * anything the expression uses changed in a new version of the schema.
@@ -815,6 +850,14 @@ export class LanguageService {
    * when `reads` is not in the form `reads()` returns.
    */
   uses(reads: Reads): Uses;
+  /**
+   * The fields of the schema of the service's input, and the other values it describes, each
+   * with what completion and hover tell of it, in the order of their paths: what an application
+   * needs to build its own list of attributes, or to match the fields of two versions of a
+   * schema, without walking it. A hidden field (`x-jlens-hidden`) and what is under it are left
+   * out; a recursive schema is listed down to where it repeats. Empty without a schema.
+   */
+  fields(): ListedField[];
   free(): void;
   [Symbol.dispose](): void;
 }

@@ -348,6 +348,23 @@ fn uses_text(service: u64, expression: u64) -> Result<Vec<u8>, Vec<u8>> {
     Ok(json_reply(&serde_json::to_value(uses).unwrap_or_default()))
 }
 
+/// Replies with the fields of the schema of service `service`'s input (roadmap 0.37 #9), as
+/// `LanguageService::fields` lists them: a JSON array of objects with `path`, `typeSummary`
+/// and, where the schema says them, `types`, `required`, `label`, `description`, `enum`,
+/// `closed`, `domain`, `format` and `extensions`; empty for a service with no schema.
+pub fn service_fields(service: u64) -> u64 {
+    reply(fields_text(service))
+}
+
+fn fields_text(service: u64) -> Result<Vec<u8>, Vec<u8>> {
+    let service = SERVICES
+        .get(service)
+        .ok_or_else(|| unknown("service", service))?;
+    Ok(json_reply(
+        &serde_json::to_value(service.fields()).unwrap_or_default(),
+    ))
+}
+
 /// Replies with what changed between two answers of `service_uses`, the JSON texts in buffers
 /// `old` and `new`, which stay the caller's (roadmap 0.33 #6), as `Uses::changes` gives it:
 /// `{}` when nothing the expression uses changed. It takes no schema and no service, so that

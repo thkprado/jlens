@@ -17,6 +17,9 @@
 //! * **What an expression uses.** [`LanguageService::uses`] tells what the schema says of each
 //!   field an expression reads, in a form ([`Uses`]) that an application keeps and compares when
 //!   the schema changes: [`Uses::changes`] tells what changed between two answers.
+//! * **The fields of a schema.** [`Schema::fields`] lists each path with what completion and
+//!   hover tell of it, and its own `x-` keywords ([`ListedField`]), for an application that
+//!   builds its own list of attributes.
 //!
 //! ```
 //! use jlens_schema::{LanguageService, Schema};
@@ -49,7 +52,7 @@ mod uri;
 mod uses;
 
 pub use changes::{Change, EnumChange, PathChanges, UseChanges, UsesChanges};
-pub use uses::{Use, Uses};
+pub use uses::{ListedField, Use, Uses};
 
 pub use jsonschema::{LoadReport, OpenTuple, SchemaLoader, UnreadKeyword, UnresolvedRef};
 pub use service::{

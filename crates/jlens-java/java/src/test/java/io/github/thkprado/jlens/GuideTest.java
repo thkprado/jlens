@@ -453,4 +453,30 @@ class GuideTest {
         }
         // ANCHOR_END: uses
     }
+
+    @Test
+    void fields() {
+        String orderSchema = """
+                {"type": "object", "required": ["status"], "properties": {
+                    "status": {"type": "string", "title": "Status", "enum": ["open", "closed"],
+                               "x-attribute-id": "A17"},
+                    "lines": {"type": "array", "items": {"type": "object", "properties": {
+                        "sku": {"type": "string", "x-jlens-domain": "products"}}}},
+                    "internal": {"type": "string", "x-jlens-hidden": true}}}""";
+        // ANCHOR: fields
+        try (Schema order = Schema.fromJson(orderSchema);
+                LanguageService service = LanguageService.of(order)) {
+            List<ListedField> fields = service.fields();
+            assertEquals(List.of("$", "lines", "lines[]", "lines[].sku", "status"),
+                    fields.stream().map(ListedField::path).toList());
+            ListedField status = fields.get(4);
+            assertEquals("Status", status.label());
+            assertEquals(true, status.required());
+            assertEquals(List.of("open", "closed"), status.enumeration());
+            assertEquals("A17", status.extensions().get("x-attribute-id"));
+            assertEquals("array<object>", fields.get(1).typeSummary());
+            assertEquals("products", fields.get(3).domain());
+        }
+        // ANCHOR_END: fields
+    }
 }

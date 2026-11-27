@@ -7,13 +7,14 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use indexmap::IndexMap;
 use jlens_core::reads::{Read, Reads};
 use jlens_core::{Bindings, Expression, HostFunction};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::service::{LanguageService, field_insert};
-use crate::shape::{Definitions, JsonType, Schema, Sh, Shape, members, members_of};
+use crate::shape::{Definitions, JsonType, Schema, Sh, Shape, members, members_of, summary};
 
 /// The path of a value itself: the input, or a variable.
 const ROOT: &str = "$";
@@ -163,12 +164,22 @@ impl Use {
     }
 }
 
+/// What the schema has at one place: the shapes as it writes them there, before their
+/// references are followed, and the shapes they stand for, which tell what the value may be.
+#[derive(Clone)]
+struct Place<'a> {
+    /// The shapes the value may have; `None` when the schema says nothing of it.
+    shapes: Option<Vec<Sh<'a>>>,
+    /// The shapes written at the place: their own label, description and extensions come
+    /// before those of the definitions they refer to.
+    written: Vec<Sh<'a>>,
+    /// Whether it is a required field; `None` for a path that is not a field.
+    required: Option<bool>,
+}
+
 /// One value to describe.
 struct Pending<'a> {
-    /// The shapes the schema gives it; `None` when it says nothing of it.
-    shapes: Option<Vec<Sh<'a>>>,
-    /// Whether it is a required field.
-    required: Option<bool>,
+    place: Place<'a>,
     path: String,
     /// What is read of it; `None` under a value read whole, where everything is.
     read: Option<&'a Read>,
@@ -180,7 +191,7 @@ struct Pending<'a> {
 /// The values under those read whole, still to describe: the nearest to the value read whole
 /// first, then in the order of their paths, so that where the listing of a recursive schema
 /// stops does not depend on the order the schema is written in.
-type Below<'a> = BTreeMap<(usize, usize, String), (Option<Vec<Sh<'a>>>, Option<bool>)>;
+type Below<'a> = BTreeMap<(usize, usize, String), Place<'a>>;
 
 /// The shapes a value of `shape` may have; `None` when a reference leaves them unknown.
 fn shapes_of<'a>(shape: &'a Shape, defs: &'a Definitions) -> Option<Vec<Sh<'a>>> {
@@ -190,53 +201,85 @@ fn shapes_of<'a>(shape: &'a Shape, defs: &'a Definitions) -> Option<Vec<Sh<'a>>>
     }
 }
 
-/// The field `name` of a value that may have any of `shapes`: its shapes, and whether every
-/// shape that has it requires it. `None` when none has it; no shapes when one is open to it
-/// with a shape it does not know ([`Shape::other_field`]).
-fn field_of<'a>(shapes: &[Sh<'a>], name: &str) -> Option<(Option<Vec<Sh<'a>>>, bool)> {
-    let mut found: Option<(Option<Vec<Sh<'a>>>, bool)> = None;
+/// The field `name` of a value that may have any of `shapes`, required where every shape that
+/// has it requires it, and whether the first shape that lists it hides it
+/// ([`Shape::hidden`]). `None` when none has it; no shapes when one is open to it with a shape
+/// it does not know ([`Shape::other_field`]).
+fn field_of<'a>(shapes: &[Sh<'a>], name: &str) -> Option<(Place<'a>, bool)> {
+    let mut found: Option<(Place<'a>, bool)> = None;
+    let mut hidden = None;
     for shape in shapes {
         let (field, is_required, unknown) = match shape.shape.fields.get(name) {
-            Some(field) => (&field.shape, field.required, false),
+            Some(field) => {
+                hidden.get_or_insert(field.shape.hidden);
+                (&field.shape, field.required, false)
+            }
             None => match shape.shape.other_field(name) {
                 Some(other) => (other, false, *other == Shape::default()),
                 None => continue,
             },
         };
-        let (all, required) = found.get_or_insert((Some(Vec::new()), true));
-        *required &= is_required;
+        let (place, _) = found.get_or_insert_with(|| {
+            let place = Place {
+                shapes: Some(Vec::new()),
+                written: Vec::new(),
+                required: Some(true),
+            };
+            (place, false)
+        });
+        place.required = Some(place.required == Some(true) && is_required);
+        place.written.push(Sh {
+            shape: field,
+            defs: shape.defs,
+        });
         if unknown
-            || all
+            || place
+                .shapes
                 .as_mut()
                 .is_none_or(|all| members(field, shape.defs, all))
         {
-            *all = None;
+            place.shapes = None;
         }
     }
-    found
+    found.map(|(place, _)| (place, hidden == Some(true)))
 }
 
 /// The items of a value that may have any of `shapes`; `None` when none is an array of known
 /// items.
-fn items_of<'a>(shapes: &[Sh<'a>]) -> Option<Option<Vec<Sh<'a>>>> {
-    let mut found: Option<Option<Vec<Sh<'a>>>> = None;
+fn items_of<'a>(shapes: &[Sh<'a>]) -> Option<Place<'a>> {
+    let mut found: Option<Place<'a>> = None;
     for shape in shapes {
         let Some(items) = shape.shape.items.as_deref() else {
             continue;
         };
-        let all = found.get_or_insert(Some(Vec::new()));
-        if all
+        let place = found.get_or_insert_with(|| Place {
+            shapes: Some(Vec::new()),
+            written: Vec::new(),
+            required: None,
+        });
+        place.written.push(Sh {
+            shape: items,
+            defs: shape.defs,
+        });
+        if place
+            .shapes
             .as_mut()
             .is_none_or(|all| members(items, shape.defs, all))
         {
-            *all = None;
+            place.shapes = None;
         }
     }
     found
 }
 
-/// The paths `read` reaches in a value described by `schema`, each with what it says there.
-fn collect(schema: Option<&Schema>, read: &Read) -> BTreeMap<String, Use> {
+/// The paths `read` reaches in a value described by `schema`, each with what the schema has
+/// there and whether it is read whole. `listing` leaves out the hidden fields
+/// ([`Shape::hidden`]) and what is under them, as completion does.
+fn walk<'a>(
+    schema: Option<&'a Schema>,
+    read: &'a Read,
+    listing: bool,
+) -> BTreeMap<String, (Place<'a>, bool)> {
     fn join(path: &str, name: &str) -> String {
         let name = field_insert(name);
         if path.is_empty() {
@@ -245,11 +288,25 @@ fn collect(schema: Option<&Schema>, read: &Read) -> BTreeMap<String, Use> {
             format!("{path}.{name}")
         }
     }
+    let unknown = Place {
+        shapes: None,
+        written: Vec::new(),
+        required: None,
+    };
     let mut out = BTreeMap::new();
+    let root = Place {
+        shapes: schema.and_then(|s| shapes_of(&s.root, &s.definitions)),
+        written: (schema.iter())
+            .map(|s| Sh {
+                shape: &s.root,
+                defs: &s.definitions,
+            })
+            .collect(),
+        required: None,
+    };
     // Iterative, so that a deep schema cannot overflow the stack.
     let mut pending: Vec<Pending> = vec![Pending {
-        shapes: schema.and_then(|s| shapes_of(&s.root, &s.definitions)),
-        required: None,
+        place: root,
         path: String::new(),
         read: Some(read),
         arrays: Vec::new(),
@@ -263,10 +320,9 @@ fn collect(schema: Option<&Schema>, read: &Read) -> BTreeMap<String, Use> {
         let (next, level) = match pending.pop() {
             Some(next) => (next, None),
             None => match below.pop_first() {
-                Some(((whole, depth, path), (shapes, required))) => (
+                Some(((whole, depth, path), place)) => (
                     Pending {
-                        shapes,
-                        required,
+                        place,
                         path,
                         read: None,
                         arrays: Vec::new(),
@@ -277,27 +333,17 @@ fn collect(schema: Option<&Schema>, read: &Read) -> BTreeMap<String, Use> {
             },
         };
         let Pending {
-            shapes,
-            required,
+            place,
             path,
             read,
             arrays,
         } = next;
-        let mut entry = match &shapes {
-            Some(shapes) => Use::of(shapes, required),
-            None => Use {
-                unknown: true,
-                ..Use::default()
-            },
-        };
-        entry.whole = matches!(read, Some(Read::Whole));
-        match (read, &shapes) {
+        match (read, &place.shapes) {
             (Some(Read::Fields(fields)), Some(shapes)) => {
                 for (name, read) in fields {
                     match field_of(shapes, name) {
-                        Some((shapes, required)) => pending.push(Pending {
-                            shapes,
-                            required: Some(required),
+                        Some((place, _)) => pending.push(Pending {
+                            place,
                             path: join(&path, name),
                             read: Some(read),
                             arrays: Vec::new(),
@@ -305,8 +351,7 @@ fn collect(schema: Option<&Schema>, read: &Read) -> BTreeMap<String, Use> {
                         // A field of an array's items is looked for there.
                         None if shapes.iter().any(|s| s.items.is_some()) => {}
                         None => pending.push(Pending {
-                            shapes: None,
-                            required: None,
+                            place: unknown.clone(),
                             path: join(&path, name),
                             read: Some(read),
                             arrays: Vec::new(),
@@ -321,8 +366,7 @@ fn collect(schema: Option<&Schema>, read: &Read) -> BTreeMap<String, Use> {
                 if !again && let Some(items) = items_of(shapes).filter(|_| !fields.is_empty()) {
                     arrays.extend(shapes.iter().map(|s| s.shape as *const Shape));
                     pending.push(Pending {
-                        shapes: items,
-                        required: None,
+                        place: items,
                         path: format!("{path}[]"),
                         read,
                         arrays,
@@ -332,8 +376,7 @@ fn collect(schema: Option<&Schema>, read: &Read) -> BTreeMap<String, Use> {
             (Some(Read::Fields(fields)), None) => {
                 for (name, read) in fields {
                     pending.push(Pending {
-                        shapes: None,
-                        required: None,
+                        place: unknown.clone(),
                         path: join(&path, name),
                         read: Some(read),
                         arrays: Vec::new(),
@@ -360,15 +403,16 @@ fn collect(schema: Option<&Schema>, read: &Read) -> BTreeMap<String, Use> {
                     }
                 }
                 for name in names {
-                    if let Some((shapes, required)) = field_of(&shapes, name) {
-                        below.insert(
-                            (whole, depth + 1, join(&path, name)),
-                            (shapes, Some(required)),
-                        );
+                    match field_of(&shapes, name) {
+                        Some((_, true)) if listing => {}
+                        Some((place, _)) => {
+                            below.insert((whole, depth + 1, join(&path, name)), place);
+                        }
+                        None => {}
                     }
                 }
                 if let Some(items) = items_of(&shapes) {
-                    below.insert((whole, depth + 1, format!("{path}[]")), (items, None));
+                    below.insert((whole, depth + 1, format!("{path}[]")), items);
                 }
             }
             (Some(Read::Whole) | None, None) => {}
@@ -378,12 +422,205 @@ fn collect(schema: Option<&Schema>, read: &Read) -> BTreeMap<String, Use> {
         } else {
             path
         };
-        out.entry(key).or_insert(entry);
+        let whole = matches!(read, Some(Read::Whole));
+        out.entry(key).or_insert((place, whole));
     }
     out
 }
 
+/// A field of a schema, or another value it describes, as [`Schema::fields`] lists it: what
+/// completion and hover tell of it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ListedField {
+    /// The path, written as [`Uses`] writes it: `$` for the value itself, `items[]` for the
+    /// items of `items`, a name that is not a plain one between backquotes.
+    pub path: String,
+    /// The types, as completion and hover give them (`array<object>`, `string | null`);
+    /// `unknown` when the schema gives none.
+    pub type_summary: String,
+    /// The types the schema gives the value; none when it gives none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<JsonType>,
+    /// Whether the object that holds the field requires it; `None` for a path that is not a
+    /// field: the value itself, the items of an array.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+    /// Its short display name (`title`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// What it means.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The values the schema lists for it.
+    #[serde(rename = "enum", default, skip_serializing_if = "Option::is_none")]
+    pub enumeration: Option<Vec<JsonValue>>,
+    /// The enumeration is closed, as [`Use::closed`] tells.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub closed: bool,
+    /// Its open domain ([`Shape::domain`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    /// Its string format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    /// Its own `x-` keywords, as written ([`Shape::extensions`]): those of its place first,
+    /// then those of the definitions it refers to.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub extensions: IndexMap<String, JsonValue>,
+}
+
+impl ListedField {
+    fn of(path: String, place: &Place) -> ListedField {
+        let shapes = place.shapes.as_deref();
+        let all = || place.written.iter().chain(shapes.into_iter().flatten());
+        let mut field = match shapes {
+            Some(shapes) => {
+                let described = Use::of(shapes, place.required);
+                ListedField {
+                    types: described.types,
+                    enumeration: described.enumeration,
+                    closed: described.closed,
+                    domain: described.domain,
+                    format: described.format,
+                    ..ListedField::default()
+                }
+            }
+            None => ListedField::default(),
+        };
+        field.path = path;
+        field.required = place.required;
+        field.label = all().find_map(|s| s.label.clone());
+        field.description = all().find_map(|s| s.description.clone());
+        for shape in all() {
+            for (keyword, value) in &shape.extensions {
+                field
+                    .extensions
+                    .entry(keyword.clone())
+                    .or_insert_with(|| value.clone());
+            }
+        }
+        field.type_summary = match shapes {
+            None => "unknown".to_owned(),
+            Some(_) => {
+                let mut parts: Vec<String> = Vec::new();
+                for written in &place.written {
+                    for part in alternatives(&summary(written.shape, written.defs)) {
+                        if !parts.iter().any(|p| p == part) {
+                            parts.push(part.to_owned());
+                        }
+                    }
+                }
+                parts.join(" | ")
+            }
+        };
+        field
+    }
+}
+
+/// The alternatives of a type summary (`array<string | null> | null`): split at each ` | `
+/// outside `<>`.
+fn alternatives(summary: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let (mut depth, mut start) = (0_usize, 0);
+    for (i, b) in summary.bytes().enumerate() {
+        match b {
+            b'<' => depth += 1,
+            b'>' => depth = depth.saturating_sub(1),
+            b'|' if depth == 0 => {
+                out.push(summary[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(summary[start..].trim());
+    out
+}
+
+impl Schema {
+    /// The fields of the schema, and the other values it describes, each with what completion
+    /// and hover tell of it, in the order of their paths: what an application needs to build
+    /// its own list of attributes, or to match the fields of two versions of a schema, without
+    /// walking it. Overrides applied to the schema ([`Schema::apply_overrides`]) are in it; a
+    /// hidden field ([`Shape::hidden`]) and what is under it are left out.
+    ///
+    /// The paths are those of [`LanguageService::uses`] for an expression that reads the whole
+    /// value: `$` is the value itself, and a recursive schema is listed down to where it
+    /// repeats.
+    ///
+    /// ```
+    /// use jlens_schema::Schema;
+    /// use serde_json::json;
+    ///
+    /// let schema = Schema::from_json_schema(&json!({
+    ///     "type": "object",
+    ///     "required": ["status"],
+    ///     "properties": {
+    ///         "status": {
+    ///             "title": "Status",
+    ///             "type": "string",
+    ///             "enum": ["open", "closed"],
+    ///             "x-attribute-id": 17
+    ///         },
+    ///         "lines": {"type": "array", "items": {
+    ///             "type": "object",
+    ///             "properties": {"sku": {"type": "string", "x-jlens-domain": "products"}}
+    ///         }},
+    ///         "internal": {"type": "string", "x-jlens-hidden": true}
+    ///     }
+    /// }))
+    /// .unwrap();
+    /// let fields = schema.fields();
+    /// let paths: Vec<&str> = fields.iter().map(|f| f.path.as_str()).collect();
+    /// assert_eq!(paths, ["$", "lines", "lines[]", "lines[].sku", "status"]);
+    /// assert_eq!(
+    ///     serde_json::to_value(&fields[4]).unwrap(),
+    ///     json!({
+    ///         "path": "status",
+    ///         "typeSummary": "string",
+    ///         "types": ["string"],
+    ///         "required": true,
+    ///         "label": "Status",
+    ///         "enum": ["open", "closed"],
+    ///         "closed": true,
+    ///         "extensions": {"x-attribute-id": 17}
+    ///     })
+    /// );
+    /// assert_eq!(fields[3].domain.as_deref(), Some("products"));
+    /// assert_eq!(fields[1].type_summary, "array<object>");
+    /// ```
+    pub fn fields(&self) -> Vec<ListedField> {
+        walk(Some(self), &Read::Whole, true)
+            .into_iter()
+            .map(|(path, (place, _))| ListedField::of(path, &place))
+            .collect()
+    }
+}
+
+/// The paths `read` reaches in a value described by `schema`, each with what it says there.
+fn collect(schema: Option<&Schema>, read: &Read) -> BTreeMap<String, Use> {
+    walk(schema, read, false)
+        .into_iter()
+        .map(|(path, (place, whole))| {
+            let mut entry = match &place.shapes {
+                Some(shapes) => Use::of(shapes, place.required),
+                None => Use::default(),
+            };
+            entry.unknown = place.shapes.is_none();
+            entry.whole = whole;
+            (path, entry)
+        })
+        .collect()
+}
+
 impl LanguageService {
+    /// The fields of the schema of the service's input, as [`Schema::fields`] lists them;
+    /// none without a schema.
+    pub fn fields(&self) -> Vec<ListedField> {
+        self.schema.as_ref().map(Schema::fields).unwrap_or_default()
+    }
+
     /// What an expression uses of the schema of its input and of the variables declared to the
     /// service, from the fields it reads ([`Expression::reads`](jlens_core::Expression::reads),
     /// or `reads_with` when host functions are marked as not reading their context).

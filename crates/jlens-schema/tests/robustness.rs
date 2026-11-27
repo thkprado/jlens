@@ -433,3 +433,59 @@ fn override_path() -> impl Strategy<Value = String> {
         1 => any::<String>(),
     ]
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(500))]
+
+    /// The fields of a schema (roadmap 0.37 #9) are what an expression that reads the whole
+    /// input uses of it, less the hidden fields, whatever the overrides; each tells what the
+    /// answer of `uses` tells, and its JSON form reads back.
+    #[test]
+    fn the_fields_are_what_a_whole_read_uses(
+        overrides in prop::collection::vec((override_path(), any::<bool>(), any::<bool>()), 0..6),
+    ) {
+        let mut schema = Schema::infer(&[json!({
+            "customer": {"login": "1", "odd name": "X"},
+            "items": [{"type": "a", "tags": [["t"]]}]
+        })]);
+        let overrides: std::collections::BTreeMap<String, Override> = overrides
+            .into_iter()
+            .map(|(path, hidden, label)| {
+                let o = Override {
+                    hidden: Some(hidden),
+                    label: label.then(|| "L".to_owned()),
+                    ..Override::default()
+                };
+                (path, o)
+            })
+            .collect();
+        schema.apply_overrides(&overrides);
+        let any_hidden = overrides.values().any(|o| o.hidden == Some(true));
+        let service = LanguageService::new(Some(schema.clone()));
+        let reads = jlens_core::Expression::compile("$").unwrap().reads();
+        let uses = service.uses(&reads).input.unwrap_or_default();
+        let fields = service.fields();
+        prop_assert_eq!(&fields, &schema.fields());
+        let paths: Vec<&str> = fields.iter().map(|f| f.path.as_str()).collect();
+        let mut sorted = paths.clone();
+        sorted.sort_unstable();
+        prop_assert_eq!(&paths, &sorted);
+        for field in &fields {
+            let Some(entry) = uses.get(&field.path) else {
+                return Err(TestCaseError::fail(format!("{} is not used", field.path)));
+            };
+            prop_assert_eq!(&field.types, &entry.types, "{}", field.path);
+            prop_assert_eq!(&field.enumeration, &entry.enumeration, "{}", field.path);
+            prop_assert_eq!(field.closed, entry.closed, "{}", field.path);
+            // An unknown place keeps whether it is required, which `uses` leaves out.
+            if !entry.unknown {
+                prop_assert_eq!(field.required, entry.required, "{}", field.path);
+            }
+            let json = serde_json::to_value(field).unwrap();
+            prop_assert_eq!(&serde_json::from_value::<jlens_schema::ListedField>(json).unwrap(), field);
+        }
+        if !any_hidden {
+            prop_assert_eq!(paths.len(), uses.len());
+        }
+    }
+}

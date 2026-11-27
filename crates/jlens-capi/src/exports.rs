@@ -111,6 +111,9 @@ export! {
     /// What expression `expression` uses of the schemas of service `service`: a reply with
     /// the JSON object of roadmap 0.33 #5, or the error.
     jlens_service_uses(service: u64, expression: u64) -> u64 = crate::schema::service_uses, crate::api::panicked;
+    /// The fields of the schema of service `service`'s input: a reply with the JSON array of
+    /// roadmap 0.37 #9, or the error.
+    jlens_service_fields(service: u64) -> u64 = crate::schema::service_fields, crate::api::panicked;
     /// What changed between the two answers of `jlens_service_uses` in buffers `old` and
     /// `new`: a reply with the changes as JSON text, `{}` for none, or the error.
     jlens_uses_changes(old: u64, new: u64) -> u64 = crate::schema::uses_changes, crate::api::panicked;

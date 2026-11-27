@@ -97,6 +97,8 @@ final class Native {
             function("jlens_service_result_type", U64, U64, U64);
     private static final MethodHandle SERVICE_USES =
             function("jlens_service_uses", U64, U64, U64);
+    private static final MethodHandle SERVICE_FIELDS =
+            function("jlens_service_fields", U64, U64);
     private static final MethodHandle USES_CHANGES =
             function("jlens_uses_changes", U64, U64, U64);
 
@@ -440,6 +442,15 @@ final class Native {
     static long serviceUses(long service, long expression) {
         try {
             return (long) SERVICE_USES.invokeExact(service, expression);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /** The fields of the schema of a service's input: a reply with JSON. */
+    static long serviceFields(long service) {
+        try {
+            return (long) SERVICE_FIELDS.invokeExact(service);
         } catch (Throwable e) {
             throw failed(e);
         }

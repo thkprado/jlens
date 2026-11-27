@@ -923,6 +923,8 @@ proptest! {
                 reply(jlens_service_uses(service, text))?;
                 reply(jlens_uses_changes(text, buffer(7)))?;
             }
+            prop_assert_eq!(reply(jlens_service_fields(service))?, Replied::Value);
+            reply(jlens_service_fields(buffer(4)))?;
             reply(jlens_uses_changes(service, service))?;
             reply(jlens_service_diagnostics(service, service))?;
             reply(jlens_service_diagnostics(buffer(4), buffer(5)))?;

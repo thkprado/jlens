@@ -8,6 +8,14 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- The fields of a schema, listed: `Schema::fields` and `LanguageService::fields` in Rust,
+  `service.fields()` in the WebAssembly and Java packages (`ListedField`), and
+  `jlens_service_fields` in the C API, give each path of the schema with what completion and
+  hover tell of it (its type, whether it is required, its label and description, its values and
+  open domain, its format) and its own `x-` keywords, overrides applied and hidden fields left
+  out, so that an application builds its list of attributes, or matches the fields of two
+  versions of a schema, without walking it. A JSON Schema's `x-` keywords that jlens does not
+  read are kept (`Shape::extensions`) and written back.
 - Template strings, as jsonata-js 2.3.0 reads them: `«Hello {name}!»`, or `<<Hello {name}!>>`.
   Each `{...}` holds an expression, whose value joins the text as `&` joins it; templates nest,
   their text takes the escapes of a string literal and `\{`, `\}`, `\<`, `\>`, `\«`, `\»`, and the

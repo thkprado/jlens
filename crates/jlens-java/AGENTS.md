@@ -83,7 +83,8 @@ The system property `jlens.library` points the package at a library outside the 
   `Schema` is made, so that it needs no native call later. What an expression uses of its
   schema and what changed between two schemas (0.33 #7) are records with no native memory,
   read from and written to the JSON form of the other packages; `fixtures/uses/cases.json`,
-  at the repository's root, pins that form for every package.
+  at the repository's root, pins that form for every package, as `fixtures/fields/cases.json`
+  does for the fields of a schema (`ListedField`, 0.37 #9).
 - **API changes** need the Javadoc, the JUnit suite and the Java chapter of the book
   (`docs/src/guides/java.md`). Its snippets live in `GuideTest.java`, between `ANCHOR`
   comments, so that the suite runs them.

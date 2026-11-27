@@ -27,6 +27,7 @@ import init, {
   type ResultCheck,
   type ResultType,
   type ServiceOptions,
+  type ListedField,
   type Span,
   type ValueCondition,
   type ValueRequest,
@@ -117,6 +118,10 @@ export async function check(): Promise<void> {
   const use: Use | undefined = uses.input?.["a"];
   const required: boolean | undefined = use?.required;
   const usesOfLimit: Use | undefined = uses.bindings["limit"]?.["$"];
+  const schemaFields: ListedField[] = service.fields();
+  const attribute: unknown = schemaFields[0]?.extensions?.["x-attribute-id"];
+  const summary: string | undefined = schemaFields[0]?.typeSummary;
+  console.log(attribute, summary);
   const changes: UsesChanges = usesChanges(uses, plain.uses(new Expression("a").reads()));
   const typesBefore: string[] | undefined = changes.input?.changed?.["a"]?.types?.old;
   const valuesAdded: unknown[] | undefined = changes.input?.changed?.["a"]?.enum?.added;

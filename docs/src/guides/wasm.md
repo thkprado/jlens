@@ -679,6 +679,37 @@ the bindings do not read their context, where `reads()` alone takes the input as
 a function it does not know. `usesChanges` needs no service and no schema. Both throw a
 `TypeError` for an argument that is not in the form `reads()` or `uses()` returns.
 
+### The fields of a schema
+
+An editor that offers its own list of attributes, or an application that matches the fields of
+two versions of a schema, takes them from `fields()` rather than walking the schema (the
+[schema guide](schema.md#the-fields-of-a-schema) says what each holds):
+
+```js
+const service = new LanguageService({ schema: {
+  type: "object",
+  required: ["status"],
+  properties: {
+    status: { type: "string", title: "Status", enum: ["open", "closed"], "x-attribute-id": "A17" },
+    lines: { type: "array", items: { type: "object", properties: {
+      sku: { type: "string", "x-jlens-domain": "products" } } } },
+    internal: { type: "string", "x-jlens-hidden": true },
+  },
+} });
+service.fields();
+// [ { path: "$", typeSummary: "object", types: ["object"] },
+//   { path: "lines", typeSummary: "array<object>", types: ["array"], required: false },
+//   { path: "lines[]", typeSummary: "object", types: ["object"] },
+//   { path: "lines[].sku", typeSummary: "string", types: ["string"], required: false,
+//     domain: "products" },
+//   { path: "status", typeSummary: "string", types: ["string"], required: true, label: "Status",
+//     enum: ["open", "closed"], closed: true, extensions: { "x-attribute-id": "A17" } } ]
+```
+
+Each path is written as `uses` writes it, and they come in its order; a hidden field is left
+out, with what is under it. `extensions` holds the field's own `x-` keywords as written, which
+jlens does not read, such as a key the application gives each field.
+
 ## Limits and memory
 
 | Limit | Default | Error |

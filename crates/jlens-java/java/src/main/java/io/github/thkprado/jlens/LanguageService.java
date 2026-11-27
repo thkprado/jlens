@@ -167,6 +167,33 @@ public final class LanguageService implements AutoCloseable {
         }
     }
 
+    /**
+     * The fields of the schema of this service's input, and the other values it describes,
+     * each with what completion and hover tell of it, in the order of their paths: what an
+     * application needs to build its own list of attributes, or to match the fields of two
+     * versions of a schema, without walking it. A hidden field ({@code x-jlens-hidden}) and
+     * what is under it are left out; a recursive schema is listed down to where it repeats.
+     * The paths are those of {@link #uses(Expression)}.
+     *
+     * {@snippet :
+     * for (ListedField field : service.fields()) {
+     *     Object key = field.extensions().get("x-attribute-id");   // the application's own
+     *     System.out.println(field.path() + ": " + field.typeSummary());
+     * }
+     * }
+     *
+     * @return the fields; empty for a service with no schema
+     * @throws IllegalStateException when the service was closed
+     */
+    public List<ListedField> fields() {
+        long service = live();
+        try {
+            return ListedField.list(Native.json(Native.serviceFields(service)));
+        } finally {
+            Reference.reachabilityFence(this);
+        }
+    }
+
     /** The diagnostics of the JSON array the C API replies with. */
     private static List<Diagnostic> decode(String json) {
         if (!(Json.parse(json) instanceof List<?> items)) throw malformed(json);

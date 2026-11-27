@@ -742,3 +742,61 @@ input
 It prints `no change` when nothing the expression uses changed, and with `--json` the JSON form,
 `{}` then. Both commands exit with 0 whether something changed or not; a file that is not an
 answer is a usage problem, 2.
+
+## The fields of a schema
+
+An application that builds its own list of attributes from a schema, as a rules editor does for
+its menus, or that matches the fields of two versions of a schema to see which moved, needs each
+field with what jlens knows of it. `Schema::fields` lists them, so that the application does not
+walk the schema itself, through its `$ref`s, branches and tuples:
+
+```rust
+use jlens_schema::Schema;
+
+let schema = Schema::from_json_schema(&serde_json::json!({
+    "type": "object",
+    "required": ["status"],
+    "properties": {
+        "status": {"type": "string", "title": "Status", "enum": ["open", "closed"],
+                   "x-attribute-id": "A17"},
+        "lines": {"type": "array", "items": {"type": "object", "properties": {
+            "sku": {"type": "string", "x-jlens-domain": "products"}}}},
+        "internal": {"type": "string", "x-jlens-hidden": true}
+    }
+}))?;
+let fields = schema.fields();
+```
+
+```json
+[
+  {"path": "$", "typeSummary": "object", "types": ["object"]},
+  {"path": "lines", "typeSummary": "array<object>", "types": ["array"], "required": false},
+  {"path": "lines[]", "typeSummary": "object", "types": ["object"]},
+  {"path": "lines[].sku", "typeSummary": "string", "types": ["string"], "required": false,
+   "domain": "products"},
+  {"path": "status", "typeSummary": "string", "types": ["string"], "required": true,
+   "label": "Status", "enum": ["open", "closed"], "closed": true,
+   "extensions": {"x-attribute-id": "A17"}}
+]
+```
+
+Each entry tells what completion and hover tell of its path:
+
+- **`path`**, written as the answers of `uses` write it, and in their order: `$` is the value
+  itself, `[]` the items of an array. A recursive schema is listed down to where it repeats, as
+  `uses` lists a value read whole.
+- **`typeSummary`**, the types as completion shows them, and **`types`**, as JSON Schema names
+  them; `unknown` and no types where the schema says nothing, as under a `$ref` that was not
+  followed.
+- **`required`**, for a field only, wherever the schema says it ([the keywords jlens
+  reads](#the-keywords-jlens-reads)); **`label`** (`title`) and **`description`**; **`enum`**,
+  with **`closed`** when a value outside it is warned about; **`domain`** and **`format`**.
+- **`extensions`**: the field's own `x-` keywords, as written, which jlens keeps and does not
+  read, such as a key that the application gives each field and that stays the same when the
+  field is renamed. Those of a `$ref`'s place come before those of its target. A schema written
+  back by `to_json_schema` keeps them.
+
+The overrides applied to the schema are in the list, and a hidden field is left out with what is
+under it, as completion leaves it out. `LanguageService::fields` lists the fields of the schema of
+the service's input; the [WebAssembly](wasm.md#the-fields-of-a-schema) and
+[Java](java.md#the-fields-of-a-schema) packages call it `service.fields()`, with the same JSON.

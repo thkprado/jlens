@@ -885,6 +885,13 @@ export const cases = [
     }
   }],
 
+  ["fields: the case every package lists the same", async (j, env) => {
+    const fixture = JSON.parse(await env.load("../../../fixtures/fields/cases.json"));
+    const service = new j.LanguageService({ schema: fixture.schema });
+    equal(service.fields(), fixture.fields, "the fields");
+    equal(new j.LanguageService({}).fields(), [], "no schema");
+  }],
+
   ["a schema of two documents: the case every package answers the same", async (j, env) => {
     const { schema, documents, report, reportAlone, cases } =
       JSON.parse(await env.load("../../../fixtures/uses/cases.json")).references;

@@ -78,6 +78,27 @@ class UsesTest {
         }
     }
 
+    /** The fields every package lists with the same JSON (roadmap 0.37 #9). */
+    @Test
+    void theSharedFields() throws IOException {
+        Path path = Path.of("..", "..", "..", "fixtures", "fields", "cases.json");
+        Map<String, Object> fixture = Json.object(Json.parse(Files.readString(path)), "fixture");
+        LanguageService closed;
+        try (Schema schema = Schema.fromJson(Json.write(fixture.get("schema")));
+                LanguageService service = LanguageService.of(schema)) {
+            List<ListedField> fields = service.fields();
+            assertEquals(fixture.get("fields"), fields.stream().map(ListedField::tree).toList());
+            ListedField id = fields.stream().filter(f -> f.path().equals("id")).findFirst().get();
+            assertEquals(new BigDecimal(1), id.extensions().get("x-attribute-id"));
+            assertEquals(Boolean.TRUE, id.required());
+            closed = service;
+        }
+        assertThrows(IllegalStateException.class, closed::fields);
+        try (LanguageService alone = LanguageService.builder().build()) {
+            assertEquals(List.of(), alone.fields());
+        }
+    }
+
     /** The schema of two documents that every package loads (roadmap 0.33 #10). */
     @Test
     void theSharedSchemaOfTwoDocuments() throws IOException {

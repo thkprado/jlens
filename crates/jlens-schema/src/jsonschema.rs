@@ -25,6 +25,16 @@ use crate::uri::{percent_decode, relative, resolve, split_fragment};
 
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 
+/// The `x-` keywords jlens reads; the others are kept as written ([`Shape::extensions`]).
+const READ_EXTENSIONS: [&str; 6] = [
+    "x-jlens-presence",
+    "x-jlens-hidden",
+    "x-jlens-enum-inferred",
+    "x-jlens-min-items-inferred",
+    "x-jlens-domain",
+    "x-jlens-samples",
+];
+
 impl Schema {
     /// Converts to a JSON Schema document.
     ///
@@ -519,6 +529,9 @@ fn export(shape: &Shape, definitions: &Definitions) -> JsonValue {
     }
     if shape.hidden {
         out.insert("x-jlens-hidden".into(), true.into());
+    }
+    for (keyword, value) in &shape.extensions {
+        out.entry(keyword.clone()).or_insert_with(|| value.clone());
     }
     out.into()
 }
@@ -1250,6 +1263,18 @@ impl<'d> Importer<'d> {
         if map.get("x-jlens-hidden").and_then(JsonValue::as_bool) == Some(true) {
             shape.hidden = true;
         }
+        // Those of a `$ref` or a branch come after the schema's own.
+        let own = map
+            .iter()
+            .filter(|(k, _)| k.starts_with("x-") && !READ_EXTENSIONS.contains(&k.as_str()));
+        let mut extensions: IndexMap<String, JsonValue> =
+            own.map(|(k, v)| (k.clone(), v.clone())).collect();
+        if !extensions.is_empty() {
+            for (k, v) in std::mem::take(&mut shape.extensions) {
+                extensions.entry(k).or_insert(v);
+            }
+            shape.extensions = extensions;
+        }
         // OpenAPI 3.0: `null` besides the types the schema gives.
         if map.get("nullable") == Some(&JsonValue::Bool(true)) && !shape.types.is_empty() {
             add_type(&mut shape, "null");
@@ -1719,6 +1744,9 @@ fn merge_as(shape: &mut Shape, other: Shape, holds: Holds) {
         shape.enumeration_inferred = other.enumeration_inferred;
     }
     shape.domain = shape.domain.take().or(other.domain);
+    for (keyword, value) in other.extensions {
+        shape.extensions.entry(keyword).or_insert(value);
+    }
     shape.format = shape.format.take().or(other.format);
     shape.description = shape.description.take().or(other.description);
     shape.label = shape.label.take().or(other.label);
@@ -1768,6 +1796,7 @@ impl Shape {
             min_items: self.min_items,
             min_items_inferred: self.min_items_inferred,
             max_items: self.max_items,
+            extensions: self.extensions.clone(),
             domain: self.domain.clone(),
             examples: self.examples.clone(),
             description: self.description.clone(),

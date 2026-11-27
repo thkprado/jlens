@@ -574,6 +574,24 @@ each field an expression reads, and `changes` compares two such answers (the
   the other packages, in which the two sides are `old` and `new`.
 - **The records cannot be changed**, and none holds native memory.
 
+## The fields of a schema
+
+An application that builds its own list of attributes, or matches the fields of two versions of
+a schema, takes them from `fields()`, without walking the schema (the
+[schema guide](schema.md#the-fields-of-a-schema) says what each holds):
+
+```java
+{{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:fields}}
+```
+
+- **`service.fields()`** returns a `ListedField` for each path of the schema of the service's
+  input, in the order of the paths, which are those of `uses`: `path()`, `typeSummary()` (as
+  completion shows it), `types()`, `required()` (`null` for the value itself and for the items
+  of an array), `label()`, `description()`, `enumeration()` and `closed()`, `domain()`,
+  `format()`, and `extensions()`, the field's own `x-` keywords as written, such as a key of the
+  application's. A hidden field is left out, with what is under it.
+- **The records cannot be changed**, and none holds native memory.
+
 ## What the package leaves out
 
 Completion, hover and signature help, which serve a person typing, are not in the Java package:

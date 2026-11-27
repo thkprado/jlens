@@ -394,6 +394,31 @@ fn uses_and_changes_are_those_of_the_shared_cases() {
     assert_eq!(jlens_service_free(new), 1);
 }
 
+/// The fields every package lists with the same JSON (roadmap 0.37 #9).
+#[test]
+fn fields_are_those_of_the_shared_case() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/fields/cases.json"
+    );
+    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let input = schema(&fixture["schema"]);
+    let listing = handle(service(input, None));
+    assert_eq!(jlens_schema_free(input), 1);
+    assert_eq!(
+        json(reply(jlens_service_fields(listing))),
+        fixture["fields"]
+    );
+    assert_eq!(jlens_service_free(listing), 1);
+    assert_eq!(
+        error(reply(jlens_service_fields(listing))),
+        ("U2002".to_owned(), Some("service".to_owned()))
+    );
+    let alone = handle(service(0, None));
+    assert_eq!(json(reply(jlens_service_fields(alone))), json!([]));
+    assert_eq!(jlens_service_free(alone), 1);
+}
+
 #[test]
 fn uses_and_changes_fail_with_the_codes_of_the_c_api() {
     let service = handle(service(0, None));
