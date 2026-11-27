@@ -88,3 +88,52 @@ measure every case, not only the one the change is for.
 1.82 ms to 148 µs (-91.8%), `integer words` 1.22 ms to 790 µs (-35.5%), `regex` 69.5 to 59.0 µs
 (-15.1%; -12.5% without the cache across evaluations, so most of it is the copied key), every
 other case from -4.5% (`recursion`, placement) to +1.7% (`sort + map`).
+
+## #20: `jlens-regress`'s `utf16` feature and the searches of `&str`
+
+**What changed.** With the `utf16` feature, a search of `&str` had no start predicate: `next_match`
+went straight to trying every position, and the predicate itself had no literal to work from,
+since the feature keeps literals as chars instead of forming literal bytes. 0.35.2 ports
+`542243a`, `3e43472`, `c57833c` and `851f87b` (a start predicate in code units for `&[u16]`, and
+the byte predicate for `&str` again), and, its own change, gives a char its UTF-8 bytes in the
+byte predicate under the feature, a run of chars taken whole, as the code unit predicate does.
+Upstream's master still has that gap. The default build, which jlens uses, compiles to the same
+code.
+
+**Method.** On the M1, the engine's benchmark, aligned, three binaries per tree: without the
+feature, with it searching `&str`, and with it searching UTF-16 (`JLENS_REGRESS_UTF16`, added to
+the benchmark for this item), before (`11ffb0d` with the new benchmark) and after, alternated,
+3 runs each (the median of the runs' medians). Logs: M1 `~/workspaces/logs/037-20/ab2/` (`ab/`
+holds the run before the char predicate).
+
+| Case | Without the feature, before | after | `&str` with the feature, before | after | after, against without | UTF-16, before | after |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| literal | 5.0 µs | 5.0 µs | 61.0 µs | 6.5 µs | +30.0% | 61.5 µs | 12.5 µs |
+| literal, no match | 505 ns | 505 ns | 64.8 µs | 505 ns | +0.0% | 65.8 µs | 6.5 µs |
+| case-insensitive literal | 6.1 µs | 6.1 µs | 51.0 µs | 6.6 µs | +8.2% | 48.6 µs | 10.4 µs |
+| classes | 28.3 µs | 28.2 µs | 71.1 µs | 28.9 µs | +2.5% | 67.4 µs | 31.4 µs |
+| classes, no match | 3.5 µs | 3.5 µs | 44.6 µs | 3.5 µs | +0.0% | 43.6 µs | 6.2 µs |
+| alternation of words | 137 µs | 136 µs | 135 µs | 138 µs | +2.0% | 141 µs | 143 µs |
+| words | 175 µs | 175 µs | 175 µs | 175 µs | −0.2% | 183 µs | 190 µs |
+| captures | 27.4 µs | 27.4 µs | 77.7 µs | 29.0 µs | +5.8% | 84.1 µs | 34.8 µs |
+| lazy | 36.2 µs | 36.2 µs | 81.1 µs | 38.0 µs | +5.0% | 83.0 µs | 43.2 µs |
+| lines | 28.9 µs | 29.0 µs | 30.9 µs | 31.0 µs | +6.9% | 33.8 µs | 34.3 µs |
+| backreference, no match | 489 µs | 486 µs | 484 µs | 486 µs | −0.1% | 498 µs | 489 µs |
+| lookahead | 410 µs | 409 µs | 394 µs | 410 µs | +0.3% | 410 µs | 433 µs |
+| lookbehind | 151 µs | 149 µs | 181 µs | 156 µs | +4.6% | 188 µs | 164 µs |
+| Unicode text | 151 µs | 152 µs | 171 µs | 152 µs | −0.1% | 175 µs | 181 µs |
+| Unicode text, case-insensitive | 22.3 µs | 22.3 µs | 62.4 µs | 22.4 µs | +0.4% | 48.3 µs | 10.3 µs |
+| Unicode property | 210 µs | 211 µs | 256 µs | 210 µs | −0.4% | 294 µs | 293 µs |
+| anchored, short text | 42 ns | 41 ns | 41 ns | 41 ns | +0.0% | 43 ns | 44 ns |
+
+**Results.** Without the feature, every case within ±1.2%. With it, `&str` searches had been up to
+128 times slower (`literal, no match`) and are now within 8% of the build without it, but
+`literal`, +30%: its program still matches the literal char by char, where literal bytes compare
+it at once, which the feature gives up by upstream's design. The ports alone (`ab/`) left the
+literals (`literal` 12 times, `literal, no match` 129 times, `captures` and `lazy`, which begin
+with `user=` and `path=`, 2.8 and 2.2 times); the char predicate brought them back. UTF-16
+searches with a predicate take 48% to 90% less; those whose predicate is a class most of the
+text matches (`\w`, `\S`) or none take 1% to 5.5% more (`lookahead` +5.5%, `words` +3.5%,
+`Unicode text` +3.7%), the cost of upstream's scan for code units before each attempt, kept as
+upstream wrote it. Compiling is unchanged. jlens itself builds the crate without the feature, so
+nothing of jlens's own benchmark changes.

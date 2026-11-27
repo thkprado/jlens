@@ -36,6 +36,13 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- `jlens-regress` 0.35.2: the `utf16` feature no longer slows the searches of `&str` in the same
+  build, which tried every position of the text: up to 128 times slower on a literal that does
+  not occur, 2 to 12 times on a pattern that begins with one. They find where a match can start
+  again, and UTF-16 and UCS-2 searches now find it by code units, 48 to 90 % faster with a
+  literal or a small class first, from upstream's commits `542243a`, `3e43472`, `c57833c` and
+  `851f87b`; a literal gives its bytes to the search of `&str` under the feature, which
+  upstream's code does not. jlens builds the crate without the feature: nothing changes there.
 - A string literal's escapes are read as jsonata-js 2.3.0 reads them: a `\` at the end of the
   expression is `S0103`, where it was `S0101`, and `\u` with fewer than four hex digits there is
   `S0104`.

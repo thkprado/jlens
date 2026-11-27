@@ -39,7 +39,7 @@ js-sys = "0.3"
 console_error_panic_hook = "0.1"
 ryu-js = "1"
 # The fork of regress whose matches stop within the evaluation's limits (ADR 0009).
-regress = { package = "jlens-regress", path = "crates/jlens-regress", version = "0.35.1", default-features = false, features = ["std", "prohibit-unsafe"] }
+regress = { package = "jlens-regress", path = "crates/jlens-regress", version = "0.35.2", default-features = false, features = ["std", "prohibit-unsafe"] }
 web-time = "1"
 stacker = "0.1"
 rustix = { version = "1", default-features = false, features = ["process", "thread"] }

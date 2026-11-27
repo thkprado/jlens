@@ -2,7 +2,9 @@
 //! which `engine.mjs` runs in V8 for reference. Each case finds every match in its text, the
 //! way jlens does: `find_from` from the end of the previous match, or, when
 //! `JLENS_REGRESS_INTERRUPT` is set at build time, `find_from_interruptible` with an interrupt
-//! like jlens's (a deadline and a cancellation flag).
+//! like jlens's (a deadline and a cancellation flag). With the `utf16` feature and
+//! `JLENS_REGRESS_UTF16` set at build time, it searches the texts in UTF-16 instead, with
+//! `find_from_utf16` or `find_from_utf16_interruptible`, and saves its times apart.
 //!
 //! Each variant is a binary of its own. In one binary, the two copies of the backtracker that
 //! `find_from` and `find_from_interruptible` instantiate are inlined differently: two copies of
@@ -15,6 +17,7 @@
 //! export CARGO_TARGET_DIR=target/aligned
 //! cargo bench -p jlens-regress --bench engine [case...]
 //! JLENS_REGRESS_INTERRUPT=1 cargo bench -p jlens-regress --bench engine [case...]
+//! JLENS_REGRESS_UTF16=1 cargo bench -p jlens-regress --features utf16 --bench engine [case...]
 //! ```
 //!
 //! Arguments select the cases whose name contains one of them. Each run saves its times in
@@ -30,12 +33,20 @@ use std::time::{Duration, Instant};
 
 /// Whether this binary matches with `find_from_interruptible`.
 const INTERRUPTIBLE: bool = option_env!("JLENS_REGRESS_INTERRUPT").is_some();
+/// Whether this binary searches the texts in UTF-16.
+const UTF16: bool = option_env!("JLENS_REGRESS_UTF16").is_some();
 /// Samples taken of each case.
 const ROUNDS: usize = 31;
 /// The least duration of one sample.
 const SAMPLE: Duration = Duration::from_millis(5);
 
 fn main() {
+    const {
+        assert!(
+            !UTF16 || cfg!(feature = "utf16"),
+            "JLENS_REGRESS_UTF16 needs the utf16 feature"
+        )
+    };
     let cases: Value = serde_json::from_str(include_str!("engine.json")).unwrap();
     let filters: Vec<String> = std::env::args()
         .skip(1)
@@ -50,7 +61,10 @@ fn main() {
         ("find_from", "interruptible")
     };
     let saved = |variant: &str| {
-        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("engine-{variant}.json"))
+        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "engine-{variant}{}.json",
+            if UTF16 { "-utf16" } else { "" }
+        ))
     };
     let previous: Map<String, Value> = std::fs::read(saved(other))
         .ok()
@@ -74,8 +88,17 @@ fn main() {
             .repeat(text["times"].as_u64().unwrap() as usize);
         let re =
             Regex::with_flags(&str_of(case, "pattern"), str_of(case, "flags").as_str()).unwrap();
-        let matches = find_all(&re, &text);
-        let time = measure(|| find_all(&re, &text));
+        #[cfg(feature = "utf16")]
+        let units: Vec<u16> = text.encode_utf16().collect();
+        let search = || {
+            #[cfg(feature = "utf16")]
+            if UTF16 {
+                return find_all_utf16(&re, &units);
+            }
+            find_all(&re, &text)
+        };
+        let matches = search();
+        let time = measure(search);
         let other_time = previous.get(&name).and_then(Value::as_f64);
         let (base, checked) = if INTERRUPTIBLE {
             (other_time, Some(time))
@@ -142,6 +165,41 @@ fn find_all(re: &Regex, text: &str) -> usize {
                 Some(c) => m.end() + c.len_utf8(),
                 None => break,
             }
+        };
+    }
+    count
+}
+
+/// Every match of `re` in UTF-16 `text`, found as `find_all` finds them in UTF-8.
+#[cfg(feature = "utf16")]
+fn find_all_utf16(re: &Regex, text: &[u16]) -> usize {
+    static CANCEL: AtomicBool = AtomicBool::new(false);
+    static DEADLINE: OnceLock<Instant> = OnceLock::new();
+    let mut start = 0;
+    let mut count = 0;
+    loop {
+        let found = if INTERRUPTIBLE {
+            let deadline = *DEADLINE.get_or_init(|| Instant::now() + Duration::from_secs(3600));
+            re.find_from_utf16_interruptible(text, start, || {
+                CANCEL.load(Ordering::Relaxed) || Instant::now() >= deadline
+            })
+            .unwrap()
+        } else {
+            re.find_from_utf16(text, start).next()
+        };
+        let Some(m) = found else { break };
+        count += 1;
+        // Past an empty match by one character: two code units for a surrogate pair.
+        start = if m.end() > m.start() {
+            m.end()
+        } else if m.end() < text.len() {
+            let pair = (0xD800..0xDC00).contains(&text[m.end()])
+                && text
+                    .get(m.end() + 1)
+                    .is_some_and(|u| (0xDC00..0xE000).contains(u));
+            m.end() + if pair { 2 } else { 1 }
+        } else {
+            break;
         };
     }
     count

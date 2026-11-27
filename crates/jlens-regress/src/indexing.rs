@@ -1231,10 +1231,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
             // Past the starting position, matching steps over whole surrogate
             // pairs, so a unit between a high and a low surrogate is never a
             // position it would try.
-            if idx == start
-                || !(Self::is_low_surrogate(self.input[idx])
-                    && Self::is_high_surrogate(self.input[idx - 1]))
-            {
+            if idx == start || !self.is_inside_surrogate_pair(idx) {
                 return Some(pos + (idx - start));
             }
             from = idx + 1;

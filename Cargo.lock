@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "jlens-regress"
-version = "0.35.1"
+version = "0.35.2"
 dependencies = [
  "hashbrown",
  "memchr",

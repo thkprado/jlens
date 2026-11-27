@@ -144,10 +144,42 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         // We assume that most char nodes have been optimized to ByteSeq or AnyBytes2, so skip
         // these.
         // TODO: we could support icase through bitmap of de-folded first bytes.
+        #[cfg(not(feature = "utf16"))]
         Node::Char { .. } => arbitrary,
 
+        // jlens-regress: with UTF-16 support, no literal bytes are formed and literals stay
+        // chars, so a char gives its UTF-8 bytes. A lone surrogate never occurs in a `&str`.
+        #[cfg(feature = "utf16")]
+        Node::Char { c } => Some(utf8_bytes(*c).map_or(
+            AbstractStartPredicate::Arbitrary,
+            AbstractStartPredicate::Sequence,
+        )),
+
         // Cats return the first non-None value, if any.
+        #[cfg(not(feature = "utf16"))]
         Node::Cat(nodes) => nodes.iter().filter_map(compute_start_predicate).next(),
+
+        // jlens-regress: and a run of chars is taken whole, as it would form literal bytes
+        // without UTF-16 support, and as the code unit predicate takes it.
+        #[cfg(feature = "utf16")]
+        Node::Cat(nodes) => {
+            let mut seq = Vec::new();
+            for node in nodes {
+                if let Node::Char { c } = node
+                    && let Some(bytes) = utf8_bytes(*c)
+                {
+                    seq.extend(bytes);
+                    continue;
+                }
+                if !seq.is_empty() {
+                    break;
+                }
+                if let Some(pred) = compute_start_predicate(node) {
+                    return Some(pred);
+                }
+            }
+            (!seq.is_empty()).then_some(AbstractStartPredicate::Sequence(seq))
+        }
 
         // MatchAny (aka .) is too common to do a fast prefix search for.
         Node::MatchAny => arbitrary,
@@ -212,6 +244,13 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
     }
 }
 
+/// jlens-regress: the UTF-8 bytes of a code point, or None for a lone surrogate.
+#[cfg(feature = "utf16")]
+fn utf8_bytes(c: u32) -> Option<Vec<u8>> {
+    let c = char::from_u32(c)?;
+    Some(c.encode_utf8(&mut [0; 4]).as_bytes().to_vec())
+}
+
 /// \return the start predicate for a Regex.
 pub fn predicate_for_re(re: &ir::Regex) -> StartPredicate {
     // Check if the regex is anchored to the start - if so, we can optimize
@@ -229,6 +268,132 @@ pub fn predicate_for_re(re: &ir::Regex) -> StartPredicate {
 
 #[cfg(feature = "utf16")]
 pub use units::predicate_for_re as unit_predicate_for_re;
+
+/// jlens-regress: the byte predicate with UTF-16 support, whose literals stay chars.
+#[cfg(all(test, feature = "utf16"))]
+mod utf16_bytes {
+    use crate::api::{Flags, Regex};
+    use crate::insn::{CompiledRegex, StartPredicate};
+    use crate::{emit, optimizer, parse};
+    #[cfg(not(feature = "std"))]
+    use alloc::{string::String, vec::Vec};
+
+    fn compile(pattern: &str, flags: &str) -> Option<CompiledRegex> {
+        let flags = Flags::from(flags);
+        let mut ire = parse::try_parse(pattern.chars().map(u32::from), flags).ok()?;
+        if !flags.no_opt {
+            optimizer::optimize(&mut ire);
+        }
+        emit::emit(&ire).ok()
+    }
+
+    /// The predicate's bytes: the sequence, or the set's.
+    fn bytes(pattern: &str, flags: &str) -> Option<Vec<u8>> {
+        match compile(pattern, flags).unwrap().start_pred {
+            StartPredicate::ByteSeq(finder) => Some(finder.needle().to_vec()),
+            StartPredicate::ByteSet1(b) => Some(b.to_vec()),
+            StartPredicate::ByteSet2(b) => Some(b.to_vec()),
+            StartPredicate::ByteSet3(b) => Some(b.to_vec()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn literals_give_their_bytes() {
+        assert_eq!(bytes("status=200", ""), Some(b"status=200".to_vec()));
+        assert_eq!(bytes(r"user=(\w+) id=(\d+)", ""), Some(b"user=".to_vec()));
+        assert_eq!(bytes("path=(.*?) ", ""), Some(b"path=".to_vec()));
+        assert_eq!(bytes("é+x", "u"), Some("é".as_bytes().to_vec()));
+        assert_eq!(bytes("😀x", "u"), Some("😀x".as_bytes().to_vec()));
+        assert_eq!(bytes("abc|abd", ""), Some(b"ab".to_vec()));
+        assert_eq!(bytes(r"(?=a)ab", ""), Some(b"ab".to_vec()));
+        assert_eq!(bytes("k", "i"), Some(b"Kk".to_vec()));
+        // A lone surrogate never occurs in a `&str`, and stops the run of chars.
+        assert_eq!(bytes(r"\uD83D", ""), None);
+        assert_eq!(bytes(r"a\uD83D", ""), Some(b"a".to_vec()));
+        assert!(matches!(
+            compile("^ab", "").unwrap().start_pred,
+            StartPredicate::StartAnchored
+        ));
+    }
+
+    #[test]
+    fn predicates_never_hide_a_match() {
+        let patterns = [
+            "abc",
+            "a|b",
+            "abc|abd",
+            "k",
+            "s",
+            "ß",
+            "é",
+            "é+x",
+            "\u{212A}",
+            "[^a]b",
+            "x*",
+            "x+",
+            "(a)\\1",
+            "(?<=a)b",
+            "a(?=b)b",
+            "^a",
+            "a$",
+            "\\bab",
+            ".b",
+            "(?:ab)+c",
+            "😀",
+            "😀a",
+            "a😀",
+            "\\uD83D",
+            "a\\uDE00",
+            "\\u{1F600}",
+        ];
+        let alphabet = [
+            'a', 'b', 'c', 'k', 'K', 's', 'x', ' ', 'é', 'ß', '\u{212A}', '😀',
+        ];
+        let mut texts: Vec<String> = ["", "abc", "a😀b😃", "xxabdabc kK\u{212A}"]
+            .iter()
+            .map(|s| String::from(*s))
+            .collect();
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        for len in 0..200 {
+            let text = (0..len % 12)
+                .map(|_| {
+                    seed = seed
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    alphabet[(seed >> 33) as usize % alphabet.len()]
+                })
+                .collect();
+            texts.push(text);
+        }
+        for pattern in patterns {
+            for flags in ["", "i", "u", "iu"] {
+                let Some(cr) = compile(pattern, flags) else {
+                    continue;
+                };
+                let mut unassisted = cr.clone();
+                unassisted.start_pred = StartPredicate::Arbitrary;
+                let (assisted, unassisted) = (Regex::from(cr), Regex::from(unassisted));
+                let spans = |m: crate::Match| (m.range, m.captures);
+                for text in &texts {
+                    for (start, _) in text.char_indices() {
+                        assert_eq!(
+                            assisted
+                                .find_from(text, start)
+                                .map(spans)
+                                .collect::<Vec<_>>(),
+                            unassisted
+                                .find_from(text, start)
+                                .map(spans)
+                                .collect::<Vec<_>>(),
+                            "/{pattern}/{flags} from {start} over {text:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// The start predicate in UTF-16 code units, for UTF-16 and UCS-2 input.
 ///
