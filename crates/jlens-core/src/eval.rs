@@ -21,7 +21,7 @@ use crate::audit::{Branch, EvalInfo, Outcome, Tracer, ValueRef};
 use crate::error::{Error, Result};
 use crate::functions::{self, Call, Picture, boolean};
 use crate::output::Output;
-use crate::regex::Regex;
+use crate::regex::{self, Pattern, Patterns, Regex};
 use crate::signature::Signature;
 use crate::value::{
     self, CONS, Function, KEEP_SINGLETON, Lambda, Map, OUTER_WRAPPER, Object, SEQUENCE, Shared,
@@ -375,7 +375,14 @@ pub(crate) struct Evaluator<'t, 'a> {
     /// function called back by a built-in one (`$map`) gives a list back for each item without
     /// taking one.
     lists: Vec<Vec<Value<'a>>>,
-    regexes: HashMap<(String, String), Rc<Regex>>,
+    /// The regex literals evaluated, by node id, as [`Self::literals`] keeps strings.
+    regexes: Vec<Option<Rc<Regex>>>,
+    /// The keys of match objects, made the first time a regex literal is evaluated and shared
+    /// by them all.
+    regex_keys: Option<Rc<regex::Keys>>,
+    /// The expression's tree and its compiled regex literals, shared by its evaluations; `None`
+    /// for a tree with no `Expression` (the language service's).
+    patterns: Option<(&'t Ast, &'t Patterns)>,
     /// The pictures `$formatNumber` parsed last, at most `numeric::PICTURES`.
     pictures: Vec<Picture>,
     /// The system clock, read once, the first time the evaluation needs it: for its
@@ -565,13 +572,14 @@ impl crate::host::Caller for HostCaller<'_, '_, '_> {
 /// Evaluates a parsed expression, and gives its result to `finish` (ADR 0017), which converts
 /// it. This is the entry point used by `Expression::evaluate_with`.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn evaluate<'a, 'v, R>(
-    ast: &Ast,
+pub(crate) fn evaluate<'t, 'a, 'v, R>(
+    ast: &'t Ast,
+    patterns: Option<&'t Patterns>,
     input: Value<'a>,
     variables: impl Iterator<Item = (&'v str, Value<'a>)>,
     bindings: &crate::Bindings,
     limits: Limits,
-    tracer: Option<&mut dyn Tracer>,
+    tracer: Option<&'t mut dyn Tracer>,
     source: Option<Rc<Shared>>,
     finish: impl FnOnce(Output<'_, 'a>) -> Result<R>,
 ) -> Result<R> {
@@ -595,7 +603,9 @@ pub(crate) fn evaluate<'a, 'v, R>(
         stored: Vec::new(),
         spare: None,
         lists: Vec::new(),
-        regexes: HashMap::new(),
+        regexes: Vec::new(),
+        regex_keys: None,
+        patterns: patterns.map(|patterns| (ast, patterns)),
         pictures: Vec::new(),
         clock: None,
         tracer,
@@ -1131,19 +1141,7 @@ impl<'a> Evaluator<'_, 'a> {
                 value
             }
             NodeKind::Regex { pattern, flags } => {
-                let key = (pattern.clone(), flags.clone());
-                let re = match self.regexes.get(&key) {
-                    Some(re) => re.clone(),
-                    None => {
-                        let re = Rc::new(
-                            Regex::new(pattern, flags)
-                                .map_err(|e| e.at(expr.span, expr.position))?,
-                        );
-                        self.regexes.insert(key, re.clone());
-                        re
-                    }
-                };
-                Value::function(Function::Regex(re))
+                Value::function(Function::Regex(self.regex(expr, pattern, flags)?))
             }
             NodeKind::Function { procedure, args } => {
                 self.call(expr, procedure, args, input, env, None)?
@@ -1874,6 +1872,47 @@ impl<'a> Evaluator<'_, 'a> {
             self.literals[id] = Some(shared.clone());
         }
         shared
+    }
+
+    /// The regex literal `node`, `/pattern/flags`: compiled once for the expression
+    /// ([`Patterns`]) and made once for the evaluation. As in [`Self::literal`], the pattern is
+    /// compared on each use, since `$eval` evaluates other trees.
+    ///
+    /// Inlined into `eval_inner` on purpose (0.37 #7): out of line, or left to the compiler,
+    /// `eval_inner`'s frame shrank from 896 bytes to 368, and evaluations without a regex
+    /// (`group-by`, `shipping rule`) became 9-10% slower on the M1, aligned builds too; inlined
+    /// (a frame of 720 bytes), they are within 1% of before. See `docs/notes/perf-0.37.md`.
+    #[inline(always)]
+    fn regex(&mut self, node: &Node, pattern: &str, flags: &str) -> Result<Rc<Regex>> {
+        let id = node.id as usize;
+        if let Some(Some(re)) = self.regexes.get(id)
+            && re.pattern.source == pattern
+            && re.pattern.flags == flags
+        {
+            return Ok(re.clone());
+        }
+        let compiled = match self
+            .patterns
+            .and_then(|(ast, patterns)| patterns.get(ast, node, pattern, flags))
+        {
+            Some(compiled) => compiled,
+            None => Pattern::new(pattern, flags).map(Arc::new),
+        }
+        .map_err(|e| e.at(node.span, node.position))?;
+        let keys = self
+            .regex_keys
+            .get_or_insert_with(|| Rc::new(regex::Keys::new()));
+        let re = Rc::new(Regex {
+            pattern: compiled,
+            keys: keys.clone(),
+        });
+        if id < LITERALS_MAX {
+            if id >= self.regexes.len() {
+                self.regexes.resize(id + 1, None);
+            }
+            self.regexes[id] = Some(re.clone());
+        }
+        Ok(re)
     }
 
     fn literal_guardrails(&self) -> Result<()> {

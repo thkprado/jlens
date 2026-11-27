@@ -158,6 +158,8 @@ struct Compiled {
     /// What an evaluation against a [`Document`] needs of the variables of its bindings, analysed
     /// by the first one that has any.
     variables: OnceLock<reads::Variables>,
+    /// Its regex literals, compiled by the first evaluation that meets each.
+    patterns: regex::Patterns,
 }
 
 impl Expression {
@@ -167,6 +169,7 @@ impl Expression {
             compiled: Arc::new(Compiled {
                 ast: parse(source)?,
                 variables: OnceLock::new(),
+                patterns: regex::Patterns::default(),
             }),
         })
     }
@@ -223,6 +226,7 @@ impl Expression {
         let shared = value::Shared::new();
         eval::evaluate(
             &self.compiled.ast,
+            Some(&self.compiled.patterns),
             input.map_or(value::Value::Undefined, |json| {
                 value::Value::lazy(json, &shared)
             }),
@@ -266,6 +270,7 @@ impl Expression {
         let shared = value::Shared::new();
         eval::evaluate(
             &self.compiled.ast,
+            Some(&self.compiled.patterns),
             value::Value::from_source(input, &shared)?,
             bindings
                 .iter()
@@ -358,7 +363,10 @@ impl Expression {
         // With nothing to convert, no analysis, and no key table.
         if bindings.vars.is_empty() {
             let limits = limits(options);
-            return eval::evaluate(ast, input, documents, bindings, limits, None, None, write);
+            let patterns = Some(&self.compiled.patterns);
+            return eval::evaluate(
+                ast, patterns, input, documents, bindings, limits, None, None, write,
+            );
         }
         let reads = self
             .compiled
@@ -369,6 +377,7 @@ impl Expression {
             .map(|reads| (reads, value::Keys::default()));
         eval::evaluate(
             ast,
+            Some(&self.compiled.patterns),
             input,
             bindings
                 .iter()
@@ -401,6 +410,7 @@ impl Expression {
         let shared = value::Shared::new();
         eval::evaluate(
             &self.compiled.ast,
+            Some(&self.compiled.patterns),
             input.map_or(value::Value::Undefined, |json| {
                 value::Value::lazy(json, &shared)
             }),

@@ -4,6 +4,8 @@
 //! Calendar arithmetic uses the proleptic Gregorian calendar in UTC, like JavaScript's `Date`
 //! with its `UTC` methods, so no time-zone database is needed.
 
+use std::sync::LazyLock;
+
 use crate::error::{Error, Result};
 use crate::functions::Decimal;
 use crate::value::js_number;
@@ -183,7 +185,9 @@ fn word_values() -> Vec<(String, f64)> {
 
 fn words_to_number(text: &str) -> f64 {
     let table = word_values();
-    let splitter = regress::Regex::new(r",\s|\sand\s|[\s\\-]").expect("valid regex");
+    static SPLITTER: LazyLock<regress::Regex> =
+        LazyLock::new(|| regress::Regex::new(r",\s|\sand\s|[\s\\-]").expect("valid regex"));
+    let splitter = &*SPLITTER;
     let mut parts = Vec::new();
     let mut last = 0;
     for m in splitter.find_iter(text) {
@@ -1395,10 +1399,13 @@ pub(crate) fn to_millis(timestamp: &str, picture: Option<&str>, now: f64) -> Res
 /// Validates and parses `^\d{4}(-[01]\d)?(-[0-3]\d)?(T[0-2]\d:[0-5]\d:[0-5]\d)?(\.\d+)?([+-][0-2]\d:?[0-5]\d|Z)?$`
 /// like `Date.parse`. A timestamp without an offset is read as UTC.
 fn parse_iso8601(s: &str) -> Option<f64> {
-    let re = regress::Regex::new(
-        r"^(\d{4})(?:-([01]\d))?(?:-([0-3]\d))?(?:T([0-2]\d):([0-5]\d):([0-5]\d))?(?:\.(\d+))?(?:([+-])([0-2]\d):?([0-5]\d)|(Z))?$",
-    )
-    .expect("valid regex");
+    static ISO8601: LazyLock<regress::Regex> = LazyLock::new(|| {
+        regress::Regex::new(
+            r"^(\d{4})(?:-([01]\d))?(?:-([0-3]\d))?(?:T([0-2]\d):([0-5]\d):([0-5]\d))?(?:\.(\d+))?(?:([+-])([0-2]\d):?([0-5]\d)|(Z))?$",
+        )
+        .expect("valid regex")
+    });
+    let re = &*ISO8601;
     let m = re.find(s)?;
     let group = |i: usize| m.group(i).map(|r| &s[r]);
     let int =

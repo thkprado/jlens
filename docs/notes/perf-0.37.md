@@ -54,3 +54,37 @@ match on the string path and the error in a `#[cold]` function, a second run of 
 `$replace` cases: `regex over a long text` +0.4%, a string pattern +1.2%, `<$0>` +1.3%, a
 function +0.4%, `$split` by regex +0.7%. `regex` (a `$contains` filter, untouched) read +1.6%
 and +2.2% in the two runs. Logs: M1 `~/workspaces/logs/037-5/`.
+
+## #7: regex literals compiled once per expression
+
+**What changed on the path.** Each evaluation compiled each regex literal the first time it met
+it, and looked it up in a map keyed by a copy of its pattern and flags each time the node was
+evaluated (two `String`s cloned per item of `items[$contains(code, /re/)]`). Now the compiled
+pattern sits in the expression's `Compiled`, by node, found by binary search over the tree's
+regex nodes and the node's address, filled by the first evaluation that meets it, on any
+thread; each evaluation keeps its own `Rc` of it by node id, as it does for string literals.
+`datetime.rs`'s two fixed patterns are `LazyLock` statics.
+
+**Method.** On the M1, `cargo xtask ab` of `26aa9f7` (before) against the change, 10 rounds,
+evaluate and document modes, with two cases added to `cases.json` for the run only: `dates
+parsed` (`$sum(items.$toMillis('2024-05-06T07:08:09.123+02:00'))`) and `integer words`
+(`$sum(items.$parseInteger('one hundred and twenty-three', 'w'))`). Logs: M1
+`~/workspaces/logs/037-7/`.
+
+**A trap in `eval_inner`.** The first version moved the node's code into a method that the
+compiler left out of line. `regex` was 13-14% faster, but `group-by` +8.7%, `shipping rule`
++9.1%, `filter + aggregate` +3.7% and `tuples` +2.0%, none of which has a regex, the same in
+document mode and in a build with every function and block aligned (so not placement).
+Bisected: the `datetime.rs` part alone was within 1%; keeping the old map in `Evaluator`
+(same struct shape), keeping the match keys by value, and removing the shared cache's plumbing
+each left the slowdown. `eval_inner`'s frame had dropped from 0x380 to 0x170 bytes, its callees
+were the same but for the regex code, and `sample` put the extra time in `eval_inner`'s own
+samples (291 to 565 of a 5 s run of `group-by`). `#[inline(never)]` changed nothing;
+`#[inline(always)]` (frame 0x2d0) brought the four cases back within 0.6%. Code added to or
+removed from `eval_inner` can move unrelated cases by 10% through its register allocation:
+measure every case, not only the one the change is for.
+
+**Results**, inlined, evaluate mode (document mode within a point of each): `dates parsed`
+1.82 ms to 148 µs (-91.8%), `integer words` 1.22 ms to 790 µs (-35.5%), `regex` 69.5 to 59.0 µs
+(-15.1%; -12.5% without the cache across evaluations, so most of it is the copied key), every
+other case from -4.5% (`recursion`, placement) to +1.7% (`sort + map`).

@@ -18,6 +18,11 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- A regular expression literal is compiled once per compiled expression, shared by its
+  evaluations and their threads, where each evaluation compiled it again and looked it up by a
+  copy of its text each time it was met; on the M1, a `$contains` filter with a regex is 15%
+  faster. `$toMillis` without a picture and `$parseInteger` with a picture of words no longer
+  compile a pattern of their own on each call: 92% and 35% faster.
 - The workflows pin every action by commit SHA, with its version in a comment that Dependabot
   moves with it, so that a tag moved upstream changes nothing that runs here. A newer push to a
   pull request cancels its CI run in progress; runs on `main` are never cancelled, as the release

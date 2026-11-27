@@ -9,17 +9,26 @@
 
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::{Arc, OnceLock};
 
+use crate::ast::{Ast, Node, NodeId, NodeKind};
 use crate::error::{Error, Result};
 use crate::eval::Evaluator;
 use crate::value::{Function, Map, Value};
 
-/// A compiled regular expression literal.
-pub(crate) struct Regex {
+/// A regular expression literal, compiled: shared by the evaluations of an expression
+/// ([`Patterns`]).
+pub(crate) struct Pattern {
     pub re: regress::Regex,
-    pub pattern: String,
-    /// The keys of the objects made for its matches, made once for each evaluation.
-    pub keys: Keys,
+    pub source: String,
+    pub flags: String,
+}
+
+/// A regular expression literal as one evaluation holds it: its compiled pattern, and the keys
+/// of the objects made for its matches, which the evaluation's literals share.
+pub(crate) struct Regex {
+    pub pattern: Arc<Pattern>,
+    pub keys: Rc<Keys>,
 }
 
 /// The keys of a match object, `{match, start, end, groups, next}`, and `index`, which `$match`
@@ -33,11 +42,24 @@ pub(crate) struct Keys {
     pub index: Rc<str>,
 }
 
-impl Regex {
+impl Keys {
+    pub fn new() -> Keys {
+        Keys {
+            match_: "match".into(),
+            start: "start".into(),
+            end: "end".into(),
+            groups: "groups".into(),
+            next: "next".into(),
+            index: "index".into(),
+        }
+    }
+}
+
+impl Pattern {
     /// Compiles `/pattern/flags`. Flags are `i`, `m`, and the extensions `u` and `v` (Unicode
     /// mode, and Unicode mode with set operations on classes); matching is always global, as in
     /// jsonata-js. A flag given twice, or `u` with `v`, is a syntax error, as in JavaScript.
-    pub fn new(pattern: &str, flags: &str) -> Result<Regex> {
+    pub fn new(pattern: &str, flags: &str) -> Result<Pattern> {
         if let Some(message) = invalid_flags(flags) {
             return Err(Error::new("S0302")
                 .with("value", pattern)
@@ -52,18 +74,77 @@ impl Regex {
                 .with("flags", flags)
                 .with("message", e.to_string())
         })?;
-        Ok(Regex {
+        Ok(Pattern {
             re,
-            pattern: pattern.to_owned(),
-            keys: Keys {
-                match_: "match".into(),
-                start: "start".into(),
-                end: "end".into(),
-                groups: "groups".into(),
-                next: "next".into(),
-                index: "index".into(),
-            },
+            source: pattern.to_owned(),
+            flags: flags.to_owned(),
         })
+    }
+}
+
+/// The regex literals of a compiled expression, each compiled the first time an evaluation
+/// meets it and shared by every evaluation after it, on any thread. Listed by node id the first
+/// time one is sought; a node is found by its address, so that a node of another tree (one
+/// `$eval` parsed) with the same id is never taken for it.
+#[derive(Default)]
+pub(crate) struct Patterns(OnceLock<Box<[Slot]>>);
+
+struct Slot {
+    id: NodeId,
+    /// The node's address in the expression's tree, which an `Expression` never moves or
+    /// changes; only compared.
+    node: usize,
+    pattern: OnceLock<Arc<Pattern>>,
+}
+
+impl Patterns {
+    /// The compiled pattern of `node`, a regex literal of `ast`, compiled now if no evaluation
+    /// has. `None` for a node of another tree.
+    pub fn get(
+        &self,
+        ast: &Ast,
+        node: &Node,
+        pattern: &str,
+        flags: &str,
+    ) -> Option<Result<Arc<Pattern>>> {
+        let slots = self.0.get_or_init(|| {
+            let mut slots = Vec::new();
+            ast.root.walk(&mut |n| {
+                if let NodeKind::Regex { .. } = n.kind {
+                    slots.push(Slot {
+                        id: n.id,
+                        node: std::ptr::from_ref(n).addr(),
+                        pattern: OnceLock::new(),
+                    });
+                }
+            });
+            slots.sort_unstable_by_key(|s| s.id);
+            slots.into_boxed_slice()
+        });
+        let slot = &slots[slots.binary_search_by_key(&node.id, |s| s.id).ok()?];
+        if slot.node != std::ptr::from_ref(node).addr() {
+            return None;
+        }
+        if let Some(compiled) = slot.pattern.get() {
+            return Some(Ok(compiled.clone()));
+        }
+        // Two threads may both compile it; the first to finish is kept. An invalid pattern is
+        // not kept: its error is the rare path.
+        Some(
+            Pattern::new(pattern, flags)
+                .map(|compiled| slot.pattern.get_or_init(|| Arc::new(compiled)).clone()),
+        )
+    }
+}
+
+impl std::fmt::Debug for Patterns {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let compiled = self.0.get().map_or(0, |slots| {
+            slots.iter().filter(|s| s.pattern.get().is_some()).count()
+        });
+        f.debug_struct("Patterns")
+            .field("compiled", &compiled)
+            .finish()
     }
 }
 
@@ -180,7 +261,7 @@ fn find_next(
     }
     let found = find(ev, searcher, text, last)?;
     if found.as_ref().is_some_and(|f| f.start.byte == f.end.byte) {
-        return Err(Error::new("D1004").with("value", re.pattern.as_str()));
+        return Err(Error::new("D1004").with("value", re.pattern.source.as_str()));
     }
     Ok(found)
 }
@@ -217,7 +298,7 @@ pub(crate) fn exec<'a>(
     text: &Rc<str>,
     from: Offset,
 ) -> Result<Value<'a>> {
-    let found = find(ev, &mut re.re.searcher(text), text, from)?;
+    let found = find(ev, &mut re.pattern.re.searcher(text), text, from)?;
     Ok(object(re, text, found))
 }
 
@@ -228,7 +309,7 @@ pub(crate) fn next<'a>(
     text: &Rc<str>,
     last: Offset,
 ) -> Result<Value<'a>> {
-    let found = find_next(ev, re, &mut re.re.searcher(text), text, last)?;
+    let found = find_next(ev, re, &mut re.pattern.re.searcher(text), text, last)?;
     Ok(object(re, text, found))
 }
 
@@ -251,7 +332,7 @@ impl<'r> Matches<'r> {
         Matches {
             re,
             text,
-            searcher: re.re.searcher(text),
+            searcher: re.pattern.re.searcher(text),
             last: None,
         }
     }
@@ -278,5 +359,99 @@ pub(crate) fn literal<'v>(v: &'v Value<'_>) -> Option<&'v Regex> {
             _ => None,
         },
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn compiled(patterns: &Patterns) -> usize {
+        patterns.0.get().map_or(0, |slots| {
+            slots.iter().filter(|s| s.pattern.get().is_some()).count()
+        })
+    }
+
+    #[test]
+    fn a_literal_is_compiled_once_per_expression() {
+        let expr = crate::Expression::compile(
+            "[$contains(x, /a/), $contains(x, /b/i), $match(x, /a/).index]",
+        )
+        .unwrap();
+        let input = serde_json::json!({"x": "xAb"});
+        let first = expr
+            .evaluate(Some(&input), &crate::Bindings::new())
+            .unwrap();
+        let patterns = &expr.compiled.patterns;
+        assert_eq!(compiled(patterns), 3);
+        let shared: Vec<_> = patterns
+            .0
+            .get()
+            .unwrap()
+            .iter()
+            .map(|s| Arc::as_ptr(s.pattern.get().unwrap()))
+            .collect();
+        let second = expr
+            .evaluate(Some(&input), &crate::Bindings::new())
+            .unwrap();
+        assert_eq!(first, second);
+        let again: Vec<_> = patterns
+            .0
+            .get()
+            .unwrap()
+            .iter()
+            .map(|s| Arc::as_ptr(s.pattern.get().unwrap()))
+            .collect();
+        assert_eq!(shared, again);
+    }
+
+    #[test]
+    fn threads_share_the_compiled_literals() {
+        let expr = crate::Expression::compile("$match(x, /\\d+/).match").unwrap();
+        let input = serde_json::json!({"x": "a1b22"});
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for _ in 0..50 {
+                        let out = expr
+                            .evaluate(Some(&input), &crate::Bindings::new())
+                            .unwrap();
+                        assert_eq!(out, Some(serde_json::json!(["1", "22"])));
+                    }
+                });
+            }
+        });
+        assert_eq!(compiled(&expr.compiled.patterns), 1);
+    }
+
+    #[test]
+    fn a_node_of_another_tree_is_not_taken() {
+        let a = crate::parse("/a/").unwrap();
+        let b = crate::parse("/b/").unwrap();
+        assert_eq!(a.root.id, b.root.id);
+        let patterns = Patterns::default();
+        assert!(patterns.get(&a, &b.root, "b", "").is_none());
+        let found = patterns.get(&a, &a.root, "a", "").unwrap().unwrap();
+        assert_eq!(found.source, "a");
+    }
+
+    #[test]
+    fn an_invalid_pattern_fails_each_time() {
+        let expr = crate::Expression::compile("$contains('a', /+/)").unwrap();
+        for _ in 0..2 {
+            let err = expr.evaluate(None, &crate::Bindings::new()).unwrap_err();
+            assert_eq!(err.code(), "S0302");
+        }
+        assert_eq!(compiled(&expr.compiled.patterns), 0);
+    }
+
+    #[test]
+    fn eval_of_the_same_ids_keeps_its_own_patterns() {
+        let expr =
+            crate::Expression::compile("/a/('xa').match & $eval('/b/')('xb').match").unwrap();
+        for _ in 0..2 {
+            let out = expr.evaluate(None, &crate::Bindings::new()).unwrap();
+            assert_eq!(out, Some(serde_json::json!("ab")));
+        }
     }
 }
