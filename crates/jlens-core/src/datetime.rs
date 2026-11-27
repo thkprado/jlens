@@ -1210,10 +1210,12 @@ pub(crate) fn from_millis(
     }
     let date = fields(local);
 
+    // The text is checked against the size limit as it grows: each marker writes up to 100
+    // characters (`[Y,100]`), many times its own length.
     let mut out = String::new();
     for part in &spec {
-        match part {
-            Part::Literal(s) => out.push_str(s),
+        let piece = match part {
+            Part::Literal(s) => std::borrow::Cow::Borrowed(s.as_str()),
             Part::Marker(m) => {
                 if m.integer_format
                     .as_ref()
@@ -1221,9 +1223,13 @@ pub(crate) fn from_millis(
                 {
                     return Err(crate::value::string_too_long(max_len));
                 }
-                out.push_str(&format_component(&date, m, offset_hours, offset_minutes)?)
+                format_component(&date, m, offset_hours, offset_minutes)?.into()
             }
+        };
+        if out.len() + piece.len() > max_len {
+            return Err(crate::value::string_too_long(max_len));
         }
+        out.push_str(&piece);
     }
     Ok(out)
 }

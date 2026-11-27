@@ -241,7 +241,7 @@ pub(super) fn trim<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_
     Ok(Value::string(out))
 }
 
-pub(super) fn pad<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
+pub(super) fn pad<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_, 'a>) -> R<'a> {
     let Some(s) = text(&a, 0) else {
         return Ok(Value::Undefined);
     };
@@ -256,7 +256,20 @@ pub(super) fn pad<'a>(_: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'_,
     if pad_length > 1e7 {
         return Err(Error::new("D2016").with("value", crate::value::json_number(pad_length)));
     }
-    let padding: String = fill.chars().cycle().take(pad_length as usize).collect();
+    // The padding's bytes, checked before it is built: ten million characters of a fill of
+    // four bytes each, or of a long fill, are past a small size limit.
+    let pad_length = pad_length as usize;
+    let fill_chars = fill.chars().count();
+    let rest = fill
+        .char_indices()
+        .nth(pad_length % fill_chars)
+        .map_or(fill.len(), |(i, _)| i);
+    let bytes = (pad_length / fill_chars)
+        .checked_mul(fill.len())
+        .and_then(|b| b.checked_add(rest + s.len()))
+        .unwrap_or(usize::MAX);
+    ev.check_string(bytes)?;
+    let padding: String = fill.chars().cycle().take(pad_length).collect();
     Ok(Value::string(if width > 0.0 {
         format!("{s}{padding}")
     } else {
@@ -369,6 +382,7 @@ pub(super) fn match_<'a>(
             m.insert(keys.match_.clone(), Value::string(f.matched(&s)));
             m.insert(keys.index.clone(), Value::Number(f.start.utf16 as f64));
             m.insert(keys.groups.clone(), groups);
+            ev.check_array(out.len() + 1)?;
             out.push(Value::object(m));
             found = matches.next(ev)?;
             count += 1.0;
@@ -382,6 +396,7 @@ pub(super) fn match_<'a>(
             m.insert("match".into(), field(&matches, "match"));
             m.insert("index".into(), field(&matches, "start"));
             m.insert("groups".into(), field(&matches, "groups"));
+            ev.check_array(out.len() + 1)?;
             out.push(Value::object(m));
             matches = evaluate_matcher(ev, &field(&matches, "next"), Value::Undefined, call, true)?;
             count += 1.0;
@@ -393,13 +408,16 @@ pub(super) fn match_<'a>(
 /// Expands `$0`, `$1`, ... and `$$` in a replacement string into `out` (jsonata-js `replace`):
 /// `whole` is the text matched, `group_count` the number of groups and `group(i)` group `i`,
 /// counted from 0, when it is a string.
+/// Fails with `U1001` before `out` would pass `max` bytes: a replacement of many `$0`s
+/// multiplies the text matched.
 fn substitute<'g>(
     out: &mut String,
     replacement: &str,
     whole: Option<&str>,
     group_count: usize,
     group: impl Fn(usize) -> Option<&'g str>,
-) {
+    max: usize,
+) -> Result<()> {
     // `$` and digits are ASCII, so the text is walked by bytes and cut only beside them.
     let bytes = replacement.as_bytes();
     let mut position = 0;
@@ -408,16 +426,16 @@ fn substitute<'g>(
             break;
         };
         let index = position + offset;
-        out.push_str(&replacement[position..index]);
+        push_within(out, &replacement[position..index], max)?;
         position = index + 1;
         match bytes.get(position) {
             Some(b'$') => {
-                out.push('$');
+                push_within(out, "$", max)?;
                 position += 1;
             }
             Some(b'0') => {
                 if let Some(m) = whole {
-                    out.push_str(m);
+                    push_within(out, m, max)?;
                 }
                 position += 1;
             }
@@ -445,31 +463,50 @@ fn substitute<'g>(
                             && i >= 1
                             && let Some(sub) = group(i - 1)
                         {
-                            out.push_str(sub);
+                            push_within(out, sub, max)?;
                         }
                         position += i.to_string().len();
                     }
-                    None => out.push('$'),
+                    None => push_within(out, "$", max)?,
                 }
             }
         }
     }
-    if position < bytes.len() {
-        out.push_str(&replacement[position..]);
-    }
+    push_within(out, &replacement[position..], max)
 }
 
 /// [`substitute`] for a match object.
-fn substitute_object<'a>(out: &mut String, replacement: &str, matched: &Value<'a>) {
+fn substitute_object<'a>(
+    out: &mut String,
+    replacement: &str,
+    matched: &Value<'a>,
+    max: usize,
+) -> Result<()> {
     let groups = field(matched, "groups");
     let groups: &[Value<'a>] = match &groups {
         Value::Array(g) => g.items(),
         _ => &[],
     };
     let whole = field(matched, "match");
-    substitute(out, replacement, whole.as_str(), groups.len(), |i| {
-        groups.get(i).and_then(Value::as_str)
-    });
+    substitute(
+        out,
+        replacement,
+        whole.as_str(),
+        groups.len(),
+        |i| groups.get(i).and_then(Value::as_str),
+        max,
+    )
+}
+
+/// Appends `piece` to a string being built, failing with `U1001` first when the string would
+/// pass `max` bytes: a function's result is checked once it is built, too late for one that
+/// multiplies its input (`$replace`).
+fn push_within(out: &mut String, piece: &str, max: usize) -> Result<()> {
+    if out.len() + piece.len() > max {
+        return Err(crate::value::string_too_long(max));
+    }
+    out.push_str(piece);
+    Ok(())
 }
 
 pub(super) fn replace<'a>(
@@ -499,6 +536,9 @@ pub(super) fn replace<'a>(
         Value::Undefined => Value::string(""),
         r => r,
     };
+    // The result is checked against the size limit as it grows: a long replacement for each of
+    // many matches would otherwise be built whole before the limit is read.
+    let max = ev.max_string_length();
     let mut result = String::new();
     let mut count = 0.0;
 
@@ -510,12 +550,12 @@ pub(super) fn replace<'a>(
                 break;
             }
             let index = position + found;
-            result.push_str(&s[position..index]);
-            result.push_str(replacement);
+            push_within(&mut result, &s[position..index], max)?;
+            push_within(&mut result, replacement, max)?;
             position = index + p.len();
             count += 1.0;
         }
-        result.push_str(&s[position..]);
+        push_within(&mut result, &s[position..], max)?;
         return Ok(Value::string(result));
     }
 
@@ -531,15 +571,20 @@ pub(super) fn replace<'a>(
         while let Some(f) = found.take()
             && limit.is_none_or(|l| count < l)
         {
-            result.push_str(&s[position.byte..f.start.byte]);
-            substitute(&mut result, r, Some(f.matched(&s)), f.groups.len(), |i| {
-                f.group(&s, i)
-            });
+            push_within(&mut result, &s[position.byte..f.start.byte], max)?;
+            substitute(
+                &mut result,
+                r,
+                Some(f.matched(&s)),
+                f.groups.len(),
+                |i| f.group(&s, i),
+                max,
+            )?;
             position = f.end;
             count += 1.0;
             found = matches.next(ev)?;
         }
-        result.push_str(&s[position.byte..]);
+        push_within(&mut result, &s[position.byte..], max)?;
         return Ok(Value::string(result));
     }
 
@@ -557,11 +602,11 @@ pub(super) fn replace<'a>(
     let mut position = 0; // UTF-16 offset
     while !matches.is_undefined() && limit.is_none_or(|l| count < l) {
         let start = field_usize(&matches, "start");
-        result.push_str(&slicer.slice(position, Some(start)));
+        push_within(&mut result, &slicer.slice(position, Some(start)), max)?;
         match &replacement {
-            Value::String(r) => substitute_object(&mut result, r, &matches),
+            Value::String(r) => substitute_object(&mut result, r, &matches, max)?,
             func => match ev.callback(func, vec![matches.clone()], call.env, call.unwrapped(2))? {
-                Value::String(r) => result.push_str(&r),
+                Value::String(r) => push_within(&mut result, &r, max)?,
                 other => {
                     let mut err = Error::new("D3012");
                     if let Some(v) = other.to_json_detail() {
@@ -576,7 +621,7 @@ pub(super) fn replace<'a>(
         count += 1.0;
         matches = evaluate_matcher(ev, &field(&matches, "next"), Value::Undefined, call, true)?;
     }
-    result.push_str(&slicer.slice(position, None));
+    push_within(&mut result, &slicer.slice(position, None), max)?;
     Ok(Value::string(result))
 }
 
@@ -594,16 +639,23 @@ pub(super) fn split<'a>(
         return Ok(Value::Undefined);
     }
     let limit = check_limit(&a, 2, "D3020", 3)?;
+    // The parts are counted against the size limit as they are cut: a string of single
+    // characters has as many parts as bytes.
     let mut out: Vec<Value<'a>> = Vec::new();
     if limit.is_none_or(|l| l > 0.0) {
         if let Value::String(sep) = &separator {
-            let parts: Vec<Value<'a>> = if sep.is_empty() {
-                s.chars().map(|c| Value::string(c.to_string())).collect()
+            let take = limit.map_or(usize::MAX, |l| l as usize);
+            if sep.is_empty() {
+                for c in s.chars().take(take) {
+                    ev.check_array(out.len() + 1)?;
+                    out.push(Value::string(c.to_string()));
+                }
             } else {
-                s.split(sep.as_ref()).map(Value::string).collect()
-            };
-            let max = limit.map_or(usize::MAX, |l| l as usize);
-            out = parts.into_iter().take(max).collect();
+                for part in s.split(sep.as_ref()).take(take) {
+                    ev.check_array(out.len() + 1)?;
+                    out.push(Value::string(part));
+                }
+            }
         } else if let Some(re) = regex::literal(&separator) {
             // The loop below, without a match object for each match.
             let mut count = 0.0;
@@ -616,6 +668,7 @@ pub(super) fn split<'a>(
                 while let Some(f) = found.take()
                     && limit.is_none_or(|l| count < l)
                 {
+                    ev.check_array(out.len() + 1)?;
                     out.push(Value::string(&s[start.byte..f.start.byte]));
                     start = f.end;
                     found = matches.next(ev)?;
@@ -641,6 +694,7 @@ pub(super) fn split<'a>(
                 let mut start = 0;
                 while !matches.is_undefined() && limit.is_none_or(|l| count < l) {
                     let m_start = field_usize(&matches, "start");
+                    ev.check_array(out.len() + 1)?;
                     out.push(Value::string(slicer.slice(start, Some(m_start))));
                     start = field_usize(&matches, "end");
                     matches = evaluate_matcher(
@@ -672,9 +726,18 @@ pub(super) fn join<'a>(ev: &mut Evaluator<'_, 'a>, a: Vec<Value<'a>>, _: &Call<'
         .iter()
         .map(|v| v.as_str().unwrap_or_default())
         .collect();
-    // Checked before joining: the parts may share one long string many times.
-    let len = parts.iter().map(|p| p.len()).sum::<usize>()
-        + separator.len() * parts.len().saturating_sub(1);
+    // Checked before joining: the parts may share one long string many times, so many that
+    // the sum overflows a 32-bit `usize` (wasm32), which is then too long as well.
+    let len = parts
+        .iter()
+        .try_fold(0usize, |sum, p| sum.checked_add(p.len()))
+        .and_then(|sum| {
+            separator
+                .len()
+                .checked_mul(parts.len().saturating_sub(1))
+                .and_then(|seps| sum.checked_add(seps))
+        })
+        .unwrap_or(usize::MAX);
     ev.check_string(len)?;
     Ok(Value::string(parts.join(&separator)))
 }

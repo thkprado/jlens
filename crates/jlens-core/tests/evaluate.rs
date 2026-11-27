@@ -1502,6 +1502,76 @@ fn size_caps_stop_huge_values() {
     }
 }
 
+/// Functions that multiply their input stop at the size limits while they build their result,
+/// not once it is built (an allocation probe measured 20-390 MB built against these limits
+/// before 0.37). A filter whose predicate repeats a position was not checked at all.
+#[test]
+fn size_caps_stop_results_while_they_are_built() {
+    let code = |source: &str, options: &Options| {
+        Expression::compile(source)
+            .unwrap()
+            .evaluate_with(None, &Bindings::new(), options)
+            .err()
+            .map(|e| e.code().to_owned())
+    };
+    let strings = Options::new().max_string_length(100_000);
+    for huge in [
+        r#"$replace($pad("", 1000, "a"), "a", $pad("", 10000, "b"))"#,
+        r#"$replace($pad("", 1000, "a"), /a/, $pad("", 10000, "b"))"#,
+        r#"$replace($pad("", 10000, "a"), /a+/, $pad("", 2000, "$0"))"#,
+        r#"($r := $pad("", 10000, "b"); $replace($pad("", 1000, "a"), /a/, function() { $r }))"#,
+        r#"$pad("", 9000000, "é")"#,
+        r#"$fromMillis(0, $join($map([1..10000], function() { '[Y,100]' })))"#,
+    ] {
+        assert_eq!(code(huge, &strings).as_deref(), Some("U1001"), "{huge}");
+    }
+    let arrays = Options::new().max_array_length(1000);
+    for huge in [
+        r#"$split($pad("", 100000, "a"), "")"#,
+        r#"$split($pad("", 100000, ","), ",")"#,
+        r#"$split($pad("", 100000, ","), /,/)"#,
+        r#"$split($pad("", 100000, ","), function($s) { $match($s, /,/) })"#,
+        r#"$match($pad("", 100000, "a"), /a/)"#,
+        r#"$match($pad("", 100000, "a"), function($s) { $match($s, /a/) })"#,
+        "[0..99][($i := $; [1..100].$i)]",
+    ] {
+        assert_eq!(code(huge, &arrays).as_deref(), Some("U1001"), "{huge}");
+    }
+
+    // At the limits, the results are whole.
+    let ten = Options::new().max_string_length(10).max_array_length(10);
+    for (source, want) in [
+        (r#"$replace("aaaaa", "a", "bb")"#, json!("bbbbbbbbbb")),
+        (r#"$replace("aaaaa", /a/, "$0$0")"#, json!("aaaaaaaaaa")),
+        (r#"$pad("é", 5, "é")"#, json!("ééééé")),
+        (r#"$pad("", -3, "ab")"#, json!("aba")),
+        (r#"$fromMillis(0, "[Y0001]-[M01]")"#, json!("1970-01")),
+        (r#"$split("aaaaaaaaaa", "")"#, json!(vec!["a"; 10])),
+        (
+            r#"$split("a,a,a,a,a,a,a,a,a,a,a,a", ",", 10)"#,
+            json!(vec!["a"; 10]),
+        ),
+        (
+            "[0..4][($i := $; [1, 2].$i)]",
+            json!([0, 0, 1, 1, 2, 2, 3, 3, 4, 4]),
+        ),
+    ] {
+        let got = Expression::compile(source)
+            .unwrap()
+            .evaluate_with(None, &Bindings::new(), &ten)
+            .unwrap_or_else(|e| panic!("{source}: {e}"));
+        assert_eq!(got, Some(want), "{source}");
+    }
+    assert_eq!(
+        code(r#"$replace("aaaaaa", "a", "bb")"#, &ten).as_deref(),
+        Some("U1001")
+    );
+    assert_eq!(
+        code("[0..5][($i := $; [1, 2].$i)]", &ten).as_deref(),
+        Some("U1001")
+    );
+}
+
 #[test]
 fn the_result_size_cap_counts_shared_values() {
     let code = |source: &str, options: &Options| {

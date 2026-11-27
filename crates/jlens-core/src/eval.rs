@@ -1672,7 +1672,13 @@ impl<'a> Evaluator<'_, 'a> {
                 same_position = false;
             }
             if res.is_array_of_numbers()? {
-                for n in res.items_or_self() {
+                let numbers = res.items_or_self();
+                // A position given many times selects its item as many times
+                // (`[0..9][($i := $; [1..20].$i)]` is 200 items), so the results can pass the
+                // size limit with no array of the size built: they are counted then. One
+                // number selects an item at most once, which needs no count.
+                let many = numbers.len() > 1;
+                for n in numbers {
                     let mut ii = n.as_number().unwrap_or(f64::NAN).floor();
                     if ii < 0.0 {
                         ii += len;
@@ -1682,6 +1688,9 @@ impl<'a> Evaluator<'_, 'a> {
                     }
                     position = ii;
                     if ii == index as f64 {
+                        if many {
+                            self.check_array(results.len() + 1)?;
+                        }
                         results.push(item.clone());
                     }
                 }
