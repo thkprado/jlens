@@ -298,3 +298,38 @@ JSON text is read with a depth in the parsing seeds, which grow the stack every 
   `evaluate` mode and within ±1.0% in `document` mode but `filter + aggregate` (+2.1%, a path
   the change does not touch); `number formatting` +0.5% and +0.7%, within the M1's floor.
   Parsing JSON text is not in the workload; the depth costs a comparison per array or object.
+
+## #22: the release's x86_64 check, on the Ryzen
+
+The plan changed the evaluator (#12, #15, #18, #19, #21) and measured it on the M1 alone, so the
+Ryzen 7 3700X, left idle, compared `7714533` with 0.35.0, natively under Windows (`cargo xtask ab
+v0.35.0 HEAD`, 10 rounds, twice in each mode) and in Python under Linux in WSL (Python 3.14.8,
+`python.py ab`, five rounds, twice, the second with a variable of 400 bytes added to the
+environment, as #21 found a slow mode that follows it):
+
+- **Natively**, `number formatting` −16 to −19% (#12), every other case within ±2.5% but `regex
+  over a long text`, +3.5 to +4.7% in all six runs, fastest rounds as much, and against a
+  `Document` `regex` +2.8% and +3.3% and `group-by` +2.5% and +2.8%. Built aligned (the flags of
+  [the performance page](../src/architecture/performance.md)), once in `evaluate` and
+  `document` mode: `regex over a long text` +0.4% and +1.0%, `regex` −0.7% and, against a
+  `Document`, +0.2% in the fastest rounds (a busy minute moved the medians of three cases there,
+  not their fastest rounds), `group-by` +0.1% and −1.1%, but `recursion` +5.4% and +5.1%, level
+  in the plain builds. The two cases twice more in each mode, aligned and with
+  `-align-all-functions=5 -align-all-nofallthru-blocks=4`: `regex over a long text` −3.4 to
+  +2.7%, `recursion` +5.1 to +5.8% and +3.1 to +4.2%.
+- **In Python**, the two runs agree, so the padded environment changes nothing: marked, `regex
+  over a long text` +4.9 to +5.5% in both modes and `distinct items` with Python values +6.3% and
+  +5.3%; faster, `number formatting` −25 to −30% and `recursion` −5.9 to −7.8%; `object
+  constructor` within +2.0%, as #21 left it. With wheels built aligned, once: `regex over a long
+  text` −7.1% and −6.3%, `distinct items` +2.4% and 0.0%, `recursion` +4.9% and +4.0%.
+- **`recursion`** (`$f(15)` of a Fibonacci, 1,973 calls) is where layout moves 0.35.0, not
+  HEAD: natively 0.35.0 reads 456 µs plain, 430 and 441 µs in the two aligned builds, HEAD 458,
+  452 and 457 µs; in Python 0.35.0 reads 420 µs plain and 383 µs aligned, HEAD 392 and 400 µs.
+  The aligned builds of each evaluator commit, chained, once: +2.1% from 0.35.0 to `d3f9a65`
+  (#2 to #17, which removed seven lines of `eval.rs` away from calls), +3.6% with `629af7f`
+  (#18), +0.5% with `b7d7d2c` (#19), −3.6% with `46ec676` (#21, which removed the field #18
+  added) and +1.2% to HEAD (#20, #23); on the M1, #10 had it at +0.5% and +1.5% aligned. #18's
+  step is the one with a change on the path, and #21 takes it back; the rest is the build's
+  layout, each step at the floor.
+
+Nothing goes to the performance page; no case calls for a change before the release.
