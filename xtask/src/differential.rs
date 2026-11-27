@@ -515,16 +515,12 @@ fn dropped_quirk(expr: &str) -> bool {
                             .is_some_and(|s| matches!(s.kind, NodeKind::Sort { .. }))
                         || ii + 1 == steps.len() && node.attrs.group.is_some())
             }),
-            NodeKind::Apply { lhs, rhs } => {
-                gives_regex(rhs) && !matches!(lhs.kind, NodeKind::String { .. })
-            }
+            NodeKind::Apply { lhs, rhs } => gives_regex(rhs) && !string_literal(lhs),
             NodeKind::Function { procedure, args } => match &procedure.kind {
                 NodeKind::Variable { name }
                     if name == "substringBefore" || name == "substringAfter" =>
                 {
-                    !args
-                        .get(1)
-                        .is_some_and(|a| matches!(a.kind, NodeKind::String { .. }))
+                    !args.get(1).is_some_and(string_literal)
                 }
                 // The replacement, third or, with the input as the string, second: neither a
                 // string literal nor a lambda may be missing, which jsonata-js writes as
@@ -532,12 +528,10 @@ fn dropped_quirk(expr: &str) -> bool {
                 NodeKind::Variable { name } if name == "replace" => args
                     .get(2)
                     .or(args.get(1).filter(|_| args.len() == 2))
-                    .is_some_and(|a| {
-                        !matches!(a.kind, NodeKind::String { .. } | NodeKind::Lambda(_))
-                    }),
-                NodeKind::Variable { name } if name == "fromMillis" => args
-                    .get(1)
-                    .is_some_and(|a| !matches!(a.kind, NodeKind::String { .. })),
+                    .is_some_and(|a| !string_literal(a) && !matches!(a.kind, NodeKind::Lambda(_))),
+                NodeKind::Variable { name } if name == "fromMillis" => {
+                    args.get(1).is_some_and(|a| !string_literal(a))
+                }
                 _ => false,
             },
             NodeKind::Lambda(def) => tail_group(&def.body),
@@ -563,6 +557,15 @@ fn reads_any(node: &Node, names: &[&str]) -> bool {
             found
         }
     }
+}
+
+/// Whether `node` is a string literal that nothing filters or groups: `''[false]` is undefined,
+/// which jsonata-js turns into the text "undefined" where a quirk above reads it.
+fn string_literal(node: &Node) -> bool {
+    matches!(node.kind, NodeKind::String { .. })
+        && node.attrs.stages.is_empty()
+        && node.attrs.predicate.is_empty()
+        && node.attrs.group.is_none()
 }
 
 /// Whether `node` is a regex literal, or a block that ends with one or an array constructor of

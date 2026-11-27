@@ -2232,29 +2232,29 @@ fn match_offsets_count_utf16_units_from_where_the_last_match_ended() {
 }
 
 #[test]
-fn a_negative_limit_is_checked_before_a_missing_pattern() {
-    // Found by `cargo xtask differential`: jsonata-js checks the limit first.
-    for (source, code) in [
-        ("$split('abc', nothing, -2.5)", "D3020"),
-        ("$replace('abc', nothing, 'x', -1)", "D3011"),
+fn a_missing_pattern_is_checked_before_the_limit() {
+    // jsonata-js 2.3.0 (pull request #831) gives nothing for a missing pattern or separator
+    // whatever the limit, where 2.2.2 read the limit first: an error for a negative one, `[]`
+    // or the string for 0. Found again by `cargo xtask differential` after the move to 2.3.0,
+    // with the context taken as the string: `$split(nothing, 0)` on "text".
+    for source in [
+        "$split('abc', nothing, -2.5)",
+        "$replace('abc', nothing, 'x', -1)",
+        "$split('abc', nothing, 1)",
+        "$replace('abc', nothing, 'x', 1)",
+        "$split('abc', nothing, 0)",
+        "$replace('abc', nothing, nothing, 0)",
+        "$split(nothing, 0)",
+        "$split(nothing, -1)",
     ] {
-        let err = Expression::compile(source)
-            .unwrap()
-            .evaluate(Some(&json!(null)), &Bindings::new())
-            .unwrap_err();
-        assert_eq!(err.code(), code, "{source}");
+        assert_eq!(eval(source, json!("text")), None, "{source}");
     }
-    assert_eq!(eval("$split('abc', nothing, 1)", json!(null)), None);
-    assert_eq!(eval("$replace('abc', nothing, 'x', 1)", json!(null)), None);
-    // A limit of 0 gives its result whatever the pattern, a missing one too.
-    assert_eq!(
-        eval("$split('abc', nothing, 0)", json!(null)),
-        Some(json!([]))
-    );
-    assert_eq!(
-        eval("$replace('abc', nothing, nothing, 0)", json!(null)),
-        Some(json!("abc"))
-    );
+    // An empty pattern is still D3010 before the limit is read.
+    let err = Expression::compile("$replace('abc', '', 'x', -1)")
+        .unwrap()
+        .evaluate(Some(&json!(null)), &Bindings::new())
+        .unwrap_err();
+    assert_eq!(err.code(), "D3010");
 }
 
 #[test]

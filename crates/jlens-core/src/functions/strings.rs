@@ -480,18 +480,17 @@ pub(super) fn replace<'a>(
     let (Some(s), pattern) = (text(&a, 0), arg(&a, 1)) else {
         return Ok(Value::Undefined);
     };
+    // A missing pattern gives nothing, before the limit is read, as in jsonata-js since 2.3.0
+    // (pull request #831): 2.2.2 checked the limit first.
+    if pattern.is_undefined() {
+        return Ok(Value::Undefined);
+    }
     if pattern.as_str() == Some("") {
         return Err(Error::new("D3010").with("value", "").with("index", 2));
     }
-    // jsonata-js checks the limit before it uses the pattern.
     let limit = check_limit(&a, 3, "D3011", 4)?;
-    // A limit of 0 replaces nothing, so jsonata-js gives the string whatever the pattern, even a
-    // missing one.
     if limit.is_some_and(|l| l <= 0.0) {
         return Ok(Value::String(s));
-    }
-    if pattern.is_undefined() {
-        return Ok(Value::Undefined);
     }
     // A missing replacement removes what the pattern finds, whatever the pattern. jsonata-js
     // writes "undefined" for a string pattern and fails with a `TypeError` for a regex
@@ -589,14 +588,13 @@ pub(super) fn split<'a>(
     let (Some(s), separator) = (text(&a, 0), arg(&a, 1)) else {
         return Ok(Value::Undefined);
     };
-    // jsonata-js checks the limit before it uses the separator.
-    let limit = check_limit(&a, 2, "D3020", 3)?;
-    let mut out: Vec<Value<'a>> = Vec::new();
-    // A limit of 0 gives no parts, so jsonata-js gives `[]` whatever the separator, even a
-    // missing one.
-    if separator.is_undefined() && limit.is_none_or(|l| l > 0.0) {
+    // A missing separator gives nothing, before the limit is read, as in jsonata-js since 2.3.0
+    // (pull request #831): 2.2.2 checked the limit first.
+    if separator.is_undefined() {
         return Ok(Value::Undefined);
     }
+    let limit = check_limit(&a, 2, "D3020", 3)?;
+    let mut out: Vec<Value<'a>> = Vec::new();
     if limit.is_none_or(|l| l > 0.0) {
         if let Value::String(sep) = &separator {
             let parts: Vec<Value<'a>> = if sep.is_empty() {
