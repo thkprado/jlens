@@ -1402,6 +1402,11 @@ impl<Input: InputIndexer, I: Interrupt> BacktrackExecutor<'_, Input, I> {
                 }
                 return Some(self.successful_match(pos, end));
             }
+            // jlens-regress: stop once the interrupt stopped the match, as upstream stops once
+            // the budget runs out: we don't know if this position may have matched.
+            if I::ENABLED && self.matcher.poll.interrupted {
+                return None;
+            }
             // Didn't find it at this position, try the next one.
             pos = inp.next_right_pos(pos)?;
         }
