@@ -118,6 +118,10 @@ pub struct Shape {
     /// reviewed.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub min_items_inferred: bool,
+    /// The most items an array has (`maxItems`), or the length of a tuple closed by `false` for
+    /// the items after it ([`Shape::prefix_items`]): no item follows it. Never inferred.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub max_items: Option<u64>,
     /// A string format shared by every string seen: `date-time`, `date`, `time`, `email`,
     /// `uuid` or `uri`.
     #[serde(skip_serializing_if = "Option::is_none", default)]

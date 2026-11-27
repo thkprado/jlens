@@ -36,6 +36,15 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- JSON Schema: `required` is read wherever it is written. A field that one branch of `allOf`
+  requires was optional when another branch listed it too, and so was a field that a `$ref`
+  required when `properties` beside it listed it again, which also replaced what the `$ref` said
+  of it; a `required` with no `properties` beside it (in a branch of `allOf`, beside a `$ref`, in
+  a branch of `anyOf` or `oneOf`) was not read. A field that is required and listed nowhere is now
+  a field of unknown shape, where it was warned about with `W0201`.
+- JSON Schema: a tuple closed by `"items": false` (or `additionalItems`, `unevaluatedItems`) was
+  written back with its items as the rest, which opens it to more items; it is now written with
+  `"items": false`. `maxItems` is read, as `Shape::max_items`, at a tuple or not.
 - `jlens-regress` 0.35.2: the `utf16` feature no longer slows the searches of `&str` in the same
   build, which tried every position of the text: up to 128 times slower on a literal that does
   not occur, 2 to 12 times on a pattern that begins with one. They find where a match can start

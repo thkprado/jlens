@@ -491,14 +491,31 @@ fn export(shape: &Shape, definitions: &Definitions) -> JsonValue {
             }
         }
     }
+    let mut max_items = shape.max_items;
     if !shape.prefix_items.is_empty() {
         let positions: Vec<JsonValue> = (shape.prefix_items.iter())
             .map(|p| export(p, definitions))
             .collect();
         out.insert("prefixItems".into(), positions.into());
     }
-    if let Some(items) = &shape.items {
-        out.insert("items".into(), export(items, definitions));
+    let length = shape.prefix_items.len() as u64;
+    match &shape.items {
+        // A closed tuple, whose items are those of its positions: no item follows them.
+        Some(items)
+            if length > 0
+                && max_items.is_some_and(|n| n <= length)
+                && **items == tuple_items(&shape.prefix_items, None) =>
+        {
+            out.insert("items".into(), false.into());
+            max_items = max_items.filter(|n| *n < length);
+        }
+        Some(items) => {
+            out.insert("items".into(), export(items, definitions));
+        }
+        None => {}
+    }
+    if let Some(n) = max_items {
+        out.insert("maxItems".into(), n.into());
     }
     if shape.hidden {
         out.insert("x-jlens-hidden".into(), true.into());
@@ -915,16 +932,19 @@ impl<'d> Importer<'d> {
         name
     }
 
-    /// The shape in the place of the `$ref` of schema `node`.
+    /// The shape in the place of the `$ref` of schema `node`, and the fields its target
+    /// requires without listing them, as [`Importer::import_part`] gives them.
     fn follow(
         &mut self,
         node: &'d JsonValue,
         reference: &'d str,
         depth: usize,
-    ) -> Result<Shape, String> {
+    ) -> Result<(Shape, Vec<String>), String> {
         let name = match self.references.get(&address(node)).copied() {
             Some(Target::Found(target)) if self.kept[target] => self.define(target, reference),
-            Some(Target::Found(target)) => return self.import(self.targets[target], depth + 1),
+            Some(Target::Found(target)) => {
+                return self.import_part(self.targets[target], depth + 1);
+            }
             // A name that the schema does not define: the place is unknown.
             Some(Target::Missing(missing)) => {
                 self.unresolved
@@ -938,13 +958,14 @@ impl<'d> Importer<'d> {
             // base is not known.
             None => {
                 self.unresolved.insert(address(node), (reference, None));
-                return Ok(Shape::default());
+                return Ok((Shape::default(), Vec::new()));
             }
         };
-        Ok(Shape {
+        let shape = Shape {
             references: vec![name],
             ..Shape::default()
-        })
+        };
+        Ok((shape, Vec::new()))
     }
 
     /// What the import did not follow or read, and the open tuples it met, with the place of
@@ -1016,21 +1037,43 @@ impl<'d> Importer<'d> {
         report
     }
 
+    /// The shape of schema `node` in a place of its own: a field, the items of an array, a
+    /// definition, the document.
     fn import(&mut self, node: &'d JsonValue, depth: usize) -> Result<Shape, String> {
+        let (mut shape, unlisted) = self.import_part(node, depth)?;
+        place_required(&mut shape, unlisted);
+        Ok(shape)
+    }
+
+    /// The shape of schema `node`, and the fields it requires that it does not list: the
+    /// schema may be a part of another, a branch of `allOf` or the target of a `$ref`, whose
+    /// other parts list them ([`place_required`] places those left).
+    fn import_part(
+        &mut self,
+        node: &'d JsonValue,
+        depth: usize,
+    ) -> Result<(Shape, Vec<String>), String> {
         if depth > 64 {
             return Err("the schema is nested too deep".into());
         }
         let JsonValue::Object(map) = node else {
-            return Ok(Shape::default()); // `true` / `false`: nothing known
+            // `true` / `false`: nothing known
+            return Ok((Shape::default(), Vec::new()));
         };
         // A schema with a keyword the load does not read says nothing of its place, as the
         // rest of it could forbid what the keyword allows.
         if let Some(keyword) = unread_keyword(map) {
             self.unread.entry(address(node)).or_insert(keyword);
-            return Ok(Shape::default());
+            return Ok((Shape::default(), Vec::new()));
         }
+        // The fields required here or by a part that holds beside this schema.
+        let mut required: Vec<String> = Vec::new();
         let mut shape = match map.get("$ref").and_then(JsonValue::as_str) {
-            Some(reference) => self.follow(node, reference, depth)?,
+            Some(reference) => {
+                let (shape, names) = self.follow(node, reference, depth)?;
+                required.extend(names);
+                shape
+            }
             None => Shape::default(),
         };
         // The keywords that hold schemas are those of `subschemas`. The branches of `allOf`
@@ -1038,18 +1081,29 @@ impl<'d> Importer<'d> {
         // one branch or another.
         if let Some(JsonValue::Array(branches)) = map.get("allOf") {
             for branch in branches {
-                let b = self.import(branch, depth + 1)?;
-                merge(&mut shape, b);
+                let (b, names) = self.import_part(branch, depth + 1)?;
+                merge_all(&mut shape, b);
+                required.extend(names);
             }
         }
         for key in ["anyOf", "oneOf"] {
             if let Some(JsonValue::Array(branches)) = map.get(key) {
                 let mut alternatives = Vec::with_capacity(branches.len());
+                // The fields every branch requires, whether it lists them or not.
+                let mut every: Option<Vec<String>> = None;
                 // A branch `false` holds for no value.
                 for branch in branches.iter().filter(|b| **b != JsonValue::Bool(false)) {
-                    alternatives.push(self.import(branch, depth + 1)?);
+                    let (b, mut names) = self.import_part(branch, depth + 1)?;
+                    let listed = b.fields.iter().filter(|(_, f)| f.required);
+                    names.extend(listed.map(|(name, _)| name.clone()));
+                    every = Some(match every {
+                        None => names,
+                        Some(all) => all.into_iter().filter(|n| names.contains(n)).collect(),
+                    });
+                    alternatives.push(b);
                 }
-                merge(&mut shape, either(alternatives));
+                merge_all(&mut shape, either(alternatives));
+                required.extend(every.unwrap_or_default());
             }
         }
         match map.get("type") {
@@ -1061,30 +1115,41 @@ impl<'d> Importer<'d> {
             }
             _ => {}
         }
+        let own: Vec<&str> = map
+            .get("required")
+            .and_then(JsonValue::as_array)
+            .map(|r| r.iter().filter_map(JsonValue::as_str).collect())
+            .unwrap_or_default();
         if let Some(JsonValue::Object(props)) = map.get("properties") {
-            let required: Vec<&str> = map
-                .get("required")
-                .and_then(JsonValue::as_array)
-                .map(|r| r.iter().filter_map(JsonValue::as_str).collect())
-                .unwrap_or_default();
             for (name, p) in props {
-                let field_shape = self.import(p, depth + 1)?;
-                let is_required = required.contains(&name.as_str());
+                let mut field_shape = self.import(p, depth + 1)?;
+                let is_required = own.contains(&name.as_str());
                 let presence = p
                     .get("x-jlens-presence")
                     .and_then(JsonValue::as_f64)
                     .unwrap_or(if is_required { 1.0 } else { 0.0 });
-                shape.fields.insert(
-                    name.clone(),
-                    Field {
-                        shape: field_shape,
-                        required: is_required,
-                        presence,
-                    },
-                );
+                // What a `$ref` or a branch of `allOf` says of the field holds too; what is
+                // written here is said first.
+                match shape.fields.get_mut(name) {
+                    Some(before) => {
+                        merge_all(&mut field_shape, std::mem::take(&mut before.shape));
+                        before.shape = field_shape;
+                        before.required |= is_required;
+                        before.presence = if before.required { 1.0 } else { presence };
+                    }
+                    None => {
+                        let field = Field {
+                            shape: field_shape,
+                            required: is_required,
+                            presence,
+                        };
+                        shape.fields.insert(name.clone(), field);
+                    }
+                }
             }
             add_type(&mut shape, "object");
         }
+        required.extend(own.into_iter().map(str::to_owned));
         let patterns = map.get("patternProperties").and_then(JsonValue::as_object);
         // `unevaluatedProperties` also sees the fields of the branches, which the shape has
         // merged by now.
@@ -1158,6 +1223,10 @@ impl<'d> Importer<'d> {
                 .and_then(JsonValue::as_bool)
                 == Some(true);
         }
+        // Beside the bound of a closed tuple, or one a `$ref` or a branch gives: the fewest.
+        if let Some(n) = map.get("maxItems").and_then(JsonValue::as_u64) {
+            shape.max_items = Some(shape.max_items.map_or(n, |m| m.min(n)));
+        }
         shape.minimum = map
             .get("minimum")
             .and_then(JsonValue::as_f64)
@@ -1190,7 +1259,20 @@ impl<'d> Importer<'d> {
                 values.push(JsonValue::Null);
             }
         }
-        Ok(shape)
+        // The fields required that the shape lists by now are marked; the others are left to
+        // the schema this one is a part of, which may list them.
+        let mut unlisted: Vec<String> = Vec::new();
+        for name in required {
+            match shape.fields.get_mut(&name) {
+                Some(field) => {
+                    field.required = true;
+                    field.presence = 1.0;
+                }
+                None if !unlisted.contains(&name) => unlisted.push(name),
+                None => {}
+            }
+        }
+        Ok((shape, unlisted))
     }
 
     /// Reads the items of the array schema `map` into `shape`: one schema for every item
@@ -1251,28 +1333,49 @@ impl<'d> Importer<'d> {
             && shape.items.is_none();
         let rest = match rest {
             Some(rest @ JsonValue::Object(_)) => Some(Some(self.import(rest, depth + 1)?)),
-            Some(JsonValue::Bool(false)) => Some(None),
+            Some(JsonValue::Bool(false)) => {
+                // No item follows the tuple.
+                let length = tuple.len() as u64;
+                shape.max_items = Some(shape.max_items.map_or(length, |m| m.min(length)));
+                Some(None)
+            }
             _ if closed => Some(None),
             // Any item may follow the first ones: what they are is not known.
             _ => None,
         };
         if let Some(rest) = rest {
-            // An item is at one position or another: where the items are tuples themselves, a
-            // position of theirs is known only where every one of them gives it.
-            let all: Vec<&Shape> = positions.iter().chain(&rest).collect();
-            let inner = positions_of_either(&all);
-            let mut merged = Shape::default();
-            for item in positions.iter().cloned().chain(rest) {
-                merge(&mut merged, item);
-            }
-            merged.prefix_items = inner;
-            shape.items = Some(Box::new(merged));
+            shape.items = Some(Box::new(tuple_items(&positions, rest)));
         }
         // The positions of a `$ref` or of a branch hold beside these: a position has both.
         let before = std::mem::replace(&mut shape.prefix_items, positions);
-        merge_positions(&mut shape.prefix_items, before);
+        merge_positions(&mut shape.prefix_items, before, Holds::Both);
         add_type(shape, "array");
         Ok(open)
+    }
+}
+
+/// Adds to `shape`, the shape of a schema in a place of its own, the fields it requires that
+/// no part of it lists (`names`), as fields whose shape is not known. An object that listed no
+/// field before stays one whose other fields may be there. A shape that is not an object
+/// takes none: what its schema gives no type says nothing of its value.
+fn place_required(shape: &mut Shape, names: Vec<String>) {
+    if names.is_empty() || !shape.is_object() {
+        return;
+    }
+    let open = shape.fields.is_empty() && shape.other_fields.is_none();
+    for name in names {
+        let field = Field {
+            shape: Shape::default(),
+            required: true,
+            presence: 1.0,
+        };
+        shape.fields.insert(name, field);
+    }
+    if open {
+        shape.other_fields = Some(Box::new(OtherFields {
+            patterns: Vec::new(),
+            rest: Some(Box::default()),
+        }));
     }
 }
 
@@ -1469,12 +1572,27 @@ fn positions_of_either(arrays: &[&Shape]) -> Vec<Shape> {
     out
 }
 
-/// Merges the positions `other` into `positions`, as [`merge`] does the fields: a position
+/// The shape of every item of an array whose first items have the shapes of `positions`, and
+/// the others that of `rest` (`None`: there are none). An item is at one position or another:
+/// where the items are tuples themselves, a position of theirs is known only where every one
+/// of them gives it.
+fn tuple_items(positions: &[Shape], rest: Option<Shape>) -> Shape {
+    let all: Vec<&Shape> = positions.iter().chain(&rest).collect();
+    let inner = positions_of_either(&all);
+    let mut merged = Shape::default();
+    for item in positions.iter().cloned().chain(rest) {
+        merge(&mut merged, item);
+    }
+    merged.prefix_items = inner;
+    merged
+}
+
+/// Merges the positions `other` into `positions`, as [`merge_as`] does the fields: a position
 /// both have is merged, and one that only one has is kept.
-fn merge_positions(positions: &mut Vec<Shape>, other: Vec<Shape>) {
+fn merge_positions(positions: &mut Vec<Shape>, other: Vec<Shape>, holds: Holds) {
     for (index, position) in other.into_iter().enumerate() {
         match positions.get_mut(index) {
-            Some(existing) => merge(existing, position),
+            Some(existing) => merge_as(existing, position, holds),
             None => positions.push(position),
         }
     }
@@ -1492,8 +1610,30 @@ fn value_type(value: &JsonValue) -> &'static str {
     }
 }
 
-/// Merges `other` into `shape` (union of types and fields).
+/// How two shapes merged hold of a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Holds {
+    /// Both hold, as the branches of `allOf` do: a field either requires is required.
+    Both,
+    /// One or the other holds, as the branches of `anyOf` and the positions of a tuple do: a
+    /// field is required only where both require it.
+    Either,
+}
+
+/// Merges `other` into `shape`, a shape that holds or `other` does (union of types and
+/// fields).
 fn merge(shape: &mut Shape, other: Shape) {
+    merge_as(shape, other, Holds::Either);
+}
+
+/// Merges `other` into `shape`, a shape that holds as well as `other` does: a branch of
+/// `allOf`, the target of a `$ref` beside the rest of its schema. As [`merge`], but a field
+/// either requires is required.
+fn merge_all(shape: &mut Shape, other: Shape) {
+    merge_as(shape, other, Holds::Both);
+}
+
+fn merge_as(shape: &mut Shape, other: Shape, holds: Holds) {
     // An object of either shape may have a field either may have.
     let open = |s: &Shape| -> Option<Box<OtherFields>> {
         match &s.other_fields {
@@ -1533,8 +1673,14 @@ fn merge(shape: &mut Shape, other: Shape) {
     for (name, field) in other.fields {
         match shape.fields.get_mut(&name) {
             Some(existing) => {
-                existing.required &= field.required;
-                merge(&mut existing.shape, field.shape);
+                match holds {
+                    Holds::Both => existing.required |= field.required,
+                    Holds::Either => existing.required &= field.required,
+                }
+                if holds == Holds::Both && existing.required {
+                    existing.presence = 1.0;
+                }
+                merge_as(&mut existing.shape, field.shape, holds);
             }
             None => {
                 shape.fields.insert(name, field);
@@ -1542,11 +1688,11 @@ fn merge(shape: &mut Shape, other: Shape) {
         }
     }
     match (&mut shape.items, other.items) {
-        (Some(a), Some(b)) => merge(a, *b),
+        (Some(a), Some(b)) => merge_as(a, *b, holds),
         (slot @ None, Some(b)) => *slot = Some(b),
         _ => {}
     }
-    merge_positions(&mut shape.prefix_items, other.prefix_items);
+    merge_positions(&mut shape.prefix_items, other.prefix_items, holds);
     // An array of either shape: the fewer items, and only if both say.
     if !arrays {
         shape.min_items = other.min_items;
@@ -1556,6 +1702,18 @@ fn merge(shape: &mut Shape, other: Shape) {
         shape.min_items_inferred &= shape.min_items.is_some();
         shape.min_items_inferred |= other.min_items_inferred && shape.min_items.is_some();
     }
+    // Of both, the fewest that either allows; of either, the most, and only if both say.
+    shape.max_items = match holds {
+        Holds::Both => match (shape.max_items, other.max_items) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        },
+        Holds::Either if !arrays => other.max_items,
+        Holds::Either if other_arrays => {
+            shape.max_items.zip(other.max_items).map(|(a, b)| a.max(b))
+        }
+        Holds::Either => shape.max_items,
+    };
     if shape.enumeration.is_none() {
         shape.enumeration = other.enumeration;
         shape.enumeration_inferred = other.enumeration_inferred;
@@ -1609,6 +1767,7 @@ impl Shape {
             enumeration_inferred: self.enumeration_inferred,
             min_items: self.min_items,
             min_items_inferred: self.min_items_inferred,
+            max_items: self.max_items,
             domain: self.domain.clone(),
             examples: self.examples.clone(),
             description: self.description.clone(),

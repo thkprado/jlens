@@ -295,6 +295,64 @@ fn positions_of_branches_and_references() {
 }
 
 #[test]
+fn a_closed_tuple_stays_closed() {
+    let schema = Schema::from_json_schema(&document()).unwrap();
+    // `items: false` keeps the array to its tuple; a tuple with a rest has no such bound.
+    assert_eq!(schema.shape_at("entry").unwrap().max_items, Some(2));
+    assert_eq!(schema.shape_at("lines").unwrap().max_items, None);
+    assert_eq!(schema.shape_at("point").unwrap().max_items, None);
+    // Written back as it was, and so read back the same.
+    let exported = schema.to_json_schema();
+    let entry = &exported["properties"]["entry"];
+    assert_eq!(entry["items"], json!(false));
+    assert_eq!(entry.get("maxItems"), None);
+    assert_eq!(Schema::from_json_schema(&exported).unwrap(), schema);
+
+    // Draft-07's `additionalItems: false`, and `maxItems`, at a tuple or not.
+    let at = |document: Value| Schema::from_json_schema(&document).unwrap().root.max_items;
+    let pair = json!([{"type": "string"}, {"type": "number"}]);
+    assert_eq!(
+        at(json!({"type": "array", "items": pair, "additionalItems": false})),
+        Some(2)
+    );
+    assert_eq!(
+        at(
+            json!({"type": "array", "prefixItems": pair, "items": {"type": "number"}, "maxItems": 3})
+        ),
+        Some(3)
+    );
+    assert_eq!(
+        at(json!({"type": "array", "prefixItems": pair, "maxItems": 1})),
+        Some(1)
+    );
+    assert_eq!(
+        at(json!({"type": "array", "items": {"type": "number"}, "maxItems": 5})),
+        Some(5)
+    );
+    // Every branch of `allOf` holds: the fewest; one branch of `anyOf` or another: the most.
+    assert_eq!(
+        at(json!({"allOf": [{"type": "array", "maxItems": 4}, {"maxItems": 2}]})),
+        Some(2)
+    );
+    assert_eq!(
+        at(json!({"anyOf": [{"type": "array", "maxItems": 4}, {"type": "array", "maxItems": 2}]})),
+        Some(4)
+    );
+    assert_eq!(
+        at(json!({"anyOf": [{"type": "array", "maxItems": 4}, {"type": "array"}]})),
+        None
+    );
+    // A bound past the tuple is written as it is, beside the items.
+    let schema = Schema::from_json_schema(&json!({
+        "type": "array", "prefixItems": pair, "items": {"type": "number"}, "maxItems": 3
+    }))
+    .unwrap();
+    let exported = schema.to_json_schema();
+    assert_eq!(exported["maxItems"], 3);
+    assert_eq!(Schema::from_json_schema(&exported).unwrap(), schema);
+}
+
+#[test]
 fn positions_survive_a_round_trip_and_take_overrides() {
     let mut schema = Schema::from_json_schema(&document()).unwrap();
     let exported = schema.to_json_schema();

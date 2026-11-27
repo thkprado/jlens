@@ -147,15 +147,21 @@ read, left out because it only narrows, or reported. What each keyword means is 
 
 | | Keywords |
 |---|---|
-| Read | `type`, `properties`, `required`, `patternProperties`, `additionalProperties`, `unevaluatedProperties` (as `additionalProperties`, where that is absent), `items`, `prefixItems`, `additionalItems`, `unevaluatedItems`, `minItems`, `enum`, `const`, `format`, `minimum`, `maximum`, `$ref`, `$id`, `$anchor`, `$defs`, `definitions`, `allOf`, `anyOf`, `oneOf`, `if` with `then` and `else`, `dependentSchemas`, `dependencies`, `nullable`, `title`, `description`, `examples`, `x-jlens-*` |
-| Left out: they only narrow | `not`, `minLength`, `maxLength`, `pattern`, `multipleOf`, `exclusiveMinimum`, `exclusiveMaximum`, `maxItems` (but for a tuple, below), `uniqueItems`, `contains`, `minContains`, `maxContains`, `minProperties`, `maxProperties`, `propertyNames`, `dependentRequired`, `contentEncoding`, `contentMediaType`, `contentSchema` |
+| Read | `type`, `properties`, `required`, `patternProperties`, `additionalProperties`, `unevaluatedProperties` (as `additionalProperties`, where that is absent), `items`, `prefixItems`, `additionalItems`, `unevaluatedItems`, `minItems`, `maxItems`, `enum`, `const`, `format`, `minimum`, `maximum`, `$ref`, `$id`, `$anchor`, `$defs`, `definitions`, `allOf`, `anyOf`, `oneOf`, `if` with `then` and `else`, `dependentSchemas`, `dependencies`, `nullable`, `title`, `description`, `examples`, `x-jlens-*` |
+| Left out: they only narrow | `not`, `minLength`, `maxLength`, `pattern`, `multipleOf`, `exclusiveMinimum`, `exclusiveMaximum`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `minProperties`, `maxProperties`, `propertyNames`, `dependentRequired`, `contentEncoding`, `contentMediaType`, `contentSchema` |
 | Left out: they describe | `default`, `deprecated`, `readOnly`, `writeOnly`, `$comment`, `$schema`, `$vocabulary`, `$dynamicAnchor`, `$recursiveAnchor`, `discriminator`, `xml`, `externalDocs`, `example` |
 | Reported | `$dynamicRef` and `$recursiveRef`, which the scope of a validation resolves; a `type` that names no JSON type, such as `"int"` |
 
 How some are read:
 
 - **`allOf`**: every branch holds, so its branches are merged with the rest of the schema: a
-  field that one branch requires is always there.
+  field that one branch requires is always there, even where another branch lists it and does
+  not require it. So do a `$ref` and the keywords beside it.
+- **`required`** holds wherever it is written: beside `properties`, in a branch of `allOf` or
+  beside a `$ref` whose other parts list the field, or with no `properties` at all. A field it
+  names that nothing lists is a field whose shape is not known, so `"required": ["id"]` makes
+  `id` a field that is always there; an object that lists no field otherwise still has any other.
+  In the branches of `anyOf` and `oneOf`, a field is required only where every branch requires it.
 - **`anyOf` and `oneOf`**: a value has the shape of one branch or another. It may have the
   types of any branch, and a field is required only where every branch requires it: with
   `anyOf` of a person with a `name` and a company with a `tax`, `name` may be absent, and a
@@ -173,7 +179,7 @@ How some are read:
   those of the rest (`items` after `prefixItems`, `additionalItems`, `unevaluatedItems`), as
   a step over the array takes them all. With no schema for the rest, any item may follow, and
   the items are not known, unless `maxItems` keeps the array to the tuple or the rest is
-  `false`. A literal index inside the tuple has the type of its position, whether items may
+  `false`; the schema keeps that bound, and writes such a tuple back with `"items": false`. A literal index inside the tuple has the type of its position, whether items may
   follow or not: with `point` a tuple of two numbers, `point[1]` is a number and `point[1] >
   "a"` gets `W0208`, and after `entry[1].` completion offers the fields of the second item.
   An index from the end, one past the tuple or a computed one (`point[-1]`, `point[2]`,
