@@ -1383,7 +1383,7 @@ impl<Input: InputIndexer, I: Interrupt> BacktrackExecutor<'_, Input, I> {
     /// \return the next match, searching the remaining code units using the
     /// given searcher to quickly find the first potential match location.
     #[cfg(feature = "utf16")]
-    fn next_match_with_unit_search<UnitSearch: bytesearch::UnitSearcher + ?Sized>(
+    fn next_match_with_unit_search<UnitSearch: bytesearch::UnitSearcher>(
         &mut self,
         mut pos: Input::Position,
         next_start: &mut Option<Input::Position>,
@@ -1446,9 +1446,11 @@ impl<Input: InputIndexer, I: Interrupt + core::fmt::Debug> exec::MatchProducer
                 UnitStartPredicate::UnitSet3(units) => {
                     self.next_match_with_unit_search(pos, next_start, units)
                 }
-                UnitStartPredicate::UnitSeq(units) => {
-                    self.next_match_with_unit_search(pos, next_start, units.as_ref())
-                }
+                UnitStartPredicate::UnitSeq(units) => self.next_match_with_unit_search(
+                    pos,
+                    next_start,
+                    &bytesearch::UnitSequence::new(units),
+                ),
                 UnitStartPredicate::Latin1Bracket(bitmap) => {
                     self.next_match_with_unit_search(pos, next_start, bitmap)
                 }

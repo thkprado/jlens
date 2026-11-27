@@ -127,7 +127,7 @@ where
     /// \return the new position, or None on failure.
     /// This panics if CODE_UNITS_ARE_BYTES is true.
     #[cfg(feature = "utf16")]
-    fn find_units<Search: bytesearch::UnitSearcher + ?Sized>(
+    fn find_units<Search: bytesearch::UnitSearcher>(
         &self,
         pos: Self::Position,
         search: &Search,
@@ -510,7 +510,7 @@ impl<'a> InputIndexer for Utf8Input<'a> {
     }
 
     #[cfg(feature = "utf16")]
-    fn find_units<Search: bytesearch::UnitSearcher + ?Sized>(
+    fn find_units<Search: bytesearch::UnitSearcher>(
         &self,
         _pos: Self::Position,
         _search: &Search,
@@ -838,7 +838,7 @@ impl<'a> InputIndexer for AsciiInput<'a> {
     }
 
     #[cfg(feature = "utf16")]
-    fn find_units<Search: bytesearch::UnitSearcher + ?Sized>(
+    fn find_units<Search: bytesearch::UnitSearcher>(
         &self,
         _pos: Self::Position,
         _search: &Search,
@@ -1219,7 +1219,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         panic!("Should never be finding bytes for utf16");
     }
 
-    fn find_units<Search: bytesearch::UnitSearcher + ?Sized>(
+    fn find_units<Search: bytesearch::UnitSearcher>(
         &self,
         pos: Self::Position,
         search: &Search,
@@ -1423,7 +1423,7 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
         panic!("Should never be finding bytes for ucs2");
     }
 
-    fn find_units<Search: bytesearch::UnitSearcher + ?Sized>(
+    fn find_units<Search: bytesearch::UnitSearcher>(
         &self,
         pos: Self::Position,
         search: &Search,
