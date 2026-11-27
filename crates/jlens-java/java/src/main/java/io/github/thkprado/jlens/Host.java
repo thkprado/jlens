@@ -13,7 +13,9 @@ import java.util.concurrent.Future;
  * threw for one evaluation: the evaluation throws it again once it fails with it.
  *
  * <p>The C API calls {@link #call} back on the evaluating thread, which finds the evaluation's
- * host in {@link #CURRENT}, and the function by the context its {@link Bindings} were made with.
+ * host in {@link #CURRENT}, and the function by the context its {@link Bindings} were made with:
+ * the host keeps the functions of its evaluation's bindings, which closing them during the
+ * evaluation leaves it (0.37 #4).
  * An exception gets a number, which the error the evaluation fails with carries back ({@code
  * hostException}). The error of a function a host function called gets a number from the C API
  * ({@code failure}); when the host function lets it through, it replies with that number, so the
@@ -27,10 +29,25 @@ final class Host {
     private static final byte REPLY_ERROR = 2;
     private static final byte REPLY_VALUES = 4;
 
+    /** The context of the evaluation's bindings, and their functions; 0 and none without them. */
+    private final long context;
+    private final Bindings.Function[] functions;
+
     /** The exceptions the host functions threw, by their numbers. */
     private final List<Throwable> exceptions = new ArrayList<>();
     /** The exceptions thrown by {@link JsonataFunction#call}, and the C API's numbers of their errors. */
     private final Map<Throwable, Long> failures = new IdentityHashMap<>();
+
+    /** The host of an evaluation with {@code bindings}. */
+    Host(Bindings bindings) {
+        this.context = bindings.context;
+        this.functions = bindings.hosted;
+    }
+
+    private Host() {
+        this.context = 0;
+        this.functions = null;
+    }
 
     /** A call of a host function in progress, which its {@link JsonataFunction}s call through. */
     static final class Call {
@@ -80,7 +97,8 @@ final class Host {
 
     private byte[] run(long context, int index, long frame, long arguments) {
         try {
-            Bindings.Function function = Bindings.function(context, index);
+            Bindings.Function function = functions != null && context == this.context
+                    ? functions[index] : Bindings.function(context, index);
             @SuppressWarnings("unchecked")
             List<Object> args = (List<Object>) Values.decode(Native.bytes(arguments), 0);
             Call call = new Call(function.name(), frame, Thread.currentThread());

@@ -121,6 +121,22 @@ class HostFunctionTest {
         assertEquals(1L, evaluate("1", Bindings.NONE));
     }
 
+    @Test
+    void bindingsClosedDuringAnEvaluationServeItUntilItReturns() {
+        // Roadmap 0.37 #4: the evaluation's functions are its own from its start.
+        Bindings[] holder = new Bindings[1];
+        Bindings bindings = Bindings.builder()
+                .function("close", 0, args -> {
+                    holder[0].close();
+                    return 1;
+                })
+                .function("one", 0, args -> 1)
+                .build();
+        holder[0] = bindings;
+        assertEquals(2L, evaluate("$close() + $one()", bindings));
+        assertThrows(IllegalStateException.class, () -> evaluate("$one()", bindings));
+    }
+
     private static final Bindings FUNCTIONS = Bindings.builder()
             .function("add", 2, args -> number(args.get(0)) + number(args.get(1)))
             .function("args", 1, args -> new ArrayList<>(args))

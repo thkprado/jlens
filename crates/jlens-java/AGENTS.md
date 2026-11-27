@@ -38,6 +38,10 @@ The system property `jlens.library` points the package at a library outside the 
   from the C API means an object was closed during the call, and becomes the same exception.
 - **The restricted methods stay in `Native`**, the one class that suppresses the `restricted`
   warning (JEP 472).
+- **No downcall is `Linker.Option.critical`**, which holds the garbage collector off while it
+  runs: every export may drop the conversions of a closed document, and most lock or free
+  (0.37 #4).
+- **A buffer is freed in a `finally`**, its copy and the call it feeds inside the `try`.
 - **Offsets in `JlensException` are UTF-16**, as the C API gives them: no conversion in Java.
 - **Results are Java objects or JSON text** (ADR 0021, results of 0.25 #5). `evaluate` and
   `evaluateFromJson` decode the C API's values (`Values`): `LinkedHashMap`, `ArrayList`,
@@ -58,7 +62,9 @@ The system property `jlens.library` points the package at a library outside the 
   larger than the scratch goes in a buffer of its own. The map is kept reachable until the call
   returns, and with it its documents.
 - **Host functions** (0.25 #7) are run by `Host`, called back on the evaluating thread, which
-  finds the evaluation's `Host` in a `ScopedValue` and the function by its `Bindings`' context.
+  finds the evaluation's `Host` in a `ScopedValue` and the function by its `Bindings`' context;
+  the `Host` keeps the functions from the evaluation's start, so that closing the bindings during
+  it leaves them (0.37 #4).
   The upcall never throws: an exception becomes an error reply with its number, and `evaluate`
   throws the same object again. A `JsonataFunction` works on its thread while its call runs.
 - **Audits** (0.25 #8) are records, decoded from one reply of values; the input is written

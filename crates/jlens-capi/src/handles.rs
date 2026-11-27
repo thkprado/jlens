@@ -56,13 +56,6 @@ pub struct Cache<T> {
 #[allow(clippy::redundant_allocation)]
 pub struct Found<T>(Rc<Arc<T>>);
 
-impl<T> Found<T> {
-    /// The `Arc` the table holds the object by.
-    pub fn arc(&self) -> &Arc<T> {
-        &self.0
-    }
-}
-
 impl<T> Clone for Found<T> {
     fn clone(&self) -> Self {
         Found(self.0.clone())
@@ -113,13 +106,7 @@ impl<T> Table<T> {
     /// Adds `value` and returns its handle, or `None` when the table is full (`u32::MAX - 1`
     /// live objects).
     pub fn insert(&self, value: T) -> Option<u64> {
-        self.insert_arc(Arc::new(value))
-    }
-
-    /// Adds the object behind `value`, as [`Table::insert`] does, for a caller that keeps a
-    /// reference to it too.
-    pub fn insert_arc(&self, value: Arc<T>) -> Option<u64> {
-        let value = Some(value);
+        let value = Some(Arc::new(value));
         let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
         let index = match slots.free.pop() {
             Some(index) => index,
@@ -183,12 +170,6 @@ impl<T> Table<T> {
         })
     }
 
-    /// Drops the objects of this thread's `cache` that were removed from the table since it last
-    /// looked: one atomic load when none was.
-    pub fn prune(&self, cache: &'static LocalKey<RefCell<Cache<T>>>) {
-        cache.with_borrow_mut(|cache| self.prune_in(cache));
-    }
-
     fn prune_in(&self, cache: &mut Cache<T>) {
         let removed = self.removed.load(Ordering::Acquire);
         if cache.removed != removed {
@@ -216,8 +197,13 @@ impl<T> Table<T> {
         Some(value)
     }
 
-    /// Whether `handle` names the object in its entry.
-    fn is_live(&self, handle: u64) -> bool {
+    /// The number of objects removed so far: one atomic load.
+    pub fn removed(&self) -> u64 {
+        self.removed.load(Ordering::Acquire)
+    }
+
+    /// Whether `handle` names the object in its entry: one atomic load, without the lock.
+    pub fn is_live(&self, handle: u64) -> bool {
         parts(handle)
             .and_then(|(_, index)| self.live_entry(index, false))
             .is_some_and(|live| live.load(Ordering::Acquire) == handle)

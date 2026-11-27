@@ -822,6 +822,36 @@ fn a_thread_drops_a_freed_documents_conversion_at_its_next_call_of_any_export() 
     );
 }
 
+#[test]
+fn an_idle_thread_that_found_a_document_keeps_no_other_thread_from_sweeping_it() {
+    // An idle thread of a pool found the document last; the others drop their conversions all
+    // the same once it is freed (roadmap 0.37 #4).
+    let document = document(r#"{"a": 1}"#, None);
+    let expression = compile("a");
+    assert_eq!(jlens_capi::documents::cached(), 1, "made on this thread");
+    let (found, found_rx) = std::sync::mpsc::channel();
+    let (done, done_rx) = std::sync::mpsc::channel::<()>();
+    let idle = std::thread::spawn(move || {
+        assert_eq!(
+            on_document(expression, document, 0),
+            Reply::Json("1".into())
+        );
+        found.send(()).unwrap();
+        done_rx.recv().unwrap();
+    });
+    found_rx.recv().unwrap();
+    assert_eq!(jlens_document_free(document), 1);
+    assert_eq!(jlens_capi::documents::cached(), 0, "dropped by the free");
+    let other = std::thread::spawn(move || {
+        assert_eq!(code(&on_document(expression, document, 0)), "U2002");
+        jlens_capi::documents::cached()
+    });
+    assert_eq!(other.join().unwrap(), 0);
+    done.send(()).unwrap();
+    idle.join().unwrap();
+    assert_eq!(jlens_expression_free(expression), 1);
+}
+
 /// Evaluates with the result as values: the decoded value, `None` when undefined.
 fn values_of(expression: u64, input: Option<&str>, options: u64) -> Option<Value> {
     let input = input.map_or(0, buffer);

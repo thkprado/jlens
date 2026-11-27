@@ -58,9 +58,12 @@ final class Native {
     private static final ValueLayout.OfInt U32 = ValueLayout.JAVA_INT;
 
     private static final MethodHandle BUFFER_NEW = function("jlens_buffer_new", U64, USIZE);
-    private static final MethodHandle BUFFER_ADDRESS = critical("jlens_buffer_address", USIZE, U64);
-    private static final MethodHandle BUFFER_LEN = critical("jlens_buffer_len", USIZE, U64);
-    private static final MethodHandle BUFFER_FREE = critical("jlens_buffer_free", U32, U64);
+    // No downcall is critical (`Linker.Option.critical`), which would hold the garbage collector
+    // off while it runs: every export may sweep the documents this thread converted after one
+    // was closed, and the buffers' take a lock and free (roadmap 0.37 #4).
+    private static final MethodHandle BUFFER_ADDRESS = function("jlens_buffer_address", USIZE, U64);
+    private static final MethodHandle BUFFER_LEN = function("jlens_buffer_len", USIZE, U64);
+    private static final MethodHandle BUFFER_FREE = function("jlens_buffer_free", U32, U64);
     private static final MethodHandle COMPILE = function("jlens_compile", U64, U64);
     private static final MethodHandle EXPRESSION_FREE = function("jlens_expression_free", U32, U64);
     private static final MethodHandle READS = function("jlens_reads", U64, U64, U64);
@@ -127,17 +130,6 @@ final class Native {
 
     private static MethodHandle function(String name, ValueLayout result, ValueLayout... arguments) {
         return Linker.nativeLinker().downcallHandle(symbol(name), FunctionDescriptor.of(result, arguments));
-    }
-
-    /**
-     * A downcall that never calls back into Java and returns at once, made without the thread's
-     * transition out of Java: the three calls that read a reply cost about 20 ns less (roadmap
-     * 0.26 #7). Freeing a large reply, or sweeping the documents this thread converted after one
-     * was closed, as any export may, takes longer and holds the garbage collector off meanwhile.
-     */
-    private static MethodHandle critical(String name, ValueLayout result, ValueLayout... arguments) {
-        return Linker.nativeLinker().downcallHandle(symbol(name), FunctionDescriptor.of(result, arguments),
-                Linker.Option.critical(false));
     }
 
     private static MemorySegment symbol(String name) {
@@ -507,10 +499,15 @@ final class Native {
         try {
             long buffer = (long) BUFFER_NEW.invokeExact((long) bytes.length);
             if (buffer == 0) throw new OutOfMemoryError("jlens: no buffer of " + bytes.length + " bytes");
-            long address = (long) BUFFER_ADDRESS.invokeExact(buffer);
-            MemorySegment.copy(bytes, 0, MemorySegment.ofAddress(address).reinterpret(bytes.length),
-                    ValueLayout.JAVA_BYTE, 0, bytes.length);
-            return buffer;
+            try {
+                long address = (long) BUFFER_ADDRESS.invokeExact(buffer);
+                MemorySegment.copy(bytes, 0, MemorySegment.ofAddress(address).reinterpret(bytes.length),
+                        ValueLayout.JAVA_BYTE, 0, bytes.length);
+                return buffer;
+            } catch (Throwable e) {
+                free(buffer);
+                throw e;
+            }
         } catch (Throwable e) {
             throw failed(e);
         }
@@ -594,16 +591,13 @@ final class Native {
         };
     }
 
+    /** A copy of the bytes of reply {@code reply}, which is freed, even when the copy fails. */
     private static byte[] take(long reply) {
         if (reply == 0) throw new OutOfMemoryError("jlens: no buffer for a reply");
         try {
-            long address = (long) BUFFER_ADDRESS.invokeExact(reply);
-            long len = (long) BUFFER_LEN.invokeExact(reply);
-            byte[] bytes = MemorySegment.ofAddress(address).reinterpret(len).toArray(ValueLayout.JAVA_BYTE);
-            int _ = (int) BUFFER_FREE.invokeExact(reply);
-            return bytes;
-        } catch (Throwable e) {
-            throw failed(e);
+            return bytes(reply);
+        } finally {
+            free(reply);
         }
     }
 

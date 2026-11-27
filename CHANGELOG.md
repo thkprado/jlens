@@ -6,6 +6,25 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Java package, under threads and failures:
+  - A thread that found a `Document` last no longer keeps the other threads from dropping
+    their conversions of it once it is closed, nor its text from being freed, while it stays
+    idle, as a pool's thread may.
+  - `Bindings` closed during an evaluation serve it until it returns, where its host functions
+    then failed with `IllegalStateException`.
+  - No call into the C API holds the garbage collector off: the calls that read a reply, which
+    may free a large one, or drop the conversions of a closed document, were critical
+    (`Linker.Option.critical`), and a collection on another thread waited for them.
+  - A reply whose copy fails, such as with `OutOfMemoryError`, is freed all the same.
+  - The package's own JSON and `Read`s (making, `toJson`, `equals`, `hashCode`, `toString`)
+    nest 1,000 levels deep on a thread of 128 KiB, without recursion. `Read.Fields.toString`
+    now prints the read's JSON form.
+  - `Options` used only once, such as a `now` per call, no longer fill the native options kept
+    for good: past 64, those not used again are let go, so that options used again stay native,
+    where every one past the first 64 made and freed its native object at each evaluation.
+
 ## [0.36.0]
 
 What adoption asks. jlens follows jsonata-js 2.3.0, released during the plan, and takes the

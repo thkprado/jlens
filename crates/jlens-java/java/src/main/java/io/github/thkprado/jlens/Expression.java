@@ -688,7 +688,7 @@ public final class Expression implements AutoCloseable {
             long recorded = auditBuffer;
             LongSupplier evaluation = () -> options.<Long>evaluate(
                     o -> Native.evaluateAudited(expression, in, bound, o, recorded));
-            Host host = bindings.functions ? new Host() : null;
+            Host host = bindings.functions ? new Host(bindings) : null;
             long reply = host == null
                     ? evaluation.getAsLong()
                     : ScopedValue.where(Host.CURRENT, host).call(evaluation::getAsLong);
@@ -769,7 +769,7 @@ public final class Expression implements AutoCloseable {
     private static <T> T run(Bindings bindings, Supplier<byte[]> evaluation,
             Function<byte[], T> decode) {
         if (!bindings.functions) return decode.apply(evaluation.get());
-        Host host = new Host();
+        Host host = new Host(bindings);
         byte[] reply = ScopedValue.where(Host.CURRENT, host).call(evaluation::get);
         try {
             return decode.apply(reply);

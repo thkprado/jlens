@@ -177,11 +177,9 @@ fn document_text(text: u64, read: u64, take: bool) -> Result<Vec<u8>, Vec<u8>> {
         ),
     };
     let text = text.map_err(|e| not_json(e.utf8_error().to_string()))?;
-    let text = Arc::new(documents::Text::new(text, read));
-    // Parsed now, to fail on text that is not JSON.
-    documents::converted(&text).map_err(|e| not_json(e.to_string()))?;
-    let Some(handle) = DOCUMENTS.insert_arc(text) else {
-        documents::sweep_if_freed();
+    let Some(handle) =
+        documents::insert(documents::Text::new(text, read)).map_err(|e| not_json(e.to_string()))?
+    else {
         return Err(full());
     };
     handle_reply(Some(handle))
@@ -353,8 +351,7 @@ fn evaluate_on_document(
     let compiled = find_expression(expression)?;
     let bindings = find_bindings(bindings)?;
     let options = find_options(options)?;
-    let text = documents::find(document).ok_or_else(|| unknown("document", document))?;
-    let document = documents::converted(text.arc()).map_err(|e| not_json(e.to_string()))?;
+    let document = documents::converted(document).map_err(not_named)?;
     run(
         &compiled,
         Input::Document(&document, &[]),
@@ -402,26 +399,19 @@ fn evaluate_on_documents(
     let compiled = find_expression(expression)?;
     let bindings = find_bindings(bindings)?;
     let options = find_options(options)?;
+    // Converted before the list, so that an unknown input is reported first.
     let input = match document {
-        0 => None,
-        document => Some(documents::find(document).ok_or_else(|| unknown("document", document))?),
+        0 => NO_DOCUMENT.with(Rc::clone),
+        document => documents::converted(document).map_err(not_named)?,
     };
     let named = match listed {
         0 => Named::default(),
         // Copied out, so that the buffer is not held while the expression runs.
         listed => buffers::with_cached(listed, |bytes| documents::named(bytes))
             .ok_or_else(|| unknown("buffer", listed))?
-            .map_err(|error| match error {
-                NotNamed::Form(message) => invalid("documents", message),
-                NotNamed::Unknown(handle) => unknown("document", handle),
-                NotNamed::NotJson(message) => not_json(message),
-            })?,
+            .map_err(not_named)?,
     };
     let variables = named.variables();
-    let input = match &input {
-        Some(text) => documents::converted(text.arc()).map_err(|e| not_json(e.to_string()))?,
-        None => NO_DOCUMENT.with(Rc::clone),
-    };
     run(
         &compiled,
         Input::Document(&input, &variables),
@@ -429,6 +419,15 @@ fn evaluate_on_documents(
         options.as_deref().unwrap_or(&DEFAULTS),
         format,
     )
+}
+
+/// The error of a document that a call names and that cannot be evaluated against.
+fn not_named(error: NotNamed) -> Vec<u8> {
+    match error {
+        NotNamed::Form(message) => invalid("documents", message),
+        NotNamed::Unknown(handle) => unknown("document", handle),
+        NotNamed::NotJson(message) => not_json(message),
+    }
 }
 
 thread_local! {

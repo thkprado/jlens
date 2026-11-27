@@ -1,9 +1,12 @@
 package io.github.thkprado.jlens;
 
+import java.lang.ref.Cleaner;
+import java.lang.ref.Reference;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The options of an evaluation: its limits, the clock and the seed. A component left
@@ -78,12 +81,47 @@ public record Options(
 
     /**
      * The most options kept as native objects. Options are usually a handful of constants, so
-     * each is made once; past this count, as when {@code now} changes with each evaluation, the
-     * native options live for one evaluation only.
+     * each is made once. Past this count, as when {@code now} changes with each evaluation, the
+     * options not used since the last look are let go, so that those used again stay (roadmap
+     * 0.37 #4).
      */
     private static final int KEPT = 64;
 
-    private static final ConcurrentHashMap<Options, Long> NATIVE = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Options, Kept> NATIVE = new ConcurrentHashMap<>();
+    private static final AtomicLong MADE = new AtomicLong();
+
+    /**
+     * A native object of options, freed by the {@link Native#CLEANER} once neither {@link
+     * #NATIVE} nor an evaluation holds it, so that letting it go never frees it during an
+     * evaluation on another thread.
+     */
+    private static final class Kept {
+        final long handle;
+        final Cleaner.Cleanable cleanable;
+        /**
+         * Whether it was used again since it was made or since the last look for options to let
+         * go: options used once, such as a {@code now} per call, are let go first.
+         */
+        volatile boolean used;
+
+        Kept(long handle) {
+            this.handle = handle;
+            this.cleanable = Native.CLEANER.register(this, new Free(handle));
+        }
+    }
+
+    /** Frees native options; never refers to the {@link Kept}. */
+    private record Free(long handle) implements Runnable {
+        @Override
+        public void run() {
+            Native.optionsFree(handle);
+        }
+    }
+
+    /** The number of native objects of options made so far, for the tests. */
+    static long made() {
+        return MADE.get();
+    }
 
     /**
      * Runs {@code evaluation} with the handle of these options' native object, 0 for the
@@ -91,19 +129,48 @@ public record Options(
      */
     <T> T evaluate(java.util.function.LongFunction<T> evaluation) {
         if (equals(DEFAULTS)) return evaluation.apply(0);
-        Long kept = NATIVE.get(this);
-        if (kept != null) return evaluation.apply(kept);
-        long handle = make();
-        if (NATIVE.size() < KEPT) {
-            Long raced = NATIVE.putIfAbsent(this, handle);
-            if (raced == null) return evaluation.apply(handle);
-            Native.optionsFree(handle);
-            return evaluation.apply(raced);
+        Kept kept = NATIVE.get(this);
+        if (kept == null) {
+            kept = keep();
+        } else if (!kept.used) {
+            kept.used = true;
         }
         try {
-            return evaluation.apply(handle);
+            return evaluation.apply(kept.handle);
         } finally {
-            Native.optionsFree(handle);
+            Reference.reachabilityFence(kept);
+        }
+    }
+
+    /** Makes the native object of these options and keeps it, letting another go when full. */
+    private Kept keep() {
+        Kept made = new Kept(make());
+        MADE.incrementAndGet();
+        Kept raced = NATIVE.putIfAbsent(this, made);
+        if (raced != null) {
+            made.cleanable.clean();
+            return raced;
+        }
+        if (NATIVE.size() > KEPT) letOneGo(made);
+        return made;
+    }
+
+    /**
+     * Removes one kept object not used since the last look, other than {@code made}, clearing
+     * the mark of those used meanwhile: each gets a second chance.
+     */
+    private static void letOneGo(Kept made) {
+        for (int look = 0; look < 2; look++) {
+            for (var members = NATIVE.values().iterator(); members.hasNext(); ) {
+                Kept kept = members.next();
+                if (kept == made) continue;
+                if (kept.used) {
+                    kept.used = false;
+                } else {
+                    members.remove();
+                    return;
+                }
+            }
         }
     }
 

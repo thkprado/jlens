@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class Bindings implements AutoCloseable {
     /** No bindings. Closing them does nothing. */
-    public static final Bindings NONE = new Bindings(0, 0, false);
+    public static final Bindings NONE = new Bindings(0, 0, null);
 
     /** The host functions of the live bindings, by the context the C API calls them with. */
     private static final Map<Long, Function[]> FUNCTIONS = new ConcurrentHashMap<>();
@@ -50,12 +50,21 @@ public final class Bindings implements AutoCloseable {
     private final long handle;
     /** Whether the bindings hold host functions, which an evaluation then needs a {@link Host} for. */
     final boolean functions;
+    /** The context the C API calls the host functions with. */
+    final long context;
+    /**
+     * The host functions, {@code null} for none: an evaluation's {@link Host} keeps them from its
+     * start, so that closing the bindings during the evaluation leaves it its functions.
+     */
+    final Function[] hosted;
     private final Cleaner.Cleanable cleanable;
     private volatile boolean closed;
 
-    private Bindings(long handle, long context, boolean functions) {
+    private Bindings(long handle, long context, Function[] hosted) {
         this.handle = handle;
-        this.functions = functions;
+        this.functions = hosted != null;
+        this.context = context;
+        this.hosted = hosted;
         this.cleanable = handle == 0 ? null : Native.CLEANER.register(this, new Free(handle, context));
     }
 
@@ -201,8 +210,9 @@ public final class Bindings implements AutoCloseable {
             try {
                 if (variables != null) valueBuffer = Native.buffer(variables);
                 long handle = Native.handle(Native.bindingsNew(specBuffer, valueBuffer, context));
-                if (!functions.isEmpty()) FUNCTIONS.put(context, functions.toArray(Function[]::new));
-                return new Bindings(handle, context, !functions.isEmpty());
+                Function[] hosted = functions.isEmpty() ? null : functions.toArray(Function[]::new);
+                if (hosted != null) FUNCTIONS.put(context, hosted);
+                return new Bindings(handle, context, hosted);
             } finally {
                 if (specBuffer != 0) Native.free(specBuffer);
                 if (valueBuffer != 0) Native.free(valueBuffer);

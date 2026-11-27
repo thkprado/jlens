@@ -10,7 +10,9 @@ import java.util.Map;
  * The JSON the package reads and writes itself: error envelopes, reads, options, diagnostics
  * and what an expression uses of its schema. Results are
  * the caller's JSON text, which this class never parses, or values ({@link Values}). The text comes from the C API, so a
- * malformed one is a bug, reported as an {@link IllegalStateException}.
+ * malformed one is a bug, reported as an {@link IllegalStateException}. Values are read and
+ * written with a stack of their own, never by recursion, as they nest as deep as the C API's
+ * (1,000 levels) on a thread with a small stack (roadmap 0.37 #4).
  */
 final class Json {
     private final String text;
@@ -110,38 +112,42 @@ final class Json {
      */
     static String write(Object value) {
         StringBuilder out = new StringBuilder();
-        write(value, out);
+        // What is left to write, the next last: values, and the text between them.
+        List<Object> left = new ArrayList<>();
+        left.add(value);
+        while (!left.isEmpty()) {
+            switch (left.removeLast()) {
+                case null -> out.append("null");
+                case Text(String text) -> out.append(text);
+                case String text -> out.append(quote(text));
+                case Boolean flag -> out.append(flag);
+                case Number number -> out.append(number);
+                case Map<?, ?> map -> {
+                    out.append('{');
+                    left.add(new Text("}"));
+                    List<Map.Entry<?, ?>> members = new ArrayList<>(map.entrySet());
+                    for (int i = members.size() - 1; i >= 0; i--) {
+                        left.add(members.get(i).getValue());
+                        left.add(new Text((i > 0 ? "," : "")
+                                + quote(String.valueOf(members.get(i).getKey())) + ":"));
+                    }
+                }
+                case List<?> list -> {
+                    out.append('[');
+                    left.add(new Text("]"));
+                    for (int i = list.size() - 1; i >= 0; i--) {
+                        left.add(list.get(i));
+                        if (i > 0) left.add(new Text(","));
+                    }
+                }
+                case Object other -> throw new IllegalArgumentException("not a JSON value: " + other);
+            }
+        }
         return out.toString();
     }
 
-    private static void write(Object value, StringBuilder out) {
-        switch (value) {
-            case null -> out.append("null");
-            case String text -> out.append(quote(text));
-            case Boolean flag -> out.append(flag);
-            case Number number -> out.append(number);
-            case Map<?, ?> map -> {
-                out.append('{');
-                boolean first = true;
-                for (Map.Entry<?, ?> member : map.entrySet()) {
-                    if (!first) out.append(',');
-                    first = false;
-                    out.append(quote(String.valueOf(member.getKey()))).append(':');
-                    write(member.getValue(), out);
-                }
-                out.append('}');
-            }
-            case List<?> list -> {
-                out.append('[');
-                for (int i = 0; i < list.size(); i++) {
-                    if (i > 0) out.append(',');
-                    write(list.get(i), out);
-                }
-                out.append(']');
-            }
-            default -> throw new IllegalArgumentException("not a JSON value: " + value);
-        }
-    }
+    /** Text {@link #write(Object)} writes as it is. */
+    private record Text(String text) {}
 
     /** {@code value} as a JSON string. */
     static String quote(String value) {
@@ -163,55 +169,70 @@ final class Json {
         return out.append('"').toString();
     }
 
+    /** The value at {@code at}, its arrays and objects read with a stack of their own. */
+    @SuppressWarnings("unchecked")
     private Object value() {
+        // The arrays and objects open, the innermost last, and for an object the key of its
+        // next member (null for an array).
+        List<Object> open = new ArrayList<>();
+        List<String> keys = new ArrayList<>();
+        while (true) {
+            space();
+            char first = peek();
+            Object value;
+            if (first == '{' || first == '[') {
+                at++;
+                space();
+                boolean object = first == '{';
+                Object made = object ? new LinkedHashMap<String, Object>() : new ArrayList<Object>();
+                if (peek() != (object ? '}' : ']')) {
+                    open.add(made);
+                    keys.add(object ? key() : null);
+                    continue;
+                }
+                at++;
+                value = made;
+            } else {
+                value = scalar(first);
+            }
+            // Adds the value to the innermost array or object, closing those that end with it.
+            while (true) {
+                if (open.isEmpty()) return value;
+                Object container = open.getLast();
+                boolean object = container instanceof Map;
+                if (object) ((Map<String, Object>) container).put(keys.getLast(), value);
+                else ((List<Object>) container).add(value);
+                space();
+                char next = next();
+                if (next == ',') {
+                    if (object) keys.set(keys.size() - 1, key());
+                    break;
+                }
+                if (next != (object ? '}' : ']')) throw malformed();
+                open.removeLast();
+                keys.removeLast();
+                value = container;
+            }
+        }
+    }
+
+    /** A member's key and its colon. */
+    private String key() {
         space();
-        return switch (peek()) {
-            case '{' -> object();
-            case '[' -> array();
+        String key = string();
+        space();
+        expect(':');
+        return key;
+    }
+
+    private Object scalar(char first) {
+        return switch (first) {
             case '"' -> string();
             case 't' -> word("true", Boolean.TRUE);
             case 'f' -> word("false", Boolean.FALSE);
             case 'n' -> word("null", null);
             default -> number();
         };
-    }
-
-    private Map<String, Object> object() {
-        Map<String, Object> object = new LinkedHashMap<>();
-        expect('{');
-        space();
-        if (peek() == '}') {
-            at++;
-            return object;
-        }
-        do {
-            space();
-            String key = string();
-            space();
-            expect(':');
-            object.put(key, value());
-            space();
-        } while (next() == ',');
-        at--;
-        expect('}');
-        return object;
-    }
-
-    private List<Object> array() {
-        List<Object> array = new ArrayList<>();
-        expect('[');
-        space();
-        if (peek() == ']') {
-            at++;
-            return array;
-        }
-        do {
-            array.add(value());
-            space();
-        } while (next() == ',');
-        at--;
-        expect(']');
-        return array;
     }
 
     private String string() {

@@ -52,11 +52,27 @@ class OptionsTest {
 
     @Test
     void manyDistinctOptions() {
-        // Past the options kept as native objects, each lives for one evaluation.
+        // More options than are kept as native objects: those not used again are let go.
         for (long ms = 0; ms < 200; ms++) {
             Options options = Options.builder().now(Instant.ofEpochMilli(ms)).build();
             assertEquals(Long.toString(ms), evaluate("$millis()", options));
         }
+    }
+
+    @Test
+    void optionsUsedAgainStayNativePastManyDistinctOnes() {
+        // Roadmap 0.37 #4: a `now` per call no longer fills the options kept for good.
+        for (long ms = 0; ms < 200; ms++) {
+            evaluate("$millis()", Options.builder().now(Instant.ofEpochMilli(ms)).build());
+        }
+        Options constant = Options.builder().maxSteps(1_000_000).build();
+        evaluate("1", constant);
+        long made = Options.made();
+        for (long ms = 0; ms < 200; ms++) {
+            assertEquals("1", evaluate("1", constant));
+            evaluate("$millis()", Options.builder().now(Instant.ofEpochMilli(1_000 + ms)).build());
+        }
+        assertEquals(made + 200, Options.made(), "the constant options made once");
     }
 
     @Test

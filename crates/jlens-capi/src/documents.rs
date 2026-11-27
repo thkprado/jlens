@@ -2,9 +2,10 @@
 //! and converted once per thread into a thread-local cache, since a `jlens_core::Document` is
 //! not `Send`.
 //!
-//! A thread keeps its conversion while the document lives. Once it is freed, each thread drops
-//! its conversion the next time it calls any export ([`guarded`](crate::guarded)): a thread
-//! that never calls one again keeps it until it exits.
+//! A thread keeps its conversion, by the document's handle, while the document lives. Once it
+//! is freed, each thread drops its conversion the next time it calls any export
+//! ([`guarded`](crate::guarded)): a thread that never calls one again keeps it until it exits,
+//! but keeps no other thread from dropping theirs, nor the text from being freed (0.37 #4).
 //!
 //! An evaluation takes documents as variables too ([`crate::api::evaluate_document_with`]), in
 //! a buffer that lists them, its numbers little-endian:
@@ -18,13 +19,11 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
 
 use jlens_core::Document;
 use jlens_core::reads::Read;
 
-use crate::handles::{Cache, Found, Table};
+use crate::handles::Table;
 
 /// What a document is made of, which each thread converts.
 pub(crate) struct Text {
@@ -46,49 +45,53 @@ impl Text {
     }
 }
 
-impl Drop for Text {
-    /// Runs once the document is freed and no evaluation holds it any longer, so that a thread
-    /// that sees the count change finds its weak reference dead.
-    fn drop(&mut self) {
-        DROPPED.fetch_add(1, Ordering::Release);
-    }
-}
-
 /// The live documents.
 pub(crate) static DOCUMENTS: Table<Text> = Table::new();
 
-/// The number of documents dropped so far, which tells a thread whether its conversions need
-/// sweeping: one atomic load per call when none was.
-static DROPPED: AtomicU64 = AtomicU64::new(0);
-
 thread_local! {
-    /// The documents this thread's evaluations found, found again without the table's lock.
-    static FOUND: RefCell<Cache<Text>> = const { RefCell::new(Cache::new()) };
-    /// The documents this thread has converted, each with a weak reference to its text.
-    static CONVERTED: RefCell<Vec<(Weak<Text>, Rc<Document>)>> = const { RefCell::new(Vec::new()) };
-    /// `DROPPED` as this thread last swept.
+    /// The documents this thread has converted, by handle. A thread holds no document's text
+    /// between its calls: a freed document's text is dropped once no conversion of it runs,
+    /// whichever thread found it last.
+    static CONVERTED: RefCell<Vec<(u64, Rc<Document>)>> = const { RefCell::new(Vec::new()) };
+    /// [`Table::removed`] of [`DOCUMENTS`] as this thread last swept.
     static SWEPT: Cell<u64> = const { Cell::new(0) };
 }
 
-/// The document of `handle`, if it is live, for an evaluation ([`Table::cached`]).
-pub(crate) fn find(handle: u64) -> Option<Found<Text>> {
-    DOCUMENTS.cached(&FOUND, handle)
+/// Converts `text`, to fail on text that is not JSON, adds it to the documents and keeps the
+/// conversion for this thread; `None` when the table is full.
+pub(crate) fn insert(text: Text) -> serde_json::Result<Option<u64>> {
+    let document = Rc::new(text.convert()?);
+    let Some(handle) = DOCUMENTS.insert(text) else {
+        return Ok(None);
+    };
+    CONVERTED.with_borrow_mut(|cache| cache.push((handle, document)));
+    Ok(Some(handle))
 }
 
-/// This thread's conversion of `text`, made on its first use.
-pub(crate) fn converted(text: &Arc<Text>) -> serde_json::Result<Rc<Document>> {
-    CONVERTED.with_borrow_mut(|cache| {
-        // A weak reference keeps its allocation, so a dead one never matches a live document.
-        if let Some((_, document)) = cache
+/// This thread's conversion of the document of `handle`, made on its first use: one atomic
+/// load and no lock once made.
+pub(crate) fn converted(handle: u64) -> Result<Rc<Document>, NotNamed> {
+    if !DOCUMENTS.is_live(handle) {
+        return Err(NotNamed::Unknown(handle));
+    }
+    let kept = CONVERTED.with_borrow(|cache| {
+        cache
             .iter()
-            .find(|(weak, _)| std::ptr::eq(weak.as_ptr(), Arc::as_ptr(text)))
-        {
-            return Ok(document.clone());
-        }
-        let document = Rc::new(text.convert()?);
-        cache.push((Arc::downgrade(text), document.clone()));
-        Ok(document)
-    })
+            .find(|&&(kept, _)| kept == handle)
+            .map(|(_, document)| document.clone())
+    });
+    if let Some(document) = kept {
+        return Ok(document);
+    }
+    // The text is held only while it converts.
+    let text = DOCUMENTS.get(handle).ok_or(NotNamed::Unknown(handle))?;
+    let document = Rc::new(
+        text.convert()
+            .map_err(|e| NotNamed::NotJson(e.to_string()))?,
+    );
+    drop(text);
+    CONVERTED.with_borrow_mut(|cache| cache.push((handle, document.clone())));
+    Ok(document)
 }
 
 /// The documents an evaluation binds to variables: their names, one after another, and this
@@ -160,8 +163,7 @@ pub(crate) fn named(bytes: &[u8]) -> Result<Named, NotNamed> {
         let Some((handle, name)) = next(&mut rest) else {
             break;
         };
-        let text = find(handle).ok_or(NotNamed::Unknown(handle))?;
-        let document = converted(text.arc()).map_err(|e| NotNamed::NotJson(e.to_string()))?;
+        let document = converted(handle)?;
         // Checked above.
         named
             .names
@@ -172,21 +174,14 @@ pub(crate) fn named(bytes: &[u8]) -> Result<Named, NotNamed> {
 }
 
 /// Drops this thread's conversions of the documents that were freed, if any was since its last
-/// sweep. Every export calls it first ([`crate::guarded`]). First this thread's cache lets go of
-/// the documents freed, so that a document is dropped once no thread holds it, which the
-/// other threads see at their next call.
+/// sweep: one atomic load when none was. Every export calls it first ([`crate::guarded`]).
 pub(crate) fn sweep_if_freed() {
-    DOCUMENTS.prune(&FOUND);
-    let dropped = DROPPED.load(Ordering::Acquire);
-    if SWEPT.get() != dropped {
-        SWEPT.set(dropped);
-        sweep();
+    // Read before the handles are, so that a document freed during the sweep is swept next time.
+    let removed = DOCUMENTS.removed();
+    if SWEPT.get() != removed {
+        SWEPT.set(removed);
+        CONVERTED.with_borrow_mut(|cache| cache.retain(|&(handle, _)| DOCUMENTS.is_live(handle)));
     }
-}
-
-/// Drops this thread's conversions of the documents that were freed.
-fn sweep() {
-    CONVERTED.with_borrow_mut(|cache| cache.retain(|(weak, _)| weak.strong_count() > 0));
 }
 
 /// The number of conversions this thread holds, for the tests.
