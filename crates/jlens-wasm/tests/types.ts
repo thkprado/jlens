@@ -10,6 +10,9 @@ import init, {
   type FunctionDeclaration,
   type FunctionInfo,
   type HostFunction,
+  type RenameEdit,
+  type Renamed,
+  type UnsureRename,
   type JlensError,
   type JsonSchema,
   type MissingOverridePath,
@@ -122,6 +125,10 @@ export async function check(): Promise<void> {
   const attribute: unknown = schemaFields[0]?.extensions?.["x-attribute-id"];
   const summary: string | undefined = schemaFields[0]?.typeSummary;
   console.log(attribute, summary);
+  const renamed: Renamed = service.rename("a.b", { "a.b": "a.c" });
+  const edit: RenameEdit | undefined = renamed.edits[0];
+  const reason: UnsureRename["reason"] | undefined = renamed.unsure[0]?.reason;
+  console.log(renamed.text, edit?.span.start, reason);
   const changes: UsesChanges = usesChanges(uses, plain.uses(new Expression("a").reads()));
   const typesBefore: string[] | undefined = changes.input?.changed?.["a"]?.types?.old;
   const valuesAdded: unknown[] | undefined = changes.input?.changed?.["a"]?.enum?.added;

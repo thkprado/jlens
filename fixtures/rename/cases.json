@@ -1,0 +1,133 @@
+{
+  "comment": "Expressions with fields renamed, as every package gives them (roadmap 0.37 #13): spans in UTF-16 code units. The service declares the function `describe`.",
+  "cases": [
+    {
+      "expression": "$sum(lines[status = 'open'].(qty * price)) + $count($keys(customer))",
+      "renames": {
+        "lines": "items",
+        "lines[].qty": "items[].quantity",
+        "customer.vip": "customer.gold"
+      },
+      "renamed": {
+        "text": "$sum(items[status = 'open'].(quantity * price)) + $count($keys(customer))",
+        "edits": [
+          {
+            "span": {
+              "start": 5,
+              "end": 10
+            },
+            "text": "items"
+          },
+          {
+            "span": {
+              "start": 29,
+              "end": 32
+            },
+            "text": "quantity"
+          }
+        ],
+        "unsure": [
+          {
+            "span": {
+              "start": 58,
+              "end": 66
+            },
+            "path": "customer",
+            "reason": "whole"
+          }
+        ]
+      }
+    },
+    {
+      "expression": "($c := customer; $c.`first name` & ' ' & «{$c.name}»)",
+      "renames": {
+        "customer.`first name`": "customer.givenName",
+        "customer.name": "customer.`family name`"
+      },
+      "renamed": {
+        "text": "($c := customer; $c.givenName & ' ' & «{$c.`family name`}»)",
+        "edits": [
+          {
+            "span": {
+              "start": 20,
+              "end": 32
+            },
+            "text": "givenName"
+          },
+          {
+            "span": {
+              "start": 46,
+              "end": 50
+            },
+            "text": "`family name`"
+          }
+        ],
+        "unsure": []
+      }
+    },
+    {
+      "expression": "'é𝄞' & `prénom` & $lookup(client, 'nom') & $describe(client.nom)",
+      "renames": {
+        "prénom": "given",
+        "client.nom": "client.family"
+      },
+      "renamed": {
+        "text": "'é𝄞' & given & $lookup(client, 'nom') & $describe(client.family)",
+        "edits": [
+          {
+            "span": {
+              "start": 8,
+              "end": 16
+            },
+            "text": "given"
+          },
+          {
+            "span": {
+              "start": 61,
+              "end": 64
+            },
+            "text": "family"
+          }
+        ],
+        "unsure": [
+          {
+            "span": {
+              "start": 35,
+              "end": 40
+            },
+            "path": "client.nom",
+            "reason": "string"
+          }
+        ]
+      }
+    },
+    {
+      "expression": "(x ? a : b).name & a.*",
+      "renames": {
+        "a.name": "a.title"
+      },
+      "renamed": {
+        "text": "(x ? a : b).name & a.*",
+        "edits": [],
+        "unsure": [
+          {
+            "span": {
+              "start": 12,
+              "end": 16
+            },
+            "path": "a.name",
+            "reason": "mixed"
+          },
+          {
+            "span": {
+              "start": 21,
+              "end": 22
+            },
+            "path": "a",
+            "reason": "whole"
+          }
+        ]
+      }
+    }
+  ]
+}

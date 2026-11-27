@@ -99,6 +99,8 @@ final class Native {
             function("jlens_service_uses", U64, U64, U64);
     private static final MethodHandle SERVICE_FIELDS =
             function("jlens_service_fields", U64, U64);
+    private static final MethodHandle SERVICE_RENAME =
+            function("jlens_service_rename", U64, U64, U64, U64);
     private static final MethodHandle USES_CHANGES =
             function("jlens_uses_changes", U64, U64, U64);
 
@@ -451,6 +453,18 @@ final class Native {
     static long serviceFields(long service) {
         try {
             return (long) SERVICE_FIELDS.invokeExact(service);
+        } catch (Throwable e) {
+            throw failed(e);
+        }
+    }
+
+    /**
+     * Expression {@code expression} with the fields of its input renamed by the JSON table in
+     * buffer {@code renames}: a reply with JSON.
+     */
+    static long serviceRename(long service, long expression, long renames) {
+        try {
+            return (long) SERVICE_RENAME.invokeExact(service, expression, renames);
         } catch (Throwable e) {
             throw failed(e);
         }

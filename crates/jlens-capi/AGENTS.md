@@ -16,8 +16,9 @@ repository-wide rules are in the root [AGENTS.md](../../AGENTS.md).
   optionally, its sources: its own URI and its other documents, each a buffer's handle by
   URI (ADR 0025); the report of its load is replied as JSON text. A service's declarations
   include the expected result type and the context path (0.34 #13, 0.35 #2). Its diagnostics,
-  the type of an expression's result, what an expression uses of its schemas and the fields of
-  its input's schema are replied as JSON text; two answers of what an expression uses are
+  the type of an expression's result, what an expression uses of its schemas, the fields of
+  its input's schema and an expression with fields renamed (a JSON table in a buffer) are
+  replied as JSON text; two answers of what an expression uses are
   compared from two buffers, with no handle (`src/schema.rs`, ADR 0023); completion, hover and signature help do not cross.
 - mimalloc is its allocator.
 

@@ -592,6 +592,24 @@ a schema, takes them from `fields()`, without walking the schema (the
   application's. A hidden field is left out, with what is under it.
 - **The records cannot be changed**, and none holds native memory.
 
+## Fields renamed by a new version
+
+When a new version of a schema renames fields, `rename` rewrites an expression written against
+the old one, given a table of paths, each old path to its new one, here built from the two
+versions' `fields()`, matched by a key of the application's (the [schema
+guide](schema.md#fields-renamed-by-a-new-version) says what it renames and why it may not be
+sure):
+
+```java
+{{#include ../../../crates/jlens-java/java/src/test/java/io/github/thkprado/jlens/GuideTest.java:rename}}
+```
+
+- **`service.rename(expression, renames)`** returns a `Renamed`: `text()`, the rewritten
+  expression; `edits()`, each name replaced with its `Span`; and `unsure()`, the places it leaves
+  as written, each with its `Span`, `path()` and `reason()` (`WHOLE`, `STRING`, `MIXED` or
+  `LOST`). Spans are UTF-16, as Java strings count.
+- **A table that is not one of renames** throws a `JlensException` with `U2005`.
+
 ## What the package leaves out
 
 Completion, hover and signature help, which serve a person typing, are not in the Java package:

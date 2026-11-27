@@ -892,6 +892,18 @@ export const cases = [
     equal(new j.LanguageService({}).fields(), [], "no schema");
   }],
 
+  ["rename: the cases every package renames the same", async (j, env) => {
+    const fixture = JSON.parse(await env.load("../../../fixtures/rename/cases.json"));
+    const service = new j.LanguageService({ functions: [{ name: "describe" }] });
+    for (const { expression, renames, renamed } of fixture.cases) {
+      equal(service.rename(expression, renames), renamed, `rename of ${expression}`);
+    }
+    throws(() => service.rename("a.b", { "a.b": "c.b" }), (e) => ok(e instanceof TypeError, "a move"));
+    throws(() => service.rename("a.b", { "a.b": 1 }), (e) => ok(e instanceof TypeError, "not a string"));
+    throws(() => service.rename("a.b", []), (e) => ok(e instanceof TypeError, "not an object"));
+    throws(() => service.rename("a.", {}), (e) => ok(e.code === "S0207", "a syntax error"));
+  }],
+
   ["a schema of two documents: the case every package answers the same", async (j, env) => {
     const { schema, documents, report, reportAlone, cases } =
       JSON.parse(await env.load("../../../fixtures/uses/cases.json")).references;

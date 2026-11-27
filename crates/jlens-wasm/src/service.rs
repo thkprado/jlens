@@ -353,6 +353,36 @@ impl LanguageService {
     pub fn fields(&self) -> JsValue {
         ser_to_js(&self.inner.fields())
     }
+
+    /// `text` with fields of its input renamed by `renames`, an object of old paths to new
+    /// ones: `{text, edits, unsure}`, spans in UTF-16 code units. Throws the expression's
+    /// error when `text` does not compile, and a `TypeError` when `renames` is not a table of
+    /// renames.
+    #[wasm_bindgen(skip_typescript)]
+    pub fn rename(&self, text: &str, renames: JsValue) -> Result<JsValue, JsValue> {
+        let offsets = Offsets::new(text);
+        let expression = jlens_core::Expression::compile(text)
+            .map_err(|e| crate::convert::js_error(&e, &offsets))?;
+        let Some(Value::Object(table)) = from_js(&renames, "renames")? else {
+            return Err(type_error("renames must be an object"));
+        };
+        let mut pairs = Vec::with_capacity(table.len());
+        for (old, new) in &table {
+            let Some(new) = new.as_str() else {
+                return Err(type_error(&format!(
+                    "the new path of `{old}` must be a string"
+                )));
+            };
+            pairs.push((old.as_str(), new));
+        }
+        let renamed = self
+            .inner
+            .rename(&expression, pairs)
+            .map_err(|message| type_error(&format!("invalid renames: {message}")))?;
+        let mut out = serde_json::to_value(&renamed).expect("serializable");
+        convert_spans(&offsets, &mut out);
+        Ok(to_js(&out))
+    }
 }
 
 /// What changed between two answers of `LanguageService.uses`, that of the schema an

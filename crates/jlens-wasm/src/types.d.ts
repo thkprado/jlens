@@ -858,8 +858,59 @@ export class LanguageService {
    * out; a recursive schema is listed down to where it repeats. Empty without a schema.
    */
   fields(): ListedField[];
+  /**
+   * Renames fields of the input in an expression: given a table of paths, each old path to its
+   * new one, written as `uses()` writes them (`lines[].sku`), it replaces each step that reads a
+   * renamed field, found as `uses()` finds the fields an expression reads, and keeps the rest of
+   * the text as written. A relative path in a predicate and a parent kept in a variable are
+   * renamed; the same name under another parent is left alone. An entry renames the last name of
+   * its path; a field under a renamed parent follows it, and an entry for it gives it under the
+   * new parent: a table built from the two versions' `fields()`, matched by a key of the
+   * application's in `extensions`, fits. Where it cannot be sure, the text is left as it is and
+   * the place listed in `unsure`. Variables' fields are not renamed. Throws the expression's
+   * error when `text` does not compile, and a `TypeError` when `renames` is not a table of
+   * renames: a path it cannot read, a field moved to another parent, renamed twice, two renamed
+   * to the same path, a name holding a backquote.
+   */
+  rename(text: string, renames: Record<string, string>): Renamed;
   free(): void;
   [Symbol.dispose](): void;
+}
+
+/** An expression with fields renamed, as `LanguageService.rename()` gives it. */
+export interface Renamed {
+  /** The rewritten text: the expression's own, with the edits made. */
+  text: string;
+  /** Each name replaced, in the order of the text. */
+  edits: RenameEdit[];
+  /**
+   * The places the rename cannot be sure of, in the order of the text, where the text is left as
+   * it is: a field renamed there may be read where no step names it, or named as data.
+   */
+  unsure: UnsureRename[];
+}
+
+/** A name replaced by `LanguageService.rename()`. */
+export interface RenameEdit {
+  /** The name in the expression, with its backquotes, in UTF-16 code units. */
+  span: Span;
+  /** What replaces it: the new name, between backquotes when it is not a plain one. */
+  text: string;
+}
+
+/** A place `LanguageService.rename()` cannot be sure of. */
+export interface UnsureRename {
+  /** The operand in the expression, in UTF-16 code units; the whole text for `lost`. */
+  span: Span;
+  /** The value used whole, or the renamed field, as `uses()` writes paths; `$` for `lost`. */
+  path: string;
+  /**
+   * `whole`: a value that holds a renamed field is used whole (given to a function such as
+   * `$keys`, `$sift` or the application's, iterated by `*` or `**`, an operand); `string`: a
+   * renamed field is named by a string given to `$lookup`; `mixed`: the step reads a renamed field
+   * and another one; `lost`: the analysis gave up on part of the expression (`$eval`...).
+   */
+  reason: "whole" | "string" | "mixed" | "lost";
 }
 
 /**

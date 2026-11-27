@@ -712,3 +712,57 @@ fn the_result_type_and_the_context_are_those_of_the_shared_workspace() {
     }
     assert_eq!(jlens_schema_free(schema), 1);
 }
+
+/// Expressions with fields renamed, as every package gives them (roadmap 0.37 #13).
+#[test]
+fn renames_are_those_of_the_shared_cases() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/rename/cases.json"
+    );
+    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let declarations = json!({"functions": [{"name": "describe"}]});
+    let renaming = handle(service(0, Some(&declarations)));
+    for case in fixture["cases"].as_array().unwrap() {
+        let text = case["expression"].as_str().unwrap();
+        let expression = compile(text);
+        let table = case["renames"].to_string();
+        let renamed = json(with_buffer(table.as_bytes(), |renames| {
+            jlens_service_rename(renaming, expression, renames)
+        }));
+        assert_eq!(renamed, case["renamed"], "{text}");
+        assert_eq!(jlens_expression_free(expression), 1);
+    }
+    assert_eq!(jlens_service_free(renaming), 1);
+}
+
+#[test]
+fn renames_fail_with_the_codes_of_the_c_api() {
+    let renaming = handle(service(0, None));
+    let expression = compile("a.b");
+    let rename = |table: &str| {
+        with_buffer(table.as_bytes(), |renames| {
+            jlens_service_rename(renaming, expression, renames)
+        })
+    };
+    let renames = |message: &str| (message.to_owned(), Some("renames".to_owned()));
+    assert_eq!(error(rename("{")).0, "U2001");
+    assert_eq!(error(rename("[]")), renames("U2005"));
+    assert_eq!(error(rename(r#"{"a.b": 1}"#)), renames("U2005"));
+    assert_eq!(error(rename(r#"{"a.b": "c.b"}"#)), renames("U2005"));
+    assert_eq!(json(rename(r#"{"a.b": "a.c"}"#))["text"], json!("a.c"));
+    assert_eq!(
+        error(reply(jlens_service_rename(
+            renaming, expression, expression
+        ))),
+        ("U2002".to_owned(), Some("buffer".to_owned()))
+    );
+    assert_eq!(jlens_expression_free(expression), 1);
+    assert_eq!(
+        error(with_buffer(b"{}", |renames| jlens_service_rename(
+            renaming, expression, renames
+        ))),
+        ("U2002".to_owned(), Some("expression".to_owned()))
+    );
+    assert_eq!(jlens_service_free(renaming), 1);
+}

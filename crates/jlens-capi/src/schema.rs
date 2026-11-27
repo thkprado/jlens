@@ -365,6 +365,56 @@ fn fields_text(service: u64) -> Result<Vec<u8>, Vec<u8>> {
     ))
 }
 
+/// Replies with expression `expression` with fields of its input renamed (roadmap 0.37 #13), as
+/// `LanguageService::rename` gives it for the table in buffer `renames`, which stays the
+/// caller's: a JSON object of old paths to new ones. The reply is the JSON object `{"text":
+/// ..., "edits": [{"span", "text"}], "unsure": [{"span", "path", "reason"}]}`, the spans'
+/// `start` and `end` in UTF-16 code units of the expression's source. Text that is not JSON
+/// fails with `U2001`; a table that is not an object of strings, or not one of renames, with
+/// `U2005` and the token `renames`.
+pub fn service_rename(service: u64, expression: u64, renames: u64) -> u64 {
+    reply(rename_text(service, expression, renames))
+}
+
+fn rename_text(service: u64, expression: u64, renames: u64) -> Result<Vec<u8>, Vec<u8>> {
+    let service = SERVICES
+        .get(service)
+        .ok_or_else(|| unknown("service", service))?;
+    let compiled = EXPRESSIONS
+        .get(expression)
+        .ok_or_else(|| unknown("expression", expression))?;
+    let table = buffers::with(renames, |bytes| serde_json::from_slice::<Value>(bytes))
+        .ok_or_else(|| unknown("buffer", renames))?
+        .map_err(|e| not_json(e.to_string()))?;
+    let Value::Object(table) = table else {
+        return Err(invalid("renames", "the table must be an object".to_owned()));
+    };
+    let mut pairs = Vec::with_capacity(table.len());
+    for (old, new) in &table {
+        let Some(new) = new.as_str() else {
+            return Err(invalid(
+                "renames",
+                format!("the new path of `{old}` must be a string"),
+            ));
+        };
+        pairs.push((old.as_str(), new));
+    }
+    let expression = &compiled.expression;
+    let renamed = service
+        .rename(expression, pairs)
+        .map_err(|message| invalid("renames", message))?;
+    let mut json = serde_json::to_value(&renamed).unwrap_or_default();
+    let offsets = Offsets::new(expression.source());
+    for list in ["edits", "unsure"] {
+        if let Some(Value::Array(items)) = json.get_mut(list) {
+            for item in items {
+                to_utf16(&offsets, item.get_mut("span"));
+            }
+        }
+    }
+    Ok(json_reply(&json))
+}
+
 /// Replies with what changed between two answers of `service_uses`, the JSON texts in buffers
 /// `old` and `new`, which stay the caller's (roadmap 0.33 #6), as `Uses::changes` gives it:
 /// `{}` when nothing the expression uses changed. It takes no schema and no service, so that

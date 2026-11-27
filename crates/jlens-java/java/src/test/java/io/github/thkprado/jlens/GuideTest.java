@@ -5,13 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -478,5 +481,52 @@ class GuideTest {
             assertEquals("products", fields.get(3).domain());
         }
         // ANCHOR_END: fields
+    }
+
+    @Test
+    void rename() {
+        String version1 = """
+                {"type": "object", "properties": {
+                    "lines": {"type": "array", "x-attribute-id": "L", "items": {
+                        "type": "object", "properties": {
+                            "qty": {"type": "integer", "x-attribute-id": "Q"},
+                            "price": {"type": "number", "x-attribute-id": "P"}}}},
+                    "status": {"type": "string", "x-attribute-id": "S"}}}""";
+        String version2 = """
+                {"type": "object", "properties": {
+                    "items": {"type": "array", "x-attribute-id": "L", "items": {
+                        "type": "object", "properties": {
+                            "quantity": {"type": "integer", "x-attribute-id": "Q"},
+                            "price": {"type": "number", "x-attribute-id": "P"}}}},
+                    "status": {"type": "string", "x-attribute-id": "S"}}}""";
+        // ANCHOR: rename
+        try (Schema old = Schema.fromJson(version1);
+                Schema current = Schema.fromJson(version2);
+                LanguageService before = LanguageService.of(old);
+                LanguageService after = LanguageService.of(current);
+                Expression rule = Expression.compile(
+                        "status = 'open' and $sum(lines.(qty * price)) > 100")) {
+            // The table, from the two versions' fields matched by the application's key.
+            Map<Object, String> byKey = new HashMap<>();
+            for (ListedField field : after.fields()) {
+                Object key = field.extensions().get("x-attribute-id");
+                if (key != null) byKey.put(key, field.path());
+            }
+            Map<String, String> renames = new TreeMap<>();
+            for (ListedField field : before.fields()) {
+                String path = byKey.get(field.extensions().get("x-attribute-id"));
+                if (path != null) renames.put(field.path(), path);
+            }
+            Renamed renamed = before.rename(rule, renames);
+            assertEquals("status = 'open' and $sum(items.(quantity * price)) > 100",
+                    renamed.text());
+            assertEquals(List.of(), renamed.unsure());
+            // The rewritten rule uses nothing the new version does not have.
+            try (Expression migrated = Expression.compile(renamed.text())) {
+                assertTrue(after.uses(migrated).input().values().stream()
+                        .noneMatch(Use::unknown));
+            }
+        }
+        // ANCHOR_END: rename
     }
 }

@@ -917,6 +917,10 @@ proptest! {
             for &text in &buffers {
                 if let Replied::Handle(expression) = reply(jlens_compile(text))? {
                     prop_assert_eq!(reply(jlens_service_uses(service, expression))?, Replied::Value);
+                    // A rename by any text: a reply, or the error of a table that is not one.
+                    for &renames in &buffers {
+                        reply(jlens_service_rename(service, expression, renames))?;
+                    }
                     prop_assert_eq!(jlens_expression_free(expression), 1);
                     prop_assert_eq!(reply(jlens_service_uses(service, expression))?, unknown());
                 }

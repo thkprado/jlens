@@ -489,3 +489,132 @@ proptest! {
         }
     }
 }
+
+#[rustfmt::skip]
+const RENAME_TOKENS: &[&str] = &[
+    "customer", "login", "vip", "items", "type", "unitPrice", "qty", "total", "`odd name`", "$",
+    "$$", ".", "[", "]", "[0]", "(", ")", "{", "}", ":", ",", ";", "=", "!=", "and", "or", "?",
+    ":=", "$c", "&", "+", "*", "**", "^(", "@$v", "#$i", "%.", "$v", "$sum(", "$count(",
+    "$keys(", "$lookup(", "$string(", "$exists(", "$map(", "function($v){", "'login'", "'type'",
+    "«{", "}»", "[customer, items]", "(total ? customer : items).type", " ",
+];
+
+/// The renames a table may hold, each a field and its new last name.
+const RENAMES: &[(&[&str], &str)] = &[
+    (&["customer"], "client"),
+    (&["customer", "login"], "user"),
+    (&["customer", "odd name"], "plain"),
+    (&["customer", "vip"], "gold flag"),
+    (&["items"], "lines"),
+    (&["items", "type"], "kind"),
+    (&["items", "qty"], "quantity"),
+    (&["total"], "sum"),
+];
+
+/// A JSON value with each key at a renamed path given its new name.
+fn renamed_keys(
+    value: &serde_json::Value,
+    path: &mut Vec<String>,
+    table: &std::collections::HashMap<Vec<String>, String>,
+) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(|item| renamed_keys(item, path, table))
+            .collect(),
+        serde_json::Value::Object(members) => {
+            let mut out = serde_json::Map::new();
+            for (key, member) in members {
+                path.push(key.clone());
+                let name = table.get(path.as_slice()).unwrap_or(key).clone();
+                out.insert(name, renamed_keys(member, path, table));
+                path.pop();
+            }
+            serde_json::Value::Object(out)
+        }
+        other => other.clone(),
+    }
+}
+
+fn holds_object(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(_) => true,
+        serde_json::Value::Array(items) => items.iter().any(holds_object),
+        _ => false,
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2000))]
+
+    /// A rename: an empty table gives the text back, the rewritten text parses, and when the
+    /// rename is sure of every place, the rewritten expression gives on the input with its
+    /// keys renamed what the expression gives on the input.
+    #[test]
+    fn a_rename_keeps_what_the_expression_gives(
+        tokens in prop::collection::vec(prop::sample::select(RENAME_TOKENS), 0..16),
+        chosen in prop::collection::vec(any::<bool>(), RENAMES.len()),
+    ) {
+        let text = tokens.join("");
+        let Ok(expression) = jlens_core::Expression::compile(&text) else {
+            return Ok(());
+        };
+        let service = LanguageService::new(None);
+        let none: [(&str, &str); 0] = [];
+        let same = service.rename(&expression, none).unwrap();
+        prop_assert_eq!(&same.text, &text);
+        prop_assert!(same.edits.is_empty() && same.unsure.is_empty());
+
+        let renames: std::collections::HashMap<Vec<String>, String> = RENAMES
+            .iter()
+            .zip(&chosen)
+            .filter(|(_, chosen)| **chosen)
+            .map(|((path, name), _)| {
+                (path.iter().map(|s| (*s).to_owned()).collect(), (*name).to_owned())
+            })
+            .collect();
+        let write = |path: &[String]| {
+            path.iter()
+                .map(|name| if name.contains(' ') { format!("`{name}`") } else { name.clone() })
+                .collect::<Vec<_>>()
+                .join(".")
+        };
+        let table: Vec<(String, String)> = renames
+            .keys()
+            .map(|old| {
+                let new: Vec<String> = (1..=old.len())
+                    .map(|i| renames.get(&old[..i]).unwrap_or(&old[i - 1]).clone())
+                    .collect();
+                (write(old), write(&new))
+            })
+            .collect();
+        let renamed = service.rename(&expression, table.iter().map(|(a, b)| (a, b))).unwrap();
+        let rewritten = jlens_core::Expression::compile(&renamed.text);
+        prop_assert!(rewritten.is_ok(), "{} gave {}", text, renamed.text);
+        if !renamed.unsure.is_empty() {
+            return Ok(());
+        }
+        let input = json!({
+            "customer": {"login": "1", "odd name": "X", "vip": true, "type": "c"},
+            "items": [
+                {"type": "a", "unitPrice": 1.5, "qty": 2},
+                {"type": "b", "unitPrice": 2, "qty": 1}
+            ],
+            "total": 3
+        });
+        let moved = renamed_keys(&input, &mut Vec::new(), &renames);
+        let options = jlens_core::Options::default().max_steps(10_000);
+        let bindings = jlens_core::Bindings::new();
+        let before = expression.evaluate_with(Some(&input), &bindings, &options);
+        let after = rewritten.unwrap().evaluate_with(Some(&moved), &bindings, &options);
+        match (&before, &after) {
+            (Ok(a), Ok(b)) => {
+                if !a.as_ref().is_some_and(holds_object) {
+                    prop_assert_eq!(a, b, "{} gave {}", text, renamed.text);
+                }
+            }
+            (Err(a), Err(b)) => prop_assert_eq!(a.code(), b.code(), "{} gave {}", text, renamed.text),
+            _ => prop_assert!(false, "{} gave {}: {:?} then {:?}", text, renamed.text, before, after),
+        }
+    }
+}

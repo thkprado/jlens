@@ -710,6 +710,31 @@ Each path is written as `uses` writes it, and they come in its order; a hidden f
 out, with what is under it. `extensions` holds the field's own `x-` keywords as written, which
 jlens does not read, such as a key the application gives each field.
 
+### Fields renamed by a new version
+
+When a new version of a schema renames fields, `rename()` rewrites an expression written against
+the old one, given a table of paths, each old path to its new one (the [schema
+guide](schema.md#fields-renamed-by-a-new-version) says what it renames and why it may not be
+sure). A table built from the two versions' `fields()`, matched by a key of the application's in
+`extensions`, fits:
+
+```js
+const key = (field) => field.extensions?.["x-attribute-id"];
+const newPaths = new Map(after.fields().filter(key).map((field) => [key(field), field.path]));
+const renames = Object.fromEntries(before.fields()
+  .filter((field) => newPaths.has(key(field)))
+  .map((field) => [field.path, newPaths.get(key(field))]));
+before.rename("status = 'open' and $sum(lines.(qty * price)) > 100", renames);
+// { text: "status = 'open' and $sum(items.(quantity * price)) > 100",
+//   edits: [ { span: { start: 25, end: 30 }, text: "items" },
+//            { span: { start: 32, end: 35 }, text: "quantity" } ],
+//   unsure: [] }
+```
+
+Spans are in UTF-16 code units. `unsure` lists the places it leaves as written, each with its
+`span`, `path` and `reason` (`whole`, `string`, `mixed` or `lost`). A text that does not compile
+throws its error, and a table that is not one of renames a `TypeError`.
+
 ## Limits and memory
 
 | Limit | Default | Error |

@@ -99,6 +99,65 @@ class UsesTest {
         }
     }
 
+    /** The JSON form of a span, as the C API writes it. */
+    private static Map<String, Object> span(Span span) {
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("start", new BigDecimal(span.start()));
+        out.put("end", new BigDecimal(span.end()));
+        return out;
+    }
+
+    /** The expressions every package renames with the same answer (roadmap 0.37 #13). */
+    @Test
+    void theSharedRenames() throws IOException {
+        Path path = Path.of("..", "..", "..", "fixtures", "rename", "cases.json");
+        Map<String, Object> fixture = Json.object(Json.parse(Files.readString(path)), "fixture");
+        LanguageService closed;
+        try (LanguageService service = LanguageService.builder().function("describe").build()) {
+            for (Object item : (List<?>) fixture.get("cases")) {
+                Map<String, Object> expected = Json.object(item, "case");
+                String text = (String) expected.get("expression");
+                Map<String, String> renames = new java.util.LinkedHashMap<>();
+                Json.object(expected.get("renames"), "renames")
+                        .forEach((old, renamed) -> renames.put(old, (String) renamed));
+                try (Expression expression = Expression.compile(text)) {
+                    Renamed renamed = service.rename(expression, renames);
+                    Map<String, Object> tree = new java.util.LinkedHashMap<>();
+                    tree.put("text", renamed.text());
+                    tree.put("edits", renamed.edits().stream().map(edit -> {
+                        Map<String, Object> out = new java.util.LinkedHashMap<>();
+                        out.put("span", span(edit.span()));
+                        out.put("text", edit.text());
+                        return out;
+                    }).toList());
+                    tree.put("unsure", renamed.unsure().stream().map(place -> {
+                        Map<String, Object> out = new java.util.LinkedHashMap<>();
+                        out.put("span", span(place.span()));
+                        out.put("path", place.path());
+                        out.put("reason", place.reason().name().toLowerCase(java.util.Locale.ROOT));
+                        return out;
+                    }).toList());
+                    assertEquals(expected.get("renamed"), tree, text);
+                    // A span counts UTF-16 code units, as Java strings do.
+                    for (Renamed.Edit edit : renamed.edits()) {
+                        String name = text.substring(edit.span().start(), edit.span().end());
+                        assertFalse(name.isEmpty() || name.contains(" & "), name);
+                    }
+                }
+            }
+            try (Expression expression = Expression.compile("a.b")) {
+                JlensException moved = assertThrows(JlensException.class,
+                        () -> service.rename(expression, Map.of("a.b", "c.b")));
+                assertEquals("U2005", moved.code());
+                assertEquals("a.c", service.rename(expression, Map.of("a.b", "a.c")).text());
+            }
+            closed = service;
+        }
+        try (Expression expression = Expression.compile("a")) {
+            assertThrows(IllegalStateException.class, () -> closed.rename(expression, Map.of()));
+        }
+    }
+
     /** The schema of two documents that every package loads (roadmap 0.33 #10). */
     @Test
     void theSharedSchemaOfTwoDocuments() throws IOException {

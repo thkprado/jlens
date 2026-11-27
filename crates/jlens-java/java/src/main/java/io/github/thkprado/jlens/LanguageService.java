@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.TreeMap;
 
 /**
  * Checks the text of expressions without evaluating them (ADR 0023): their syntax, the fields
@@ -190,6 +191,49 @@ public final class LanguageService implements AutoCloseable {
         try {
             return ListedField.list(Native.json(Native.serviceFields(service)));
         } finally {
+            Reference.reachabilityFence(this);
+        }
+    }
+
+    /**
+     * Renames fields of the input in an expression: given a table of paths, each old path to its
+     * new one, written as {@link Uses} writes them ({@code lines[].sku}), it replaces each step
+     * that reads a renamed field, found as {@link #uses(Expression)} finds the fields an
+     * expression reads, and keeps the rest of the text as it is written. A relative path in a
+     * predicate and a parent kept in a variable are renamed; the same name under another parent
+     * is left alone. An entry renames the last name of its path; a field under a renamed parent
+     * follows it, and an entry for it gives it under the new parent. A table built from the two
+     * versions' {@link #fields()}, matched by a key of the application's in {@link
+     * ListedField#extensions()}, has an entry for every field, most of them kept.
+     *
+     * <p>Where it cannot be sure, the text is left as it is and the place listed ({@link
+     * Renamed#unsure()}): a value holding a renamed field used whole ({@code $keys}, {@code *},
+     * a function of the application), a renamed field named by a string given to {@code
+     * $lookup}, a step that reads a renamed field and another. Variables' fields are not renamed.
+     *
+     * {@snippet :
+     * Renamed renamed = service.rename(expression, Map.of(
+     *         "lines", "items", "lines[].qty", "items[].quantity"));
+     * String text = renamed.text();
+     * }
+     *
+     * @param expression the expression
+     * @param renames each old path to its new one
+     * @return the rewritten expression, with its edits and the places it cannot be sure of
+     * @throws JlensException with {@code U2005} when the table is not one of renames: a path it
+     *     cannot read, a field moved to another parent, renamed twice, two renamed to the same
+     *     path, a name holding a backquote
+     * @throws IllegalStateException when the service or the expression was closed
+     */
+    public Renamed rename(Expression expression, Map<String, String> renames) {
+        long service = live();
+        long table = Native.buffer(Json.write(new TreeMap<>(renames)));
+        try {
+            long reply = Native.serviceRename(service, expression.live(), table);
+            return Renamed.fromJson(Native.json(reply));
+        } finally {
+            Native.free(table);
+            Reference.reachabilityFence(expression);
             Reference.reachabilityFence(this);
         }
     }

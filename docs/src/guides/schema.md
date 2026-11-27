@@ -800,3 +800,72 @@ The overrides applied to the schema are in the list, and a hidden field is left 
 under it, as completion leaves it out. `LanguageService::fields` lists the fields of the schema of
 the service's input; the [WebAssembly](wasm.md#the-fields-of-a-schema) and
 [Java](java.md#the-fields-of-a-schema) packages call it `service.fields()`, with the same JSON.
+
+## Fields renamed by a new version
+
+When a new version of a schema renames fields, the expressions written against the old one still
+name the old fields. `LanguageService::rename` rewrites them: given a table of paths, each old
+path to its new one, it replaces each step that reads a renamed field, found as `uses` finds the
+fields an expression reads, and keeps the rest of the text as written. A rule migrated to a new
+version takes four steps: what changed, the table, the rename and the check.
+
+```rust
+use std::collections::{BTreeMap, HashMap};
+
+use jlens_core::Expression;
+use jlens_schema::{LanguageService, ListedField};
+
+// Two versions of the schema of an order, each field with a key of the application's:
+// `lines` became `items`, and `qty` `quantity`.
+let before = LanguageService::new(Some(version_1));
+let after = LanguageService::new(Some(version_2));
+let rule = Expression::compile("status = 'open' and $sum(lines.(qty * price)) > 100")?;
+
+// 1. Does the rule use anything the new version changed? `lines` and `qty` are gone.
+let changes = before.uses_of(&rule).changes(&after.uses_of(&rule));
+assert!(changes.input.removed.contains_key("lines[].qty"));
+
+// 2. The table: each old path to the new one with the same key.
+let key = |field: &ListedField| field.extensions.get("x-attribute-id").cloned();
+let new_paths: HashMap<_, _> = after.fields().into_iter()
+    .filter_map(|field| Some((key(&field)?.to_string(), field.path)))
+    .collect();
+let table: BTreeMap<String, String> = before.fields().into_iter()
+    .filter_map(|field| Some((field.path.clone(), new_paths.get(&key(&field)?.to_string())?.clone())))
+    .collect();
+
+// 3. The rename.
+let renamed = before.rename(&rule, &table)?;
+assert_eq!(renamed.text, "status = 'open' and $sum(items.(quantity * price)) > 100");
+assert!(renamed.unsure.is_empty());
+
+// 4. The rewritten rule uses nothing the new version does not have.
+let migrated = Expression::compile(&renamed.text)?;
+assert!(after.uses_of(&migrated).input.iter().flatten().all(|(_, used)| !used.unknown));
+```
+
+A step is renamed where it reads the field, whatever the path that leads there: a relative path
+in a predicate, a parent kept in a variable (`$o := order; $o.total`), the parent of `%`. The same
+name under another parent, or of an object the expression builds, is left alone, and a new name
+that is not a plain one is written between backquotes. An entry renames the last name of its
+path. A field under a renamed parent follows it without an entry of its own, and an entry for it
+gives it under the new parent (`lines[].qty` to `items[].quantity`), as a table built from the two
+versions' fields does; an entry that moves a field to another parent fails, and so do a field
+renamed twice, two fields renamed to the same path and a name that holds a backquote, which
+JSONata cannot write.
+
+The answer gives the rewritten `text`, each edit with its span, and the places the rename cannot
+be sure of, in `unsure`, where it leaves the text as written for someone to look at:
+
+| `reason` | The place |
+|---|---|
+| `whole` | A value that holds a renamed field is used whole: given to a function that may read the field or its name (`$keys(customer)`, `$sift`, `$string`, a function of the expression's own or a host function the service does not declare), iterated by `*` or `**`, an operand. `path` is the value |
+| `string` | A renamed field named by a string given to `$lookup`, as in `$lookup(customer, 'vip')` |
+| `mixed` | A step that reads a renamed field and another one, which keeps its name: `(x ? a : b).name` with `a.name` renamed alone |
+| `lost` | The analysis gave up on part of the expression, as for `$eval`: a renamed field may be read anywhere |
+
+The result of the expression is not listed: an expression that returns an object holding a
+renamed field returns it with its new name. Only the fields of the input are renamed, not those
+of variables. The [WebAssembly](wasm.md#fields-renamed-by-a-new-version) and
+[Java](java.md#fields-renamed-by-a-new-version) packages call it `service.rename(...)`, with the
+spans in UTF-16 code units.

@@ -336,3 +336,59 @@ fn json_form() {
         })
     );
 }
+
+/// The example of the schema guide: a rule migrated to a new version of its schema.
+#[test]
+fn the_example_of_the_guides() -> Result<(), String> {
+    use jlens_schema::Schema;
+    use std::collections::{BTreeMap, HashMap};
+
+    let version = |lines: &str, qty: &str| {
+        Schema::from_json_schema(&serde_json::json!({
+            "type": "object",
+            "properties": {
+                lines: {"type": "array", "x-attribute-id": "L", "items": {
+                    "type": "object", "properties": {
+                        qty: {"type": "integer", "x-attribute-id": "Q"},
+                        "price": {"type": "number", "x-attribute-id": "P"}}}},
+                "status": {"type": "string", "x-attribute-id": "S"}
+            }
+        }))
+    };
+    let (old, new) = (version("lines", "qty")?, version("items", "quantity")?);
+    let before = LanguageService::new(Some(old));
+    let after = LanguageService::new(Some(new));
+    let rule = Expression::compile("status = 'open' and $sum(lines.(qty * price)) > 100")
+        .map_err(|e| e.to_string())?;
+    // Was anything the rule uses changed? `lines` and `qty` are gone.
+    let changes = before.uses_of(&rule).changes(&after.uses_of(&rule));
+    assert!(changes.input.removed.contains_key("lines[].qty"));
+    // The table: each old path to the new one with the same key.
+    let key = |field: &jlens_schema::ListedField| field.extensions.get("x-attribute-id").cloned();
+    let new_paths: HashMap<_, _> = after
+        .fields()
+        .into_iter()
+        .filter_map(|field| Some((key(&field)?.to_string(), field.path)))
+        .collect();
+    let table: BTreeMap<String, String> = before
+        .fields()
+        .into_iter()
+        .filter_map(|field| {
+            Some((
+                field.path.clone(),
+                new_paths.get(&key(&field)?.to_string())?.clone(),
+            ))
+        })
+        .collect();
+    let renamed = before.rename(&rule, &table)?;
+    assert_eq!(
+        renamed.text,
+        "status = 'open' and $sum(items.(quantity * price)) > 100"
+    );
+    assert!(renamed.unsure.is_empty());
+    // The rewritten rule uses nothing the new version does not have.
+    let migrated = Expression::compile(&renamed.text).map_err(|e| e.to_string())?;
+    let uses = after.uses_of(&migrated);
+    assert!(uses.input.iter().flatten().all(|(_, used)| !used.unknown));
+    Ok(())
+}

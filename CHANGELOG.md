@@ -16,6 +16,14 @@ All notable changes are recorded here. The format follows
   out, so that an application builds its list of attributes, or matches the fields of two
   versions of a schema, without walking it. A JSON Schema's `x-` keywords that jlens does not
   read are kept (`Shape::extensions`) and written back.
+- Fields renamed in an expression: `LanguageService::rename` in Rust, `service.rename(...)` in
+  the WebAssembly and Java packages (`Renamed`) and `jlens_service_rename` in the C API take a
+  table of paths, old to new, and rewrite the steps of an expression that read a renamed field
+  of the input, found as `uses` finds them, keeping the rest of the text; the answer lists the
+  places they cannot be sure of (a value holding a renamed field used whole, a field named by a
+  string given to `$lookup`, a step over a renamed field and another, `$eval`). In
+  `jlens-core`, `Expression::sites_with` gives where an expression reads each field
+  (`reads::Sites`).
 - Template strings, as jsonata-js 2.3.0 reads them: `«Hello {name}!»`, or `<<Hello {name}!>>`.
   Each `{...}` holds an expression, whose value joins the text as `&` joins it; templates nest,
   their text takes the escapes of a string literal and `\{`, `\}`, `\<`, `\>`, `\«`, `\»`, and the
