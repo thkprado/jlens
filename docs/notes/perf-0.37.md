@@ -30,3 +30,27 @@ the two calls make again do not show beside the text's parsing. Java objects ove
 from -0.7% to +3.9% in `documents` and `cases`, within their spreads (up to 9.9%); those over
 converted objects read from -4.7% to +3.6%. Host functions are not in the harness, so their
 calls were not timed.
+
+## #5: the size limits while a result is built
+
+**Memory.** A scratch crate over `jlens-core` with a counting global allocator (live bytes and
+their peak) ran each case with a small limit, before and after. Before, every case built far
+past its limit before `U1001`: `$replace` 20 MB against 100,000 bytes (a 10,000-byte
+replacement for each of 1,000 matches, or 1,000 `$0`s for one match of 10,000 bytes), `$split`
+42-49 MB and `$match` 258 MB against 1,000 items (a part or a match per character of 1 MB),
+`$pad` 54 MB against 1,000 bytes (nine million `é`), `$fromMillis` 4.5 MB against 100,000
+bytes (10,000 `[Y,100]`), and `[0..1999][($i := $; [1..2000].$i)]` 389 MB with no error at all
+against 10,000 items. After, each peak is that of its input (3 MB for the 1 MB strings that
+`$pad` makes, 100-500 KB for the others). `$join`'s overflow is on 32-bit targets only, so it
+was read, not measured.
+
+**Speed.** On the M1, `cargo xtask ab` of `4c9774e` (before) against the fix, 10 rounds, with
+ten cases over `text-20k.json` added to `cases.json` for the run only (`$replace` with a string,
+`$0` and a function, `$split` by text, characters and regex, `$match`, `$pad`, `$fromMillis`,
+a filter with two positions). The first version checked each piece it appended, with the
+error built inline: `$replace` was slower, `regex over a long text` +6.7%, a string pattern
++13.1%, `<$0>` +10.4%, about 1.3 ns a check; every other case within ±2%. With one check per
+match on the string path and the error in a `#[cold]` function, a second run of the
+`$replace` cases: `regex over a long text` +0.4%, a string pattern +1.2%, `<$0>` +1.3%, a
+function +0.4%, `$split` by regex +0.7%. `regex` (a `$contains` filter, untouched) read +1.6%
+and +2.2% in the two runs. Logs: M1 `~/workspaces/logs/037-5/`.

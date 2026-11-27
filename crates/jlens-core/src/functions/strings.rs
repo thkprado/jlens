@@ -501,12 +501,21 @@ fn substitute_object<'a>(
 /// Appends `piece` to a string being built, failing with `U1001` first when the string would
 /// pass `max` bytes: a function's result is checked once it is built, too late for one that
 /// multiplies its input (`$replace`).
+#[inline]
 fn push_within(out: &mut String, piece: &str, max: usize) -> Result<()> {
     if out.len() + piece.len() > max {
-        return Err(crate::value::string_too_long(max));
+        return Err(too_long(max));
     }
     out.push_str(piece);
     Ok(())
+}
+
+/// The error of [`push_within`], kept out of the loops that check: with the error built inline
+/// and a check per piece, `$replace` was 7-13% slower on the M1 (`docs/notes/perf-0.37.md`).
+#[cold]
+#[inline(never)]
+fn too_long(max: usize) -> Error {
+    crate::value::string_too_long(max)
 }
 
 pub(super) fn replace<'a>(
@@ -550,8 +559,11 @@ pub(super) fn replace<'a>(
                 break;
             }
             let index = position + found;
-            push_within(&mut result, &s[position..index], max)?;
-            push_within(&mut result, replacement, max)?;
+            if result.len() + (index - position) + replacement.len() > max {
+                return Err(too_long(max));
+            }
+            result.push_str(&s[position..index]);
+            result.push_str(replacement);
             position = index + p.len();
             count += 1.0;
         }

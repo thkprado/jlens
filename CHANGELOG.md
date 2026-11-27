@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- The size limits stop a result while it is built, not once it is whole: `$replace` (a long
+  replacement, or many `$0`s, for each match), `$split`, `$match`, `$pad` and `$fromMillis` built
+  up to hundreds of times the limit before failing with `U1001`, and `$join`'s check could
+  overflow on WebAssembly. A filter whose predicate gives a position many times
+  (`[0..9][($i := $; [1..20].$i)]`) was not limited at all, and now fails with `U1001` past
+  `max_array_length`.
 - Java package, under threads and failures:
   - A thread that found a `Document` last no longer keeps the other threads from dropping
     their conversions of it once it is closed, nor its text from being freed, while it stays

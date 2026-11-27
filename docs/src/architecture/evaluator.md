@@ -181,6 +181,12 @@ out is limited too:
   clones its input) gives the values jsonata-js gets by writing that text and parsing it, but
   copies the value without the text; it counts the length the text would have, and fails where
   `$string` would.
+- **Functions whose result can be many times their input** check the limits while they build it,
+  so that they stop at the limit instead of building past it: `$replace` (a long replacement, or
+  many `$0`s, for each match), `$split` and `$match` (a part or a match per character), `$pad`,
+  `$join` and `$fromMillis` (a marker writes up to 100 characters). So does a filter whose
+  predicate gives a position many times, which selects its item as many times
+  (`[0..9][($i := $; [1..20].$i)]` is 200 items).
 - **The `value` of an error** (`T2001`, `T0410` and others) is left out when it is larger than
   the default size of a result.
 
