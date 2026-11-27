@@ -77,7 +77,6 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-    ignore:
-      # Its ref names a toolchain, not a version of the action: `@1.88` is the minimum Rust version,
-      # and `@stable` needs no update.
-      - dependency-name: dtolnay/rust-toolchain
+    # Every action is pinned by commit SHA, its version in a comment, which these updates move
+    # together. dtolnay/rust-toolchain has no tags: it is pinned at a commit of master, with the
+    # toolchain as its input (`toolchain: 1.88` is the minimum Rust version).

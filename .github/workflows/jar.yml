@@ -36,9 +36,11 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - if: runner.os != 'Linux'
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
       - name: Build the C API
         env:
           IMAGE: ${{ matrix.image }}
@@ -95,7 +97,7 @@ jobs:
             macOS) cp target/release/libjlens_capi.dylib "$native/" ;;
             *) cp target/release/libjlens_capi.so "$native/" ;;
           esac
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: java-native-${{ matrix.platform }}
           path: crates/jlens-java/java/native/
@@ -109,13 +111,13 @@ jobs:
       run:
         working-directory: crates/jlens-java/java
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: "25"
           cache: maven
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: java-native-*
           merge-multiple: true
@@ -134,7 +136,7 @@ jobs:
             windows-x86_64/jlens_capi.dll | sort | diff - libraries.txt
           mkdir dist
           cp "$jar" dist/jlens.jar
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: java-jar
           path: crates/jlens-java/java/dist/jlens.jar
@@ -160,14 +162,14 @@ jobs:
         shell: bash
         working-directory: crates/jlens-java/java
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - if: ${{ !matrix.alpine }}
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: "25"
           cache: maven
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: java-jar
           path: crates/jlens-java/java/dist

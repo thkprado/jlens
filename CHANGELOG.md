@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The workflows pin every action by commit SHA, with its version in a comment that Dependabot
+  moves with it, so that a tag moved upstream changes nothing that runs here. A newer push to a
+  pull request cancels its CI run in progress; runs on `main` are never cancelled, as the release
+  workflow asks for the run of the tagged commit.
+- `cargo xtask` fails with its usage on an unknown command, or none, where it exited 0;
+  `cargo xtask help` prints the usage.
+
 ### Fixed
 
 - Python package: reading the input calls no method of its values, which a subclass may define

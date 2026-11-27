@@ -45,8 +45,8 @@ jobs:
         shell: bash
         working-directory: crates/jlens-python
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       # On Linux the wheels build in a manylinux or musllinux container, which has its own
       # interpreters; elsewhere maturin finds python3.10 and python3.15t on the PATH.
       - if: runner.os != 'Linux'
@@ -55,14 +55,14 @@ jobs:
           uv python dir --bin >> "$GITHUB_PATH"
       # One build per interpreter: given both at once, maturin builds a version-specific wheel
       # for Python 3.10 instead of the abi3 one.
-      - uses: PyO3/maturin-action@v1
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'off' }}
           rust-toolchain: stable
           working-directory: crates/jlens-python
           args: --release --locked --out dist --interpreter python3.10
-      - uses: PyO3/maturin-action@v1
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'off' }}
@@ -93,7 +93,7 @@ jobs:
           else
             sh -c "$TEST"
           fi
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: inputs.upload
         with:
           name: python-${{ matrix.target }}
@@ -108,10 +108,12 @@ jobs:
         shell: bash
         working-directory: crates/jlens-python
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: astral-sh/setup-uv@v10.4.0
-      - uses: PyO3/maturin-action@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           command: sdist
           working-directory: crates/jlens-python
@@ -121,7 +123,7 @@ jobs:
           uv venv --managed-python --python 3.14t venv
           uv pip install --python venv pytest dist/jlens-*.tar.gz
           venv/bin/python -m pytest -p no:cacheprovider tests
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: inputs.upload
         with:
           name: python-sdist

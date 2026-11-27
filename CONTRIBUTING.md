@@ -141,8 +141,10 @@ the release with `gh workflow run release.yml --ref vX.Y.Z` (step 5) and fix the
    (`.github/dependabot.yml`) and bring the dependencies to their newest versions, as new
    advisories keep coming: `cargo update`, here and in `fuzz/`; `npm outdated` and
    `npm audit` in `editors/vscode` and `benches/compare`; the versions in both `pom.xml` files,
-   the Maven Wrapper's and the actions'. Keep an older version only for a stated reason, such as
-   the minimum Rust version, or a floor the package supports (`@types/vscode` is
+   the Maven Wrapper's and the actions' (each pinned by commit SHA with its version in a comment;
+   `dtolnay/rust-toolchain`, which has no tags, at the newest commit of its `master`). Keep an
+   older version only for a stated reason, such as the minimum Rust version, or a floor the
+   package supports (`@types/vscode` is
    `engines.vscode`'s). `jlens-regress` is a fork, so that none of these sees `regress`: read
    the commits after the last one its README's "Ported from upstream" names, and port them or
    record why not.

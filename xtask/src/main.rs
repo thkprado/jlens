@@ -178,10 +178,13 @@ fn main() -> Result<()> {
             Some(path) => update_suite(Path::new(path)),
             None => bail!("update-suite needs the path of a jsonata-js checkout\n\n{USAGE}"),
         },
-        _ => {
-            eprint!("{USAGE}");
+        Some("help" | "--help" | "-h") => {
+            print!("{USAGE}");
             Ok(())
         }
+        // A typo in CI must fail its step, not pass it after printing the usage.
+        Some(command) => bail!("unknown command {command:?}\n\n{USAGE}"),
+        None => bail!("a command is needed\n\n{USAGE}"),
     }
 }
 
