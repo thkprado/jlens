@@ -50,14 +50,16 @@
 //!
 //! [ADR 0016]: https://github.com/thkprado/jlens/blob/main/docs/src/adr/0016-fields-read.md
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
 
 use serde::de::{self, DeserializeSeed, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
-use crate::ast::{Ast, FallbackOp, LambdaDef, Node, NodeKind, Stage, TemplatePart, TransformDef};
+use crate::ast::{
+    Ast, FallbackOp, LambdaDef, Node, NodeId, NodeKind, Span, Stage, TemplatePart, TransformDef,
+};
 use crate::functions::{self, Native};
 use crate::signature::Signature;
 use crate::{Bindings, Document};
@@ -268,6 +270,62 @@ impl Reads {
     }
 }
 
+/// Where in its source an expression reads each field, and where it uses a value whole, given
+/// by [`Expression::sites_with`](crate::Expression::sites_with): what an application needs to
+/// rewrite the names of the fields an expression reads, as the language service of
+/// `jlens-schema` does when fields are renamed.
+///
+/// It follows the same analysis as [`Reads`]: a step is listed with every place it may read,
+/// and a value the analysis cannot follow, a field of which may still be read, is listed where
+/// it is used whole. When the analysis gives up on part of the expression (`$eval`, a parent
+/// it cannot find, a value with too many places or too deep), `complete` is false and some
+/// fields may be read where nothing here says so.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Sites {
+    /// Each name that reads a field: a step of a path, or the string given to `$lookup`.
+    pub fields: Vec<FieldSite>,
+    /// Each place where a value is used whole: given to a function, an operand, iterated by
+    /// `*` or `**`... The result of the expression is not listed.
+    pub wholes: Vec<WholeSite>,
+    /// Whether the analysis followed every value.
+    pub complete: bool,
+}
+
+/// A name that reads a field (see [`Sites`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldSite {
+    /// The bytes of the name in the source: the name of a step, between its backquotes if it
+    /// has them, or the whole string literal given to `$lookup`.
+    pub span: Span,
+    /// The name of the field.
+    pub name: String,
+    /// The fields of the input and of bindings it may read, each with the path to it, its own
+    /// name last.
+    pub reads: Vec<ReadPath>,
+    /// It may also read a field of an object the expression builds (`{"a": 1}.a`).
+    pub built: bool,
+    /// The name is a string given to `$lookup`, not a step.
+    pub string: bool,
+}
+
+/// A value used whole (see [`Sites`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WholeSite {
+    /// The bytes of the operand that uses it.
+    pub span: Span,
+    /// The value.
+    pub path: ReadPath,
+}
+
+/// A value an expression reads: the input or a binding, then field names.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ReadPath {
+    /// The binding whose value it is, without the `$`; `None` for the input.
+    pub binding: Option<String>,
+    /// The field names from there.
+    pub fields: Vec<String>,
+}
+
 /// What an evaluation against a [`Document`] needs of the variables of its bindings (ADR 0016,
 /// amendment of 0.27): the analysis of an expression without any bindings, which is an upper
 /// bound for all of them, kept with the expression.
@@ -303,16 +361,19 @@ impl Variables {
 // The analysis: an abstract evaluation of the processed tree (ADR 0016, decision 3).
 
 /// Where a value comes from: the input or a binding, followed by field names.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Place {
     root: Root,
     path: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Root {
     Input,
     Binding(String),
+    /// An object the expression builds, kept only for [`Sites`]: a step over it reads no
+    /// field of the input.
+    Built,
 }
 
 impl Place {
@@ -384,7 +445,7 @@ struct Analysis<'n> {
     everything: bool,
     every_binding: bool,
     /// The contexts of calls to functions that are neither built-ins nor bindings.
-    calls: Vec<Places>,
+    calls: Vec<(Span, Places)>,
     /// A binding was used as a value, so a host function may be called through a variable or
     /// a computed value, and read the context of the call.
     escaped: bool,
@@ -396,17 +457,107 @@ struct Analysis<'n> {
     /// How many nodes around the one being analysed, within its scope, may leave it out: all
     /// but blocks and assignments, which run what they hold.
     conditional: usize,
+    /// What [`Sites`] gathers; `None` for the reads alone.
+    sites: Option<Recorder>,
+    /// The node analysed last, where a value used whole is used.
+    site: Span,
+}
+
+/// The sites of [`Sites`] as the analysis meets them.
+#[derive(Default)]
+struct Recorder {
+    /// Each name that reads a field, by its node: the node's `pos` (the end of the name), its
+    /// span, its name, the places it reads, and whether it is a string given to `$lookup`.
+    fields: HashMap<NodeId, (usize, Span, String, Vec<Place>, bool)>,
+    wholes: Vec<(Span, Place)>,
+    seen: HashSet<(Span, Place)>,
+    /// A value whole is used where no site stands for it: the result.
+    off: bool,
+    lost: bool,
 }
 
 /// Analyses a processed tree, given the bindings it will be evaluated with.
 pub(crate) fn analyse<'n>(ast: &'n Ast, bindings: &'n Bindings) -> Reads {
-    run(ast, bindings).finish()
+    run(ast, bindings, None).finish()
+}
+
+/// The sites of a processed tree, given the bindings it will be evaluated with.
+pub(crate) fn sites(ast: &Ast, bindings: &Bindings) -> Sites {
+    let mut analysis = run(ast, bindings, Some(Recorder::default()));
+    analysis.finish_calls();
+    let everything = analysis.everything;
+    let Some(recorder) = analysis.sites.take() else {
+        return Sites::default();
+    };
+    let path = |place: Place| {
+        let binding = match place.root {
+            Root::Input => None,
+            Root::Binding(name) => Some(name),
+            Root::Built => return None,
+        };
+        Some(ReadPath {
+            binding,
+            fields: place.path,
+        })
+    };
+    let source = ast.source.as_str();
+    let mut complete = !everything && !recorder.lost;
+    let mut fields = Vec::with_capacity(recorder.fields.len());
+    for (pos, span, name, places, string) in recorder.fields.into_values() {
+        let span = if string {
+            span
+        } else {
+            // The name ends at `pos`, between backquotes when it is not a plain one.
+            let quoted = source[..pos].ends_with('`');
+            let start = pos.checked_sub(name.len() + if quoted { 2 } else { 0 });
+            let written = start.and_then(|start| source.get(start..pos));
+            let matches = written.is_some_and(|text| {
+                if quoted {
+                    text.len() >= 2 && text[1..text.len() - 1] == name && text.starts_with('`')
+                } else {
+                    text == name
+                }
+            });
+            if !matches {
+                // A step the parser made, with no name of its own in the source.
+                complete = false;
+                continue;
+            }
+            Span::new(start.unwrap_or(pos), pos)
+        };
+        let count = places.len();
+        let mut reads: Vec<ReadPath> = places.into_iter().filter_map(path).collect();
+        reads.sort();
+        fields.push(FieldSite {
+            span,
+            name,
+            built: reads.len() < count,
+            reads,
+            string,
+        });
+    }
+    fields.sort_by_key(|site| (site.span.start, site.span.end));
+    let wholes = recorder
+        .wholes
+        .into_iter()
+        .filter_map(|(span, place)| {
+            Some(WholeSite {
+                span,
+                path: path(place)?,
+            })
+        })
+        .collect();
+    Sites {
+        fields,
+        wholes,
+        complete,
+    }
 }
 
 /// Analyses a processed tree for an evaluation against a [`Document`].
 pub(crate) fn variables(ast: &Ast) -> Variables {
     let bindings = Bindings::new();
-    let mut analysis = run(ast, &bindings);
+    let mut analysis = run(ast, &bindings, None);
     let builtins = std::mem::take(&mut analysis.builtins);
     let gave_up = analysis.everything || analysis.every_binding;
     let reads = analysis.finish();
@@ -416,7 +567,7 @@ pub(crate) fn variables(ast: &Ast) -> Variables {
     }
 }
 
-fn run<'n>(ast: &'n Ast, bindings: &'n Bindings) -> Analysis<'n> {
+fn run<'n>(ast: &'n Ast, bindings: &'n Bindings, sites: Option<Recorder>) -> Analysis<'n> {
     let mut analysis = Analysis {
         marked: bindings
             .functions()
@@ -441,6 +592,8 @@ fn run<'n>(ast: &'n Ast, bindings: &'n Bindings) -> Analysis<'n> {
         context_functions: false,
         builtins: BTreeSet::new(),
         conditional: 0,
+        sites,
+        site: ast.root.span,
     };
     analysis.survey(&ast.root);
     let input = vec![Place {
@@ -448,7 +601,13 @@ fn run<'n>(ast: &'n Ast, bindings: &'n Bindings) -> Analysis<'n> {
         path: Vec::new(),
     }];
     let result = analysis.eval(&ast.root, &input, 0);
+    if let Some(recorder) = &mut analysis.sites {
+        recorder.off = true;
+    }
     analysis.use_whole(&result);
+    if let Some(recorder) = &mut analysis.sites {
+        recorder.off = false;
+    }
     while let Some(deferred) = analysis.queue.pop_front() {
         analysis.body(deferred);
     }
@@ -525,11 +684,7 @@ impl<'n> Analysis<'n> {
     }
 
     fn finish(mut self) -> Reads {
-        if self.escaped || self.context_functions {
-            for context in std::mem::take(&mut self.calls) {
-                self.use_whole(&context);
-            }
-        }
+        self.finish_calls();
         if self.everything {
             self.input = Some(Read::Whole);
             for name in &self.named {
@@ -540,6 +695,17 @@ impl<'n> Analysis<'n> {
             input: self.input,
             bindings: self.bindings,
             every_binding: self.every_binding,
+        }
+    }
+
+    /// A host function may be called where the analysis does not see it: every call to a
+    /// function that is not a built-in reads its context whole.
+    fn finish_calls(&mut self) {
+        if self.escaped || self.context_functions {
+            for (span, context) in std::mem::take(&mut self.calls) {
+                self.site = span;
+                self.use_whole(&context);
+            }
         }
     }
 
@@ -554,6 +720,7 @@ impl<'n> Analysis<'n> {
     /// Records that a place is needed, or needed whole.
     fn mark(&mut self, place: &Place, whole: bool) {
         let mut read = match &place.root {
+            Root::Built => return,
             Root::Input => self.input.get_or_insert_with(Read::needed),
             Root::Binding(name) => self
                 .bindings
@@ -594,6 +761,17 @@ impl<'n> Analysis<'n> {
             }
             self.mark(place, true);
         }
+        if let Some(recorder) = &mut self.sites
+            && !recorder.off
+        {
+            for place in places {
+                let key = (self.site, place.clone());
+                if !recorder.seen.contains(&key) {
+                    recorder.wholes.push(key.clone());
+                    recorder.seen.insert(key);
+                }
+            }
+        }
     }
 
     /// Adds `from` to `into`; past [`MAX_PLACES`], uses them all.
@@ -604,6 +782,9 @@ impl<'n> Analysis<'n> {
             }
         }
         if into.len() > MAX_PLACES {
+            if let Some(recorder) = &mut self.sites {
+                recorder.lost = true;
+            }
             let all = std::mem::take(into);
             self.use_whole(&all);
         }
@@ -614,6 +795,9 @@ impl<'n> Analysis<'n> {
         let mut out = Vec::with_capacity(context.len());
         for place in context {
             if place.path.len() >= MAX_DEPTH {
+                if let Some(recorder) = &mut self.sites {
+                    recorder.lost = true;
+                }
                 self.mark(place, true);
                 continue;
             }
@@ -623,6 +807,39 @@ impl<'n> Analysis<'n> {
             out.push(place);
         }
         out
+    }
+
+    /// The places of an object the expression builds: one for [`Sites`], none for the reads.
+    fn built(&self) -> Places {
+        match self.sites {
+            Some(_) => vec![Place {
+                root: Root::Built,
+                path: Vec::new(),
+            }],
+            None => Vec::new(),
+        }
+    }
+
+    /// Records a name that reads the fields at `places`.
+    fn record_field(
+        &mut self,
+        node: &Node,
+        pos: usize,
+        name: &str,
+        places: &[Place],
+        string: bool,
+    ) {
+        if let Some(recorder) = &mut self.sites {
+            let site = recorder
+                .fields
+                .entry(node.id)
+                .or_insert_with(|| (pos, node.span, name.to_owned(), Vec::new(), string));
+            for place in places {
+                if !site.3.contains(place) {
+                    site.3.push(place.clone());
+                }
+            }
+        }
     }
 
     fn new_scope(&mut self, parent: usize) -> usize {
@@ -708,8 +925,10 @@ impl<'n> Analysis<'n> {
             NodeKind::Block { .. } | NodeKind::Bind { .. } => around,
             _ => around + 1,
         };
+        self.site = node.span;
         let value = crate::stack::grow(|| self.node(node, context, scope));
         self.conditional = around;
+        self.site = node.span;
         value
     }
 
@@ -750,9 +969,13 @@ impl<'n> Analysis<'n> {
             }
             NodeKind::Object { pairs } => {
                 self.group(pairs, context, scope);
-                Vec::new()
+                self.built()
             }
-            NodeKind::Name { name } => self.field(context, name),
+            NodeKind::Name { name } => {
+                let places = self.field(context, name);
+                self.record_field(node, node.pos, name, &places, false);
+                places
+            }
             NodeKind::Wildcard | NodeKind::Descendant => {
                 self.use_whole(context);
                 Vec::new()
@@ -1011,6 +1234,7 @@ impl<'n> Analysis<'n> {
         }
         let function = self.eval(rhs, context, scope);
         self.use_whole(&function);
+        self.site = lhs.span;
         self.use_whole(&value);
         Vec::new()
     }
@@ -1052,7 +1276,7 @@ impl<'n> Analysis<'n> {
         if reads_context {
             self.use_whole(context);
         } else if !direct {
-            self.calls.push(context.to_vec());
+            self.calls.push((procedure.span, context.to_vec()));
         }
         for arg in &args {
             let places = self.arg(arg, context, scope);
@@ -1088,7 +1312,11 @@ impl<'n> Analysis<'n> {
             && let Some(key) = string_literal(key)
         {
             let places = self.arg(object, context, scope);
-            return self.field(&places, key);
+            let places = self.field(&places, key);
+            if let Arg::Node(node) = &args[1] {
+                self.record_field(node, node.span.end, key, &places, true);
+            }
+            return places;
         }
         match (name, args.as_slice()) {
             ("count" | "exists" | "type", [first, rest @ ..]) => {

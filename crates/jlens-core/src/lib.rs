@@ -204,6 +204,34 @@ impl Expression {
         reads::analyse(&self.compiled.ast, bindings)
     }
 
+    /// Where in its source the expression reads each field and uses a value whole, by the
+    /// analysis of [`reads_with`](Expression::reads_with) with `bindings`: what rewriting the
+    /// names of renamed fields takes ([`reads::Sites`]).
+    ///
+    /// ```
+    /// use jlens_core::{Bindings, Expression};
+    ///
+    /// let expr = Expression::compile("($c := customer; $c.`first name` & ' ' & name)").unwrap();
+    /// let sites = expr.sites_with(&Bindings::new());
+    /// let fields: Vec<_> = sites
+    ///     .fields
+    ///     .iter()
+    ///     .map(|site| (&expr.source()[site.span.start..site.span.end], site.reads[0].fields.join(".")))
+    ///     .collect();
+    /// assert_eq!(
+    ///     fields,
+    ///     [
+    ///         ("customer", "customer".to_owned()),
+    ///         ("`first name`", "customer.first name".to_owned()),
+    ///         ("name", "name".to_owned()),
+    ///     ]
+    /// );
+    /// assert!(sites.complete);
+    /// ```
+    pub fn sites_with(&self, bindings: &Bindings) -> reads::Sites {
+        reads::sites(&self.compiled.ast, bindings)
+    }
+
     /// Evaluates the expression against `input` with default [`Options`].
     ///
     /// `None` as input means *undefined* (no input document). A result of `Ok(None)` means

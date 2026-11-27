@@ -755,6 +755,12 @@ impl LanguageService {
     /// assert!(service.uses(&expression.reads()).input.unwrap().contains_key("total"));
     /// ```
     pub fn uses_of(&self, expression: &Expression) -> Uses {
+        self.uses(&expression.reads_with(&self.host_bindings()))
+    }
+
+    /// Bindings with a host function for each function declared to the service, marked as
+    /// reading its arguments alone, for the analysis of what an expression reads.
+    pub(crate) fn host_bindings(&self) -> Bindings {
         let mut bindings = Bindings::new();
         for function in &self.functions {
             let host = match &function.signature {
@@ -766,7 +772,7 @@ impl LanguageService {
                 bindings = bindings.function(function.name.clone(), host.without_input());
             }
         }
-        self.uses(&expression.reads_with(&bindings))
+        bindings
     }
 }
 

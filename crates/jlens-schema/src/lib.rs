@@ -20,6 +20,8 @@
 //! * **The fields of a schema.** [`Schema::fields`] lists each path with what completion and
 //!   hover tell of it, and its own `x-` keywords ([`ListedField`]), for an application that
 //!   builds its own list of attributes.
+//! * **Renamed fields.** [`LanguageService::rename`] rewrites the steps of an expression that
+//!   read the fields a new version of the schema renames, and lists where it cannot be sure.
 //!
 //! ```
 //! use jlens_schema::{LanguageService, Schema};
@@ -45,6 +47,7 @@
 
 mod changes;
 mod jsonschema;
+mod rename;
 mod service;
 mod shape;
 mod typing;
@@ -52,6 +55,7 @@ mod uri;
 mod uses;
 
 pub use changes::{Change, EnumChange, PathChanges, UseChanges, UsesChanges};
+pub use rename::{RenameEdit, Renamed, Unsure, UnsureReason};
 pub use uses::{ListedField, Use, Uses};
 
 pub use jsonschema::{LoadReport, OpenTuple, SchemaLoader, UnreadKeyword, UnresolvedRef};
