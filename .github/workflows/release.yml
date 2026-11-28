@@ -5,10 +5,11 @@ name: Release
 # crates.io, and to npm the WebAssembly package and the packages of the CLI (ADR 0012), to PyPI
 # the Python package (ADR 0014), to Maven Central the Java package (ADR 0021; the maintainer
 # publishes the deployment on the Central Portal), to ghcr.io the container image, and the VS
-# Code extension to the Visual Studio Marketplace and Open VSX (ADR 0013), then drafts the GitHub
-# release from CHANGELOG.md with the binaries attached. Nothing is published unless every binary,
-# every wheel and the JAR build and pass their tests and the CI run of the tagged commit on main
-# passed. The npm packages are published with provenance, the Python files with PEP 740
+# Code extension to the Visual Studio Marketplace and Open VSX (ADR 0013), and drafts the GitHub
+# release from CHANGELOG.md with the binaries attached once the libraries (tier 1: crates.io,
+# jlens-wasm, PyPI, the Maven Central deployment) are uploaded. Nothing is published unless
+# every binary, every wheel and the JAR build and pass their tests and the CI run of the tagged
+# commit on main passed. The npm packages are published with provenance, the Python files with PEP 740
 # attestations, and the binary archives and the image get build attestations, all signed
 # through Sigstore with the run's OIDC token; the Java files are signed with the project's GPG
 # key, as Maven Central requires. Needs the repository secret CARGO_REGISTRY_TOKEN, and the
@@ -440,9 +441,11 @@ jobs:
 
   github:
     name: GitHub release (draft)
-    needs: [crates, npm, npm-cli, pypi, maven, container, vscode, binaries]
-    # crates, the npm jobs, pypi, maven, container and vscode are skipped when the workflow is run
-    # by hand.
+    # It waits for the channels of tier 1 (CONTRIBUTING.md, Channels) and the binaries it
+    # attaches, not for those of tier 2 (npm-cli, container, vscode), so that one of those failing
+    # holds neither the draft nor, with it, Homebrew and Scoop. crates, npm, pypi and maven are
+    # skipped when the workflow is run by hand.
+    needs: [crates, npm, pypi, maven, binaries]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     # contents creates the release; the others sign and store the attestations.

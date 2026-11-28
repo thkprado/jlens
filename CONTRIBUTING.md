@@ -126,9 +126,10 @@ and the site. One that fails does not hold the release: it is fixed when it can 
 latest by the next release; until then, the GitHub release's notes say which channel lacks the
 version. Step 7 checks that each serves the version, that its attestation verifies where it has
 one, and that its `jlens` answers. The `github` job of the `Release` workflow, which drafts the
-GitHub release, waits for every job that publishes, so a failed `container` or `vscode` job holds
-the draft and, with it, Homebrew and Scoop: re-run the failed job, and if it keeps failing, draft
-the release with `gh workflow run release.yml --ref vX.Y.Z` (step 5) and fix the channel apart.
+GitHub release, waits only for the channels of tier 1 and the binaries it attaches, so a failed
+`npm (CLI)`, `Container image` or `VS Code extension` job holds neither the draft nor, with it,
+Homebrew and Scoop: re-run the failed job, and if it keeps failing, say in the draft's notes which
+channel lacks the version and fix it apart.
 
 ### Steps
 
@@ -202,8 +203,9 @@ the release with `gh workflow run release.yml --ref vX.Y.Z` (step 5) and fix the
    `X.Y.Z`, `X.Y` and `latest`), and to the Visual Studio Marketplace and Open VSX the VS Code
    extension `thkprado.jlens` (ADR 0013: the seven VSIX files of the targets and the one that
    uses the `PATH`, built by `cargo xtask vscode` from the archives), then attests the binary
-   archives and the image (build provenance, through `actions/attest`) and drafts the GitHub
-   release with the notes of the version, the archives and their `SHA256SUMS`. It needs the
+   archives and the image (build provenance, through `actions/attest`) and, once those of tier
+   1 are uploaded, drafts the GitHub release with the notes of the version, the archives and
+   their `SHA256SUMS`, without waiting for those of tier 2. It needs the
    repository secret `CARGO_REGISTRY_TOKEN`. The npm packages are published from the
    environment `npm`, the Python package from the environment `pypi`, the Java package from the
    environment `maven-central`, and the extension from the environment `vscode`, set up as
@@ -238,7 +240,9 @@ the release with `gh workflow run release.yml --ref vX.Y.Z` (step 5) and fix the
    run checks out other code in the cache scope of `main`. When that workflow itself is broken,
    draft the release by hand as above (without attestations) and fix the workflow on `main` for
    the next release.
-6. Review the draft on the Releases page, edit it if needed, and publish it. `cargo binstall`
+6. Wait for every job of the `Release` run to end, as the draft may come before those of tier 2
+   do; then review the draft on the Releases page, edit it if needed (a channel of tier 2 that
+   failed, [Channels](#channels) says how), and publish it. `cargo binstall`
    finds the binaries once the release is published. Publishing it starts the `Homebrew`
    workflow, which writes the formula of the release (`cargo xtask homebrew`, from its
    `SHA256SUMS`) to the tap `thkprado/homebrew-jlens`. It needs the repository secret

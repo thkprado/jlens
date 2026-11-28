@@ -43,6 +43,10 @@ All notable changes are recorded here. The format follows
   moves with it, so that a tag moved upstream changes nothing that runs here. A newer push to a
   pull request cancels its CI run in progress; runs on `main` are never cancelled, as the release
   workflow asks for the run of the tagged commit.
+- The release workflow drafts the GitHub release once the libraries (crates.io, `jlens-wasm`,
+  PyPI, Maven Central's deployment) and the binaries are uploaded, without waiting for the CLI's
+  npm packages, the container image or the VS Code extension: one of those failing no longer
+  holds the draft, nor Homebrew and Scoop, which follow it.
 - `cargo xtask` fails with its usage on an unknown command, or none, where it exited 0;
   `cargo xtask help` prints the usage.
 - The WebAssembly guide says how to serve the module: the `'wasm-unsafe-eval'` that a
