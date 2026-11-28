@@ -309,3 +309,6 @@ published module, +5.7%), 496.2 KiB with brotli at quality 11 (470.2, +5.5%), 57
 gzipped; the npm package unpacks to 4.4 MB. `cargo xtask wasm` prints 674 KiB, about 6 KiB under
 the 680 KiB budget, which 0.37 does not raise. The WebAssembly guide's table of sizes has these
 numbers.
+The JAR of the seven targets, from CI's `java-jar` artifact of `b0e291d`: 11,865,124 bytes
+against 11,256,647 for 0.36.0 on Maven Central (+5.4%); 11,850,806 at `285e0b7`, so the rename's
+fixes add 14 KB across the seven libraries.
