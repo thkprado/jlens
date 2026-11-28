@@ -34,6 +34,8 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- `jlens_core::ast::NodeKind` has a new variant, `Template`: a `match` on it with no wildcard arm
+  needs one more arm.
 - A regular expression literal is compiled once per compiled expression, shared by its
   evaluations and their threads, where each evaluation compiled it again and looked it up by a
   copy of its text each time it was met; on the M1, a `$contains` filter with a regex is 15%
