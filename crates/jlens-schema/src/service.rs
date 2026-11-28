@@ -593,9 +593,11 @@ fn is_word_char(c: char) -> bool {
 
 /// Inserts a field name, quoting it with backquotes when it is not a plain name.
 pub(crate) fn field_insert(name: &str) -> String {
+    // A name is read up to an operator character, but a `«` where a token starts opens a
+    // template string.
     let plain = !name.is_empty()
         && name.chars().all(is_word_char)
-        && !name.starts_with(|c: char| c.is_ascii_digit() || c == '$')
+        && !name.starts_with(|c: char| c.is_ascii_digit() || c == '$' || c == '«')
         && !matches!(name, "and" | "or" | "in" | "true" | "false" | "null");
     if plain {
         name.to_owned()

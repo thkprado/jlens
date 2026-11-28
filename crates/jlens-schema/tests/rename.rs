@@ -131,6 +131,10 @@ fn names_are_written_as_jsonata_needs_them() {
         ),
         "'é' & given & família"
     );
+    // A name that starts with `«` would open a template (found by the `rename` fuzz target);
+    // one that holds it further on is read as a name.
+    assert_eq!(renamed("a", &[("a", "«a»")]), "`«a»`");
+    assert_eq!(renamed("`«a»`", &[("«a»", "a«b»")]), "a«b»");
 }
 
 #[test]

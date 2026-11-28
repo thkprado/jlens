@@ -80,6 +80,9 @@ random inputs rarely reach. The targets live in `fuzz/`, a crate outside the wor
 | `regex` | A byte of flags, then a pattern and a text separated by a NUL byte | Compiling the pattern with `jlens-regress` and finding every match never panic; groups lie on character boundaries of the text |
 | `pictures` | A picture, optionally followed by a NUL byte and a second string | `$formatNumber`, `$formatInteger`, `$parseInteger`, `$fromMillis` and `$toMillis` never panic on the picture, the text they parse or the time zone |
 | `language_service` | Two bytes of offset, then a text | Diagnostics, completion, hover and signature help never panic, at any offset, against an inferred schema and a recursive one with a `$ref` left unresolved; their ranges lie inside the text. What a text that compiles uses of each schema reads back from its JSON form, and has no change against itself |
+| `json_schema` | A JSON document | Read as a JSON Schema (which also refers to itself under another URI) and as a sample to infer a schema from, it never makes the reader panic. What is written back reads again, and reads as itself the second time. The listed fields read back from their JSON form, and the service knows each listed path: no `W0201` warning |
+| `parse_cut` | An expression, optionally followed by a NUL byte and the JSON text of the input | Parsing the text cut by what the expression reads never panics. Where `Document::parse` accepts the text, the cut document is the value cut, and the expression gives the same result or error code on it as on the whole document |
+| `rename` | An expression, then optionally a NUL byte and a JSON input document, and a NUL byte and a table of renames, an old path's line followed by its new one's | Renaming never panics. An empty table gives the text back. The edits, in order, make the text, and the text parses. Renaming every field the expression reads, when no place is unsure, gives the same result or error code on the input with its keys renamed, unless the result holds an object |
 
 Evaluations run with a timeout, a depth limit, size caps, and a fixed clock and seed. Each
 target runs on a thread with a 1 MB stack, the size of the main thread's stack on Windows, so
@@ -88,12 +91,12 @@ assertions, so an arithmetic overflow is a crash.
 
 The `Fuzz` workflow runs every target for ten minutes each week, or for as long as asked when
 started by hand. Each target starts from seeds that `cargo xtask fuzz-seed` writes to
-`fuzz/corpus/`: the expressions and input documents of the JSONata suite, and a few regular
-expressions and pictures. It also starts from the corpus its last run kept. A crash fails the
-run, and the input that caused it is uploaded with the run, along with the corpus. A stack
-overflow stops the target before libFuzzer can write the input; the targets write each input to
-the file that `JLENS_FUZZ_LAST_INPUT` names before running it, and the workflow uploads that file
-as `last-input`.
+`fuzz/corpus/`: the expressions and input documents of the JSONata suite, a few regular
+expressions and pictures, and the JSON Schemas and rename tables of `fixtures/`. It also starts
+from the corpus its last run kept. A crash fails the run, and the input that caused it is
+uploaded with the run, along with the corpus. A stack overflow stops the target before libFuzzer
+can write the input; the targets write each input to the file that `JLENS_FUZZ_LAST_INPUT` names
+before running it, and the workflow uploads that file as `last-input`.
 
 cargo-fuzz needs nightly Rust and Linux or macOS. To fuzz, on Linux:
 

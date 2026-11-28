@@ -77,6 +77,30 @@ doc = false
 bench = false
 required-features = ["libfuzzer"]
 
+[[bin]]
+name = "json_schema"
+path = "fuzz_targets/json_schema.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "parse_cut"
+path = "fuzz_targets/parse_cut.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "rename"
+path = "fuzz_targets/rename.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
 # Runs saved inputs through the targets without libFuzzer: `cargo xtask fuzz-replay`.
 [[bin]]
 name = "replay"

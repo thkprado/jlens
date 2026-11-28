@@ -68,6 +68,9 @@ All notable changes are recorded here. The format follows
   literal or a small class first, from upstream's commits `542243a`, `3e43472`, `c57833c` and
   `851f87b`; a literal gives its bytes to the search of `&str` under the feature, which
   upstream's code does not. jlens builds the crate without the feature: nothing changes there.
+- Language service: a field name that begins with `«` is written between backquotes, by
+  completion, `rename` and the paths of `uses` and `fields`, as it would otherwise open a
+  template string; found by fuzzing.
 - A string literal's escapes are read as jsonata-js 2.3.0 reads them: a `\` at the end of the
   expression is `S0103`, where it was `S0101`, and `\u` with fewer than four hex digits there is
   `S0104`.

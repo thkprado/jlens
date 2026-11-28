@@ -69,8 +69,9 @@ const EVALUATIONS: &[&str] = &["$doc.a + $count($doc.*)", "($doc[0].a := 1; $doc
 /// Writes the expressions of the suite to `fuzz/corpus/parse` and `fuzz/corpus/parse_recover`;
 /// each expression followed by a NUL byte and its input document to `fuzz/corpus/evaluate`; each
 /// expression after its length, as the offset, to `fuzz/corpus/language_service` (the input
-/// formats of those targets), with [`EVALUATIONS`] and [`SERVICES`]; and the regular
-/// expressions and pictures above to theirs.
+/// formats of those targets), with [`EVALUATIONS`] and [`SERVICES`]; the regular
+/// expressions and pictures above to theirs; and the inputs of `json_schema`, `parse_cut` and
+/// `rename` (see [`schemas`] and [`rename_cases`]).
 pub fn seed() -> Result<()> {
     let mut expressions = BTreeSet::new();
     let mut evaluations = BTreeSet::new();
@@ -125,7 +126,83 @@ pub fn seed() -> Result<()> {
         }
         input
     });
-    write("pictures", &pictures.collect())
+    write("pictures", &pictures.collect())?;
+    write("json_schema", &schemas()?)?;
+    // An expression and its input, as `evaluate` reads them, is also what `parse_cut` reads,
+    // and what `rename` reads with no table of its own.
+    write("parse_cut", &evaluations)?;
+    let mut renames = evaluations;
+    renames.extend(rename_cases()?);
+    write("rename", &renames)
+}
+
+/// The inputs of the `json_schema` target: the input documents of the suite, read as JSON
+/// Schemas and as samples, and the JSON Schemas of the repository's fixtures.
+fn schemas() -> Result<BTreeSet<Vec<u8>>> {
+    let mut inputs = BTreeSet::new();
+    for case in suite_cases()? {
+        if let Some(data) = case.get("data") {
+            inputs.insert(serde_json::to_vec(data)?);
+        }
+    }
+    let root = super::root();
+    for file in [
+        "fixtures/cli/order.schema.json",
+        "fixtures/workspace/order.schema.json",
+        "editors/vscode/schemas/jlens.schema.json",
+    ] {
+        let doc: JsonValue = serde_json::from_str(&fs::read_to_string(root.join(file))?)?;
+        inputs.insert(serde_json::to_vec(&doc)?);
+    }
+    // The schemas of the packages' shared cases, wherever they sit.
+    fn collect(value: &JsonValue, inputs: &mut BTreeSet<Vec<u8>>) -> Result<()> {
+        let JsonValue::Object(members) = value else {
+            return Ok(());
+        };
+        for (key, member) in members {
+            match (key.as_str(), member) {
+                ("schema" | "newSchema", JsonValue::Object(_)) => {
+                    inputs.insert(serde_json::to_vec(member)?);
+                }
+                ("documents" | "variables" | "newVariables", JsonValue::Object(docs)) => {
+                    for doc in docs.values().filter(|doc| doc.is_object()) {
+                        inputs.insert(serde_json::to_vec(doc)?);
+                    }
+                }
+                _ => {}
+            }
+            collect(member, inputs)?;
+        }
+        Ok(())
+    }
+    for file in ["fixtures/fields/cases.json", "fixtures/uses/cases.json"] {
+        let doc: JsonValue = serde_json::from_str(&fs::read_to_string(root.join(file))?)?;
+        collect(&doc, &mut inputs)?;
+    }
+    Ok(inputs)
+}
+
+/// The cases of `fixtures/rename/cases.json`, as the `rename` target reads them: the
+/// expression, a NUL byte, no input, a NUL byte, and the table, an old path's line followed by
+/// its new one's.
+fn rename_cases() -> Result<Vec<Vec<u8>>> {
+    let path = super::root().join("fixtures/rename/cases.json");
+    let doc: JsonValue = serde_json::from_str(&fs::read_to_string(&path)?)?;
+    let mut inputs = Vec::new();
+    for case in doc["cases"].as_array().into_iter().flatten() {
+        let Some(expression) = case["expression"].as_str() else {
+            continue;
+        };
+        let mut input = expression.as_bytes().to_vec();
+        input.extend([0, 0]);
+        for (old, new) in case["renames"].as_object().into_iter().flatten() {
+            if let Some(new) = new.as_str() {
+                input.extend(format!("{old}\n{new}\n").as_bytes());
+            }
+        }
+        inputs.push(input);
+    }
+    Ok(inputs)
 }
 
 /// Runs saved inputs through the body of a fuzz target with the `replay` program of `fuzz/`,
