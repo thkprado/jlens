@@ -83,6 +83,7 @@ proptest! {
         let diagnostics = service.diagnostics(&text);
         for d in &diagnostics {
             prop_assert!(d.span.start <= d.span.end && d.span.end <= text.len(), "{d:?}");
+            prop_assert!(text.is_char_boundary(d.span.start) && text.is_char_boundary(d.span.end), "{d:?}");
             if d.code == "W0206" {
                 // The warning points at a literal.
                 prop_assert!(jlens_core::parse(&text[d.span.start..d.span.end]).is_ok(), "{d:?}");
@@ -144,6 +145,7 @@ proptest! {
             }
             if let Some(hover) = service.hover(&text, offset) {
                 prop_assert!(hover.range.end <= text.len());
+                prop_assert!(text.is_char_boundary(hover.range.start) && text.is_char_boundary(hover.range.end), "{hover:?}");
             }
             let _ = service.signature_help(&text, offset);
         }
@@ -181,6 +183,7 @@ proptest! {
             prop_assert!(completions.range.end <= text.len());
             if let Some(hover) = body.hover(&text, offset) {
                 prop_assert!(hover.range.end <= text.len());
+                prop_assert!(text.is_char_boundary(hover.range.start) && text.is_char_boundary(hover.range.end), "{hover:?}");
             }
         }
     }
@@ -233,6 +236,7 @@ proptest! {
         let service = LanguageService::new(Some(schema)).with_result_type([JsonType::Boolean]);
         for d in service.diagnostics(&text) {
             prop_assert!(d.span.start <= d.span.end && d.span.end <= text.len(), "{d:?}");
+            prop_assert!(text.is_char_boundary(d.span.start) && text.is_char_boundary(d.span.end), "{d:?}");
         }
         let result = service.result_type(&text);
         if let (Some(types), Ok(expr)) = (&result.types, jlens_core::Expression::compile(&text)) {
@@ -253,6 +257,7 @@ proptest! {
             prop_assert!(service.complete(&text, offset).range.end <= text.len());
             if let Some(hover) = service.hover(&text, offset) {
                 prop_assert!(hover.range.end <= text.len());
+                prop_assert!(text.is_char_boundary(hover.range.start) && text.is_char_boundary(hover.range.end), "{hover:?}");
             }
         }
     }
@@ -496,7 +501,8 @@ const RENAME_TOKENS: &[&str] = &[
     "$$", ".", "[", "]", "[0]", "(", ")", "{", "}", ":", ",", ";", "=", "!=", "and", "or", "?",
     ":=", "$c", "&", "+", "*", "**", "^(", "@$v", "#$i", "%.", "$v", "$sum(", "$count(",
     "$keys(", "$lookup(", "$string(", "$exists(", "$map(", "function($v){", "'login'", "'type'",
-    "«{", "}»", "[customer, items]", "(total ? customer : items).type", " ",
+    "«{", "}»", "[customer, items]", "(total ? customer : items).type", " ", "`login`", "\"type\"",
+    "(total ? items{'type': qty} : items).type", "$spread(", "$sift(",
 ];
 
 /// The renames a table may hold, each a field and its new last name.

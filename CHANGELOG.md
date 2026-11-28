@@ -21,7 +21,8 @@ All notable changes are recorded here. The format follows
   table of paths, old to new, and rewrite the steps of an expression that read a renamed field
   of the input, found as `uses` finds them, keeping the rest of the text; the answer lists the
   places they cannot be sure of (a value holding a renamed field used whole, a field named by a
-  string given to `$lookup`, a step over a renamed field and another, `$eval`). In
+  string given to `$lookup`, a step over a renamed field and another, or over one and an object
+  the expression builds or a function gives, `$eval`). In
   `jlens-core`, `Expression::sites_with` gives where an expression reads each field
   (`reads::Sites`).
 - Template strings, as jsonata-js 2.3.0 reads them: `«Hello {name}!»`, or `<<Hello {name}!>>`.
@@ -62,6 +63,14 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- Language service: hover and `W0201` give the range of a field's name as it is written, with
+  its backquotes or quotes. Hover left out the backquotes, and both cut a name written as a
+  string short of its closing quote, so that the range could end inside a character
+  (`` `café` `` gave bytes `0..5`); the LSP server and the packages, which count UTF-16 code
+  units, were not affected.
+- Schema paths (`shape_at`, overrides, a context path): a backquote that opens or closes no name
+  (`` a` ``) and a dot with no name before it (`..a`, `a..b`, `a.`) make the path malformed.
+  The backquotes were dropped and the empty names skipped, so `` a` `` and `..a` read `a`.
 - JSON Schema: `required` is read wherever it is written. A field that one branch of `allOf`
   requires was optional when another branch listed it too, and so was a field that a `$ref`
   required when `properties` beside it listed it again, which also replaced what the `$ref` said

@@ -12,7 +12,7 @@ use jlens_core::ast::Span;
 use jlens_core::reads::ReadPath;
 use serde::Serialize;
 
-use crate::service::{LanguageService, field_insert};
+use crate::service::{LanguageService, field_insert, is_word_char};
 use crate::shape::parse_path;
 
 /// An expression with renamed fields, given by [`LanguageService::rename`].
@@ -62,11 +62,28 @@ pub enum UnsureReason {
     /// A renamed field is named by a string, given to `$lookup`.
     String,
     /// The step reads a renamed field and another one, which keeps its name, or two fields
-    /// renamed apart: no single name fits both.
+    /// renamed apart: no single name fits both. The other may be a field of an object the
+    /// expression builds or a function gives (a group-by, `$sift`, a function of the
+    /// expression's).
     Mixed,
     /// The analysis gave up on part of the expression (`$eval`, a parent it cannot find, a
     /// value with too many places), where a renamed field may be read.
     Lost,
+}
+
+/// A name as it replaces the one at `span`: between backquotes when it is not a plain name, or
+/// when the text beside it would run into it (`` `a`and b `` read as `xand b`).
+fn written_at(source: &str, span: Span, name: &str) -> String {
+    let text = field_insert(name);
+    let runs_on = |c: Option<char>| c.is_some_and(is_word_char);
+    if !text.starts_with('`')
+        && (runs_on(source[..span.start].chars().next_back())
+            || runs_on(source[span.end..].chars().next()))
+    {
+        format!("`{name}`")
+    } else {
+        text
+    }
 }
 
 /// The table of renames, checked.
@@ -309,7 +326,7 @@ impl LanguageService {
                 }),
                 None => edits.push(RenameEdit {
                     span: site.span,
-                    text: field_insert(first),
+                    text: written_at(source, site.span, first),
                 }),
             }
         }

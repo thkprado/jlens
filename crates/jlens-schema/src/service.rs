@@ -587,8 +587,17 @@ fn operand_before(text: &str, at: usize, closed: Option<usize>) -> bool {
     }
 }
 
-fn is_word_char(c: char) -> bool {
+pub(crate) fn is_word_char(c: char) -> bool {
     !c.is_whitespace() && !OPERATOR_CHARS.contains(c)
+}
+
+/// The name of a step as written: from where the step starts to the end of its token, with
+/// its backquotes or quotes.
+fn name_span(node: &Node) -> Span {
+    Span::new(
+        node.span.start,
+        node.pos.clamp(node.span.start, node.span.end),
+    )
 }
 
 /// Inserts a field name, quoting it with backquotes when it is not a plain name.
@@ -1841,9 +1850,7 @@ impl LanguageService {
                 node, name, ctx, ..
             } if self.schema.is_some() && ctx.is_known_objects() && !ctx.has_field(name) => {
                 let known: Vec<&str> = ctx.fields().iter().map(|(n, ..)| *n).collect();
-                let quoted = text[node.span.start..].starts_with('`');
-                let len = name.len() + if quoted { 2 } else { 0 };
-                let span = Span::new(node.span.start, (node.span.start + len).min(node.span.end));
+                let span = name_span(node);
                 out.push(Diagnostic::new(
                     Severity::Warning,
                     "W0201",
@@ -2051,10 +2058,7 @@ impl LanguageService {
             Event::Field {
                 node, name, ctx, ..
             } => {
-                let span = Span::new(
-                    node.span.start,
-                    (node.span.start + name.len()).min(node.span.end),
-                );
+                let span = name_span(node);
                 let field = ctx
                     .fields()
                     .into_iter()

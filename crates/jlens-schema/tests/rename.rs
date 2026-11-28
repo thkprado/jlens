@@ -396,3 +396,79 @@ fn the_example_of_the_guides() -> Result<(), String> {
     assert!(uses.input.iter().flatten().all(|(_, used)| !used.unknown));
     Ok(())
 }
+
+#[test]
+fn backquotes_are_kept_where_the_name_would_run_on() {
+    let table = [("a", "x")];
+    // Without its backquotes, the name would run into the operator after it.
+    assert_eq!(renamed("`a`and b", &table), "`x`and b");
+    assert_eq!(renamed("`a`or(b)", &table), "`x`or(b)");
+    assert_eq!(renamed("`a`in[1, 2]", &table), "`x`in[1, 2]");
+    // Where an operator character or a space follows, they are not needed.
+    assert_eq!(renamed("`a` and b", &table), "x and b");
+    assert_eq!(renamed("`a`.b", &table), "x.b");
+}
+
+#[test]
+fn a_step_written_as_a_string_is_renamed() {
+    let table = [("customer.name", "customer.fullName")];
+    assert_eq!(renamed("customer.\"name\"", &table), "customer.fullName");
+    assert_eq!(
+        renamed("customer.'name' & 'name'", &table),
+        "customer.fullName & 'name'"
+    );
+}
+
+#[test]
+fn a_step_over_an_object_the_expression_builds_is_listed() {
+    let table = [("a.name", "a.title")];
+    let mixed = |text: &str| {
+        let (out, unsure) = rename(text, &table);
+        assert_eq!(out, text);
+        assert!(
+            unsure.iter().any(|(span, path, reason)| span == "name"
+                && path == "a.name"
+                && *reason == UnsureReason::Mixed),
+            "{text}: {unsure:?}"
+        );
+    };
+    mixed("(x ? a : items{kind: $count($)}).name");
+    mixed("(x ? a : items.{kind: $count($)}).name");
+    mixed("(x ? a : $clone(b)).name");
+    mixed("(x ? a : $sift(b, function($v) { $v })).name");
+    mixed("(x ? a : $spread(b)).name");
+    mixed("(x ? a : $match('x', /x/)).name");
+    mixed("(x ? a : ($ ~> |b|{'c': 1}|)).name");
+    mixed("($f := function() { {'name': 1} }; (x ? a : $f())).name");
+    mixed("(x ? a : b ~> $f).name");
+    mixed("(x ? a : $lookup(b, k)).name");
+    // A function that gives a string or a number builds no object.
+    assert_eq!(
+        renamed("(x ? a : $string(b)).name", &table),
+        "(x ? a : $string(b)).title"
+    );
+}
+
+#[test]
+fn paths_with_stray_backquotes_or_dots_fail() {
+    let service = LanguageService::new(None);
+    let expression = Expression::compile("a.b").unwrap();
+    for table in [
+        vec![("a", "b`")],
+        vec![("a", "```")],
+        vec![("`a", "b")],
+        vec![("a`b`", "c")],
+        vec![("...a", "b")],
+        vec![("a..b", "a.c")],
+        vec![("a.", "b")],
+    ] {
+        assert!(
+            service.rename(&expression, table.clone()).is_err(),
+            "{table:?}"
+        );
+    }
+    // `$.a`, `.a` and `$[].a` are paths.
+    assert_eq!(renamed("a", &[("$.a", "b")]), "b");
+    assert_eq!(renamed("a", &[(".a", "b")]), "b");
+    assert_eq!(renamed("a", &[("$[].a", "$[].b")]), "b");
+}

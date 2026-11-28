@@ -302,7 +302,10 @@ pub struct FieldSite {
     /// The fields of the input and of bindings it may read, each with the path to it, its own
     /// name last.
     pub reads: Vec<ReadPath>,
-    /// It may also read a field of an object the expression builds (`{"a": 1}.a`).
+    /// It may also read a field of an object the expression builds (`{"a": 1}.a`), or of one
+    /// the analysis does not follow: the result of a function that may give an object (a
+    /// group-by, `$sift`, a function of the expression's), a value `*` or `**` gives, a
+    /// function's parameter.
     pub built: bool,
     /// The name is a string given to `$lookup`, not a step.
     pub string: bool,
@@ -371,8 +374,9 @@ struct Place {
 enum Root {
     Input,
     Binding(String),
-    /// An object the expression builds, kept only for [`Sites`]: a step over it reads no
-    /// field of the input.
+    /// An object the expression builds, or one the analysis does not follow (the result of a
+    /// function, a value `*` gives, a parameter), kept only for [`Sites`]: a step over it may
+    /// read a field of another object than those of its other places.
     Built,
 }
 
@@ -507,7 +511,8 @@ pub(crate) fn sites(ast: &Ast, bindings: &Bindings) -> Sites {
         let span = if string {
             span
         } else {
-            // The name ends at `pos`, between backquotes when it is not a plain one.
+            // The name ends at `pos`, between backquotes when it is not a plain one, or written
+            // as a string (`a."b"`), which may hold escapes.
             let quoted = source[..pos].ends_with('`');
             let start = pos.checked_sub(name.len() + if quoted { 2 } else { 0 });
             let written = start.and_then(|start| source.get(start..pos));
@@ -518,12 +523,23 @@ pub(crate) fn sites(ast: &Ast, bindings: &Bindings) -> Sites {
                     text == name
                 }
             });
-            if !matches {
-                // A step the parser made, with no name of its own in the source.
-                complete = false;
-                continue;
-            }
-            Span::new(start.unwrap_or(pos), pos)
+            let string_step = || {
+                let text = source.get(span.start..pos)?;
+                let quote = text.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+                (text.len() >= 2 && text.ends_with(quote)).then_some(span.start)
+            };
+            let start = match (matches, start) {
+                (true, Some(start)) => start,
+                _ => match string_step() {
+                    Some(start) => start,
+                    None => {
+                        // A step the parser made, with no name of its own in the source.
+                        complete = false;
+                        continue;
+                    }
+                },
+            };
+            Span::new(start, pos)
         };
         let count = places.len();
         let mut reads: Vec<ReadPath> = places.into_iter().filter_map(path).collect();
@@ -668,8 +684,11 @@ impl<'n> Analysis<'n> {
                     self.context_functions = true;
                 }
                 let seq = self.next_seq();
+                // An argument is used whole where the function is called; here it is an object
+                // the analysis does not follow.
                 for param in &def.params {
-                    self.bind(scope, param, Vec::new(), seq);
+                    let places = self.built();
+                    self.bind(scope, param, places, seq);
                 }
                 self.used(&def.body, &deferred.context, scope);
             }
@@ -978,7 +997,7 @@ impl<'n> Analysis<'n> {
             }
             NodeKind::Wildcard | NodeKind::Descendant => {
                 self.use_whole(context);
-                Vec::new()
+                self.built()
             }
             NodeKind::Parent { label, .. } => {
                 let (places, found, _) = self.lookup(label, scope);
@@ -1074,7 +1093,7 @@ impl<'n> Analysis<'n> {
             && let Some(group) = &node.attrs.group
         {
             self.group(&group.pairs, &value, scope);
-            value = Vec::new();
+            value = self.built();
         }
         value
     }
@@ -1138,7 +1157,7 @@ impl<'n> Analysis<'n> {
         }
         if let Some(group) = &node.attrs.group {
             self.group(&group.pairs, &context, scope);
-            return Vec::new();
+            return self.built();
         }
         context
     }
@@ -1236,7 +1255,7 @@ impl<'n> Analysis<'n> {
         self.use_whole(&function);
         self.site = lhs.span;
         self.use_whole(&value);
-        Vec::new()
+        self.built()
     }
 
     fn call(
@@ -1282,7 +1301,7 @@ impl<'n> Analysis<'n> {
             let places = self.arg(arg, context, scope);
             self.use_whole(&places);
         }
-        Vec::new()
+        self.built()
     }
 
     /// Reads places whole without letting a binding escape: a function called where it is
@@ -1346,7 +1365,11 @@ impl<'n> Analysis<'n> {
             }
             _ => {
                 self.use_args(&args, context, scope);
-                Vec::new()
+                if may_give_object(native) {
+                    self.built()
+                } else {
+                    Vec::new()
+                }
             }
         }
     }
@@ -1425,6 +1448,8 @@ impl<'n> Analysis<'n> {
                     items.clone()
                 }
                 ("reduce", 0) if from_items => items.clone(),
+                // The accumulator, which the initial value or the body may make an object.
+                ("reduce", 0) => self.built(),
                 _ => Vec::new(),
             };
             self.bind(lambda, param, places, seq);
@@ -1434,7 +1459,7 @@ impl<'n> Analysis<'n> {
             "map" => body,
             "reduce" if !from_items => {
                 self.use_whole(&body);
-                Vec::new()
+                self.built()
             }
             _ => {
                 self.use_whole(&body);
@@ -1442,6 +1467,31 @@ impl<'n> Analysis<'n> {
             }
         }
     }
+}
+
+/// Whether a built-in may give an object or an array of them, as its signature's result says
+/// (`$sift`, `$spread`, `$match`, `$lookup`...): not one that gives a string, a number, a
+/// boolean or an array of strings or numbers, nor `$error` and `$assert`, which give nothing.
+fn may_give_object(native: &Native) -> bool {
+    if matches!(native.name, "error" | "assert") {
+        return false;
+    }
+    let Some(signature) = &native.signature else {
+        return true;
+    };
+    // The result follows the last `:` outside a parameter's own `<...>`.
+    let definition = signature.definition.as_str();
+    let mut depth = 0usize;
+    let mut result = None;
+    for (i, c) in definition.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            ':' if depth == 1 => result = Some(&definition[i + 1..definition.len() - 1]),
+            _ => {}
+        }
+    }
+    !matches!(result, Some("s" | "n" | "b" | "a<s>" | "a<n>"))
 }
 
 /// A node evaluated as it is, without predicates, stages or a group.

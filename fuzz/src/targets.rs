@@ -529,16 +529,17 @@ fn written_name(name: &str) -> Option<String> {
 }
 
 /// The rename table of every field `read` reads, each given a new name, as text pairs and by
-/// path.
+/// path; `false` past 64 fields, where a table cut short could rename `a` to the `a_v2` it
+/// leaves out.
 fn rename_all(
     read: &Read,
     path: &mut Vec<String>,
     written: (&str, &str),
     table: &mut Vec<(String, String)>,
     renamed: &mut HashMap<Vec<String>, String>,
-) {
+) -> bool {
     let Read::Fields(fields) = read else {
-        return;
+        return true;
     };
     for (name, inner) in fields {
         let new = format!("{name}_v2");
@@ -546,7 +547,7 @@ fn rename_all(
             continue;
         };
         if table.len() >= 64 {
-            return;
+            return false;
         }
         let join = |parent: &str, name: &str| match parent {
             "" => name.to_owned(),
@@ -556,9 +557,13 @@ fn rename_all(
         table.push((old.clone(), new_path.clone()));
         path.push(name.clone());
         renamed.insert(path.clone(), new);
-        rename_all(inner, path, (&old, &new_path), table, renamed);
+        let whole = rename_all(inner, path, (&old, &new_path), table, renamed);
         path.pop();
+        if !whole {
+            return false;
+        }
     }
+    true
 }
 
 /// A JSON value with each key at a renamed path given its new name; `None` when a new name is
@@ -661,7 +666,9 @@ pub fn rename(data: &[u8]) {
             return;
         };
         let (mut table, mut renames) = (Vec::new(), HashMap::new());
-        rename_all(&read, &mut Vec::new(), ("", ""), &mut table, &mut renames);
+        if !rename_all(&read, &mut Vec::new(), ("", ""), &mut table, &mut renames) {
+            return;
+        }
         let renamed = service
             .rename(&expression, table.iter().map(|(a, b)| (a, b)))
             .unwrap_or_else(|e| panic!("{e}: {table:?}"));

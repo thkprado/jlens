@@ -896,7 +896,9 @@ where
     }
 }
 
-/// Parses `a.b[].c` into `[(Some("a"), 0), (Some("b"), 1), (Some("c"), 0)]`.
+/// Parses `a.b[].c` into `[(Some("a"), 0), (Some("b"), 1), (Some("c"), 0)]`; `None` for a
+/// backquote that does not open or close a name, or a dot with no name before it
+/// (`..a`, `a..b`, `a.`).
 pub(crate) fn parse_path(path: &str) -> Option<Vec<(Option<String>, usize)>> {
     let path = path.trim();
     let path = path.strip_prefix('$').unwrap_or(path);
@@ -914,7 +916,14 @@ pub(crate) fn parse_path(path: &str) -> Option<Vec<(Option<String>, usize)>> {
         }
         // A name between backquotes is taken as written, the empty one included.
         let quoted = name.len() >= 2 && name.starts_with('`') && name.ends_with('`');
-        let name = name.trim_matches('`');
+        let name = if quoted {
+            &name[1..name.len() - 1]
+        } else {
+            name
+        };
+        if name.contains('`') || (!quoted && name.is_empty() && arrays == 0) {
+            return None;
+        }
         out.push((
             (quoted || !name.is_empty()).then(|| name.to_owned()),
             arrays,

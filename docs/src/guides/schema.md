@@ -849,14 +849,16 @@ assert!(after.uses_of(&migrated).input.iter().flatten().all(|(_, used)| !used.un
 ```
 
 A step is renamed where it reads the field, whatever the path that leads there: a relative path
-in a predicate, a parent kept in a variable (`$o := order; $o.total`), the parent of `%`. The same
-name under another parent, or of an object the expression builds, is left alone, and a new name
-that is not a plain one is written between backquotes. An entry renames the last name of its
-path. A field under a renamed parent follows it without an entry of its own, and an entry for it
-gives it under the new parent (`lines[].qty` to `items[].quantity`), as a table built from the two
-versions' fields does; an entry that moves a field to another parent fails, and so do a field
-renamed twice, two fields renamed to the same path and a name that holds a backquote, which
-JSONata cannot write.
+in a predicate, a parent kept in a variable (`$o := order; $o.total`), the parent of `%`, a step
+written as a string (`customer."name"`). The same name under another parent, or of an object the
+expression builds, is left alone. A new name that is not a plain one is written between
+backquotes, and so is one the text beside it would run into (`` `a`and b `` with `a` renamed `x`
+gives `` `x`and b ``). An entry renames the last name of its path. A field under a renamed parent
+follows it without an entry of its own, and an entry for it gives it under the new parent
+(`lines[].qty` to `items[].quantity`), as a table built from the two versions' fields does; an
+entry that moves a field to another parent fails, and so do a field renamed twice, two fields
+renamed to the same path, a path with a backquote that opens or closes no name or a dot with no
+name before it (`a..b`), and a name that holds a backquote, which JSONata cannot write.
 
 The answer gives the rewritten `text`, each edit with its span, and the places the rename cannot
 be sure of, in `unsure`, where it leaves the text as written for someone to look at:
@@ -865,7 +867,7 @@ be sure of, in `unsure`, where it leaves the text as written for someone to look
 |---|---|
 | `whole` | A value that holds a renamed field is used whole: given to a function that may read the field or its name (`$keys(customer)`, `$sift`, `$string`, a function of the expression's own or a host function the service does not declare), iterated by `*` or `**`, an operand. `path` is the value |
 | `string` | A renamed field named by a string given to `$lookup`, as in `$lookup(customer, 'vip')` |
-| `mixed` | A step that reads a renamed field and another one, which keeps its name: `(x ? a : b).name` with `a.name` renamed alone |
+| `mixed` | A step that reads a renamed field and another one, which keeps its name: `(x ? a : b).name` with `a.name` renamed alone, or `(x ? a : $sift(b, $f)).name`, where the other is a field of an object the expression builds or a function gives (a group-by, `$spread`, a function of the expression's) |
 | `lost` | The analysis gave up on part of the expression, as for `$eval`: a renamed field may be read anywhere |
 
 The result of the expression is not listed: an expression that returns an object holding a

@@ -1949,3 +1949,21 @@ fn an_expression_is_typed_as_the_body_of_a_step() {
     assert!(unknown.diagnostics("%.customer.name").is_empty());
     assert_eq!(codes(&unknown, "%.anything"), ["W0201"]);
 }
+
+#[test]
+fn hover_and_unknown_fields_span_the_name_as_written() {
+    let schema = Schema::infer(&[json!({"café": {"cafè": 1}, "a": 1})]);
+    let svc = LanguageService::new(Some(schema));
+    let written = |text: &str, span: (usize, usize)| text[span.0..span.1].to_owned();
+    // Backquotes and quotes included, never inside a character.
+    for (text, name) in [("`café`", "`café`"), ("`café`.\"cafè\"", "\"cafè\"")] {
+        let offset = text.find(name).unwrap() + 1;
+        let hover = svc.hover(text, offset).unwrap();
+        assert_eq!(written(text, (hover.range.start, hover.range.end)), name);
+    }
+    for (text, name) in [("`cafó`", "`cafó`"), ("`café`.\"cafó\"", "\"cafó\"")] {
+        let d = &svc.diagnostics(text)[0];
+        assert_eq!(d.code, "W0201");
+        assert_eq!(written(text, (d.span.start, d.span.end)), name);
+    }
+}
