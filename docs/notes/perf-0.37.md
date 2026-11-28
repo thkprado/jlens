@@ -137,3 +137,95 @@ text matches (`\w`, `\S`) or none take 1% to 5.5% more (`lookahead` +5.5%, `word
 `Unicode text` +3.7%), the cost of upstream's scan for code units before each attempt, kept as
 upstream wrote it. Compiling is unchanged. jlens itself builds the crate without the feature, so
 nothing of jlens's own benchmark changes.
+
+## #14: what the WebAssembly module is made of
+
+**Method.** Each release's module is the `jlens_bg.wasm` of its npm package (`npm pack
+jlens-wasm@X.Y.Z`), built by the release workflow; 0.37's commits were built here with `cargo
+xtask wasm` (Rust 1.100.0, binaryen 132 from npm), whose 0.36.0 is 1,013 bytes larger than
+the published one and 0.1 KiB smaller gzipped. Sizes are gzip at its best level, as `cargo xtask wasm` measures them, and brotli at
+quality 11. The variants were built from HEAD (`4d0029c`) with parts of `crates/jlens-wasm/src`
+left out by hand, not committed. The split by crate is `twiggy top` (twiggy 0.8.0) on the module
+before `wasm-bindgen` and `wasm-opt`, which still has its function names: each function goes to
+the first crate of its name outside `core`/`alloc`/`std`, so that a generic function goes to the
+crate whose type it was made for. Scripts: the scratch directory of the session, not kept.
+
+**Each release.**
+
+| Release | Bytes | gzip | brotli | `jlens.global.js` gzip |
+|---|---:|---:|---:|---:|
+| 0.20.0 | 1,371,895 | 510.9 KiB | 376.0 KiB | — |
+| 0.24.0 | 1,381,313 | 516.0 KiB | 379.4 KiB | — |
+| 0.27.0 | 1,390,779 | 515.5 KiB | 384.0 KiB | 745.9 KiB |
+| 0.28.0 | 1,425,835 | 522.4 KiB | 388.6 KiB | 758.5 KiB |
+| 0.29.0 | 1,442,710 | 530.1 KiB | 393.9 KiB | 768.1 KiB |
+| 0.30.0 | 1,449,757 | 533.1 KiB | 395.7 KiB | 771.8 KiB |
+| 0.31.0 | 1,446,819 | 531.8 KiB | 395.4 KiB | 770.2 KiB |
+| 0.32.0 | 1,459,424 | 534.5 KiB | 396.6 KiB | 776.4 KiB |
+| 0.33.0 | 1,582,410 | 582.4 KiB | 432.3 KiB | 842.6 KiB |
+| 0.34.0 | 1,679,209 | 615.8 KiB | 455.7 KiB | 892.4 KiB |
+| 0.35.0 | 1,690,082 | 619.6 KiB | 458.7 KiB | 898.4 KiB |
+| 0.36.0 | 1,733,237 | 637.7 KiB | 470.2 KiB | 921.9 KiB |
+
+The two large steps are the language service's: 0.33's schemas (`uses`, recursive `$ref`, documents
+and their loader with its own URI resolver), +47.9 KiB, and 0.34's types, +33.4 KiB.
+
+**0.37, item by item.**
+
+| Commit | Item | Bytes | gzip | Change |
+|---|---|---:|---:|---:|
+| `b786433` | 0.36.0 | 1,734,250 | 637.6 KiB | |
+| `2bac089` | #5, the size limits while building | 1,734,103 | 637.9 KiB | +0.3 KiB |
+| `26aa9f7` | #8, template strings | 1,742,683 | 641.8 KiB | +3.9 KiB |
+| `11ffb0d` | #7, regex literals compiled once | 1,744,655 | 642.6 KiB | +0.8 KiB |
+| `ce7dc3c` | #20, `jlens-regress` 0.35.2 | 1,744,662 | 642.7 KiB | +0.1 KiB |
+| `7626b55` | #9, the reader's gaps | 1,749,230 | 644.5 KiB | +1.8 KiB |
+| `f740632` | #9, `fields()` | 1,771,834 | 653.2 KiB | +8.7 KiB |
+| `d8a4ed3` | #13, `rename` and `sites_with` in the crates | 1,779,284 | 655.5 KiB | +2.3 KiB |
+| `bda62da` | #13, `rename` in the module | 1,823,123 | 673.3 KiB | +17.8 KiB |
+| `4d0029c` | #19, fuzzing (HEAD) | 1,823,130 | 673.3 KiB | +0.0 KiB |
+
+#4, #10, #11, #12 and #15 leave the module as it was. 0.37 adds 35.7 KiB, half of it `rename`:
+until the module exported it, `d8a4ed3`'s rewriting was dead code that the linker dropped, and the
+binding inlines all of it (18.5 KB of code in one function before `wasm-opt`, about 30 KB with
+the sorts of its edits and the recorder of sites). `cargo xtask wasm` measures with `flate2`,
+whose output is up to 1.5 KiB longer than these (639 KiB for `b786433`): HEAD's 673 KiB leaves
+about 6.5 KiB of the 680 KiB budget.
+
+**By part.** Leaving parts out of HEAD's module:
+
+| Module | Bytes | gzip | brotli |
+|---|---:|---:|---:|
+| Whole (HEAD) | 1,823,130 | 673.3 KiB | 496.0 KiB |
+| Without the language service (`service.rs`: `LanguageService`, `inferSchema`, `functions`, `usesChanges`, …) | 1,382,940 | 505.2 KiB | 373.6 KiB |
+| Evaluation only (also without `evaluateWithAudit`, `ast`, `reads`, `unionReads`, `parseRecover`) | 1,313,577 | 475.8 KiB | 350.8 KiB |
+
+The language service is a quarter of the module, 168 KiB gzipped: `jlens-schema` and the
+monomorphized code it brings (`serde_json` for its replies, `indexmap`, its own uses of
+`regress` for `pattern`). The audit, the syntax tree and the fields read cost 29 KiB more;
+`reads` itself stays, as an evaluation uses it to read only the fields an expression needs.
+
+Code by crate before `wasm-opt`, in bytes (names and `wasm-bindgen`'s sections left out):
+
+| Crate | Whole | Without the language service | Evaluation only |
+|---|---:|---:|---:|
+| `jlens_core` | 566,111 | 545,816 | 524,473 |
+| `jlens_schema` | 272,621 | 0 | 0 |
+| `regress` | 288,025 | 253,111 | 253,111 |
+| `serde_json` | 90,584 | 61,582 | 43,188 |
+| `jlens_wasm` | 68,985 | 33,434 | 31,013 |
+| `core` and `alloc` | 91,038 | 86,146 | 83,241 |
+| `indexmap`, `hashbrown`, `foldhash` | 69,015 | 43,280 | 42,645 |
+| `js_sys` | 32,712 | 32,712 | 32,712 |
+| data | 401,492 | 392,532 | 390,316 |
+
+The data, 397,060 bytes in the final module, is mostly tables: 140,703 zero bytes, 42,565 bytes
+of text (messages, the function catalog's descriptions, names), and `regress`'s Unicode property
+tables, 22,860 ranges in 182,880 bytes, about 38.5 KiB gzipped, which `\p{…}` needs at any time
+since a pattern can name any property. What remains for an evaluation is `jlens_core`, `regress`
+and those tables, about 476 KiB gzipped.
+
+**For ADR 0015 (0.38 #2).** A module without the language service would be 505 KiB gzipped
+(374 KiB with brotli), 25% less than one with it. Two modules from one crate, by a Cargo feature,
+would cost the release a second build and package, and a page that evaluates and edits would load
+both or the larger one. Not decided here. The budget, 680 KiB, leaves HEAD about 6.5 KiB.

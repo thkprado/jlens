@@ -167,7 +167,9 @@ the release with `gh workflow run release.yml --ref vX.Y.Z` (step 5) and fix the
    scripts shows only there. The Python and Java packages are compared with the previous release
    by `python.py ab` and `cargo xtask java-compare ab`. Update the summary at the top of the page,
    and replace its "X against the previous release" section with the new one, its full
-   comparison in `docs/notes/perf-X.Y.md`. Condense the finished plan of the
+   comparison in `docs/notes/perf-X.Y.md`. Write there also the size of the `.wasm` that
+   `cargo xtask wasm` prints, gzipped, against the release before it, and the reason for any
+   raise of its budget (`SIZE_BUDGET_GZIP` in `xtask/src/wasm.rs`). Condense the finished plan of the
    [roadmap](docs/src/architecture/roadmap.md) into a paragraph of the
    [roadmap history](docs/src/architecture/roadmap-history.md).
 4. Check that everything passes, including the packages:
