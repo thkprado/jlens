@@ -683,16 +683,17 @@ pub fn rename(data: &[u8]) {
         {
             return;
         }
-        // A field called as a function fails with a code that asks whether the built-in of
-        // that name was meant, which a new name may not be.
-        let unhinted = |outcome: Option<String>| {
-            outcome.map(|code| match code.as_str() {
-                "T1005" => "T1006".to_owned(),
-                "T1007" => "T1008".to_owned(),
-                _ => code,
-            })
-        };
-        if let (Some(a), Some(b)) = (unhinted(outcome(before)), unhinted(outcome(after))) {
+        // A field called as a function, when a built-in has its name, fails with a code that
+        // asks whether the built-in was meant, before its arguments are evaluated; once renamed
+        // it is no built-in's name, so its arguments are evaluated first and may fail on their
+        // own: it fails either way, with a code that may differ.
+        if let Err(e) = &before
+            && matches!(e.code(), "T1005" | "T1007")
+        {
+            assert!(after.is_err(), "{source} gave {}: {after:?}", renamed.text);
+            return;
+        }
+        if let (Some(a), Some(b)) = (outcome(before), outcome(after)) {
             assert_eq!(a, b, "{source} gave {}", renamed.text);
         }
     });
