@@ -551,7 +551,17 @@ fn diagnostics_report_values_outside_a_declared_enumeration() {
         ("kind = 'ordr'", &[("W0206", &ordr)]),
         ("level = 2.0", &[]),
         ("level in [1, 3]", &[("W0206", &level)]),
-        (r#""new" in tags or tags = "sael""#, &[("W0206", &sael)]),
+        // The items' `enum` gives no `type`: its values type them, so `=` on the array warns.
+        (
+            r#""new" in tags or tags = "sael""#,
+            &[
+                (
+                    "W0215",
+                    r#"The left side of = is an array, which never equals one value; to look for the value among its items, write `"sael" in tags`"#,
+                ),
+                ("W0206", &sael),
+            ],
+        ),
         ("guess = 3", &[]),
     ];
     assert_diagnostics(&svc, cases);

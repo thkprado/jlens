@@ -267,7 +267,8 @@ class UsesTest {
                             Map.of("b", true)),
                     status.enumeration());
             assertTrue(status.closed() && status.whole() && status.required());
-            assertEquals(List.of(), status.types());
+            // An `enum` with no `type` has the types of its values.
+            assertEquals(List.of("null", "number", "string", "array", "object"), status.types());
             Use name = uses.input().get("customer.name");
             assertEquals(List.of("string"), name.types());
             assertEquals("email", name.format());
@@ -325,7 +326,12 @@ class UsesTest {
             assertEquals(
                     List.of(new BigDecimal("1.5"), List.of("a"), Map.of("b", true)),
                     status.enumeration().removed());
-            assertNull(status.types());
+            // The types of the values listed, with no `type` beside them.
+            assertEquals(
+                    new UsesChanges.Change<>(
+                            List.of("null", "number", "string", "array", "object"),
+                            List.of("null", "string")),
+                    status.types());
             assertThrows(UnsupportedOperationException.class, () -> input.changed().clear());
         }
     }

@@ -1397,6 +1397,9 @@
             },
             "children[].kind": {
               "whole": true,
+              "types": [
+                "string"
+              ],
               "enum": [
                 "file",
                 "folder"
@@ -1452,6 +1455,9 @@
               "required": false
             },
             "children[].kind": {
+              "types": [
+                "string"
+              ],
               "enum": [
                 "file",
                 "folder"
@@ -1513,6 +1519,9 @@
               ]
             },
             "kind": {
+              "types": [
+                "string"
+              ],
               "enum": [
                 "file",
                 "folder"
@@ -1574,6 +1583,9 @@
               ]
             },
             "kind": {
+              "types": [
+                "string"
+              ],
               "enum": [
                 "file",
                 "folder"

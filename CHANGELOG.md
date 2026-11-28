@@ -55,6 +55,10 @@ All notable changes are recorded here. The format follows
   Content-Security-Policy needs, what fails without it and the error each browser gives, and how
   to send it small (brotli, 471 KiB against 640 KiB with gzip; `application/wasm`; `jlens.js`
   with the `.wasm` beside it rather than `jlens.global.js`). Its sizes were those of 0.27.
+- A JSON Schema `enum` or `const` with no `type` gives the types of its values, as it did only in
+  a branch of `anyOf` or `oneOf`: `{"enum": ["open", "closed"]}` is a string where it was of
+  unknown type, so the diagnostics that need a type (`W0207` to `W0215`), completion, hover,
+  `uses` and `fields` now see it.
 
 ### Fixed
 

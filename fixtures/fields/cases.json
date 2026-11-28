@@ -182,7 +182,10 @@
     },
     {
       "path": "kind",
-      "typeSummary": "unknown",
+      "typeSummary": "string",
+      "types": [
+        "string"
+      ],
       "required": false,
       "enum": [
         "a",

@@ -185,6 +185,10 @@ How some are read:
   An index from the end, one past the tuple or a computed one (`point[-1]`, `point[2]`,
   `point[$i]`) has the type of every item. An [override](#2-describe-the-fields) at `point[]`
   sets each position as well.
+- **`enum` and `const`** with no `type` give the types of their values, as every value is one
+  of them: `{"enum": ["open", "closed"]}` is a string, and `{"enum": [1, "a", null]}` a
+  number, a string or `null`. A `type`, or one that a `$ref` or a branch of `allOf` gives,
+  holds as written.
 - **`nullable: true`** adds `null` to the types a schema gives, and to its `enum`.
 
 A reported keyword leaves the place of its schema unknown, as a `$ref` that was not followed

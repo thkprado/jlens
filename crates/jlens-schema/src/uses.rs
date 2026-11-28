@@ -900,7 +900,7 @@ mod tests {
         // An inferred enumeration is not closed.
         assert_eq!(
             all["status"],
-            json!({"whole": true, "enum": ["open", "closed"], "required": false})
+            json!({"whole": true, "types": ["string"], "enum": ["open", "closed"], "required": false})
         );
         assert_eq!(
             all["customer"],
@@ -925,7 +925,7 @@ mod tests {
                 "items": {"types": ["array"], "required": false},
                 "items[]": {"types": ["object"]},
                 "items[].price": {"unknown": true, "whole": true},
-                "status": {"enum": ["open", "closed"], "required": false},
+                "status": {"types": ["string"], "enum": ["open", "closed"], "required": false},
                 "status.a": {"unknown": true, "whole": true}
             })
         );

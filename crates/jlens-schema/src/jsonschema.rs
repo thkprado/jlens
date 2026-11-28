@@ -1226,6 +1226,15 @@ impl<'d> Importer<'d> {
             shape.enumeration = Some(vec![value.clone()]);
             shape.enumeration_inferred = false;
         }
+        // A value is one of those listed: where nothing gives a type, theirs are its types, as
+        // for a branch of `anyOf` (see `either`).
+        if shape.types.is_empty()
+            && let Some(values) = shape.enumeration.clone()
+        {
+            for value in &values {
+                add_type(&mut shape, value_type(value));
+            }
+        }
         if let Some(f) = map.get("format").and_then(JsonValue::as_str) {
             shape.format = Some(f.to_owned());
         }

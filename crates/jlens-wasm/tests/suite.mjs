@@ -1054,7 +1054,8 @@ export const cases = [
     const service = (active) => new j.LanguageService({ schema: schema(active), variables: { limit: null }, functions: [{ name: "rate" }] });
     const uses = service("boolean").uses(expression.reads());
     equal(uses.input.$, { whole: true, types: ["object"] }, "a host function reads its context");
-    equal(uses.input["`odd name`"], { enum: ["é", null, 1.5], closed: true, required: false });
+    // An `enum` with no `type` has the types of its values.
+    equal(uses.input["`odd name`"], { types: ["null", "number", "string"], enum: ["é", null, 1.5], closed: true, required: false });
     equal(uses.bindings, { limit: { $: { unknown: true }, max: { unknown: true, whole: true } } });
     // A JavaScript function cannot read its context: with the bindings, the input is not whole.
     const narrow = service("boolean").uses(expression.reads({ rate: (n) => n }));
