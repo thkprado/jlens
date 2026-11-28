@@ -312,3 +312,36 @@ numbers.
 The JAR of the seven targets, from CI's `java-jar` artifact of `b0e291d`: 11,865,124 bytes
 against 11,256,647 for 0.36.0 on Maven Central (+5.4%); 11,850,806 at `285e0b7`, so the rename's
 fixes add 14 KB across the seven libraries.
+
+## #17: the release's x86_64 check, on the Ryzen
+
+The plan changed the evaluator (#5, #7, #8) and measured it on the M1 alone, so on 2026-11-28 the
+Ryzen 7 3700X, left idle, compared `91abf60` with 0.36.0, natively under Windows (`cargo xtask ab
+v0.36.0 HEAD`, 10 rounds, twice in each mode) and in Python under Linux in WSL (Python 3.14.8,
+`python.py ab`, five rounds, twice, the second with 400 bytes added to the environment):
+
+- **Natively**, `regex` −10.4 to −11.6% in every mode (#7). Every other case within +4.7% (most
+  within 2.5%: `transform` from a `Source` +4.7% in one run and −1.0% in the other, `group-by`
+  and `index into 10,000 items` against a `Document` up to +3.8% and +4.1%, `regex over a long
+  text` from a `Source` +3.5% and +3.6%; `names over items` −3.4% and −6.5% in `evaluate`
+  mode), but two against a `Document`, in both runs and in their fastest rounds:
+  `filter + aggregate` +11.1% and +10.9% (30.0 → 33.4 µs) and the shipping rule +4.7% and +4.9%;
+  in `evaluate` mode they read +3.8 and +5.5% and +1.4 and +2.0%.
+- **Built aligned** (the flags of [the performance page](../src/architecture/performance.md)),
+  twice in `evaluate` and `document` mode: `filter + aggregate` against a `Document` +0.5% and
+  +2.2%, so its 11% is the build's layout; `regex` −11.0 to −13.7% in the fastest rounds (the
+  aligned medians of 0.36.0 are bimodal in several cases, 0.36.0's `path` 789 ns where its fastest
+  round is 559 ns); the shipping rule still +2.6 to +3.9% (+1.5 to +4.4% in the fastest rounds),
+  `path` against a `Document` +3.6% and +4.1% (8 ns), `recursion` −3.5 to −3.9%.
+- **The shipping rule along the plan**, aligned, one comparison per mode at each commit that
+  changed the core: `2bac089` (#5) +2.1% and +0.1%, `26aa9f7` (#8) +0.4% and +2.9%, `11ffb0d`
+  (#7) −1.3% and +2.2%, then to HEAD +2.9% and −0.3% (`evaluate`, `document`). No step moves both
+  modes and none passes the floor: the layout of each build, as in 0.36 #22, and on the M1 the
+  case was within 2.9% (#16).
+- **In Python**, the two runs agree: `regex` −11.6 to −14.2% and `regex over a long text` −8.6 to
+  −9.4%, marked in both modes (the case 0.30 found bimodal between 160 and 170 µs in Linux LTO
+  libraries, now on its fast side); the shipping rule against a `Document` −3.8% and −4.0%, marked;
+  nothing slower past +2.7% (`names over items` with Python values in the padded run, whose spread
+  was 8.1%).
+
+Nothing goes to the performance page; no case calls for a change before the release.
