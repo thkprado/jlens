@@ -116,7 +116,7 @@ The Python and Java packages are compared the same way with `python.py ab` and `
 java-compare ab`, five rounds by default. `*` marks a difference on which no run of one build
 reaches the other's, above 3.5% in Python and 5% in Java ([`benches/compare/README.md`](https://github.com/thkprado/jlens/blob/main/benches/compare/README.md#two-builds-of-a-package)).
 The tables below come from one build each, so a change of a few percent from an earlier table can
-be that build's; the release compares builds as above ([0.36 against 0.35.0](#036-against-0350)).
+be that build's; the release compares builds as above ([0.37 against 0.36.0](#037-against-0360)).
 
 ### Native (criterion)
 
