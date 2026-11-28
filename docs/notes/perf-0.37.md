@@ -183,7 +183,9 @@ and their loader with its own URI resolver), +47.9 KiB, and 0.34's types, +33.4 
 | `f740632` | #9, `fields()` | 1,771,834 | 653.2 KiB | +8.7 KiB |
 | `d8a4ed3` | #13, `rename` and `sites_with` in the crates | 1,779,284 | 655.5 KiB | +2.3 KiB |
 | `bda62da` | #13, `rename` in the module | 1,823,123 | 673.3 KiB | +17.8 KiB |
-| `4d0029c` | #19, fuzzing (HEAD) | 1,823,130 | 673.3 KiB | +0.0 KiB |
+| `4d0029c` | #19, fuzzing | 1,823,130 | 673.3 KiB | +0.0 KiB |
+| `285e0b7` | the types of an `enum` or `const` with no `type` | 1,823,352 | 673.4 KiB | +0.1 KiB |
+| `4f28b79` | #21, the rename's fixes (0.37.0) | 1,824,465 | 673.9 KiB | +0.5 KiB |
 
 #4, #10, #11, #12 and #15 leave the module as it was. 0.37 adds 35.7 KiB, half of it `rename`:
 until the module exported it, `d8a4ed3`'s rewriting was dead code that the linker dropped, and the
@@ -300,6 +302,10 @@ is −0.9 to −1.0% in every mode,
 and #5 was measured within 1.3% on the M1 (`$replace`). Left as it is: 7 µs on 20 KB of text,
 in WebAssembly only.
 
-**The sizes**, the JAR and the gzipped `.wasm` against 0.36.0's and the WebAssembly guide's
-table: measured after the rename's fixes, on the final code, as the module and the native library
-carry `rename`.
+**The sizes**, on the final code (`b0e291d`), after the rename's fixes (#21). The module, built
+here with `cargo xtask wasm`: 1,824,465 bytes, 673.9 KiB gzipped (637.7 KiB for 0.36.0's
+published module, +5.7%), 496.2 KiB with brotli at quality 11 (470.2, +5.5%), 571 KiB at quality
+5; `jlens.global.js` 968.9 KiB gzipped (921.9, +5.1%), 685.9 KiB with brotli; `jlens.js` 9.2 KiB
+gzipped; the npm package unpacks to 4.4 MB. `cargo xtask wasm` prints 674 KiB, about 6 KiB under
+the 680 KiB budget, which 0.37 does not raise. The WebAssembly guide's table of sizes has these
+numbers.

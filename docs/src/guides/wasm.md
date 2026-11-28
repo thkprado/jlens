@@ -46,8 +46,8 @@ The `wasm-bindgen` CLI must be the exact version in `Cargo.lock`, and the task c
 |---|---|
 | `jlens.js` | The ES module |
 | `jlens.d.ts` | TypeScript declarations |
-| `jlens_bg.wasm` | The WebAssembly module: about 1.7 MiB, 640 KiB gzipped |
-| `jlens.global.js` | The package as one classic script, the module embedded: about 2.3 MiB, 920 KiB gzipped |
+| `jlens_bg.wasm` | The WebAssembly module: about 1.7 MiB, 673 KiB gzipped |
+| `jlens.global.js` | The package as one classic script, the module embedded: about 2.4 MiB, 968 KiB gzipped |
 | `jlens.global.d.ts` | TypeScript declarations of its global, `jlens` |
 | `package.json` | npm metadata: `"type": "module"`, `exports`, `types` |
 
@@ -106,11 +106,11 @@ It also serves what cannot resolve the `.wasm` file: a classic worker loads it w
 import declares it too; a classic script references it with
 `/// <reference types="jlens-wasm/global" />`.
 
-Its cost is size: the `.wasm` in base64 is a third larger, about 2.3 MiB, and 920 KiB gzipped
-against 640 KiB for `jlens_bg.wasm`, as base64 compresses less well
+Its cost is size: the `.wasm` in base64 is a third larger, about 2.4 MiB, and 968 KiB gzipped
+against 673 KiB for `jlens_bg.wasm`, as base64 compresses less well
 ([serving the module](#serving-the-module) compares them). A page that loads it pays for the
-whole module even if it never calls `init`, and the npm package unpacks to 4.2 MB, of which the
-script takes 2.4 MB. Starting is no slower: in Node.js 22, reading
+whole module even if it never calls `init`, and the npm package unpacks to 4.4 MB, of which the
+script takes 2.5 MB. Starting is no slower: in Node.js 22, reading
 the script and `init()` take about 19 ms, and the module with its bytes about 26 ms. `jlens.js`
 does not change, nor what importing it loads. Each loads a module of its own, so a page that
 loads both has two instances, with classes that do not mix.
@@ -157,14 +157,14 @@ These were tried with the policies above sent as headers, in Edge 158 and Firefo
 
 | What the page loads | Size | gzip | brotli |
 |---|---|---|---|
-| `jlens.js` and `jlens_bg.wasm` | 41 KiB + 1.7 MiB | 9 + 640 KiB | 8 + 471 KiB |
-| `jlens.global.js` | 2.3 MiB | 920 KiB | 652 KiB |
+| `jlens.js` and `jlens_bg.wasm` | 42 KiB + 1.7 MiB | 9 + 673 KiB | 8 + 496 KiB |
+| `jlens.global.js` | 2.4 MiB | 968 KiB | 686 KiB |
 
 The sizes of 0.37, brotli at its highest quality, 11. To serve the module small:
 
 - **Compress `jlens_bg.wasm` with brotli**, sent with `Content-Encoding: br`: a quarter smaller
   than with gzip. A server that compresses as it sends often uses a lower quality (at 5, the
-  module is 540 KiB); compressing the file once when deploying, at quality 11, and serving that
+  module is 571 KiB); compressing the file once when deploying, at quality 11, and serving that
   copy keeps the smaller size.
 - **Send it with `Content-Type: application/wasm`.** `init()` then compiles the module with
   `WebAssembly.instantiateStreaming`, while it downloads. With any other type, it warns on the
