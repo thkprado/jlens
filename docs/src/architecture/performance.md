@@ -6,14 +6,14 @@ the most from it.
 
 ## Summary
 
-Measured for 0.36.0 on an Apple M1 ([below](#benchmarks)), on seventeen expressions over a 24 KB
+Measured for 0.37.0 on an Apple M1 ([below](#benchmarks)), on seventeen expressions over a 24 KB
 order and an array of 10,000 items:
 
 | Platform | Against the reference | Against the fastest other engine |
 |---|---|---|
 | Rust | `customer.name` in 0.10 µs, a 30-line rule in 42 µs against a `Document` | – |
-| Node.js (WebAssembly) | faster than jsonata-js on 15 of 17 cases with `evaluate`, all 17 against a `Document`, by up to 540× | jsonata2js, which compiles to JavaScript, is faster on 14 of 17 |
-| Python | fastest of the Python packages on 14 of 17 cases with Python values, 15 of 17 against a `Document`; 19 to 225× jsonata-python | jsonata2py leads on `names over items` and the index into 10,000 items, jsonatapy on that index once converted |
+| Node.js (WebAssembly) | faster than jsonata-js on 15 of 17 cases with `evaluate`, all 17 against a `Document`, by up to 520× | jsonata2js, which compiles to JavaScript, is faster on 14 of 17 |
+| Python | fastest of the Python packages on 14 of 17 cases with Python values, 15 of 17 against a `Document`; 18 to 226× jsonata-python | jsonata2py leads on `names over items` and the index into 10,000 items, jsonatapy on that index once converted |
 | Java | faster than jsonata-java on all 17 cases against a `Document`, the most evaluations per second from JSON text on any number of threads | jsonata-jvm-compiler, which compiles to bytecode, is faster on most cases over converted input |
 
 - jlens is fastest where the expression reads a little of a large input (an index, a path) and
@@ -27,7 +27,7 @@ order and an array of 10,000 items:
 The numbers are meant for comparing alternatives on one machine. They are not guarantees, and
 your hardware will give different absolute values. How each change was measured (methods, traps,
 intermediate numbers) is kept outside the book, in
-[`docs/notes/`](https://github.com/thkprado/jlens/tree/main/docs/notes): `perf-0.36.md`, `perf-0.35.md`, `perf-0.34.md`, `perf-0.33.md`,
+[`docs/notes/`](https://github.com/thkprado/jlens/tree/main/docs/notes): `perf-0.37.md`, `perf-0.36.md`, `perf-0.35.md`, `perf-0.34.md`, `perf-0.33.md`,
 `perf-0.32.md`, `perf-0.31.md`, `perf-0.30.md`, `perf-0.29.md`, `perf-0.28.md`, `perf-0.27.md`, `perf-0.26.md` and
 `perf-earlier.md`.
 
@@ -65,7 +65,7 @@ cargo bench -p jlens-regress --bench engine   # the regular expression engine al
 cargo xtask growth                            # how each built-in's time grows with its input
 ```
 
-The numbers below were measured for jlens 0.36.0 on a MacBook Air M1 (4+4 cores, 16 GB, no fan)
+The numbers below were measured for jlens 0.37.0 on a MacBook Air M1 (4+4 cores, 16 GB, no fan)
 under macOS 27, with Rust 1.100, Node.js 24, Python 3.14.10 and OpenJDK 25.0.5.1; the system's
 thermal pressure stayed nominal through the runs. The columns of other engines whose version has
 not changed keep the numbers measured there for 0.31.0, the first release measured on it, or for
@@ -135,37 +135,38 @@ against a [`Document`](#reusing-documents) converted beforehand. With macOS's sy
 | Case | `evaluate` | `evaluate_document` |
 |---|---:|---:|
 | path (`customer.name`) | 0.24 µs | 0.10 µs |
-| names over items (`$sum(items.quantity)`) | 7.1 µs | 1.72 µs |
+| names over items (`$sum(items.quantity)`) | 7.0 µs | 1.71 µs |
 | filter + aggregate | 26 µs | 17.2 µs |
-| group-by | 49 µs | 39 µs |
-| sort + map | 163 µs | 147 µs |
+| group-by | 48 µs | 39 µs |
+| sort + map | 165 µs | 148 µs |
 | strings | 42 µs | 32 µs |
-| regex | 67 µs | 58 µs |
-| number formatting | 12.1 µs | 10.8 µs |
+| regex | 59 µs | 50 µs |
+| number formatting | 12.3 µs | 11.0 µs |
 | object constructor | 85 µs | 75 µs |
-| transform | 191 µs | 169 µs |
-| recursion (`$f(15)`, Fibonacci) | 231 µs | 230 µs |
-| shipping rule | 61 µs | 42 µs |
+| transform | 189 µs | 169 µs |
+| recursion (`$f(15)`, Fibonacci) | 232 µs | 233 µs |
+| shipping rule | 60 µs | 42 µs |
 | index into 10,000 items (`items[0].code`) | 0.52 µs | 0.29 µs |
-| index in a variable (`($i := 0; items[$i].code)`) | 0.67 µs | 0.42 µs |
-| regex over a long text (20 KB) | 89 µs | 88 µs |
+| index in a variable (`($i := 0; items[$i].code)`) | 0.66 µs | 0.41 µs |
+| regex over a long text (20 KB) | 88 µs | 87 µs |
 | distinct items | 50 µs | 10.7 µs |
 | tuples (`items#$n@$i[...]`) | 76 µs | 68 µs |
 
-Three copies, which agreed within 2.1% (`sort + map` with `evaluate`). On Windows, the system
+Three copies, which agreed within 1.9% (`recursion` with `evaluate`, `group-by` against a
+`Document`). On Windows, the system
 allocator makes some cases draw one of two times for each process (`recursion` against a
 `Document` 776 or 890 µs on the Ryzen); `mimalloc`, which the command and the packages use, does
 not draw.
 
 | Other measurements | Time |
 |---|---:|
-| Compile `customer.name` | 0.59 µs |
+| Compile `customer.name` | 0.64 µs |
 | Compile the shipping rule (30 lines) | 21 µs |
-| `Document::parse` of the 24 KB document | 65 µs |
+| `Document::parse` of the 24 KB document | 66 µs |
 | `Document::new` from a `serde_json::Value` | 38 µs |
-| `serde_json::from_str` of the same text, for reference | 112 µs |
-| Shipping rule, audit level `decisions` | 768 µs (13× without a tracer) |
-| Shipping rule, audit level `full` | 3.72 ms (61× without a tracer) |
+| `serde_json::from_str` of the same text, for reference | 114 µs |
+| Shipping rule, audit level `decisions` | 770 µs (13× without a tracer) |
+| Shipping rule, audit level `full` | 3.73 ms (62× without a tracer) |
 
 Without a tracer, evaluation takes the shortcuts described under
 [Where the time goes](#where-the-time-goes); with one it takes the general path, so that the
@@ -175,7 +176,7 @@ The path case reads one field of the input, `customer`, and one of that object, 
 `evaluate` takes 0.24 µs, where converting the whole input first took 38 µs. A path step reads
 only the field it looks up
 ([ADR 0010, amended](../adr/0010-lazy-input.md#amendment-one-field-at-a-time-017)), so
-`names over items` reads one field of each item and takes 7.1 µs. An expression that reads whole
+`names over items` reads one field of each item and takes 7.0 µs. An expression that reads whole
 items pays for converting them, and the allocator sets much of that cost; an application that
 calls `evaluate` on whole documents can set a faster global allocator, as the `jlens` command
 does.
@@ -205,44 +206,43 @@ expression to JavaScript source and lets the JavaScript engine compile it.
 [`benches/compare/README.md`](https://github.com/thkprado/jlens/blob/main/benches/compare/README.md)
 says how each is called.
 
-Measured for 0.36.0, the median of four runs, each on a new copy of the module, which agreed
-within 5%, but jsonata-js on `group-by` and `recursion`, one run 7% slower, and the times under
-2 µs, printed to a tenth; jsonata2js for 0.31.0, as its version has not changed since.
-jsonata-js 2.3.0 is within 3% of 2.2.2 on every case but the transform, 9% slower (767 to
-833 µs), where 2.3.0 added a walk of the copy for every transform (jsonata-js#870):
+Measured for 0.37.0, the median of four runs, each on a new copy of the module, which agreed
+within 3%, but jsonata-js, up to 7% apart on `recursion`, and the times under 4 µs, printed to a
+tenth; jsonata2js for 0.31.0, as its version has not changed since. jsonata-js 2.3.0 is within
+2.3% of its numbers for 0.36.0:
 
 | Case | jsonata-js 2.3.0 | jsonata2js 0.1.2 | jlens-wasm `evaluate` | jlens-wasm `evaluateJson` | jlens-wasm `evaluateDocument` |
 |---|---:|---:|---:|---:|---:|
-| path | 1.3 µs | 0.2 µs | 2.4 µs | 71 µs | 0.7 µs |
-| names over items | 43 µs | 3.2 µs | 29 µs | 99 µs | 3.7 µs |
-| filter + aggregate | 418 µs | 8.8 µs | 88 µs | 144 µs | 27 µs |
-| group-by | 645 µs | 13.8 µs | 124 µs | 172 µs | 55 µs |
-| sort + map | 3.05 ms | 61 µs | 288 µs | 348 µs | 230 µs |
-| strings | 374 µs | 11.1 µs | 127 µs | 187 µs | 52 µs |
-| regex | 384 µs | 10.1 µs | 133 µs | 196 µs | 93 µs |
-| number formatting | 344 µs | 75 µs | 42 µs | 122 µs | 16.6 µs |
-| object constructor | 758 µs | 52 µs | 154 µs | 282 µs | 88 µs |
-| transform | 833 µs | 204 µs | 356 µs | 492 µs | 191 µs |
-| recursion | 5.63 ms | 42 µs | 365 µs | 432 µs | 357 µs |
-| shipping rule | 1.10 ms | 27 µs | 190 µs | 202 µs | 64 µs |
-| index into 10,000 items | 1.3 µs | 145 µs | 3.4 µs | 2.26 ms | 0.9 µs |
-| index in a variable | 2.00 ms | 197 µs | 3.7 µs | 2.28 ms | 1.2 µs |
-| regex over a long text | 346 µs | 135 µs | 178 µs | 180 µs | 154 µs |
-| distinct items | 6.47 ms | 56 µs | 177 µs | 164 µs | 16.9 µs |
-| tuples | 654 µs | 28 µs | 154 µs | 212 µs | 94 µs |
+| path | 1.3 µs | 0.2 µs | 2.4 µs | 72 µs | 0.7 µs |
+| names over items | 42 µs | 3.2 µs | 29 µs | 101 µs | 3.7 µs |
+| filter + aggregate | 417 µs | 8.8 µs | 87 µs | 146 µs | 27 µs |
+| group-by | 649 µs | 13.8 µs | 125 µs | 175 µs | 55 µs |
+| sort + map | 3.00 ms | 61 µs | 292 µs | 353 µs | 236 µs |
+| strings | 372 µs | 11.1 µs | 127 µs | 190 µs | 53 µs |
+| regex | 381 µs | 10.1 µs | 118 µs | 182 µs | 77 µs |
+| number formatting | 336 µs | 75 µs | 42 µs | 124 µs | 16.9 µs |
+| object constructor | 753 µs | 52 µs | 151 µs | 282 µs | 87 µs |
+| transform | 819 µs | 204 µs | 354 µs | 496 µs | 191 µs |
+| recursion | 5.59 ms | 42 µs | 365 µs | 430 µs | 358 µs |
+| shipping rule | 1.12 ms | 27 µs | 194 µs | 205 µs | 65 µs |
+| index into 10,000 items | 1.3 µs | 145 µs | 3.4 µs | 2.31 ms | 0.9 µs |
+| index in a variable | 1.97 ms | 197 µs | 3.8 µs | 2.31 ms | 1.1 µs |
+| regex over a long text | 346 µs | 135 µs | 184 µs | 184 µs | 158 µs |
+| distinct items | 6.47 ms | 56 µs | 178 µs | 167 µs | 16.7 µs |
+| tuples | 652 µs | 28 µs | 155 µs | 215 µs | 95 µs |
 
 - `evaluate` is faster than jsonata-js on fifteen of the seventeen cases, by up to 15× on
-  recursion, 37× on `distinct items`, whose `$distinct` is quadratic in jsonata-js, and 540× on
+  recursion, 36× on `distinct items`, whose `$distinct` is quadratic in jsonata-js, and 520× on
   the index held in a variable, which jsonata-js tests against every item. It is slower on
   `path` and the index into 10,000 items, which do almost no work, so the overhead of calling
   into WebAssembly dominates.
 - Against a `Document` converted once, jlens-wasm is faster than jsonata-js on all seventeen
-  cases: by 12 to 21× on recursion, group-by, sort + map, `filter + aggregate`, number formatting
-  and the shipping rule, 380× on `distinct items`, 4.4× on the transform and 1.4× on the index
+  cases: by 12 to 20× on recursion, group-by, sort + map, `filter + aggregate`, number formatting
+  and the shipping rule, 390× on `distinct items`, 4.3× on the transform and 1.4× on the index
   into 10,000 items.
 - jsonata2js is faster than `evaluate` on fourteen of the seventeen cases, and than
-  `evaluateDocument` on twelve: by 1.1 times on `names over items` and `regex over a long text` to
-  8 times on `recursion` and 9 on `regex`. As compiled JavaScript, it reads the JavaScript objects
+  `evaluateDocument` on twelve: by 1.2 times on `names over items` and `regex over a long text` to
+  8.5 times on `recursion`. As compiled JavaScript, it reads the JavaScript objects
   it is given, with nothing to convert. jlens-wasm is faster on number formatting, the two indexes
   into 10,000 items, and, against a `Document`, `distinct items` and the transform. Called again
   on the same text, its `compile` takes 2 to 4 times what jlens's `new Expression` takes, which it
@@ -251,10 +251,10 @@ jsonata-js 2.3.0 is within 3% of 2.2.2 on every case but the transform, 9% slowe
   `evaluate` reads the input object as the expression reaches it: up to 16 values in one call to a
   JavaScript helper, a long array of objects in one call with the fields the expression reads, and
   an index the items it picks alone. An expression that reads every item whole pays what
-  converting the whole input does: `JSON.stringify` takes 27 µs, parsing it into a `Document` 135 µs.
+  converting the whole input does: `JSON.stringify` takes 27 µs, parsing it into a `Document` 136 µs.
 - `evaluateJson` takes JSON text and returns JSON text, and parses the input without the fields
   the expression does not read ([ADR 0016](../adr/0016-fields-read.md)). Parsing still costs
-  far more than a small evaluation: 71 µs on `path`, and 2.3 ms for the text of 10,000 items. An
+  far more than a small evaluation: 72 µs on `path`, and 2.3 ms for the text of 10,000 items. An
   input evaluated more than once is best converted once into a `Document`.
 
 gnata-js 0.6.2, the Go engine gnata built for WebAssembly, left the table after 0.27.0: it was
@@ -271,49 +271,48 @@ it. Each package gives jlens's result on each case but `regex over a long text`,
 `jsonata2py` and `jsonata-python` give 4,150, not the 9,858 of jsonata-js and jlens: Python's `\w`
 matches the accented, Greek and Japanese letters that JavaScript's does not.
 
-Measured for 0.36.0, on Python 3.14.10; `jsonata2py` for 0.31.0, as its version has not changed
-since. `jsonatapy` 2.2.15, with wheels up to Python 3.13, is built from its source distribution.
-The input is the document as Python values, and for jlens and `jsonatapy` also an input
-converted once (`Document`, `JsonataData`). jlens and `jsonatapy` are the median of three runs,
-which agreed within 3.5% but one run of jlens 7% slower on `names over items`, and `jsonatapy`
-4% apart on `recursion`; `jsonata-python`, one run, within 3.5% of its numbers for 0.35.0, and
-faster on each case. `jsonatapy` 2.2.15 is within 3% of 2.2.14 but on `regex over a long text`
-(97 → 94 µs) and the shipping rule (184 → 163 µs):
+Measured for 0.37.0, on Python 3.14.10; `jsonata2py` for 0.31.0, as its version has not changed
+since. `jsonatapy` 2.2.17 was built from its source distribution when installed. The input is
+the document as Python values, and for jlens and `jsonatapy` also an input converted once
+(`Document`, `JsonataData`). jlens and `jsonatapy` are the median of three runs, which agreed
+within 2.5%, but `jsonatapy` 5.4% apart on the transform converted once; `jsonata-python`, one
+run, within 1.4% of its numbers for 0.36.0. `jsonatapy` 2.2.17 is within 3.5% of 2.2.15 but on
+the transform, 29% faster (724 → 511 µs):
 
-| Case | jsonata-python 0.7.2 | jsonatapy 2.2.15 | jsonatapy, `JsonataData` | jsonata2py 0.1.3 | jlens `evaluate` | jlens `evaluate_document` |
+| Case | jsonata-python 0.7.2 | jsonatapy 2.2.17 | jsonatapy, `JsonataData` | jsonata2py 0.1.3 | jlens `evaluate` | jlens `evaluate_document` |
 |---|---:|---:|---:|---:|---:|---:|
 | path | 1.06 ms | 0.5 µs | 0.2 µs | 0.5 µs | 0.5 µs | 0.4 µs |
-| names over items | 1.40 ms | 15.0 µs | 3.6 µs | 13.2 µs | 13.8 µs | 2.0 µs |
-| filter + aggregate | 3.29 ms | 60 µs | 35 µs | 62 µs | 38 µs | 17.3 µs |
-| group-by | 4.67 ms | 88 µs | 60 µs | 151 µs | 68 µs | 38 µs |
-| sort + map | 17.4 ms | 302 µs | 225 µs | 266 µs | 170 µs | 128 µs |
-| strings | 3.12 ms | 82 µs | 53 µs | 64 µs | 50 µs | 28 µs |
-| regex | 3.25 ms | 91 µs | 73 µs | 158 µs | 68 µs | 50 µs |
-| number formatting | 2.84 ms | 70 µs | 67 µs | 90 µs | 12.6 µs | 9.5 µs |
-| object constructor | 4.15 ms | 153 µs | 124 µs | 182 µs | 87 µs | 60 µs |
-| transform | 3.95 ms | 724 µs | 661 µs | 347 µs | 198 µs | 132 µs |
-| recursion | 29.2 ms | 580 µs | 580 µs | 1.39 ms | 229 µs | 229 µs |
-| shipping rule | 7.06 ms | 163 µs | 98 µs | 221 µs | 101 µs | 41 µs |
-| index into 10,000 items | 20.4 ms | 177 µs | 0.4 µs | 0.7 µs | 0.8 µs | 0.5 µs |
-| index in a variable | 36.3 ms | 612 µs | 437 µs | 1.29 ms | 0.9 µs | 0.6 µs |
-| regex over a long text | differs | 94 µs | 93 µs | differs | 89 µs | 88 µs |
-| distinct items | 1.46 ms | 498 µs | 401 µs | 307 µs | 76 µs | 10.7 µs |
-| tuples | 4.36 ms | 261 µs | 235 µs | 277 µs | 82 µs | 63 µs |
+| names over items | 1.40 ms | 15.0 µs | 3.6 µs | 13.2 µs | 13.7 µs | 2.0 µs |
+| filter + aggregate | 3.28 ms | 58 µs | 35 µs | 62 µs | 38 µs | 17.3 µs |
+| group-by | 4.68 ms | 88 µs | 60 µs | 151 µs | 68 µs | 38 µs |
+| sort + map | 17.4 ms | 302 µs | 226 µs | 266 µs | 170 µs | 128 µs |
+| strings | 3.10 ms | 81 µs | 54 µs | 64 µs | 49 µs | 28 µs |
+| regex | 3.24 ms | 91 µs | 73 µs | 158 µs | 59 µs | 43 µs |
+| number formatting | 2.85 ms | 70 µs | 67 µs | 90 µs | 12.6 µs | 9.6 µs |
+| object constructor | 4.11 ms | 155 µs | 124 µs | 182 µs | 87 µs | 60 µs |
+| transform | 3.92 ms | 511 µs | 429 µs | 347 µs | 204 µs | 132 µs |
+| recursion | 28.8 ms | 593 µs | 593 µs | 1.39 ms | 233 µs | 233 µs |
+| shipping rule | 7.03 ms | 166 µs | 100 µs | 221 µs | 100 µs | 42 µs |
+| index into 10,000 items | 20.3 ms | 183 µs | 0.4 µs | 0.7 µs | 0.8 µs | 0.5 µs |
+| index in a variable | 36.2 ms | 625 µs | 440 µs | 1.29 ms | 0.9 µs | 0.6 µs |
+| regex over a long text | differs | 93 µs | 94 µs | differs | 88 µs | 88 µs |
+| distinct items | 1.46 ms | 511 µs | 410 µs | 307 µs | 80 µs | 10.7 µs |
+| tuples | 4.35 ms | 264 µs | 237 µs | 277 µs | 83 µs | 64 µs |
 
 - With Python values in, jlens is the fastest on fourteen of the seventeen cases: by 5.6 times
-  on number formatting, 4.0 times on `distinct items`, 3.2 times on `tuples`, 2.5 times on
-  `recursion`, 680 times on the index held in a variable, which `jsonatapy` and `jsonata2py` test
+  on number formatting, 3.8 times on `distinct items`, 3.2 times on `tuples`, 2.5 times on
+  `recursion`, 690 times on the index held in a variable, which `jsonatapy` and `jsonata2py` test
   against every item, and by 1.1 to 1.8 times on the rest. It is level with both on `path`
-  (0.5 µs), and `jsonata2py` is ahead on `names over items` (13.2 against 13.8 µs) and the index
+  (0.5 µs), and `jsonata2py` is ahead on `names over items` (13.2 against 13.7 µs) and the index
   into 10,000 items (0.7 against 0.8 µs).
-- With the input converted once, jlens is the fastest on fifteen of the seventeen cases, by 7.1
-  times on number formatting and 37 times on `distinct items`; `jsonatapy` is faster on `path`
+- With the input converted once, jlens is the fastest on fifteen of the seventeen cases, by 7.0
+  times on number formatting and 38 times on `distinct items`; `jsonatapy` is faster on `path`
   (0.2 against 0.4 µs, printed to a tenth) and on the index into 10,000 items (0.4 against
   0.5 µs).
 - `jsonata2py` reads the Python values it is given, with nothing to convert, as compiled Python.
   Besides `path` and the two cases where it leads, it takes 1.3 to 7.1 times what jlens
   `evaluate` takes, and 1,400 times on the index in a variable.
-- `jsonata-python` takes 19 to 225 times what jlens `evaluate` takes on every case but `path` and
+- `jsonata-python` takes 18 to 226 times what jlens `evaluate` takes on every case but `path` and
   the two indexes, and reads the whole input before evaluating: 1.1 ms on `path` and 20 ms on the
   index into 10,000 items.
 
@@ -325,7 +324,7 @@ cannot load jsonata-js on Windows.
 #### Limits in Python
 
 How each behaves at the limits, measured by `python.py limits` for 0.27.0 under Linux, with the
-packages of the table above; `jsonatapy` 2.2.15 gave the same answers for 0.36.0. Each case
+packages of the table above; `jsonatapy` 2.2.17 gave the same answers for 0.37.0. Each case
 runs in a process of its own, killed after 30 seconds. `$string($)` reads the whole input, and
 the cyclic input is `{"n": 1, "child": {"parent": <the input>}}`:
 
@@ -362,43 +361,43 @@ says how to run it, and which packages it leaves out and why. jsonata-java gives
 every case, jsonata-jvm-compiler on all but two: on `tuples` it gives arrays of the products where
 jsonata-js gives their sums, and on `regex over a long text` 4,150, as its `\w` is Python's.
 
-Measured for 0.36.0, on OpenJDK 25.0.5.1 (8 hardware threads), every engine in one JVM with
+Measured for 0.37.0, on OpenJDK 25.0.5.1 (8 hardware threads), every engine in one JVM with
 `-Xmx4g`; jsonata-jvm-compiler for 0.34.0, as its version has not changed since. Each time is the
 best of five runs of 0.3 s after a second of warm-up, in the faster of two JVMs, as jsonata-java
-ran `recursion` 12 to 14% slower in one or the other. Each engine
+ran `filter + aggregate` 30% slower in one of them. Each engine
 returns its own objects, not serialized: jlens maps, lists and boxed values. With the input
 converted once: Java maps for jsonata-java and `evaluate(Object)`, a Jackson tree for
 jsonata-jvm-compiler, and a `Document` for `evaluate(Document)`:
 
 | Case | jsonata-java 0.9.11 | jsonata-jvm-compiler 1.0.7 | jlens `evaluate(Object)` | jlens `evaluate(Document)` |
 |---|---:|---:|---:|---:|
-| path | 8.7 µs | 0.03 µs | 0.88 µs | 0.22 µs |
-| names over items | 16.2 µs | 1.3 µs | 16.3 µs | 1.8 µs |
-| filter + aggregate | 58 µs | 4.1 µs | 52 µs | 17.5 µs |
-| group-by | 125 µs | 13.1 µs | 78 µs | 38 µs |
-| sort + map | 446 µs | 37 µs | 175 µs | 132 µs |
-| strings | 71 µs | 7.4 µs | 70 µs | 28 µs |
-| regex | 94 µs | 11.9 µs | 71 µs | 50 µs |
-| number formatting | 88 µs | 8.5 µs | 15.8 µs | 9.8 µs |
-| object constructor | 106 µs | 6.9 µs | 95 µs | 60 µs |
-| transform | 240 µs | 27 µs | 210 µs | 127 µs |
-| recursion | 797 µs | 44 µs | 246 µs | 230 µs |
-| shipping rule | 166 µs | 15.2 µs | 127 µs | 42 µs |
-| index into 10,000 items | 148 µs | 0.04 µs | 1.2 µs | 0.37 µs |
-| index in a variable | 660 µs | 6.8 µs | 1.3 µs | 0.48 µs |
-| regex over a long text | 98 µs | differs | 116 µs | 88 µs |
-| distinct items | 22 µs | 18.2 µs | 94 µs | 10.5 µs |
-| tuples | 153 µs | differs | 97 µs | 65 µs |
+| path | 8.3 µs | 0.03 µs | 0.89 µs | 0.21 µs |
+| names over items | 16.0 µs | 1.3 µs | 16.3 µs | 1.8 µs |
+| filter + aggregate | 59 µs | 4.1 µs | 51 µs | 16.8 µs |
+| group-by | 121 µs | 13.1 µs | 77 µs | 38 µs |
+| sort + map | 443 µs | 37 µs | 169 µs | 130 µs |
+| strings | 69 µs | 7.4 µs | 70 µs | 27 µs |
+| regex | 95 µs | 11.9 µs | 64 µs | 43 µs |
+| number formatting | 92 µs | 8.5 µs | 15.5 µs | 9.7 µs |
+| object constructor | 104 µs | 6.9 µs | 95 µs | 58 µs |
+| transform | 236 µs | 27 µs | 211 µs | 126 µs |
+| recursion | 775 µs | 44 µs | 245 µs | 231 µs |
+| shipping rule | 161 µs | 15.2 µs | 127 µs | 41 µs |
+| index into 10,000 items | 151 µs | 0.04 µs | 1.2 µs | 0.36 µs |
+| index in a variable | 660 µs | 6.8 µs | 1.3 µs | 0.46 µs |
+| regex over a long text | 99 µs | differs | 116 µs | 88 µs |
+| distinct items | 22 µs | 18.2 µs | 94 µs | 10.7 µs |
+| tuples | 151 µs | differs | 95 µs | 64 µs |
 
 - jsonata-jvm-compiler is the fastest on every case it agrees on but the index in a variable and
-  `distinct items`, by 1.4 (`names over items`) to 8.7 times (`object constructor`) against a
+  `distinct items`, by 1.1 (number formatting) to 8.4 times (`object constructor`) against a
   jlens `Document` on the cases that take a microsecond or more, 5.2 times on `recursion`: its
   expression is a Java class, which the JIT
   compiles with the application.
 - Against jsonata-java, the other interpreter, jlens over a `Document` is faster on every case.
   It takes less than a third of the time on `recursion`, `sort + map` and the shipping rule,
   and less than a ninth on number formatting.
-- Over Java maps, jlens takes 1.3 to 3.0 times as long as over a `Document` on the cases that
+- Over Java maps, jlens takes 1.3 to 3.1 times as long as over a `Document` on the cases that
   read the order's items, and 9 times on `names over items` and `distinct items`: each value
   read is a call back into Java, though a map is written with only the fields the expression
   reads ([ADR 0021, amended](../adr/0021-java-package.md#amendment-maps-written-with-what-the-expression-reads-026-4)).
@@ -411,33 +410,33 @@ does not read:
 
 | Case | jsonata-java 0.9.11 | jsonata-jvm-compiler 1.0.7 | jlens `evaluateFromJson` |
 |---|---:|---:|---:|
-| path | 94 µs | 70 µs | 30 µs |
-| names over items | 102 µs | 72 µs | 41 µs |
-| filter + aggregate | 143 µs | 75 µs | 64 µs |
-| group-by | 211 µs | 86 µs | 85 µs |
-| sort + map | 531 µs | 109 µs | 175 µs |
-| strings | 156 µs | 80 µs | 81 µs |
-| regex | 180 µs | 84 µs | 92 µs |
-| number formatting | 168 µs | 82 µs | 54 µs |
-| object constructor | 192 µs | 80 µs | 108 µs |
-| transform | 322 µs | 98 µs | 183 µs |
-| recursion | 1.05 ms | 116 µs | 277 µs |
-| shipping rule | 253 µs | 88 µs | 99 µs |
-| index into 10,000 items | 1.43 ms | 1.38 ms | 885 µs |
-| index in a variable | 1.96 ms | 1.33 ms | 885 µs |
-| regex over a long text | 116 µs | differs | 116 µs |
-| distinct items | 108 µs | 93 µs | 68 µs |
-| tuples | 240 µs | differs | 111 µs |
+| path | 93 µs | 70 µs | 31 µs |
+| names over items | 101 µs | 72 µs | 41 µs |
+| filter + aggregate | 144 µs | 75 µs | 64 µs |
+| group-by | 212 µs | 86 µs | 85 µs |
+| sort + map | 526 µs | 109 µs | 175 µs |
+| strings | 154 µs | 80 µs | 80 µs |
+| regex | 182 µs | 84 µs | 85 µs |
+| number formatting | 168 µs | 82 µs | 53 µs |
+| object constructor | 189 µs | 80 µs | 107 µs |
+| transform | 318 µs | 98 µs | 183 µs |
+| recursion | 1.10 ms | 116 µs | 270 µs |
+| shipping rule | 251 µs | 88 µs | 100 µs |
+| index into 10,000 items | 1.45 ms | 1.38 ms | 882 µs |
+| index in a variable | 1.98 ms | 1.33 ms | 882 µs |
+| regex over a long text | 118 µs | differs | 117 µs |
+| distinct items | 108 µs | 93 µs | 69 µs |
+| tuples | 240 µs | differs | 110 µs |
 
 jlens is the fastest where the parsing is the cost (`path`, `names over items`, `filter +
 aggregate`, number formatting, `distinct items` and the two index cases), and level with
-jsonata-jvm-compiler on `group-by`; jsonata-jvm-compiler where the evaluation is, 116 against
-277 µs on `recursion`. jlens is faster
-than jsonata-java on every case.
+jsonata-jvm-compiler on `group-by`, `strings` and `regex`; jsonata-jvm-compiler where the
+evaluation is, 116 against 270 µs on `recursion`. jlens is faster than jsonata-java on every
+case but `regex over a long text`, where they are level.
 
 On the documents of ADR 0021's spike, 1,000 and 100,000 items of five fields each, an index or
 `$count` takes the same time at both sizes in jlens, 0.3 to 0.5 µs against a `Document`, where
-jsonata-java takes 58 µs and 7.2 ms for `items[0].name`. From JSON text, jlens takes about half the
+jsonata-java takes 57 µs and 7.1 ms for `items[0].name`. From JSON text, jlens takes about half the
 time of the others on 100,000 items, but on `$`, for which it builds the whole document as Java
 objects.
 
@@ -448,9 +447,9 @@ expressions are not thread-safe, compiles one per thread:
 
 | Engine | 1 thread | 2 threads | 4 threads | 8 threads | 1,000 virtual threads |
 |---|---:|---:|---:|---:|---:|
-| jlens, JSON text | 44,346 (1.0×) | 85,435 (1.9×) | 164,430 (3.7×) | 213,814 (4.8×) | 213,785 (4.8×) |
-| jlens, Java objects parsed by Jackson | 17,348 (1.0×) | 33,905 (2.0×) | 64,454 (3.7×) | 85,434 (4.9×) | 85,586 (4.9×) |
-| jsonata-java 0.9.11 | 18,651 (1.0×) | 36,406 (2.0×) | 69,541 (3.7×) | 92,930 (5.0×) | 93,273 (5.0×) |
+| jlens, JSON text | 43,424 (1.0×) | 84,689 (2.0×) | 162,618 (3.7×) | 212,267 (4.9×) | 212,733 (4.9×) |
+| jlens, Java objects parsed by Jackson | 17,062 (1.0×) | 33,506 (2.0×) | 63,887 (3.7×) | 84,426 (4.9×) | 85,024 (5.0×) |
+| jsonata-java 0.9.11 | 18,694 (1.0×) | 36,454 (2.0×) | 69,624 (3.7×) | 92,833 (5.0×) | 93,285 (5.0×) |
 | jsonata-jvm-compiler 1.0.7 | 19,501 (1.0×) | 38,177 (2.0×) | 73,603 (3.8×) | 99,066 (5.1×) | 99,066 (5.1×) |
 
 jlens leads at every count of threads, by 2.1 times or more. Parsed by Jackson into Java maps
@@ -507,46 +506,47 @@ node crates/jlens-regress/benches/engine.mjs           # V8
 
 Each run saves its times and prints what the check costs against the last run of the other
 variant. A change to the engine is measured the same way, aligned, against the revision before.
-Measured for 0.36.0, which ported 20 newer commits of `regress`'s master (the median of
-31 samples of at least 5 ms, and of two runs of each variant; V8 13.6, Node.js 24.22):
+Measured for 0.37.0 (the median of 31 samples of at least 5 ms, and of three runs without an
+interrupt and two with one; V8 13.6, Node.js 24.22):
 
 | Case | Pattern | Matches | `jlens-regress` | With an interrupt | V8 |
 |---|---|---:|---:|---:|---:|
-| literal | `status=200` | 200 | 5.2 µs | 5.2 µs (+0.0%) | 11.2 µs |
-| literal, no match | `status=500` | 0 | 506 ns | 508 ns (+0.4%) | 7.2 µs |
-| case-insensitive literal | `lazy dog`, `i` | 200 | 6.2 µs | 6.4 µs (+3.2%) | 10.0 µs |
-| classes | `\d{4}-\d{2}-\d{2}T[\d:]+Z` | 200 | 28.3 µs | 28.4 µs (+0.4%) | 15.9 µs |
+| literal | `status=200` | 200 | 5.3 µs | 5.2 µs (−1.9%) | 11.2 µs |
+| literal, no match | `status=500` | 0 | 505 ns | 508 ns (+0.6%) | 7.2 µs |
+| case-insensitive literal | `lazy dog`, `i` | 200 | 6.1 µs | 6.5 µs (+6.6%) | 10.0 µs |
+| classes | `\d{4}-\d{2}-\d{2}T[\d:]+Z` | 200 | 28.2 µs | 28.5 µs (+1.1%) | 15.8 µs |
 | classes, no match | `\d{3}-\d{4}` | 0 | 3.5 µs | 3.5 µs (+0.0%) | 1.6 µs |
-| alternation of words | `\b(?:fox\|dog\|cat)s?\b` | 400 | 136 µs | 141 µs (+3.7%) | 15.5 µs |
-| words | `\b\w+\b` | 2,400 | 177 µs | 181 µs (+2.0%) | 78.3 µs |
-| captures | `user=(\w+) id=(\d+)` | 200 | 27.3 µs | 27.9 µs (+2.0%) | 11.3 µs |
-| lazy | `path=(.*?) ` | 200 | 36.3 µs | 36.8 µs (+1.2%) | 9.1 µs |
-| lines | `^.*status=200$`, `m` | 200 | 29.0 µs | 29.8 µs (+2.8%) | 15.1 µs |
-| backreference, no match | `(\w+)\s+\1` | 0 | 489 µs | 502 µs (+2.7%) | 148 µs |
-| lookahead | `\w+(?=,)` | 200 | 409 µs | 427 µs (+4.3%) | 135 µs |
-| lookbehind | `(?<=the )\w+` | 200 | 149 µs | 164 µs (+9.9%) | 51.9 µs |
-| Unicode text | `\S+` | 2,000 | 155 µs | 154 µs (−0.3%) | 69.1 µs |
-| Unicode text, case-insensitive | `γράμματα`, `i` | 200 | 22.2 µs | 22.4 µs (+1.1%) | 7.3 µs |
-| Unicode property | `\p{L}+`, `u` | 2,000 | 211 µs | 218 µs (+3.2%) | 332 µs |
-| anchored, short text | `^1[0-9]$` on `17` | 1 | 43 ns | 45 ns (+4.7%) | 37 ns |
+| alternation of words | `\b(?:fox\|dog\|cat)s?\b` | 400 | 136 µs | 139 µs (+2.5%) | 15.3 µs |
+| words | `\b\w+\b` | 2,400 | 175 µs | 180 µs (+2.9%) | 77.0 µs |
+| captures | `user=(\w+) id=(\d+)` | 200 | 27.4 µs | 27.9 µs (+1.8%) | 11.5 µs |
+| lazy | `path=(.*?) ` | 200 | 36.2 µs | 36.4 µs (+0.6%) | 9.2 µs |
+| lines | `^.*status=200$`, `m` | 200 | 28.9 µs | 29.4 µs (+1.7%) | 15.1 µs |
+| backreference, no match | `(\w+)\s+\1` | 0 | 485 µs | 500 µs (+3.1%) | 150 µs |
+| lookahead | `\w+(?=,)` | 200 | 410 µs | 425 µs (+3.7%) | 139 µs |
+| lookbehind | `(?<=the )\w+` | 200 | 150 µs | 165 µs (+9.8%) | 51.9 µs |
+| Unicode text | `\S+` | 2,000 | 151 µs | 156 µs (+3.2%) | 68.8 µs |
+| Unicode text, case-insensitive | `γράμματα`, `i` | 200 | 22.3 µs | 22.4 µs (+0.4%) | 7.4 µs |
+| Unicode property | `\p{L}+`, `u` | 2,000 | 210 µs | 215 µs (+2.5%) | 331 µs |
+| anchored, short text | `^1[0-9]$` on `17` | 1 | 41 ns | 45 ns (+9.8%) | 37 ns |
 
 | Compilation | Pattern | `jlens-regress` | V8 `new RegExp` | V8, and a first `exec` |
 |---|---|---:|---:|---:|
 | date-time | `^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z\|[+-]\d{2}:\d{2})$` | 6.5 µs | 1.6 µs | 14.9 µs |
-| e-mail, case-insensitive | `^[a-z0-9._%+-]+@(?:[a-z0-9-]+\.)+[a-z]{2,}$`, `i` | 7.4 µs | 1.1 µs | 25.0 µs |
-| Unicode property | `\p{L}+`, `u` | 3.2 µs | 24.7 µs | 55.2 µs |
+| e-mail, case-insensitive | `^[a-z0-9._%+-]+@(?:[a-z0-9-]+\.)+[a-z]{2,}$`, `i` | 7.4 µs | 1.1 µs | 24.9 µs |
+| Unicode property | `\p{L}+`, `u` | 3.2 µs | 24.5 µs | 55.0 µs |
 
 - V8 compiles a pattern to machine code, and is 1.8 to 9 times faster wherever the engine runs
   its instructions at many positions of the text: alternations, classes, lookarounds,
   backreferences. `jlens-regress` is a backtracker that interprets its instructions. It is
-  faster where it can search for a literal first (`memchr`): 2.2 times on `literal`, 14 times
+  faster where it can search for a literal first (`memchr`): 2.1 times on `literal`, 14 times
   on a literal that does not occur; and on `\p{L}+`.
-- jlens compiles a pattern once per evaluation, the first time the evaluation reaches it, so an
-  expression evaluated many times compiles its patterns each time. V8's `new RegExp` only parses
-  the pattern; the first `exec` compiles it.
-- **The interrupt** costs about 2.4% over these 17 cases (the geometric mean), from 0.3% faster
-  to 9.9% slower per case (`lookbehind`, 9 to 10% in each run, and 7% before the ports), most
-  of that spread from how the compiler allocates the backtracker's registers, not from the check
+- jlens compiles a regex literal once per compiled expression, the first time an evaluation
+  reaches it, and every later evaluation, on any thread, uses that pattern (since 0.37; before,
+  each evaluation compiled it again). V8's `new RegExp` only parses the pattern; the first
+  `exec` compiles it.
+- **The interrupt** costs about 2.8% over these 17 cases (the geometric mean), from 1.9% faster
+  to 9.8% slower per case (`lookbehind` and `anchored, short text`, 10% in each run), most of
+  that spread from how the compiler allocates the backtracker's registers, not from the check
   itself.
 
 Through jlens, `$match`, `$replace`, `$split` and `$contains` are linear in the text since 0.27,
@@ -770,25 +770,26 @@ items takes 0.8 µs, and 8.3 ms with the variable in `Bindings`.
   since 0.27 (2 to 24% faster). Its larger frames make a deep recursion overflow V8's stack 4 to 9%
   sooner; the default `maxDepth` of 500 keeps a third of headroom ([WebAssembly guide](../guides/wasm.md#limits-and-memory)).
 
-## 0.36 against 0.35.0
+## 0.37 against 0.36.0
 
-Measured for the release (roadmap 0.36 #10) on the M1, against builds of 0.35.0 made the same
-way, each run on a new copy of its build; the full comparison is in `docs/notes/perf-0.36.md`.
-0.36 formats numbers from their shortest decimal digits, reads date/time pictures without
-building a regular expression, checks a transform's matches against its copy, and ported 20
-commits of `regress`.
+Measured for the release (roadmap 0.37 #16) on the M1, against builds of 0.36.0 made the same
+way, each run on a new copy of its build; the full comparison is in `docs/notes/perf-0.37.md`.
+0.37 compiles a regex literal once per compiled expression, checks the size limits while a
+result is built, and finds a Java thread's conversion of a document by its handle.
 
-Number formatting takes 19 to 25% less natively, 23 to 29% less in Python, 15 to 32% less in
-WebAssembly and 4 to 28% less in Java. `$toMillis` with a picture takes 62 to 67% less (200 calls
-in 0.93 ms, 2.5 ms in 0.35.0); `$fromMillis` takes 3 to 6% more, about 0.1 µs a call, spread over
-several commits of the plan. Natively every other case is within 3% in each mode, but `regex over
-a long text`, 2 to 4% slower in every mode, and 2% in Python and Java, from the ported commits;
-built aligned, `recursion`, 1.4 to 3.0% slower in plain builds, is within 1.5%. WebAssembly moves
-no other case more than 2% but times under 2 µs, printed to a tenth, and Java slows none more
-than 3.6%. In Python, `object constructor` with Python values took 11 to 13% more in some
-environments of the process with a field that #18 added to the evaluator, and is level without
-it (#21); `regex` takes 4 to 7% more in some environments, as 0.35.0 does in others, with no
-commit that holds it.
+`regex` takes 11 to 15% less natively, 10 to 15% less in Python, 7 to 14% less in Java and 8 to
+18% less in WebAssembly. `$toMillis` of an ISO 8601 timestamp, with no picture, takes 88% less
+(200 calls in 0.22 ms, 1.9 ms in 0.36.0), as its pattern is compiled once for the process.
+`path` against a `Document` takes 6% less natively and 7% less in Java. Natively every other
+case is within 3% in each mode. Python and Java slow no case past their marks (3.5% and 5%);
+Java's one mark, `filter + aggregate` over Java objects, 9% slower in one comparison, is a draw
+of the JIT, as the table's run of the same build gives 0.36.0's time. In WebAssembly, `regex
+over a long text` takes 4% more (177 to 184 µs), in two steps of about 2% that native builds do
+not show: the size limits checked as `$replace` builds its text (#5), and the commits ported to
+`jlens-regress` (#20). Every other case is within 2.1%, but times under 4 µs, printed to a tenth.
 
-On its own benchmark, the engine is within 2% of 0.35.0 on most cases; `backreference, no match`
-takes 10% more and `alternation of words` 5% more, and the interrupt 2.4% where it took 1.5%.
+Compiling `customer.name` reads 0.64 µs where 0.36.0's table read 0.59 µs; built and run one
+after the other, 0.36.0 takes 0.61 µs and 0.37 0.60 µs, so the difference is between builds,
+not in the code. On its own benchmark, the engine is within 2% of 0.36.0 on every case but two
+faster (`Unicode text` 3%, `anchored, short text` 5%), and the interrupt costs 2.8% where it
+cost 2.4%.

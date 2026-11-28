@@ -229,3 +229,77 @@ and those tables, about 476 KiB gzipped.
 (374 KiB with brotli), 25% less than one with it. Two modules from one crate, by a Cargo feature,
 would cost the release a second build and package, and a page that evaluates and edits would load
 both or the larger one. Not decided here. The budget, 680 KiB, leaves HEAD about 6.5 KiB.
+
+## #16: the release measured
+
+Measured on 2026-11-28 on the M1 at `285e0b7` against v0.36.0. Thermal pressure nominal at each
+step; Rust 1.100.0, Node.js 24.22.3, OpenJDK 25.0.5.1, Python 3.14.10. New versions since 0.36:
+`jsonatapy` 2.2.17 (built from its source distribution); jsonata-js 2.3.0, jsonata2js 0.1.2,
+`jsonata2py` 0.1.3, jsonata-python 0.7.2, jsonata-java 0.9.11 and jsonata-jvm-compiler 1.0.7
+have not changed. Scripts and logs: M1 `~/workspaces/logs/037-16/` (`m037-16.sh`, `m037-16c.sh`
+for the compile bisect, `m037-16w.sh` and `rx.mjs` for the WebAssembly one).
+
+- **Natively**, `cargo xtask ab v0.36.0 HEAD`, 10 rounds, twice in each mode: `regex` −13.3 to
+  −13.6% (`evaluate`), −15.3 and −15.4% (`document`), −10.9 and −11.1% (`source`), #7; `path`
+  −3.6% (`evaluate`), −5.7% (`document`), −1.8 and −2.0% (`source`); every other case within
+  2.9% (`index in a variable` from a `Source`, +2.9% in one run, −0.4% in the other).
+- **Dates**, the five cases of 0.36 #10 added to `benches/cases.json` for the run only, 10
+  rounds: `$toMillis` of an ISO 8601 text −88.1% (`evaluate`, 1.89 ms → 224 µs) and −88.4%
+  (`document`), its pattern a `LazyLock` since #7; the other four within 1%.
+- **Python**, `python.py ab`, two comparisons of five rounds: `regex` −10.3% with Python values
+  and −14.7 to −14.9% against a `Document`, marked in both. Marked in one of the two only: the
+  shipping rule with Python values −7.0% (−3.6% in the other), `strings` −8.4% and −9.6% in the
+  second, where a round of 0.36.0 spread 10.5 to 11.8%. Every other case within 3.4%.
+- **WebAssembly**, `compare.mjs --pkg --engines jsonata-js`, four processes of each build
+  alternated: `regex` −11% with `evaluate` (133 → 118 µs), −8% with `evaluateJson`, −18%
+  against a `Document` (94 → 77 µs); `regex over a long text` +3.8% with `evaluate` (177 →
+  184 µs, every run of 0.37 above every run of 0.36.0) and +2.5% against a `Document`; every
+  other case within 2.1%. jsonata-js 2.3.0, the control, within 2.3% of its 0.36.0 column.
+- **Java**, `cargo xtask java-compare ab`, every part, five rounds, once: the cases mark `regex`
+  in all four forms (−6.6 to −13.5%), `path` against a `Document` (−6.9%), and `filter +
+  aggregate` over converted Java objects, +9.2% (52.2 → 57.0 µs, spreads 2.3 and 1.7%); the
+  table's two runs, of the same code built from the tree, give 51.9 and 51.1 µs, 0.36.0's
+  time, so a draw of the JIT in that run rather than a change. The documents mark nothing (−4.8
+  to +2.6%); the threads within 2.1%.
+- **The tables.** Natively, `bench-table`, three copies within 1.9%. Against 0.36's table,
+  `regex` (67 → 59 µs, 58 → 50 µs) and `compile/path`, 0.59 → 0.64 µs (its copies 620 to
+  642 ns). Python: three runs of jlens and `jsonatapy`, one of jsonata-python, within 1.4% of its
+  numbers for 0.36.0; `jsonatapy` 2.2.17 within 3.5% of 2.2.15 but the transform, 724 → 511 µs
+  (661 → 429 µs converted once), and `python.py limits` gives 2.2.15's answers. Java: two JVMs,
+  the faster of each time; jsonata-java within 4.6% of its 0.36.0 column (−4.6% on `path`, +4.1% on `number formatting`), its `filter + aggregate` 30% slower in one JVM.
+- **The regular expression engine**, aligned, three runs without an interrupt and two with: the
+  first plain run read `literal` 8.1 µs where the other two read 5.1 and 5.3 µs (the median
+  kept); the medians within 2% of 0.36.0's table but `Unicode text` (155 → 151 µs) and
+  `anchored, short text` (43 → 41 ns); the interrupt 2.8% over the 17 cases where it was 2.4%,
+  `lookbehind` +9.8% and `anchored, short text` +9.8% in both pairs.
+
+**`compile/path`.** Criterion's `compile` group at 0.36.0, at each of #8, #7 and #13 and its
+parent, and at HEAD, one build after the other in a target directory of their own: `compile/path`
+614 ns at 0.36.0, 603 ns at HEAD, every commit between 603 and 629 ns; `group-by` 3.07 to
+3.13 µs and the shipping rule 21.2 to 21.5 µs throughout. The table's 0.64 µs against 0.59 is the
+spread between builds of the same code, not a commit.
+
+**WebAssembly, `regex over a long text`.** `$length($replace(text, /\w+/, 'x'))` over 20 KB, in
+`rx.mjs`: the case alone, 15 rounds of 200 ms, in a module built at each commit around #5, #7 and
+#20, four processes of each in alternation (medians, µs, `evaluate` / `evaluateDocument`):
+
+| Build | `evaluate` | `evaluateDocument` |
+|---|---:|---:|
+| v0.36.0 | 169.7 | 143.8 |
+| `1ed7251`, #5's first commit (the limits while `$replace` builds) | 173.6 | 146.4 |
+| `2bac089`, #5 (the limits once per match) | 174.6 | 148.3 |
+| `26aa9f7`, #8 | 173.0 | 147.2 |
+| `11ffb0d`, #7 | 172.0 | 146.5 |
+| `ce7dc3c`, #20 (`jlens-regress` 0.35.2) | 175.8 | 149.8 |
+| HEAD | 175.7 | 150.9 |
+
+Two steps of about 2%, each about the spread between processes: #5's checks as `$replace`
+appends to its text, and #20's ports, whose new code is almost all under the `utf16` feature,
+which jlens does not build, so more likely the module's layout than more work. Natively the case
+is −0.9 to −1.0% in every mode,
+and #5 was measured within 1.3% on the M1 (`$replace`). Left as it is: 7 µs on 20 KB of text,
+in WebAssembly only.
+
+**The sizes**, the JAR and the gzipped `.wasm` against 0.36.0's and the WebAssembly guide's
+table: measured after the rename's fixes, on the final code, as the module and the native library
+carry `rename`.
