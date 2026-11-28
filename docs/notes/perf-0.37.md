@@ -2,7 +2,9 @@
 
 How the measurements of roadmap 0.37 were made: methods, traps and intermediate numbers that the
 [performance page](../src/architecture/performance.md) and the guides leave out. The item numbers
-are those of the plan, in [the roadmap](../src/architecture/roadmap.md).
+are those of the plan, whose table the tag keeps in
+[the roadmap](https://github.com/thkprado/jlens/blob/v0.37.0/docs/src/architecture/roadmap.md#037-what-adopters-need-before-they-evaluate);
+[the roadmap's history](../src/architecture/roadmap-history.md#037) sums it up.
 
 ## #4: the Java package without critical downcalls
 

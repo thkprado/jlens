@@ -6,6 +6,18 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.37.0]
+
+What adopters need before they evaluate. jlens reads template strings (`«Hello {name}!»`), the
+one feature of jsonata-js 2.3.0 that 0.36 left out, and passes 1,970 of the 1,972 cases of its
+suite; the other two are documented differences. An application lists the fields of a schema
+without walking it, and rewrites the expressions stored against one version of a schema when
+the next renames or moves its fields, told where the rewrite cannot be sure. The size limits
+stop a result while it is built, a regular expression literal is compiled once per expression
+(`regex` 7 to 18% faster on every platform), and the Java package holds up under threads and
+failures. `jlens-regress` 0.35.2 keeps the searches of `&str` fast under its `utf16` feature. The
+release workflow drafts the GitHub release without waiting for the tools' channels.
+
 ### Added
 
 - The fields of a schema, listed: `Schema::fields` and `LanguageService::fields` in Rust,
@@ -2079,7 +2091,8 @@ The first release.
   crates, WebAssembly, auditing and schemas, plus the architecture, performance and decision
   records.
 
-[Unreleased]: https://github.com/thkprado/jlens/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/thkprado/jlens/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/thkprado/jlens/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/thkprado/jlens/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/thkprado/jlens/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/thkprado/jlens/compare/v0.33.0...v0.34.0

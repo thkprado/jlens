@@ -14,9 +14,9 @@ JSON documents, and it can **explain** how a result was reached. It ships as:
 The documentation is at <https://thkprado.github.io/jlens/>, with a
 [web editor](https://thkprado.github.io/jlens/editor/) that runs jlens in your browser.
 
-> **Status: version 0.36.0.** jlens passes 1,901 of the 1,972 cases of the
-> official JSONata test suite of jsonata-js 2.3.0: of the other 71, 69 are that release's
-> template strings (`«...»`), which jlens does not have yet, and two are documented overrides.
+> **Status: version 0.37.0.** jlens passes 1,970 of the 1,972 cases of the
+> official JSONata test suite of jsonata-js 2.3.0, template strings (`«...»`) included; the
+> other two are documented overrides.
 > Evaluations can be audited and explained, schemas inferred from samples drive completion and
 > diagnostics, and everything is available in the browser as a WebAssembly ES module. See the
 > [changelog](CHANGELOG.md), the [roadmap](docs/src/architecture/roadmap.md), the

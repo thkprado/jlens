@@ -459,3 +459,33 @@ object constructor in some environments, and #21 removed it. The release's check
 nothing to change. How it was measured is in
 [`docs/notes/perf-0.36.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.36.md).
 ([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0360))
+
+## 0.37
+
+*What adopters need before they evaluate.* The applications adopting jlens were to judge it with
+this plan, so it took what they would meet first. Template strings (`«Hello {name}!»`), the one
+feature of jsonata-js 2.3.0 that 0.36 left out, are read as 2.3.0 reads them, and jlens passes
+1,970 of the 1,972 cases of its suite; the other two are documented differences. For editors
+built on jlens, the language service lists a schema's fields with what completion and hover know
+of them and their own `x-` keywords, after the JSON Schema reader's gaps that the list would show
+were fixed (`required` in `allOf`, beside a `$ref` or alone, closed tuples). From the two lists,
+an application builds a table of paths when a schema's new version renames or moves fields, and
+`rename` rewrites the expressions stored against the old one, the rest of the text kept, with the
+places it cannot be sure of; a second outside review, of the code at `285e0b7`, found where that
+rewrite could change what an expression means, fixed before the release. An outside review of the
+code at `7b69a6e` gave the fixes: the size limits stop a result while it is built (`$replace`,
+`$split`, `$match`, `$pad`, `$fromMillis`, and a filter that repeats a position), a regular
+expression literal is compiled once per expression (`regex` 7 to 18% faster on every platform,
+`$toMillis` of an ISO text 88%), the Java package holds up under threads and failures (a
+document's conversions swept, no critical downcall, `Options` that evict), and the Python package
+calls no method of its input's values while it holds their lock. `jlens-regress` 0.35.2 keeps
+the searches of `&str` fast under its `utf16` feature, which had made them up to 128 times
+slower, with four more commits of `regress`. New fuzz targets cover what applications send to the
+language service; the workflows pin their actions by commit, and the release workflow drafts the
+GitHub release once the libraries are published, without waiting for the tools' channels. The
+WebAssembly guide says how to serve the module under a Content-Security-Policy, and what the
+module is made of was measured for 0.38's ADR: without the language service it is a quarter
+smaller. Three items moved to 0.38: a result kept as a `Document`, ADR 0015 and a binding of a
+block's predicate. The release's check on x86_64 found nothing to change. How it was measured is
+in [`docs/notes/perf-0.37.md`](https://github.com/thkprado/jlens/blob/main/docs/notes/perf-0.37.md).
+([Changelog](https://github.com/thkprado/jlens/blob/main/CHANGELOG.md#0370))
